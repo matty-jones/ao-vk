@@ -120,7 +120,8 @@ Spell effects with GPU particles, and depth of field.
   ground and big objects often missed the lights around you). Up to 64 lights a frame.
 - Separate intensity sliders for lamps and for the lights characters carry (your own included).
 - Generated bump maps: normal maps derived from each texture's brightness, the ground included.
-- Side-loaded material maps for individual game textures (`randy-vk\materials\`, see `docs/materials.md`): normal
+- Side-loaded material maps for individual game textures (`randy-vk\materials\` and texture packs in
+  `randy-vk\packs\`, see `docs/materials.md`): normal
   maps, PBR materials (roughness / metallic / occlusion: GGX highlights, metals, reflections) and enhanced
   textures (the Renderer tab's **Materials** section).
 - Sunlight shining through leaves and grass.
@@ -351,6 +352,14 @@ switches between ao-vk's look and the game's own.
   not need DXVK.
 - The game still asks DirectDraw for display information outside the renderer. Wine's builtin DirectDraw should do
   for that; the tested setup used D7VK as the prefix's DirectDraw, which works. dgVoodoo is not needed.
+
+### Texture packs
+
+Optional: higher resolution textures and material maps, released as `ao-vk-textures-<version>-<area>.zip` (one per
+area of the game, e.g. Newland, Tir; `-all` has everything). Unpack a zip into the client folder: the files go to
+`randy-vk\packs\ao-vk-textures\`. Every texture zip unpacks into that same folder (overwrite when asked: the same
+name is the same file). Delete the folder to remove them. The Renderer tab's **Materials** section turns them on and
+off.
 
 ### Uninstalling
 

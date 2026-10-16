@@ -12,6 +12,10 @@
 //   <id>_<suffix>        any of these for any type (fallback)
 // ao-assets writes these names (python -m aoassets material-template / import).
 //
+// Texture packs: <client>\randy-vk\packs\<name>\ hold the same names (a released pack is one such folder). A
+// texture's maps all come from one place: live\ (preview), else materials\ if it has any file for it, else the first
+// pack (by folder name) that has. Packs are read once at startup (not hot reloaded).
+//
 // Hot reload (RANDYVK_HOTRELOAD=1): both materials\ and live\ (the ao-assets workbench's previews of checked-out
 // assets) are watched; when a texture's files change, its maps are decoded again and replace what every surface of it
 // had (a map that's gone is removed). A texture id with any file in live\ takes its maps from there only;
@@ -138,6 +142,7 @@ struct Folder {
     std::unordered_map<std::string, uint64_t> files;   // lower-case name -> last write time ^ size (hot reload)
 };
 Folder g_mat, g_live;                         // materials\ (applied maps), live\ (workbench previews, hot reload only)
+std::vector<Folder> g_packs;                  // packs\<name>\ (released texture packs), by name
 std::unordered_set<uint64_t> g_liveKeys;      // texture ids with any file in live\ (their maps come from there only)
 bool g_scanned = false;
 bool g_hot = false;                           // RANDYVK_HOTRELOAD=1
@@ -181,6 +186,29 @@ void RebuildLiveKeys()
             g_liveKeys.insert(key);
 }
 
+void ScanPacks(const std::string& root)
+{
+    std::vector<std::string> names;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA((root + "*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != '.')
+            names.push_back(fd.cFileName);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return Lower(a) < Lower(b); });
+    for (const std::string& name : names) {
+        Folder f;
+        f.dir = root + name + "\\";
+        ScanFolder(f);
+        RvkLog("materials: pack '%s', %u files", name.c_str(), unsigned(f.files.size()));
+        if (!f.files.empty())
+            g_packs.push_back(std::move(f));
+    }
+}
+
 void Scan()
 {
     if (g_scanned)
@@ -198,6 +226,7 @@ void Scan()
     char hot[8] = {};
     g_hot = GetEnvironmentVariableA("RANDYVK_HOTRELOAD", hot, sizeof(hot)) && hot[0] == '1';
     ScanFolder(g_mat);
+    ScanPacks(std::string(path) + "randy-vk\\packs\\");
     if (g_hot) {
         CreateDirectoryA(g_live.dir.c_str(), nullptr);
         ScanFolder(g_live);
@@ -207,10 +236,11 @@ void Scan()
            g_hot ? "; hot reload on (watching it and live\\)" : "");
 }
 
-std::string FindMap(uint32_t type, uint32_t id, const char* suffix)
+constexpr const char* kSuffixes[] = {"_n.png", "_orm.png", "_r.png", "_m.png", "_ao.png", "_d.png", "_e.png",
+                                     "_leaves.png", "_leaves_n.png"};
+
+std::string FindIn(const Folder& f, uint32_t type, uint32_t id, const char* suffix)
 {
-    Scan();
-    const Folder& f = g_liveKeys.count(KeyOf(type, id)) ? g_live : g_mat;
     for (uint32_t t : {FullQualityType(type), type}) {
         std::string a = std::to_string(t) + "_" + std::to_string(id) + suffix;
         if (f.files.count(a)) return f.dir + a;
@@ -218,6 +248,32 @@ std::string FindMap(uint32_t type, uint32_t id, const char* suffix)
     std::string b = std::to_string(id) + suffix;
     if (f.files.count(b)) return f.dir + b;
     return {};
+}
+
+bool HasAny(const Folder& f, uint32_t type, uint32_t id)
+{
+    for (const char* suffix : kSuffixes)
+        if (!FindIn(f, type, id, suffix).empty())
+            return true;
+    return false;
+}
+
+// Where a texture's maps come from (see the top of the file).
+const Folder& FolderFor(uint32_t type, uint32_t id)
+{
+    Scan();
+    if (g_liveKeys.count(KeyOf(type, id)))
+        return g_live;
+    if (!g_packs.empty() && !HasAny(g_mat, type, id))
+        for (const Folder& pack : g_packs)
+            if (HasAny(pack, type, id))
+                return pack;
+    return g_mat;
+}
+
+std::string FindMap(uint32_t type, uint32_t id, const char* suffix)
+{
+    return FindIn(FolderFor(type, id), type, id, suffix);
 }
 
 // ---------------------------------------------------------------- map loading (rvk/material_maps.h)
@@ -457,7 +513,7 @@ std::string DescribeTexture(const rvk::Texture* texture, std::string* reference)
         const uint32_t full = FullQualityType(top->rdbType);
         auto it = g_names.find(KeyOf(top->rdbType, top->rdbId));
         std::string maps;
-        for (const char* suffix : {"_n.png", "_orm.png", "_r.png", "_m.png", "_ao.png", "_d.png", "_e.png", "_leaves.png"})
+        for (const char* suffix : kSuffixes)
             if (!FindMap(top->rdbType, top->rdbId, suffix).empty())
                 maps += std::string(" ") + suffix;
         // (No name: what the game hands CreateTexture as one isn't the texture's - "a.?", "" - the workbench has them.)
@@ -550,7 +606,7 @@ void Reload(uint64_t key)
             rvk::maps::Replace(*g_rvk.device, top->texture, rvk::maps::Decoded{});   // its maps are gone
     }
     RvkLog("hot reload: RDB texture %u:%u from %s, %u surface(s) in use", type, id,
-           !any ? "nothing (maps removed)" : g_liveKeys.count(key) ? "live\\ (preview)" : "materials\\", surfaces);
+           !any ? "nothing (maps removed)" : FolderFor(type, id).dir.c_str(), surfaces);
 }
 }  // namespace
 

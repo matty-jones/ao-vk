@@ -14,6 +14,11 @@ load):
 `<type>` is the full-quality table, which also covers the lower quality levels: 1010004 world (1010016/17),
 1010006 ground (1010021/22), 1010011 character skins (1010019/20). `<id>_<suffix>` works for any type.
 
+**Texture packs**: `<client>\randy-vk\packs\<name>\` holds the same names (a released texture pack is one such
+folder; ao-assets `pack` makes the zips). A texture's maps all come from one place: the workbench's `live\` preview
+(hot reload), else `materials\` if it has any file for that texture, else the first pack (by folder name) that has
+one. Packs are read once at startup; the log names each (`materials: pack 'ao-vk-textures', N files`).
+
 ao-assets makes and collects these files (its `docs/blender-workflow.md`):
 - `python -m aoassets material-template <texture or model> [--luma|--relief] [--pbr [--roughness R] [--metallic M]]`
   writes the diffuse (reference), a flat or relief normal map and, with `--pbr`, an `_orm.png` (occlusion from the
