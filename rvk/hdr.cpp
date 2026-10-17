@@ -816,7 +816,7 @@ bool Device::RenderDof(VkCommandBuffer cmd, bool bloom, bool ao, bool gi, bool v
 // One full-target pass: dst <- pipeline(src, src2). load: keep dst's contents (blended onto) instead of overwriting.
 void Device::FullscreenPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pipeline, VkImageView src, VkImageView src2,
                             VkSampler sampler, const float* params, uint32_t paramBytes, bool load, VkImageView src3,
-                            VkImageView src4)
+                            VkImageView src4, const VkRect2D* scissorRect)
 {
     Transition(cmd, dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -831,7 +831,7 @@ void Device::FullscreenPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pipeli
     ri.pColorAttachments = &color;
     vkCmdBeginRendering(cmd, &ri);
     VkViewport viewport{0.0f, 0.0f, float(dst->m_width), float(dst->m_height), 0.0f, 1.0f};
-    VkRect2D scissor{{0, 0}, {dst->m_width, dst->m_height}};
+    VkRect2D scissor = scissorRect ? *scissorRect : VkRect2D{{0, 0}, {dst->m_width, dst->m_height}};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);

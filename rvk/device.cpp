@@ -1737,12 +1737,15 @@ void Device::EndFrame()
     Transition(f.main, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     bool screenshot = !m_screenshotPath.empty();
+    static const bool consoleInShots = std::getenv("RANDYVK_CONSOLE_SHOT") != nullptr;   // (tests: the console in it)
+    if (consoleInShots) DrawConsole(f.main);
     if (screenshot) {
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {m_width, m_height, 1};
         vkCmdCopyImageToBuffer(f.main, m_main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_readback, 1, &region);
     }
+    if (!consoleInShots) DrawConsole(f.main);    // (after the screenshot's copy: not in it)
 
     uint32_t imageIndex = 0;
     bool present = false;

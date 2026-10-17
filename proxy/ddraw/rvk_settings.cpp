@@ -1035,6 +1035,37 @@ bool PresetApply(uint32_t i)
     return true;
 }
 
+uint32_t PresetCount() { return kPresetCount; }
+const char* PresetName(uint32_t i) { return i < kPresetCount ? kPresetNames[i] : ""; }
+
+uint32_t Count()
+{
+    Load();
+    return uint32_t(kCount);
+}
+
+bool Info(uint32_t index, RvkSettingInfo* out, bool* hidden)
+{
+    Load();
+    if (index >= kCount || !out)
+        return false;
+    const Setting& s = g_settings[index];
+    out->size = sizeof(RvkSettingInfo);
+    out->name = s.name;
+    out->label = s.label;
+    out->section = s.section;
+    out->type = s.type;
+    out->min = s.min;
+    out->max = s.max;
+    out->step = s.step;
+    out->value = s.value;
+    out->defaultValue = s.defaultValue;
+    out->parent = AlwaysOn(s.parent) ? nullptr : s.parent;
+    out->choices = s.choices;
+    if (hidden) *hidden = Hidden(s);
+    return true;
+}
+
 
 }  // namespace rvk_settings
 

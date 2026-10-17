@@ -685,6 +685,16 @@ void ThreadedDevice::SetHideInterface(bool hide)
     Enqueue([this, hide](const uint8_t*) { m_device.SetHideInterface(hide); });
 }
 
+void ThreadedDevice::SetConsoleImage(uint32_t width, uint32_t height, const void* pixels)
+{
+    std::vector<uint8_t> data;
+    if (pixels && width && height)
+        data.assign(static_cast<const uint8_t*>(pixels), static_cast<const uint8_t*>(pixels) + size_t(width) * height * 4);
+    Enqueue([this, width, height, data = std::move(data)](const uint8_t*) {
+        m_device.SetConsoleImage(width, data.empty() ? 0 : height, data.empty() ? nullptr : data.data());
+    });
+}
+
 void ThreadedDevice::SetLightingDebug(bool enable)
 {
     m_lightingDebug = enable;

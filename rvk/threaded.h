@@ -77,6 +77,7 @@ public:
     bool LightingDebug() const { return m_lightingDebug; }
     void SetHideInterface(bool hide);
     bool HideInterface() const { return m_hideInterface; }
+    void SetConsoleImage(uint32_t width, uint32_t height, const void* pixels);   // copied
     void SetLightOverride(bool enable);
     void SetCarrierLit(bool enable);
     bool LightOverride() const { return m_lightOverride; }

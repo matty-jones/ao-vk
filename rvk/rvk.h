@@ -184,6 +184,10 @@ public:
     // characters are dropped, and the interface layer isn't put over the frame. Not a setting: off at each start.
     void SetHideInterface(bool hide) { m_hideInterface = hide; }
     bool HideInterface() const { return m_hideInterface; }
+    // The console (the proxy's rvk_console.cpp): an image put over the top of the finished frame, after the interface
+    // and after a screenshot's copy (screenshots leave it out) - A8R8G8B8 premultiplied by its coverage, tightly
+    // packed, `width` the main target's. Copied; uploaded at the next EndFrame. Null / height 0: none.
+    void SetConsoleImage(uint32_t width, uint32_t height, const void* pixels);
     // Enhancement, with per-pixel lighting: every lit draw gets the frame's active point / spot lights nearest
     // the camera instead of the (at most 8) the game enabled for it. Directional lights stay as the game set them.
     void SetLightOverride(bool enable) { if (m_lightOverride != enable) { m_lightOverride = enable; m_constantsDirty = true; } }
@@ -1320,6 +1324,11 @@ private:
     Texture* m_scene = nullptr;
     bool m_scenePhase = false;                   // 3D drawn into m_scene; ends at the first interface draw
     bool m_hideInterface = false;                // SetHideInterface
+    std::vector<uint8_t> m_consolePixels;        // SetConsoleImage (interface.cpp DrawConsole)
+    uint32_t m_consoleW = 0, m_consoleH = 0;
+    bool m_consoleDirty = false;
+    Texture* m_consoleTex = nullptr;
+    void DrawConsole(VkCommandBuffer cmd);       // EndFrame: m_main in TRANSFER_SRC, left so
     bool m_sceneSaw3D = false;
     uint32_t m_sceneEndDraw = 0, m_sceneEndFvf = 0;   // frame dumps: where the scene phase ended
     VkPipeline m_pipelinesHdr[3] = {};           // m_pipelines for the float target
@@ -2467,7 +2476,8 @@ private:
     // One full-target pass into dst reading src (binding 0) and src2 (binding 1), which must be readable already.
     void FullscreenPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pipeline, VkImageView src, VkImageView src2,
                         VkSampler sampler, const float* params, uint32_t paramBytes, bool load,
-                        VkImageView src3 = VK_NULL_HANDLE, VkImageView src4 = VK_NULL_HANDLE);
+                        VkImageView src3 = VK_NULL_HANDLE, VkImageView src4 = VK_NULL_HANDLE,
+                        const VkRect2D* scissor = nullptr);   // (only this part of dst drawn)
     void RenderObjectMotionBlur(VkCommandBuffer cmd, const float params[24]);
     float m_aoStrength = 1.0f, m_aoRadius = 1.5f;
     Texture* m_aoTex[2] = {};                    // half resolution: raw, blurred (ping-pong)

@@ -38,6 +38,7 @@ repository. Every enhancement can be switched off (in-game or with one hotkey) t
   - [Wine / Linux notes](#wine--linux-notes)
   - [Uninstalling](#uninstalling)
 - [Settings](#settings)
+  - [Console](#console)
   - [Hotkeys (Ctrl+Shift + key)](#hotkeys-ctrlshift--key)
   - [Environment variables](#environment-variables)
 - [Known limitations](#known-limitations)
@@ -425,6 +426,21 @@ Some useful ones:
 | `RVK_SmokeBright` | 1 | how light the smoke is (0.25 - 3) |
 | `RVK_SmokeOpaque` | 1 | how opaque it is drawn (0.05 - 8), its shape and shading kept (unlike the density): below 1 see-through as a whole; above 1 its cover as if that many times as thick - its dense parts hide what is behind them |
 | `RVK_SmokeGame` | 0 | the game's own smoke sprites drawn as well (1) |
+
+### Console
+
+The key left of 1 (`~` / `` ` `` on US keyboards; the same key on any layout) opens a console at the top of the screen;
+it or Esc closes it. While it is open the game gets no keyboard input (the mouse still works).
+
+- Type a setting's name to see it (`bloom` or `RVK_Bloom`, any case), and a value after it to set it: `bloom 1.2`,
+  `pbr off`, `pbr toggle`, `aniso 8`, `bloom reset`. Changes apply at once and are saved to randy-vk.ini, like the
+  settings window's.
+- `find shadow`, `list lighting`, `changed` (what differs from the defaults), `preset ultra`, `try bloom 2` (in effect
+  but not saved; `untry` puts the saved value back), and the hotkeys' actions: `hideui`, `freecam`, `dump`,
+  `profile`, `luts`, `lightdebug`. `help` lists them all.
+- Tab completes (again: the next match), Right takes the grey suggestion, Up / Down go through earlier commands
+  (kept in randy-vk-console.txt), PgUp / PgDn scroll.
+- Another key: randy-vk.ini `[Console]` `Key=` its scan code (default 41); `Key=0` turns the console off.
 
 ### Hotkeys (Ctrl+Shift + key)
 

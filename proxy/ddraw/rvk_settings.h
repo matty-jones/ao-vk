@@ -45,5 +45,14 @@ void LoadLuts(rvk::ThreadedDevice* device);         // randy-vk-day/night.cube n
 void PollIni(rvk::ThreadedDevice* device);          // once a frame: randy-vk.ini edited by hand -> its changes applied
 void LogAll();
 const char* IniPath();                              // randy-vk.ini (other sections: [Particles])
+// Presets: 0 Original, 1 Classic+, 2 Modern, 3 Ultra; Current: the one the settings match, -1 custom.
+uint32_t PresetCount();
+const char* PresetName(uint32_t i);
+bool PresetApply(uint32_t i);
+int PresetCurrent();
+// The console (rvk_console.cpp): every setting by index (table order), the hidden ones too (`hidden`: the settings
+// window leaves it out); `parent` null where the feature can't be switched off.
+uint32_t Count();
+bool Info(uint32_t index, RvkSettingInfo* out, bool* hidden);
 
 }  // namespace rvk_settings

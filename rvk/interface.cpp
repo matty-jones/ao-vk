@@ -96,4 +96,42 @@ void Device::InterfaceEnd()
     BeginRenderingOn(m_target);
 }
 
+void Device::SetConsoleImage(uint32_t width, uint32_t height, const void* pixels)
+{
+    m_consoleW = pixels && height ? width : 0;
+    m_consoleH = pixels && width ? height : 0;
+    if (m_consoleH)
+        m_consolePixels.assign(static_cast<const uint8_t*>(pixels),
+                               static_cast<const uint8_t*>(pixels) + size_t(width) * height * 4);
+    else
+        std::vector<uint8_t>().swap(m_consolePixels);
+    m_consoleDirty = true;
+}
+
+// The console's image over the top of the main target (EndFrame, which has it in TRANSFER_SRC for presenting and
+// gets it back so). Its upload goes with the frame's others, before its draws. An image made for another size (the
+// window just resized) waits for the console's next one.
+void Device::DrawConsole(VkCommandBuffer cmd)
+{
+    if (!m_consoleH || !m_uiCompositePipeline || !m_main || m_main->m_format != Format::A8R8G8B8 ||
+        m_consoleW != m_main->m_width || m_consoleH > m_main->m_height)
+        return;
+    if (!m_consoleTex || m_consoleTex->m_width != m_consoleW || m_consoleTex->m_height != m_consoleH) {
+        if (m_consoleTex) DestroyTexture(m_consoleTex);
+        m_consoleTex = CreateTexture(m_consoleW, m_consoleH, Format::A8R8G8B8, 1);
+        m_consoleDirty = true;
+        if (!m_consoleTex) return;
+    }
+    if (m_consoleDirty) {
+        UpdateTexture(m_consoleTex, 0, 0, 0, m_consoleW, m_consoleH, m_consolePixels.data(), m_consoleW * 4);
+        m_consoleDirty = false;
+    }
+    // (The interface layer's pass: texel for pixel, blended ONE / INV_SRC_ALPHA - only the console's rows drawn.)
+    const VkRect2D area{{0, 0}, {m_consoleW, m_consoleH}};
+    const float params[4] = {};
+    FullscreenPass(cmd, m_main, m_uiCompositePipeline, m_consoleTex->m_view, m_consoleTex->m_view, m_pointSampler, params,
+                   sizeof(params), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &area);
+    Transition(cmd, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+}
+
 }  // namespace rvk
