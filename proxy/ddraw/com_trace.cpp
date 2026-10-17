@@ -274,7 +274,7 @@ void* PatchImport(HMODULE module, const char* dll, const char* function, void* h
                 continue;
             void* previous = reinterpret_cast<void*>(iat->u1.Function);
             DWORD protect;
-            VirtualProtect(&iat->u1.Function, sizeof(void*), PAGE_READWRITE, &protect);
+            VirtualProtect(&iat->u1.Function, sizeof(void*), PAGE_EXECUTE_READWRITE, &protect);
             iat->u1.Function = reinterpret_cast<ULONG_PTR>(hook);
             VirtualProtect(&iat->u1.Function, sizeof(void*), protect, &protect);
             return previous;

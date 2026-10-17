@@ -262,8 +262,8 @@ void* HookSlot(HMODULE module, uint32_t vtable, uint32_t slot, uint32_t expected
             (void*)(base + expected));
         return nullptr;
     }
-    DWORD protect;
-    if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &protect))
+    DWORD protect;   // (execute kept: the slot may share a page with code another thread runs)
+    if (!VirtualProtect(entry, sizeof(*entry), PAGE_EXECUTE_READWRITE, &protect))
         return nullptr;
     void* original = reinterpret_cast<void*>(*entry);
     *entry = reinterpret_cast<uintptr_t>(target);

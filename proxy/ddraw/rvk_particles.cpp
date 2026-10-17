@@ -197,7 +197,7 @@ bool PatchSlot(HMODULE module, uint32_t vtable, uint32_t slot, uint32_t expected
         return false;
     }
     DWORD protect;
-    if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &protect))
+    if (!VirtualProtect(entry, sizeof(*entry), PAGE_EXECUTE_READWRITE, &protect))   // (execute kept: shared pages)
         return false;
     *original = reinterpret_cast<void*>(*entry);
     *entry = reinterpret_cast<uintptr_t>(hook);
