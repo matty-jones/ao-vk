@@ -1,6 +1,7 @@
 // Character skinning on the game's thread (cpu) or deferred to the renderer (on); see cat_skin.h. The SSE loop itself
 // is rvk/skin.cpp.
 #include "native/cat_skin.h"
+#include "native/cat_pick.h"
 #include "native/device.h"
 
 #include <algorithm>
@@ -409,8 +410,8 @@ void Install(HMODULE orig)
     if (target == reinterpret_cast<void*>(&SkinOn)) {
         g_deferred = true;
     }
-    if (target == reinterpret_cast<void*>(&SkinOn) && GetMode("Scene", Mode::On) != Mode::On) {
-        // (Scene=on: picking is native, cat_pick.cpp, and opens this scope itself - PickingBegin.)
+    if (target == reinterpret_cast<void*>(&SkinOn) && !catpick::Native()) {
+        // (Native picking, cat_pick.cpp, opens this scope itself - PickingBegin.)
         g_isLine = reinterpret_cast<IsLineFn>(HookEntry(orig, kIsLineRva, kIsLinePrologue, sizeof(kIsLinePrologue),
                                                         reinterpret_cast<void*>(&IsLineHook),
                                                         "RCATMesh_t::IsLineIntersecting"));
