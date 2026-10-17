@@ -253,6 +253,32 @@ void Record(const CallFrame& f)
         g_events.push_back(DescribeLists(f));
 }
 
+// AOReloaded (version.dll next to the game) is loaded by Windows' DLL search - except when compatibility settings for
+// AnarchyOnline.exe (AppCompatFlags\Layers: "Run as administrator", DPI or full-screen options) make the loader take
+// the system version.dll first (ao-vk #7). Then randy31.dll, which the game always loads from its folder, loads it.
+void LoadAoReloaded()
+{
+    wchar_t path[MAX_PATH] = {};
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&LoadAoReloaded), &self);
+    if (!GetModuleFileNameW(self, path, MAX_PATH)) return;
+    wchar_t* slash = wcsrchr(path, L'\\');
+    if (!slash || size_t(slash - path) + 13 >= MAX_PATH) return;
+    wcscpy(slash + 1, L"version.dll");
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES || GetModuleHandleW(path))
+        return;                                   // none there, or Windows loaded it as usual
+    wchar_t current[MAX_PATH] = {};
+    if (HMODULE v = GetModuleHandleW(L"version.dll"))
+        if (GetModuleFileNameW(v, current, MAX_PATH) && !_wcsicmp(current, path))
+            return;
+    HMODULE loaded = LoadLibraryW(path);
+    wchar_t got[MAX_PATH] = {};
+    if (loaded) GetModuleFileNameW(loaded, got, MAX_PATH);
+    rvkproxy::RvkLog("AOReloaded: version.dll next to the game wasn't loaded by Windows (compatibility settings for "
+                     "AnarchyOnline.exe?) - loaded it: %ls", loaded ? got : L"failed");
+}
+
 void Init()
 {
     g_orig = GetModuleHandleA("randy31_orig.dll");
@@ -280,6 +306,7 @@ void Init()
         }
         rnative::Install(g_orig);
     }
+    LoadAoReloaded();
 }
 
 }  // namespace
