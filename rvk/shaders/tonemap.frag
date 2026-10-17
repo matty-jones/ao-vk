@@ -97,23 +97,12 @@ float DustDepth(vec2 uv, float z)
     return z - (t1 - t0) + sum * dt;
 }
 
-vec3 Air(vec3 c, float z)
+// The valley mist (rvk mist.cpp) along the view ray V (view space, length dist): a layer up to P.fog.z over the eye,
+// fading over ~8 units above. phase: the air's glow towards the sun (Air).
+vec3 Mist(vec3 c, vec3 V, float dist, float phase)
 {
-    vec2 uv = gl_FragCoord.xy / vec2(textureSize(scene, 0));
-    vec3 V = vec3((uv.x * 2.0 - 1.0) / P.air0.x, (1.0 - uv.y * 2.0) / P.air0.y, 1.0) * z;
-    float dist = length(V);
-    vec3 dir = V / max(dist, 1e-4);
-    float x = dot(V, P.air1.xyz) / P.air0.w;      // (height over the eye, in scale heights)
-    float f = abs(x) < 1e-3 ? 1.0 : (1.0 - exp(-x)) / x;
-    float tau = P.air0.z * dist * clamp(f, 0.0, 4.0);
-    vec3 through = exp(-tau * vec3(0.8, 1.0, 1.3));
-    float g = P.air2.w, cosT = dot(dir, P.air2.xyz);
-    float phase = min((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5), 5.0);
-    vec3 scattered = (1.0 - through) * P.haze.rgb + (1.0 - exp(-tau)) * P.air3.rgb * (phase * P.air1.w);
-    c = c * through + scattered;
-    // The valley mist (rvk mist.cpp): a layer up to P.fog.z over the eye, fading over ~8 units above. Its depth along
-    // the ray: the density's integral over the heights the ray crosses, over how fast it climbs. Lit as the air - the
-    // zone's colour, paler - and the sun's (moon's) glow.
+    // Its depth along the ray: the density's integral over the heights the ray crosses, over how fast it climbs.
+    // Lit as the air - the zone's colour, paler - and the sun's (moon's) glow.
     if (P.fog.w > 0.0) {
         float h0 = 0.0, h1 = dot(V, P.air1.xyz), top = P.fog.z;
         float tauM;
@@ -133,6 +122,26 @@ vec3 Air(vec3 c, float z)
         c = mix(c, mist, m);
     }
     return c;
+}
+
+// The pixel's view ray out to view depth z: V (its length dist) and the air's glow towards the sun along it.
+void AirRay(float z, out vec3 V, out float dist, out float phase)
+{
+    vec2 uv = gl_FragCoord.xy / vec2(textureSize(scene, 0));
+    V = vec3((uv.x * 2.0 - 1.0) / P.air0.x, (1.0 - uv.y * 2.0) / P.air0.y, 1.0) * z;
+    dist = length(V);
+    float g = P.air2.w, cosT = dot(V / max(dist, 1e-4), P.air2.xyz);
+    phase = min((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5), 5.0);
+}
+
+vec3 Air(vec3 c, vec3 V, float dist, float phase)
+{
+    float x = dot(V, P.air1.xyz) / P.air0.w;      // (height over the eye, in scale heights)
+    float f = abs(x) < 1e-3 ? 1.0 : (1.0 - exp(-x)) / x;
+    float tau = P.air0.z * dist * clamp(f, 0.0, 4.0);
+    vec3 through = exp(-tau * vec3(0.8, 1.0, 1.3));
+    vec3 scattered = (1.0 - through) * P.haze.rgb + (1.0 - exp(-tau)) * P.air3.rgb * (phase * P.air1.w);
+    return c * through + scattered;
 }
 
 void main()
@@ -178,12 +187,25 @@ void main()
         if (P.haze.w > 0.0 && P.fog.y > P.fog.x) {
             float gameFog = clamp((z - P.fog.x) / (P.fog.y - P.fog.x), 0.0, 1.0);
             if (P.air0.z > 0.0) {
-                c = mix(c, Air(c, z), min(P.haze.w * 2.5, 1.0) * (1.0 - gameFog));
+                vec3 V;
+                float dist, phase;
+                AirRay(z, V, dist, phase);
+                float k = min(P.haze.w * 2.5, 1.0);
+                c = mix(c, Air(c, V, dist, phase), k * (1.0 - gameFog));
+                // (The mist not handed over to the game's fog: the sky behind gets it too, below - one layer.)
+                c = mix(c, Mist(c, V, dist, phase), k);
             } else {
                 float air = 1.0 - exp(-z / (0.4 * P.fog.y));
                 c = mix(c, P.haze.rgb, P.haze.w * air * (1.0 - gameFog));
             }
         }
+    } else if (P.haze.w > 0.0 && P.fog.y > P.fog.x && P.air0.z > 0.0 && P.fog.w > 0.0) {
+        // The sky through the valley mist too, as far as the game's fog end: else a mist over the land stopped at
+        // the hilltops in a hard line against the sky (ao-vk #14). Level rays stay in the layer, rising ones leave it.
+        vec3 V;
+        float dist, phase;
+        AirRay(P.fog.y, V, dist, phase);
+        c = mix(c, Mist(c, V, dist, phase), min(P.haze.w * 2.5, 1.0));
     }
     // A sand or ash storm (rvk wind.cpp): the air thick with sand to the horizon - the sky wholly, the land through a
     // veil that thickens with distance, surging with the wind.
