@@ -1168,10 +1168,12 @@ void PickCharacter(CharacterScene& scene)
         for (float dx : {-0.25f, 0.0f, 0.25f}) {
             Vector3 to{m[12] + dx, m[13] + h, m[14]};
             Vector3 end{from.x + (to.x - from.x) * 3.0f, from.y + (to.y - from.y) * 3.0f, from.z + (to.z - from.z) * 3.0f};
-            float at = -1.0f;
-            bool hit = isLine(scene.characters[0], nullptr, &from, &end, &at, false);
-            std::printf(" %s", hit ? "X" : ".");
-            if (hit) std::printf("%.3f", at);
+            for (bool box : {false, true}) {         // the triangles; the pose's box only (sphere = true)
+                float at = -1.0f;
+                bool hit = isLine(scene.characters[0], nullptr, &from, &end, &at, box);
+                std::printf(" %s%s", box ? "b" : "", hit ? "X" : ".");
+                if (hit) std::printf("%.3f", at);
+            }
         }
     }
     std::printf("\n");

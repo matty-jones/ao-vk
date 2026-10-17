@@ -9,6 +9,7 @@
 #include "native/xmath.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace rnative::catpick {
@@ -30,6 +31,12 @@ R Virtual(void* object, uint32_t slot, A... args)
 
 using cat::RenderGroup;
 constexpr uint32_t kVisual = 0x3C, kBoxMin = 0x1FC, kBoxMax = 0x208, kPickable = 0x220, kExtents = 0x1CC;
+
+// Where a test ended (counted for the log: why characters aren't hit, if they aren't).
+enum Stage { kNoMesh, kNotPickable, kSphere, kBox, kTriangles, kHit, kStages };
+const char* const kStageNames[kStages] = {"no mesh / animation", "not pickable (not in view)", "outside the sphere",
+                                          "outside the box", "between the triangles", "hit"};
+Stage g_stage;
 
 void Sub(const float* a, const float* b, float* out) { out[0] = a[0] - b[0], out[1] = a[1] - b[1], out[2] = a[2] - b[2]; }
 
@@ -161,6 +168,7 @@ bool Triangles(uint8_t* mesh, const float* a, const float* d, float limit, float
                     xm::Cross(u, q, c2);
                     if (0.0f <= c2[2] * c0[2] + c2[0] * c0[0] + c2[1] * c0[1] && t <= limit) {
                         if (at) *at = t;
+                        g_stage = kHit;
                         orig::VertexBuffer_c_Unlock(slot.buffer);
                         return true;
                     }
@@ -188,7 +196,11 @@ bool MissesSphere(const float* a, const float* d, float c2, float r2, bool zxy)
 // it in *at).
 bool LineTest(uint8_t* mesh, const float* from, const float* to, float* at, bool sphere)
 {
-    if (!Field<void*>(mesh, 4) || !Field<void*>(mesh, 8) || !mesh[kPickable]) return false;
+    g_stage = kNoMesh;
+    if (!Field<void*>(mesh, 4) || !Field<void*>(mesh, 8)) return false;
+    g_stage = kNotPickable;
+    if (!mesh[kPickable]) return false;
+    g_stage = kSphere;
     float a[3] = {from[0], from[1], from[2]}, b[3] = {to[0], to[1], to[2]};
     float inverse[16];
     std::memcpy(inverse, orig::RRefFrame_t_GetWorldMatrix(mesh + kVisual), sizeof(inverse));
@@ -206,6 +218,7 @@ bool LineTest(uint8_t* mesh, const float* from, const float* to, float* at, bool
                                double(Field<float>(mesh, kExtents + 4)));
     const float c2 = a[2] * a[2] + a[0] * a[0] + a[1] * a[1];
     if (MissesSphere(a, d, c2, radius * radius, false)) return false;
+    g_stage = kBox;
     PoseUpdate(mesh);
     float hit[3] = {0.0f, 0.0f, 0.0f};
     bool found = RayBox(a, d, &Field<float>(mesh, kBoxMin), &Field<float>(mesh, kBoxMax), hit);
@@ -216,9 +229,11 @@ bool LineTest(uint8_t* mesh, const float* from, const float* to, float* at, bool
     }
     if (sphere) {
         if (at) *at = distance;
+        if (found) g_stage = kHit;
         return found;
     }
     if (!found) return false;
+    g_stage = kTriangles;
     orig::RRefFrame_t_GetWorldMatrix(mesh + kVisual);
     return Triangles(mesh, a, d, length, at, [&](const float* v, uint32_t n) {
         float hi[3] = {v[0], v[1], v[2]}, lo[3] = {v[0], v[1], v[2]};
@@ -240,7 +255,9 @@ bool LineTest(uint8_t* mesh, const float* from, const float* to, float* at, bool
 bool RayTest(uint8_t* visual, const float* from, const float* along, float* at)
 {
     uint8_t* mesh = visual - kVisual;
+    g_stage = kNoMesh;
     if (!Field<void*>(mesh, 4) || !Field<void*>(mesh, 8)) return false;
+    g_stage = kSphere;
     float o[3] = {from[0], from[1], from[2]}, d[3] = {along[0], along[1], along[2]};
     const float* w = static_cast<const float*>(orig::RRefFrame_t_GetWorldMatrix(visual));
     {                                                 // FUN_10044ae1: into the frame (rotation transposed)
@@ -268,6 +285,7 @@ bool RayTest(uint8_t* visual, const float* from, const float* along, float* at)
     const float c2 = o[2] * o[2] + o[0] * o[0] + o[1] * o[1];
     const float r = float(double(scale) * radius);
     if (MissesSphere(o, d, c2, r * r, true)) return false;
+    g_stage = kTriangles;
     PoseUpdate(mesh);
     return Triangles(mesh, o, d, 1.0f, at, [](const float*, uint32_t) { return false; });
 }
@@ -283,24 +301,117 @@ struct Exact {
     }
 };
 
+// Counts per test kind (line, ray) and stage, logged now and then: why a character the mouse is over isn't hit.
+struct Counts {
+    uint64_t calls = 0, stages[kStages] = {}, differ = 0;
+} g_counts[2];
+Mode g_mode = Mode::Off;
+using LineFn = bool(__fastcall*)(uint8_t*, void*, const float*, const float*, float*, bool);
+using RayFn = bool(__fastcall*)(uint8_t*, void*, const float*, const float*, float*, bool);
+LineFn g_origLine;
+RayFn g_origRay;
+
+void Count(int kind, bool hit, bool theirs, bool compared, float ours, float their)
+{
+    Counts& c = g_counts[kind];
+    ++c.calls;
+    ++c.stages[g_stage];
+    if (compared && (hit != theirs || (hit && std::fabs(ours - their) > 1e-3f * (1.0f + std::fabs(their))))) ++c.differ;
+    if (c.calls == 200 || c.calls % 20000 == 0) {
+        char line[512];
+        int n = std::snprintf(line, sizeof(line), "picking: %s tests %llu:", kind ? "ray" : "line",
+                              (unsigned long long)c.calls);
+        for (int i = 0; i < kStages && n < int(sizeof(line)); ++i)
+            if (c.stages[i])
+                n += std::snprintf(line + n, sizeof(line) - n, " %s %llu,", kStageNames[i],
+                                   (unsigned long long)c.stages[i]);
+        if (compared && n < int(sizeof(line)))
+            std::snprintf(line + n, sizeof(line) - n, " differ from the original %llu", (unsigned long long)c.differ);
+        Log("%s", line);
+    }
+}
+
+// Pick=verify: what the test saw, when ours and the original disagree (the first few).
+void Disagree(int kind, uint8_t* mesh, bool sphere, bool ours, float oursAt, bool theirs, float theirAt)
+{
+    static int logged;
+    if (++logged > 40) return;
+    const float* lo = &Field<float>(mesh, kBoxMin);
+    const float* hi = &Field<float>(mesh, kBoxMax);
+    Log("picking verify: %s test of %p%s: ours %s (%g, stopped %s), original %s (%g); pickable %d, extents %g %g, "
+        "box (%g %g %g)-(%g %g %g)", kind ? "ray" : "line", mesh, sphere ? " (box only)" : "", ours ? "hit" : "miss",
+        oursAt, kStageNames[g_stage], theirs ? "hit" : "miss", theirAt, mesh[kPickable],
+        Field<float>(mesh, kExtents), Field<float>(mesh, kExtents + 4), lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+}
+
 bool __fastcall IsLineIntersecting(uint8_t* mesh, void*, const float* from, const float* to, float* at, bool sphere)
 {
     Exact exact(mesh);
-    return LineTest(mesh, from, to, at, sphere);
+    if (g_mode != Mode::Verify) {                     // (the caller's `at` as the original treats it)
+        const bool ours = LineTest(mesh, from, to, at, sphere);
+        Count(0, ours, false, false, 0.0f, 0.0f);
+        return ours;
+    }
+    float oursAt = -1.0f;
+    const bool ours = LineTest(mesh, from, to, &oursAt, sphere);
+    const Stage stage = g_stage;
+    float theirAt = -1.0f;
+    const bool theirs = g_origLine(mesh, nullptr, from, to, &theirAt, sphere);
+    g_stage = stage;
+    Count(0, ours, theirs, true, oursAt, theirAt);
+    if (ours != theirs) Disagree(0, mesh, sphere, ours, oursAt, theirs, theirAt);
+    if (at && (theirs || theirAt != -1.0f)) *at = theirAt;   // what the original wrote
+    return theirs;
 }
 
-bool __fastcall IsRayIntersecting(uint8_t* visual, void*, const float* from, const float* along, float* at, bool)
+bool __fastcall IsRayIntersecting(uint8_t* visual, void*, const float* from, const float* along, float* at, bool flag)
 {
     Exact exact(visual - kVisual);
-    return RayTest(visual, from, along, at);
+    if (g_mode != Mode::Verify) {                     // (the caller's `at` as the original treats it)
+        const bool ours = RayTest(visual, from, along, at);
+        Count(1, ours, false, false, 0.0f, 0.0f);
+        return ours;
+    }
+    float oursAt = -1.0f;
+    const bool ours = RayTest(visual, from, along, &oursAt);
+    const Stage stage = g_stage;
+    float theirAt = -1.0f;
+    const bool theirs = g_origRay(visual, nullptr, from, along, &theirAt, flag);
+    g_stage = stage;
+    Count(1, ours, theirs, true, oursAt, theirAt);
+    if (ours != theirs) Disagree(1, visual - kVisual, false, ours, oursAt, theirs, theirAt);
+    if (at && (theirs || theirAt != -1.0f)) *at = theirAt;   // what the original wrote
+    return theirs;
 }
 
 }  // namespace
 
+bool Native()
+{
+    return GetMode("Scene", Mode::On) == Mode::On && GetMode("Pick", Mode::On) != Mode::Off;
+}
+
 void Install(HMODULE orig)
 {
-    if (GetMode("Scene", Mode::On) != Mode::On) return;
+    if (!Native()) {
+        if (GetMode("Scene", Mode::On) == Mode::On) Log("picking: the original's ([Native] Pick=off)");
+        return;
+    }
     g_orig = orig;
+    g_mode = GetMode("Pick", Mode::On);
+    if (g_mode == Mode::Verify) {
+        // The original's tests stay whole (their helpers too); ours run beside them, with our own helpers.
+        static const uint8_t kLine[] = {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x6C, 0x01, 0x00, 0x00};
+        static const uint8_t kRay[] = {0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x00, 0x01, 0x00, 0x00};
+        g_origLine = reinterpret_cast<LineFn>(HookEntry(orig, 0x56786, kLine, sizeof(kLine),
+                                                        reinterpret_cast<void*>(&IsLineIntersecting),
+                                                        "RCATMesh_t::IsLineIntersecting (verify)"));
+        g_origRay = reinterpret_cast<RayFn>(HookEntry(orig, 0x5632D, kRay, sizeof(kRay),
+                                                      reinterpret_cast<void*>(&IsRayIntersecting),
+                                                      "RCATMesh_t ray test (verify)"));
+        Log("picking: verify (%s)", g_origLine && g_origRay ? "both tests" : "hooks missing: unknown client build");
+        return;
+    }
     struct Entry {
         uint32_t rva;
         void* target;

@@ -299,6 +299,8 @@ Device=on     ; the device layer: render state, drawing, vertex buffers, state b
 Scene=on      ; the scene layer (so far: viewports - the frame: camera, scene update, lights, the render lists)
 Direct=on     ; with Device=on: render state reaches the renderer directly, one hand-off per update (default on)
 Retain=on     ; (default) with Device, Scene and Direct on: static meshes kept on the GPU and drawn by handle
+Pick=on       ; (default) with Scene on: character picking (mouse, Tab) is ours; off = the original's, verify = both,
+              ; the original's answer kept and why ours missed logged (ao-vk #16)
 ```
 
 All of them default to `on` since 0.5 (the first start of 0.5 also switches on any part an earlier version left
