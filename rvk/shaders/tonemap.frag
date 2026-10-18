@@ -226,12 +226,14 @@ void main()
         far = clamp(z / zFar, 0.0, 1.0);
         // The game's far fog in the sky's twilight colours (SkyDelta): as much as the game fogged the land, the
         // difference the twilight makes to its colour there - the land fades into the sky drawn behind it.
+        // (Our own sky - FL.skyRing: the scene already fogged into its horizon, rvk draw.cpp; only the haze's colour.)
         if (P.fog.y > P.fog.x) {
             vec3 Vd;
             float dd, ph;
             AirRay(z, Vd, dd, ph);
             gSkyDelta = SkyDelta(Vd / max(dd, 1e-4));
-            c = max(c + gSkyDelta * clamp((z - P.fog.x) / (P.fog.y - P.fog.x), 0.0, 1.0), vec3(0.0));
+            if (FL.skyRing[0].w <= 0.5)
+                c = max(c + gSkyDelta * clamp((z - P.fog.x) / (P.fog.y - P.fog.x), 0.0, 1.0), vec3(0.0));
         }
         // The haze over the distant land (RVK_VolLand): the air between the eye and the land, thickening from the
         // eye out - each ridge farther paler and bluer - and giving way to the game's own fog where that starts

@@ -98,6 +98,18 @@ void Device::SunThroughAir(float up, float out[3]) const
     for (int i = 0; i < 3; ++i) out[i] /= l;
 }
 
+// What the game fogs in its fog colour, under our own sky: into its horizon instead (the ring's mean) - the rain's
+// mist, the smoke, the cloud puffs (the scene's own draws fade into the ring towards each pixel: draw.cpp).
+void Device::OurSkyFog(float rgb[3]) const
+{
+    if (!ProcSkyReady() || m_skyRing[0][3] <= 0.5f)
+        return;
+    float mean[3] = {};
+    for (const auto& r : m_skyRing)
+        for (int i = 0; i < 3; ++i) mean[i] += r[i] * 0.125f;
+    for (int i = 0; i < 3; ++i) rgb[i] = std::min(mean[i], 1.0f);
+}
+
 // Our sky this frame and last: the sky pass may use the table (made at the end of the frame before).
 bool Device::ProcSkyReady() const
 {

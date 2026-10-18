@@ -1686,6 +1686,7 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
         sf.viewport[2] = 1.0f / sw;
         sf.viewport[3] = 1.0f / sh;
         SceneFog(sf.fogColour, sf.fogParams);   // (the scene's: the render states hold the interface's by now)
+        OurSkyFog(sf.fogColour);
         void* cpu = nullptr;
         const VkDeviceSize offset = Allocate(sizeof(SmokeFrame), 256, &cpu);
         std::memcpy(cpu, &sf, sizeof(sf));

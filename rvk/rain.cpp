@@ -290,6 +290,7 @@ void Device::RenderDebris(VkCommandBuffer cmd)
     else
         ArgbTo4(m_rs[d3d::RS_AMBIENT], rf.ambient);
     SceneFog(rf.fogColour, rf.fogParams);
+    OurSkyFog(rf.fogColour);
     rf.viewport[0] = float(m_scene->m_width);
     rf.viewport[1] = float(m_scene->m_height);
     rf.viewport[2] = 1.0f / rf.viewport[0];
@@ -482,6 +483,7 @@ void Device::RenderRain(VkCommandBuffer cmd)
     else
         ArgbTo4(m_rs[d3d::RS_AMBIENT], rf.ambient);
     SceneFog(rf.fogColour, rf.fogParams);   // (the scene's: the render states hold the interface's by now)
+    OurSkyFog(rf.fogColour);
     rf.viewport[0] = float(m_scene->m_width);
     rf.viewport[1] = float(m_scene->m_height);
     rf.viewport[2] = 1.0f / rf.viewport[0];

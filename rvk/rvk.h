@@ -1275,6 +1275,7 @@ private:
     float m_skyRing[8][4] = {};                  // rgb, w 1 when known
     float m_skyUp[4] = {};                       // the sky over the land (overhead, 35 degrees up), w 1 when known
     void SunThroughAir(float up, float out[3]) const;   // the sun's colour through the air (unit luma)
+    void OurSkyFog(float rgb[3]) const;          // the scene fog's colour into our sky's horizon (its mean), if on
     bool ProcSkyReady() const;
     void UpdateAtmosphere(VkCommandBuffer cmd);
     void DestroyAtmosphere();

@@ -926,7 +926,9 @@ void main()
             else if (table == 1u) f = clamp(exp(-C.fogParams.z * d), 0.0, 1.0);
             else { float x = C.fogParams.z * d; f = clamp(exp(-x * x), 0.0, 1.0); }
         }
-        current.rgb = mix(C.fogColor.rgb, current.rgb, f);
+        // (Our own sky - C.fogParams.w: its horizon towards the pixel, rvk draw.cpp.)
+        vec3 fogC = C.fogParams.w > 0.5 ? SkyHorizonRing(normalize(vPosW - C.eyePos.xyz), FL.skyRing) : C.fogColor.rgb;
+        current.rgb = mix(fogC, current.rgb, f);
 #ifdef RVK_GLOW
         albedo *= f;                                      // indirect light fades into the fog with the surface
         reflectivity *= f;                                // ... and so do reflections

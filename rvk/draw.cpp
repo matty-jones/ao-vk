@@ -2960,7 +2960,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     c.fogParams[0] = AsFloat(m_rs[d3d::RS_FOGSTART]);
     c.fogParams[1] = AsFloat(m_rs[d3d::RS_FOGEND]);
     c.fogParams[2] = AsFloat(m_rs[d3d::RS_FOGDENSITY]);
-    c.fogParams[3] = 0.0f;
+    // (w 1: fade into our own sky's horizon towards the pixel - RVK_ProcSky, FL.skyRing - not the zone's fog colour:
+    // the land, the buildings, the far trees (blended, writing no depth, so the tone mapping's correction by depth
+    // never reached them: teal canopies on the horizon - user, 2026-10-18). Not the ground's light pass's white fog,
+    // what is added, the sky's own draws and its scenery (their fog colour set above).)
+    {
+        const bool added = m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE;
+        c.fogParams[3] = ProcSkyReady() && m_skyRing[0][3] > 0.5f && !IsMultiplyPass() && !added && !skyScenery &&
+                                 VisualKind(m_drawVisualKind) != VisualKind::Sky
+                             ? 1.0f
+                             : 0.0f;
+    }
     if (skyScenery)                              // (the far sky's haze: exponential below)
         c.fogParams[2] = 1.0f / kSkySceneryHaze;
     ArgbToFloat(m_rs[d3d::RS_TEXTUREFACTOR], c.tfactor);

@@ -10,6 +10,7 @@
 //   - the game's fog over all of it.
 // W.look.x blends two looks: 0 = the game's water made richer (its colour, its texture, more opaque), 1 = realistic.
 #include "water_common.glsl"
+#include "sky_common.glsl"                      // (our own sky's horizon: SkyHorizonRing)
 #include "wind.glsl"
 
 layout(set = 0, binding = 5) uniform sampler2DArrayShadow shadowMap;   // the sun's cascades
@@ -133,6 +134,10 @@ vec3 Sky(vec3 dir)
 {
     vec3 horizon = W.fogColour.rgb;
     vec3 top = W.sky.rgb;
+    if (FL.skyRing[0].w > 0.5 && FL.skyUp.w > 0.5) {   // (our own sky - RVK_ProcSky: its horizon and its sky overhead)
+        horizon = SkyHorizonRing(dir, FL.skyRing);
+        top = FL.skyUp.rgb;
+    }
     if (dot(top, vec3(1.0)) <= 0.0)
         top = horizon * vec3(0.75, 0.85, 1.1);
     float up = clamp(dir.y, 0.0, 1.0);
@@ -557,7 +562,9 @@ void main()
 
     // The game's fog, by the view distance.
     float fog = FogFactor(dist);
-    colour = mix(W.fogColour.rgb, colour, fog);
+    // (Our own sky: into its horizon towards the water, as the land - not the zone's fog colour.)
+    vec3 fogC = FL.skyRing[0].w > 0.5 ? SkyHorizonRing(-V, FL.skyRing) : W.fogColour.rgb;
+    colour = mix(fogC, colour, fog);
 
     outScene = vec4(colour, 1.0);
     // RANDYVK_WATER_DEBUG: 1 the depths (r: water view depth / 100, g: the scene behind / 100, b: path / 10), 2 the
