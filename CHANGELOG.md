@@ -12,12 +12,14 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - **Neon look:** coloured light (signs, screens, coloured lamps) keeps its colour instead of washing out to
   white (`RVK_NeonSat`), and bloom has a tight core with a wide haze, wider in rain and storms at night
   (`RVK_BloomWide`). `RVK_NeonNight` adds an optional night colour grade: teal shadows, richer lights.
-- **Rounder objects:** curved parts of buildings and props (pipes, rims, domes) are smoothed with
-  tessellation, while box edges stay sharp (`RVK_TessStatic`, on by default).
+- Ctrl+Shift+J on a dungeon's walls, floors or pillars now names the tile piece they are built from, so the
+  ao-assets workbench can open it for editing (an edit changes that piece in every dungeon room using it).
 - Texture packs: put a pack's maps in `randy-vk\packs\<name>\`. They are used for any texture `materials\`
   has nothing for. Packs are found at startup and listed in the log.
 
 ### Fixed
+- Waterfalls pouring from pipes (the subway and other narrow streams) showed as a wide dark wall of water,
+  and the streams themselves were missing.
 - The PF map's black areas showed the world through them when the interface refresh rate (`RVK_UiRate`)
   was on.
 - Held weapons swayed and bent like plants, most visibly while sitting. (#12)
@@ -30,6 +32,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - `[Native] Pick=off|on|verify` in `randy-vk.ini` for problems clicking on characters. `off` uses the
   game's own picking, `verify` runs both and logs where they disagree. (#16)
 - Frame captures (Ctrl+Shift+F9) show which character each drawn object belongs to.
+- Frame captures also save the water's mesh beside the capture (`...-water.bin`) and list each waterfall and
+  how it was drawn.
 
 ## 0.6.0 - 2026-10-16
 
