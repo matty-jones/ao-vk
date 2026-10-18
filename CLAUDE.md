@@ -102,6 +102,21 @@ new diagnostics. Keep it up to date as work lands.
 - **At release:** rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD`, start a fresh empty `## Unreleased`
   above it, and draft the GitHub release notes from that section.
 
+## Release builds
+
+Every release build gets a new tag on GitHub: commit the changelog, tag the commit with an annotated
+`vX.Y.Z` tag (message `ao-vk X.Y.Z`), and push the branch and the tag (`git push github main vX.Y.Z`).
+The version exists only in the tag and `CHANGELOG.md`; nothing in the DLL carries it. Then:
+
+- Build from a clean directory (`cmake --preset linux-release -B build/release-X.Y.Z`, then
+  `cmake --build build/release-X.Y.Z`) and run `tools/native-check.sh`, `tools/rvk-demo.sh`,
+  `tools/crash-check.sh`, and `tools/calllog-ab.sh <Mode>` for any `[Native]` switch that changed.
+- Package `../dist/ao-vk-X.Y.Z.zip` with the previous release's layout, all in one folder `ao-vk-X.Y.Z/`:
+  `randy31.dll`, AOReloaded's `version.dll` (built from `../AOReloaded`), `INSTALL.txt`,
+  `README-ao-vk.md`, `LICENSE-ao-vk.txt`, `LICENSE-AOReloaded.txt`.
+- Create the GitHub release on the tag, named `ao-vk X.Y.Z`, with the zip and the notes
+  (`gh release create vX.Y.Z ../dist/ao-vk-X.Y.Z.zip --title "ao-vk X.Y.Z" --notes-file ...`).
+
 ## Conventions
 
 - Comments and docs are plain prose describing behaviour ("what it does, and why"), matching the README's style.
