@@ -42,6 +42,10 @@ void SetLightSink(LightSinkFn sink);
 // The visual being rendered right now (null outside RViewPort_t::Render), and what it is.
 const void* CurrentVisual();
 VisualInfo Describe(const void* visual);
+// A frame dump was asked for: for the next few renders, every visual's frames up to its root (addresses, classes,
+// attractor children marked) and the characters' attractor children with their own frames go to the log - the
+// dump's draws carry their visual's address (@...) to match.
+void NoteDumpRequested();
 // The visual's class and those of the frames above it ("GenericMeshObject_t<VisualGloomySky_t<..."; up to 4): for the
 // sky, whose meshes are generic and whose objects (clouds, stars, gloom) are known by what holds them. A lasting string.
 const char* ClassChain(const void* visual);

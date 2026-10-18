@@ -2,6 +2,7 @@
 #include "rvk_backend.h"
 #include "rvk_settings.h"
 #include "native/gui.h"
+#include "native/scene.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -216,6 +217,7 @@ static void RequestFrameDump(rvk::ThreadedDevice* device, bool burst)
     char base[MAX_PATH];
     std::snprintf(base, sizeof(base), "%srvk-frame-%02d%02d%02d", dir, t.wHour, t.wMinute, t.wSecond);
     device->RequestFrameDump(std::string(base) + ".txt", burst ? 60 : 1);
+    rnative::scene::NoteDumpRequested();          // (the visuals' frames to the log, matched by the draws' @address)
     device->RequestScreenshot(std::string(base) + ".bmp");
     RvkLog("frame dump: %s.txt / .bmp", base);
 }

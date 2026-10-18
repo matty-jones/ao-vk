@@ -212,7 +212,7 @@ void IndexAttachments(const void* character)
                         ++logged;
                         // (the name: a VS2010 std::string - inline below 16 characters)
                         const auto* s = static_cast<const uint8_t*>(n) + kNodeName;
-                        const uint32_t cap = Readable(s + 0x18, 4) ? *reinterpret_cast<const uint32_t*>(s + 0x18) : 0;
+                        const uint32_t cap = Readable(s + 0x14, 4) ? *reinterpret_cast<const uint32_t*>(s + 0x14) : 0;
                         const char* name = cap < 16 ? reinterpret_cast<const char*>(s)
                                                     : static_cast<const char*>(SafeRead(n, kNodeName));
                         Log("visuals: attractor \"%.31s\" holds %s", name && Readable(name, 32) ? name : "?", ClassName(*f));
@@ -233,6 +233,33 @@ void IndexAttachments(const void* character)
                 ++it;
             }
         }
+}
+
+// Frame dump diagnostics (NoteDumpRequested): until this render, visuals' frame chains and the attractor index logged.
+uint32_t g_chainLogUntil = 0;
+std::unordered_set<const void*> g_chainLogged;
+
+void LogChain(const void* visual)
+{
+    if (!g_chainLogged.insert(visual).second || g_chainLogged.size() > 4000)
+        return;
+    std::string line;
+    char part[96];
+    const void* frame = visual;
+    for (int depth = 0; frame && depth < 12; ++depth, frame = SafeRead(frame, kParent)) {
+        std::snprintf(part, sizeof(part), "%s%08X %s%s", depth ? " < " : "", unsigned(reinterpret_cast<uintptr_t>(frame)),
+                      ClassName(frame), g_attachedTo.count(frame) ? " [attractor child]" : "");
+        line += part;
+    }
+    Log("dump chain: %s", line.c_str());
+}
+
+void LogFrameTree(const void* frame, int depth, std::string indent)
+{
+    for (const void* child = SafeRead(frame, kFirstChild); child && depth < 3; child = SafeRead(child, kNextSibling)) {
+        Log("dump attractor tree: %s%08X %s", indent.c_str(), unsigned(reinterpret_cast<uintptr_t>(child)), ClassName(child));
+        LogFrameTree(child, depth + 1, indent + "  ");
+    }
 }
 
 // The character an object hangs on by an attractor: it, or a frame up its parents, is one's attractor child.
@@ -338,11 +365,27 @@ const char* ClassChain(const void* visual)
     return out;
 }
 
+void NoteDumpRequested()
+{
+    g_chainLogUntil = g_renders + 60;            // (several renders a frame: past the dumped one)
+    g_chainLogged.clear();
+    for (const auto& [character, a] : g_attachments)
+        for (const void* f : a.frames) {
+            const void* parent = SafeRead(f, kParent);
+            Log("dump attractor child: %08X %s of character %08X; parent %08X %s", unsigned(reinterpret_cast<uintptr_t>(f)),
+                ClassName(f), unsigned(reinterpret_cast<uintptr_t>(character)), unsigned(reinterpret_cast<uintptr_t>(parent)),
+                ClassName(parent));
+            LogFrameTree(f, 0, "  ");
+        }
+}
+
 VisualInfo Describe(const void* visual)
 {
     ForgetPages();
     if (!visual)
         return {};
+    if (g_renders <= g_chainLogUntil)
+        LogChain(visual);
     const void* vtable = *static_cast<const void* const*>(visual);
     Cached& c = g_visuals[visual];
     if (c.vtable == vtable && g_renders - c.stamp < 2000)
