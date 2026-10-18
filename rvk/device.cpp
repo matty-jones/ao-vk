@@ -1515,6 +1515,7 @@ void Device::BeginFrame()
     m_pickArmed = false;
     m_pickBest = nullptr;
     m_pickBestVisual = m_pickBestOwner = m_pickBestKind = m_pickBestVertices = m_pickBestIndices = 0;
+    m_pickBestTriangleCount = 0;
     m_pickDepth = 2.0f;
     m_batchRuns = m_batchMerged = m_batchMaxRun = 0;
     m_batchKey = 0;
@@ -1712,6 +1713,11 @@ void Device::EndFrame()
         m_pickPublishedKind.store(m_pickBestKind, std::memory_order_relaxed);
         m_pickPublishedVertices.store(m_pickBestVertices, std::memory_order_relaxed);
         m_pickPublishedIndices.store(m_pickBestIndices, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(m_pickTriangleMutex);
+            m_pickPublishedTriangleCount = m_pickBestTriangleCount;
+            std::memcpy(m_pickPublishedTriangles, m_pickBestTriangles, sizeof(m_pickPublishedTriangles));
+        }
         m_pickSerial.fetch_add(1, std::memory_order_release);
     }
     if (m_rendering && !m_particleOrphansDone) {

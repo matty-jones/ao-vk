@@ -11,6 +11,8 @@
 
 #include <array>
 #include <memory>
+#include <mutex>
+#include <cstring>
 #include <cstdint>
 #include <string>
 #include <atomic>
@@ -248,8 +250,12 @@ public:
     // gives them once that frame has ended (serial: one more each result; thread-safe). SetPickHighlight: draws with
     // that texture flash yellow (null: none).
     void RequestPick(float x, float y) { m_pickX = x; m_pickY = y; m_pickArmed = true; }
+    // triangles: the hit triangle (first) and those joined to it by shared vertices - in a dungeon room, the tile
+    // piece's sub-mesh as placed - each as its corners drawn (model space x y z, then u v of stage 0); what the
+    // workbench finds the piece by. Rooms only (triangleCount 0 otherwise).
+    static constexpr uint32_t kPickTriangles = 48;
     struct PickResult { Texture* texture = nullptr; uint32_t serial = 0, visual = 0, owner = 0, kind = 0, vertices = 0,
-                        indices = 0; };
+                        indices = 0; uint32_t triangleCount = 0; float triangles[kPickTriangles * 15] = {}; };
     PickResult LastPick() const
     {
         PickResult r;
@@ -260,6 +266,11 @@ public:
         r.kind = m_pickPublishedKind.load(std::memory_order_relaxed);
         r.vertices = m_pickPublishedVertices.load(std::memory_order_relaxed);
         r.indices = m_pickPublishedIndices.load(std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(m_pickTriangleMutex);
+            r.triangleCount = m_pickPublishedTriangleCount;
+            std::memcpy(r.triangles, m_pickPublishedTriangles, sizeof(r.triangles));
+        }
         return r;
     }
     void SetPickHighlight(Texture* t) { if (m_pickHighlight != t) { m_pickHighlight = t; m_constantsDirty = true; } }
@@ -911,6 +922,11 @@ private:
     uint32_t m_pickBestVisual = 0, m_pickBestOwner = 0, m_pickBestKind = 0, m_pickBestVertices = 0, m_pickBestIndices = 0;
     std::atomic<uint32_t> m_pickPublishedVisual{0}, m_pickPublishedOwner{0}, m_pickPublishedKind{0},
         m_pickPublishedVertices{0}, m_pickPublishedIndices{0};   // the draw's counts (the workbench matches meshes by them)
+    float m_pickBestTriangles[kPickTriangles * 15] = {};   // the nearest hit's triangles (PickResult::triangles)
+    uint32_t m_pickBestTriangleCount = 0;
+    mutable std::mutex m_pickTriangleMutex;      // (published by the render thread, read by the game's)
+    float m_pickPublishedTriangles[kPickTriangles * 15] = {};
+    uint32_t m_pickPublishedTriangleCount = 0;
     const void* m_pickSkinned = nullptr;         // a GPU-skinned draw's CPU-skinned vertices, for the pick (DrawSkinned)
     std::atomic<uint32_t> m_pickSerial{0};
     Texture* m_pickHighlight = nullptr;

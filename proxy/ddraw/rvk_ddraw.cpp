@@ -379,6 +379,22 @@ void RvkState::Present()
             std::string reference;
             RvkLog("pick: %s", mesh ? DescribeMesh(result.visual, result.owner, result.kind, &reference).c_str()
                                     : DescribeTexture(result.texture, &reference).c_str());
+            // A dungeon room (built by the game from tile pieces when it loads, ao-assets docs/rooms-plan.md): the hit
+            // triangle as drawn - the workbench finds the tile piece it came from by its uv and flat edge lengths
+            // (pieces are only turned about the vertical, moved and bent in height).
+            if (mesh && reference.empty() && result.kind == 5 /* VisualKind::Room */ && result.triangleCount) {
+                std::string texture;
+                DescribeTexture(result.texture, &texture);
+                reference = "room " + (texture.empty() ? std::string("-") : texture) + " " +
+                            std::to_string(result.triangleCount);
+                for (uint32_t k = 0; k < result.triangleCount * 15; ++k) {
+                    char v[24];
+                    std::snprintf(v, sizeof(v), k % 5 == 0 ? "  %.9g" : " %.9g", result.triangles[k]);
+                    reference += v;
+                }
+                RvkLog("pick: a dungeon room (texture %s), %u triangles of its tile piece - the workbench looks it up",
+                       texture.empty() ? "unknown" : texture.c_str(), result.triangleCount);
+            }
             // A mesh randy-vk can't name (static meshes: read from their .abiff where no hook sees it): what was drawn
             // - its texture and vertex / index counts - for the ao-assets workbench, whose index matches it to a mesh.
             if (mesh && reference.empty() && result.visual) {

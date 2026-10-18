@@ -3593,6 +3593,7 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
     };
     const uint32_t n = indices ? indexCount : vertexCount;
     const uint32_t triangles = primitive == d3d::TriangleList ? n / 3 : n >= 3 ? n - 2 : 0;
+    uint32_t hit = ~0u;                          // this draw's nearest hit, if it is the nearest so far
     for (uint32_t t = 0; t < triangles; ++t) {
         uint32_t k[3];
         if (primitive == d3d::TriangleList) {
@@ -3624,6 +3625,44 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
         m_pickBestKind = m_drawVisualKind;
         m_pickBestVertices = vertexCount;
         m_pickBestIndices = indexCount;
+        m_pickBestTriangleCount = 0;
+        hit = t;
+    }
+    // A dungeon room hit (VisualKind::Room): the hit triangle and those joined to it by shared vertices - the room's
+    // vertices aren't shared between the tile pieces placed in it, so that is the piece's sub-mesh as placed.
+    if (hit == ~0u || VisualKind(m_drawVisualKind) != VisualKind::Room || primitive != d3d::TriangleList || !indices)
+        return;
+    auto corner = [&](uint32_t tri, int j) { return uint32_t(indices[tri * 3 + j]); };
+    auto put = [&](uint32_t tri) {
+        float* out = &m_pickBestTriangles[m_pickBestTriangleCount++ * 15];
+        for (int j = 0; j < 3; ++j) {
+            const uint8_t* v = base + size_t(corner(tri, j)) * layout.stride;
+            std::memcpy(&out[j * 5], v + layout.offset[0], 12);
+            if (layout.offset[4] >= 0)
+                std::memcpy(&out[j * 5 + 3], v + layout.offset[4], 8);
+            else
+                out[j * 5 + 3] = out[j * 5 + 4] = 0.0f;
+        }
+    };
+    std::vector<uint32_t> vertices_{corner(hit, 0), corner(hit, 1), corner(hit, 2)};
+    std::vector<bool> taken(triangles, false);
+    taken[hit] = true;
+    put(hit);
+    for (bool grew = true; grew && m_pickBestTriangleCount < kPickTriangles;) {   // (until nothing more joins)
+        grew = false;
+        for (uint32_t t = 0; t < triangles && m_pickBestTriangleCount < kPickTriangles; ++t) {
+            if (taken[t]) continue;
+            const uint32_t a = corner(t, 0), b = corner(t, 1), c = corner(t, 2);
+            if (a >= vertexCount || b >= vertexCount || c >= vertexCount) continue;
+            bool joined = false;
+            for (uint32_t v : vertices_)
+                if (v == a || v == b || v == c) { joined = true; break; }
+            if (!joined) continue;
+            taken[t] = grew = true;
+            put(t);
+            for (uint32_t v : {a, b, c})
+                if (std::find(vertices_.begin(), vertices_.end(), v) == vertices_.end()) vertices_.push_back(v);
+        }
     }
 }
 
