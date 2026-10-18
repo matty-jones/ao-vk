@@ -104,6 +104,9 @@ new diagnostics. Keep it up to date as work lands.
 
 ## Release builds
 
+Before cutting a release, check `git branch --no-merged main` (and the worktrees): work on feature branches
+is often newer than main. Merge what belongs in the release first.
+
 Every release build gets a new tag on GitHub: commit the changelog, tag the commit with an annotated
 `vX.Y.Z` tag (message `ao-vk X.Y.Z`), and push the branch and the tag (`git push github main vX.Y.Z`).
 The version exists only in the tag and `CHANGELOG.md`; nothing in the DLL carries it. Then:
