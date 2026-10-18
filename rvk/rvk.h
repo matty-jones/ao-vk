@@ -742,7 +742,8 @@ public:
         float sheet = 1.0f;                      // RVK_CloudSheet: the game's flat sheets behind the layer, x (0: none)
         float morph = 1.0f;                      // RVK_CloudMorph: how fast the clouds churn and change, x (0: still)
         uint32_t quality = 1;                    // RVK_CloudQual: 0 low .. 3 ultra (the layer's step length, steps to the sun)
-        float cirrus = 1.0f;                     // RVK_Cirrus: thin high wisps over the layer, x (0: none)
+        float cirrus = 0.0f;                     // RVK_Cirrus: thin high wisps over the layer, x (0: none; the default -
+                                                 // coarse streaks across our own sky, user 2026-10-18)
     };
     void SetCloudParams(const CloudParams& params);
     void SmokeSourceFrame(uint64_t key, const SmokeSource& source);

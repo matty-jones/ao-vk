@@ -201,7 +201,7 @@ Setting g_settings[] = {
     {"RVK_SkyZones",    "Clouds: each zone its own skies - deserts clearer, coasts and forests cloudier (0: the same everywhere)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_Afterglow",   "Clouds: how strongly they take the sunset's colours - gold, orange, red, pink undersides after the sun has set (0: the game's hues)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_StarFade",    "Sky: the stars come out slowly as the sky darkens after sunset, and fade before sunrise (off: as the game shows them)", "Sky", Bool, 0, 1, 1, 1, nullptr, 0},
-    {"RVK_Cirrus",      "Clouds: thin high wisps, most on clear days - pink and gold round sunrise and sunset (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
+    {"RVK_Cirrus",      "Clouds: thin high wisps, most on clear days - pink and gold round sunrise and sunset (0: none; off by default: under our own sky they showed as coarse streaks)", "Sky", Float, 0, 2, 0.1f, 0, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudDetail", "Clouds: billows and wisps (0 smooth)",                    "Sky",     Float, 0, 2, 0.1f, 2, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudHalf",   "Clouds: drawn at half resolution (much cheaper)",         "Sky",     Bool,  0, 1, 1, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudShadow", "Shadows on the ground (0 = none)", "Sky",     Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_CloudsOn"},

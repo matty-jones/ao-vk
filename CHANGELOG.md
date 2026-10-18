@@ -41,8 +41,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - The sun's disc turns golden below about 25 degrees and orange near the horizon, instead of staying white-hot.
 - Golden-hour colour grade round sunrise and sunset: warmer light, slightly cooler shade, a touch more contrast
   (`RVK_GoldenHour` under Colour grading, 0.5; 0 for none).
-- Thin high wisps of cloud, most on clear days, that catch the light round sunrise and sunset (`RVK_Cirrus`, 1;
-  0 for none). Before, a clear sky had no cloud at all.
+- Thin high wisps of cloud, most on clear days, that catch the light round sunrise and sunset (`RVK_Cirrus`, off by
+  default: under the new sky they showed as coarse streaks; 1 to try them).
 
 ### Fixed
 - Day turned to night all at once: the picture darkened and took on its night colours within a second, the land's
