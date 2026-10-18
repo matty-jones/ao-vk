@@ -160,6 +160,37 @@ const void* CharacterAbove(const void* object)
 // The character carrying a light: one up its parents, or one next to it under its parent (a character's visual hangs
 // its light on its own frame) - only under a small parent (not a zone's root, which may hold characters too).
 constexpr uint32_t kFirstChild = 0x1C, kNextSibling = 0x18;   // RRefFrame_t children list
+
+// The character a visual belongs to: one up its parents, or one next to any of them - a character's parts (head,
+// hair, armour, a held weapon) don't hang under its RCATMesh_t but beside it, under the character's own frame (as its
+// light does). Every dump had no part found by its parents alone: a weapon taken for a prop swayed as a plant. Only
+// under small frames (a zone's root may hold characters as well as props).
+const void* CharacterOwning(const void* object)
+{
+    const void* frame = SafeRead(object, kParent);
+    for (int depth = 0; frame && depth < 12; ++depth, frame = SafeRead(frame, kParent)) {
+        if (!std::strcmp(ClassName(frame), "RCATMesh_t")) {
+            static int logged = 0;
+            if (logged < 8 && ++logged)
+                Log("visuals: character part %s under its RCATMesh_t, %d frame(s) up", ClassName(object), depth + 1);
+            return frame;
+        }
+        const void* found = nullptr;
+        int children = 0;
+        for (const void* child = SafeRead(frame, kFirstChild); child && children <= 32;
+             child = SafeRead(child, kNextSibling), ++children)
+            if (!found && child != object && !std::strcmp(ClassName(child), "RCATMesh_t"))
+                found = child;
+        if (found && children <= 32) {
+            static int logged = 0;               // (the first few: how parts hang, for the log)
+            if (logged < 8 && ++logged)
+                Log("visuals: character part %s beside its RCATMesh_t, %d frame(s) up, %d children there",
+                    ClassName(object), depth + 1, children);
+            return found;
+        }
+    }
+    return nullptr;
+}
 const void* CarrierOf(const void* light)
 {
     if (const void* character = CharacterAbove(light))
@@ -266,7 +297,7 @@ VisualInfo Describe(const void* visual)
     // Attached to a character (somewhere up its frames): one of its parts.
     c.info.owner = c.info.kind == Kind::Character ? visual : nullptr;
     if (c.info.kind != Kind::Character && c.info.kind != Kind::BlobShadow)
-        if (const void* character = CharacterAbove(visual)) {
+        if (const void* character = CharacterOwning(visual)) {
             c.info.kind = Kind::CharacterPart;
             c.info.owner = character;
         }

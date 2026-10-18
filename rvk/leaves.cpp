@@ -189,6 +189,11 @@ void Device::CanopyParams(uint32_t primitive, uint32_t fvf, const FvfLayout& lay
     if ((!m_leaf.on && m_crownShade <= 0.0f) || m_external || m_drawGpu || !m_drawMesh || !m_leafPipelines[0] ||
         !m_drawMeshStatic || m_drawMesh->firstFrame + 2 > m_frameNumber || m_target != m_scene)
         return;
+    // Never a character or what it carries: a held weapon (rigid, a texture with holes, plant-sized) hanging upright
+    // took leaves and its texture the canopy's cut-outs - and kept them, the verdict being remembered per mesh.
+    const auto visual = VisualKind(m_drawVisualKind);
+    if (visual == VisualKind::Character || visual == VisualKind::CharacterPart)
+        return;
     Texture* tex = m_textures[0];
     if (!tex || tex->m_alphaMask.empty() || !m_rs[d3d::RS_LIGHTING] || !m_rs[d3d::RS_ZWRITEENABLE])
         return;                                  // (most draws: not worth a look-up)

@@ -657,10 +657,15 @@ bool detail::OnePlane(uint32_t primitive, uint32_t stride, const void* vertices,
 // cut-out texture (the vertex shader keeps those whose texture is mostly holes - leaves, grass), not one flat plane
 // (signs, banners, posters - from a survey of the game's 10,600 static meshes: a third of the non-plants that passed
 // the rest, a few single-card plants), and static: their vertices are the same as last frame (a character's hair or
-// cloak is CPU-skinned, its vertices change every frame). out: DrawTransform sway.
+// cloak is CPU-skinned, its vertices change every frame). Never a character or what it carries: a held weapon is
+// rigid (moved by its world matrix), blended with holes and plant-sized - hanging upright (sitting down) it passed as
+// a plant, and the grass push bent it away from its own carrier. out: DrawTransform sway.
 bool Device::SwayParams(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
                         const uint16_t* indices, uint32_t indexCount, float out[4])
 {
+    const auto kind = VisualKind(m_drawVisualKind);
+    if (kind == VisualKind::Character || kind == VisualKind::CharacterPart)
+        return false;
     if ((m_sway <= 0.0f && m_grassPush <= 0.0f) || m_target != m_scene || !m_textures[0] || !m_rs[d3d::RS_LIGHTING] || m_drawIsLabel ||
         (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZ || IsTerrain(fvf) || !m_rs[d3d::RS_ZWRITEENABLE] ||
         !(m_rs[d3d::RS_ALPHATESTENABLE] || m_rs[d3d::RS_ALPHABLENDENABLE]) || vertexCount < 3 || vertexCount > 4096 ||
