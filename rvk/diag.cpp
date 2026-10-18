@@ -27,6 +27,7 @@ void Device::RequestFrameDump(const std::string& path, int frames)
 void Device::BeginFrameDump()
 {
     m_dumpFile = std::fopen(m_dumpPath.c_str(), "w");
+    m_dumpOpenPath = m_dumpPath;
     if (m_sandMap.valid && m_dumpBurstIndex == 0) {                       // (the sand's shelter map beside it: <dump>-sand.bmp)
         std::string sand = m_dumpPath;
         const size_t dot = sand.rfind('.');

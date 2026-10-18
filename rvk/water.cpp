@@ -17,6 +17,7 @@
 #include "internal.h"
 
 #include <algorithm>
+#include <unordered_map>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -478,6 +479,7 @@ Device::WaterMap* Device::WaterMapFor(const WaterVertex* v, uint32_t count, cons
     float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
     float flatLoY = 1e30f, flatHiY = -1e30f;         // the flat triangles' height span (a step = mountains)
     double heightSum = 0.0;
+    std::vector<float> flatArea;
     for (uint32_t t = 0; t + 2 < icount; t += 3) {
         uint32_t i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
         if (i0 >= count || i1 >= count || i2 >= count)
@@ -496,6 +498,72 @@ Device::WaterMap* Device::WaterMapFor(const WaterVertex* v, uint32_t count, cons
             continue;
         }
         flat.push_back({i0, i1, i2});
+        flatArea.push_back(0.5f * len);
+    }
+    // A stream's lip: where water leaves a pipe or a ledge it arcs out nearly level before it falls, so the top of a
+    // narrow fall has flat triangles. In the map they were little pools high above the one below, and the surface
+    // stretched between them stood as walls of water (the subway's pipes). A small flat patch (welded by position: the
+    // game gives every triangle its own corners) joined to the steep triangles and over a unit above where they reach
+    // down to is a fall's: it goes with the steep ones. A pool on a terrace over a real fall is far bigger: kept.
+    if (!steep.empty() && !flat.empty()) {
+        const auto weldKey = [&](uint32_t i) {
+            const auto q = [&](int k) { return uint64_t(int64_t(std::lround(v[i].pos[k] * 64.0f)) & 0x1FFFFF); };
+            return q(0) | q(1) << 21 | q(2) << 42;
+        };
+        // Welded corner of a steep triangle -> the lowest point of its whole connected group (where the fall reaches
+        // down to: the triangles next to a lip are barely lower than it).
+        std::unordered_map<uint64_t, uint32_t> steepCorner;
+        std::vector<uint32_t> group(steep.size() / 3);
+        for (uint32_t s = 0; s < group.size(); ++s) group[s] = s;
+        const auto root = [&](uint32_t a) { while (group[a] != a) a = group[a] = group[group[a]]; return a; };
+        for (uint32_t s = 0; s < group.size(); ++s)
+            for (int k = 0; k < 3; ++k) {
+                auto [it, fresh] = steepCorner.emplace(weldKey(steep[s * 3 + k]), s);
+                if (!fresh) group[root(s)] = root(it->second);
+            }
+        std::vector<float> groupLow(group.size(), 1e30f);
+        for (uint32_t s = 0; s < group.size(); ++s)
+            for (int k = 0; k < 3; ++k)
+                groupLow[root(s)] = std::min(groupLow[root(s)], v[steep[s * 3 + k]].pos[1]);
+        std::unordered_map<uint64_t, float> steepLow;
+        for (const auto& [corner, s] : steepCorner) steepLow[corner] = groupLow[root(s)];
+        // The flat triangles' patches (union-find over welded corners).
+        std::unordered_map<uint64_t, uint32_t> corner;
+        std::vector<uint32_t> parent(flat.size());
+        for (uint32_t f = 0; f < flat.size(); ++f) parent[f] = f;
+        const auto find = [&](uint32_t a) { while (parent[a] != a) a = parent[a] = parent[parent[a]]; return a; };
+        for (uint32_t f = 0; f < flat.size(); ++f)
+            for (uint32_t i : {flat[f].a, flat[f].b, flat[f].c}) {
+                auto [it, fresh] = corner.emplace(weldKey(i), f);
+                if (!fresh) parent[find(f)] = find(it->second);
+            }
+        struct Patch { float area = 0.0f, low = 1e30f, steepLow = 1e30f; };
+        std::unordered_map<uint32_t, Patch> patches;
+        for (uint32_t f = 0; f < flat.size(); ++f) {
+            Patch& pt = patches[find(f)];
+            pt.area += flatArea[f];
+            for (uint32_t i : {flat[f].a, flat[f].b, flat[f].c}) {
+                pt.low = std::min(pt.low, v[i].pos[1]);
+                auto it = steepLow.find(weldKey(i));
+                if (it != steepLow.end()) pt.steepLow = std::min(pt.steepLow, it->second);
+            }
+        }
+        constexpr float kLipArea = 8.0f, kLipHeight = 1.0f;
+        std::vector<Tri> keep;
+        keep.reserve(flat.size());
+        for (uint32_t f = 0; f < flat.size(); ++f) {
+            const Patch& pt = patches[find(f)];
+            if (pt.area < kLipArea && pt.steepLow < 1e29f && pt.low > pt.steepLow + kLipHeight)
+                steep.insert(steep.end(), {flat[f].a, flat[f].b, flat[f].c});
+            else
+                keep.push_back(flat[f]);
+        }
+        flat.swap(keep);
+    }
+    for (const Tri& tr : flat) {
+        const float* p0 = v[tr.a].pos;
+        const float* p1 = v[tr.b].pos;
+        const float* p2 = v[tr.c].pos;
         for (const float* p : {p0, p1, p2}) {
             flatLoY = std::min(flatLoY, p[1]);
             flatHiY = std::max(flatHiY, p[1]);
@@ -1065,8 +1133,9 @@ static_assert(sizeof(MeshVertexOut) == 48, "water.vert MeshVertex");
 
 // Each connected group of steep triangles (vertices welded by position: the game may split them along edges) is one
 // fall: its face normals, turned to one side of the sheet and weighted by area, averaged at each vertex; its width
-// the principal axis of its vertices across the ground (a curved fall is measured along a straight line: fine for
-// the bends the game's falls have). shore: the steep triangles that are not falls (as vertex index triples); falls:
+// across the way its faces look (a curved fall is measured along a straight line: fine for the bends the game's
+// falls have). (Not the long axis of its footprint: a narrow stream arcing out of a pipe is longer the way it flows
+// than it is wide - its two edges came together and its sheet was empty, the subway's falls.) shore: the steep triangles that are not falls (as vertex index triples); falls:
 // each fall's triangles (as offsets into steep).
 void BuildFallVertices(const Device::WaterVertex* v, uint32_t count, const std::vector<uint32_t>& steep,
                        MeshVertexOut* out, std::vector<uint32_t>& shore, std::vector<std::vector<uint32_t>>& fallTris)
@@ -1161,9 +1230,13 @@ void BuildFallVertices(const Device::WaterVertex* v, uint32_t count, const std::
         principal(f.nxx, f.nxz, f.nzz, f.face);
         f.mid[0] = float(f.sx / f.n);
         f.mid[1] = float(f.sz / f.n);
-        const double cxx = f.sxx / f.n - double(f.mid[0]) * f.mid[0], cxz = f.sxz / f.n - double(f.mid[0]) * f.mid[1],
-                     czz = f.szz / f.n - double(f.mid[1]) * f.mid[1];
-        principal(cxx, cxz, czz, f.axis);
+        f.axis[0] = -f.face[1];
+        f.axis[1] = f.face[0];
+        if (f.nxx + f.nzz <= 1e-12) {            // (no face looks any way across the ground: by its footprint)
+            const double cxx = f.sxx / f.n - double(f.mid[0]) * f.mid[0], cxz = f.sxz / f.n - double(f.mid[0]) * f.mid[1],
+                         czz = f.szz / f.n - double(f.mid[1]) * f.mid[1];
+            principal(cxx, cxz, czz, f.axis);
+        }
         if (f.axis[0] < 0.0f || (f.axis[0] == 0.0f && f.axis[1] < 0.0f)) { f.axis[0] = -f.axis[0]; f.axis[1] = -f.axis[1]; }
     }
     // The vertices' normals: the faces turned to the fall's facing side, summed.
@@ -1225,10 +1298,11 @@ uint64_t FallKey(const MeshVertexOut* out, const std::vector<uint32_t>& steep, c
 }
 
 // The sheet we draw for a fall: its triangles resampled onto an even grid in its own flow coordinates (columns
-// across it, rows down it, kSheetStep apart) - every vertex at the game's surface there, with the smooth normal - so
+// across it, rows down it, kSheetStep apart - closer on a narrow stream: at least kSheetMinColumns across) - every vertex at the game's surface there, with the smooth normal - so
 // the sheet can ripple (water.vert) and fade out at its sides (edge: by the distance to them, over kSheetFade; the
 // top row comes over the lip and the bottom one goes into the pool: no fade there).
-constexpr float kSheetStep = 0.5f, kSheetFade = 3.0f;
+constexpr float kSheetStep = 0.5f, kSheetFade = 3.0f, kSheetMinStep = 0.08f;
+constexpr int kSheetMinColumns = 6;
 constexpr size_t kSheetMaxNodes = 300000;
 // foot: where the sheet meets the pool, every kFootStep across it (Device::WaterFall::foot).
 constexpr float kFootStep = 4.0f;
@@ -1248,7 +1322,8 @@ void BuildFallSheet(const MeshVertexOut* out, const std::vector<uint32_t>& steep
         }
     if (cHi <= cLo || aHi <= 0.0f)
         return;
-    float step = std::max(kSheetStep, std::sqrt((cHi - cLo) * aHi / float(kSheetMaxNodes)));
+    float step = std::clamp((cHi - cLo) / float(kSheetMinColumns), kSheetMinStep, kSheetStep);
+    step = std::max(step, std::sqrt((cHi - cLo) * aHi / float(kSheetMaxNodes)));
     const int nc = int(std::ceil((cHi - cLo) / step)) + 1, na = int(std::ceil(aHi / step)) + 2;
     std::vector<int32_t> node(size_t(nc) * size_t(na), -1);
     for (uint32_t t : tris) {
@@ -1498,7 +1573,7 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     // Frame dump: the water mesh as it came (<dump>-water.bin: vertex count, index count, the vertices, the 16-bit
     // indices - rvk_demo --water-mesh replays it) and what each fall became.
     if (m_dumpFile) {
-        std::string bin = m_dumpPath;
+        std::string bin = m_dumpOpenPath;
         if (bin.size() > 4 && bin.compare(bin.size() - 4, 4, ".txt") == 0) bin.resize(bin.size() - 4);
         bin += "-water.bin";
         if (FILE* w = std::fopen(bin.c_str(), "wb")) {
@@ -1556,6 +1631,9 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
         it->lastFrame = m_frameNumber;
         if (!it->indices.empty())
             sheetKeys.push_back(key);
+        else                                     // (no sheet came of it: its own triangles, rather than nothing)
+            for (uint32_t t : tris)
+                shore.insert(shore.end(), {steep[t], steep[t + 1], steep[t + 2]});
     }
     std::vector<const WaterFall*> sheets;
     VkDeviceSize sheetBytes = 0;

@@ -2989,6 +2989,7 @@ private:
 
     std::string m_screenshotPath;
     std::string m_dumpPath;
+    std::string m_dumpOpenPath;                  // the dump being written (its files beside it: water mesh)
     std::string m_dumpBurstBase;                 // a run of frames dumped: <base>-NN.txt (RequestFrameDump frames)
     int m_dumpBurstLeft = 0, m_dumpBurstIndex = 0;
     FILE* m_dumpFile = nullptr;
