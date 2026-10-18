@@ -1874,6 +1874,13 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     // back-to-front sorted list, so nothing drawn after them needs their depth.
     if (m_drawIsLabel && m_target == m_scene && m_aoStrength > 0.0f)
         zWrite = 0;
+    // An additive draw (blended onto ONE) only adds light - it hides nothing behind it - but some write depth (the
+    // Temple of the Three Winds portal's discs): their whole quads, clear corners too, stood in the depth as walls,
+    // and the passes reading it (ambient occlusion, contact shadows, haze and fog, reflections, volumetric light)
+    // drew their outlines as squares. Their depth isn't written. (ao-vk #15)
+    if (zWrite && m_target == m_scene && m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE &&
+        (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW)
+        zWrite = 0;
     // A blended overlay drawn over everything (ZFUNC ALWAYS) - a sandstorm's tint is a screen-sized sprite a few
     // units ahead of the camera - writes its depth over the whole frame: the post passes (ambient occlusion, depth
     // of field, contact shadows, volumetric light) would take the frame for a wall a few units away.
