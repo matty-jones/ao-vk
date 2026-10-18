@@ -258,8 +258,8 @@ void RvkState::Present()
         return;
     ++presentCount;
     CallLogFrame(presentCount);
-    if (InterfaceRateOn())
-        rnative::gui::Install();   // GUI.dll's interface drawing (RVK_UiRate), once it is loaded
+    rnative::gui::Install();       // GUI.dll's interface drawing, once it is loaded: where the interface begins (the
+                                   // floating text goes just before it) and RVK_UiRate's layer
     Frame();                  // a present without any rendering still shows a frame
     device->EndFrame();
     PollMaterialMaps();       // material maps decoded in the background, uploaded between frames

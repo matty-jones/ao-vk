@@ -58,6 +58,10 @@ std::vector<Range> g_templates;
 bool g_allTemplates;
 // Sprite batches of chosen effects, with the frame their effect last updated them.
 std::unordered_map<const void*, uint32_t> g_chosen;
+// Floating text (FlushOverlayText): the batches held back this frame, and when the interface last flushed them - only
+// while it does (its hook in place) is text held back; else it is drawn in the scene as before.
+std::vector<std::pair<void*, void*>> g_overlayText;
+uint32_t g_overlayFlushed;
 
 template <typename T>
 T At(const void* object, uint32_t offset)
@@ -108,8 +112,17 @@ uint32_t __fastcall StarsUpdate(void* self, void* /*edx*/)
 
 uint32_t __fastcall DiaBillRender(void* self, void* /*edx*/, void* viewport)
 {
-    auto it = g_chosen.find(self);
     rvk::ThreadedDevice* device = g_rvk.device;
+    // Floating text - damage and XP numbers, names: the only sprite batches with packed glyph rectangles (Gamecode
+    // FUN_100dee29 makes one sprite a character of a string). Held back from the scene - the smoke, fog, bloom and
+    // grading over it changed it - and drawn over the finished picture just before the interface.
+    if (device && At<uint8_t>(self, kDiaBillPackedUv) != 0 && g_overlayFlushed + 2 >= g_frame &&
+        At<uint32_t>(self, kDiaBillHidden) == 0 && g_overlayText.size() < 256) {
+        if (std::find(g_overlayText.begin(), g_overlayText.end(), std::make_pair(self, viewport)) == g_overlayText.end())
+            g_overlayText.emplace_back(self, viewport);
+        return 0;                                 // (the game's Render returns nothing)
+    }
+    auto it = g_chosen.find(self);
     if (it == g_chosen.end() || it->second + 30 < g_frame || !device || !device->GetParticleParams().enable ||
         At<uint32_t>(self, kDiaBillHidden) != 0)
         return g_render(self, viewport);
@@ -185,6 +198,27 @@ uint32_t __fastcall DiaBillRender(void* self, void* /*edx*/, void* viewport)
 
 }  // namespace
 
+void FlushOverlayText()
+{
+    g_overlayFlushed = g_frame;
+    rvk::ThreadedDevice* device = g_rvk.device;
+    if (g_overlayText.empty() || !device || !g_render) {
+        g_overlayText.clear();
+        return;
+    }
+    device->OverlayBegin();
+    HMODULE ds = GetModuleHandleA("DisplaySystem.dll");
+    const uintptr_t vtable = ds ? reinterpret_cast<uintptr_t>(ds) + kDiaBillVtable : 0;
+    static const unsigned index = ComIndex("IDirect3DDevice7::DrawIndexedPrimitive");
+    for (const auto& [self, viewport] : g_overlayText) {
+        if (!vtable || At<uintptr_t>(self, 0) != vtable)
+            continue;                             // (no longer the batch it was)
+        ComScope scope(index);
+        g_render(self, viewport);
+    }
+    g_overlayText.clear();
+}
+
 // Points slot `slot` of the vtable at module + vtable (expected: module + expected) at hook; the old entry in original.
 bool PatchSlot(HMODULE module, uint32_t vtable, uint32_t slot, uint32_t expected, void* hook, void** original,
                const char* what)
@@ -209,6 +243,7 @@ bool PatchSlot(HMODULE module, uint32_t vtable, uint32_t slot, uint32_t expected
 void ParticleFrame()
 {
     ++g_frame;
+    g_overlayText.clear();                        // (held back but never flushed: the interface wasn't drawn)
     if (g_frame % 600 == 0) {                         // forget batches of effects that ended
         for (auto it = g_chosen.begin(); it != g_chosen.end();)
             it = it->second + 600 < g_frame ? g_chosen.erase(it) : std::next(it);

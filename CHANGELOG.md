@@ -18,6 +18,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   has nothing for. Packs are found at startup and listed in the log.
 
 ### Fixed
+- Floating damage and XP numbers (and other text over the world) were dimmed by smoke and changed by fog, bloom
+  and colour grading. They are now drawn over the finished picture, still hidden behind walls.
 - Light beams and glows on lamps (under the billboards in the cities, for example) swayed like trees and grew
   leaves.
 - Grass on steep hillsides stood in visible rows, and grass grew in front of walls at the foot of grassy banks.

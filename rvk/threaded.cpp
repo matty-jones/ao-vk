@@ -1120,6 +1120,11 @@ void ThreadedDevice::SetFoliageEdges(bool on)
     Enqueue([this, on](const uint8_t*) { m_device.SetFoliageEdges(on); });
 }
 
+void ThreadedDevice::OverlayBegin()
+{
+    Enqueue([this](const uint8_t*) { m_device.OverlayBegin(); });
+}
+
 void ThreadedDevice::InterfaceBegin(bool redraw)
 {
     Enqueue([this, redraw](const uint8_t*) { m_device.InterfaceBegin(redraw); });

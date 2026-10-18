@@ -120,6 +120,7 @@ public:
     // The interface layer (Device::InterfaceBegin / InterfaceEnd).
     void InterfaceBegin(bool redraw);
     void InterfaceEnd();
+    void OverlayBegin();
     bool InterfaceLayerReady() const { return m_device.InterfaceLayerReady(); }
     void SetShadowResolution(uint32_t sun, uint32_t point);
     void SetPointLightIntensity(float lights, float characters);

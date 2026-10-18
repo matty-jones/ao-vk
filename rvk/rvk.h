@@ -732,6 +732,10 @@ public:
     // this frame; End shows the layer over the main target.
     void InterfaceBegin(bool redraw);
     void InterfaceEnd();
+    // The world's floating text (damage, XP, names over heads) next: the scene ends here - its effects (smoke, fog,
+    // the tone mapping, bloom, grading) applied - and the text is drawn over the finished picture, still hidden by
+    // what stands in front of it (the scene's depth). The interface follows.
+    void OverlayBegin() { if (m_inFrame && m_main) InterfaceSceneEnd(); }
     // The layer holds an interface drawn at the current size (else the next frame must redraw it). Any thread.
     bool InterfaceLayerReady() const { return m_uiLayerReady.load(std::memory_order_relaxed); }
     Texture* GetRenderTarget() const { return m_target == m_main ? nullptr : m_target; }
