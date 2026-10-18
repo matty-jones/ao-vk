@@ -5,6 +5,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+### Fixed
+- Replacement textures from `materials\` or texture packs whose alpha channel isn't see-through-ness (the bank's
+  front plate, where it is a glow mask) showed black where that alpha was 0.
+
 ## 0.6.1 - 2026-10-18
 
 ### New

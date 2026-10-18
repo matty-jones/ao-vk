@@ -217,35 +217,46 @@ inline bool DecodeOrmMap(const std::string& packed, const std::string parts[3], 
     return true;
 }
 
-// Albedo: box filtered, colour weighted by alpha so see-through texels don't darken the edges.
+// Albedo: box filtered, colour weighted by alpha so see-through texels don't darken the edges. Level 0 is the file's
+// texels as they are, and where a level's texel has no alpha at all it keeps the plain average colour: a game
+// texture's alpha isn't always coverage (bank_frontplate.png: a glow mask, alpha 0 over the opaque body), so the
+// colour under alpha 0 can be drawn and must not turn black.
 inline bool DecodeAlbedoMap(const std::string& path, MipChain* out, std::string* error)
 {
     Image img;
     if (!LoadImage(path, &img, error))
         return false;
     int w = img.w, h = img.h;
-    std::vector<float> px(size_t(w) * h * 4);
+    std::vector<float> px(size_t(w) * h * 4), plain(size_t(w) * h * 3);   // px: premultiplied colour + alpha
+    std::vector<uint32_t> level8(size_t(w) * h);
     for (size_t i = 0; i < size_t(w) * h; ++i) {
-        float a = img.rgba[i * 4 + 3] / 255.0f;
-        for (int c = 0; c < 3; ++c) px[i * 4 + c] = img.rgba[i * 4 + c] / 255.0f * a;
+        const uint8_t* s = &img.rgba[i * 4];
+        float a = s[3] / 255.0f;
+        for (int c = 0; c < 3; ++c) {
+            plain[i * 3 + c] = s[c] / 255.0f;
+            px[i * 4 + c] = plain[i * 3 + c] * a;
+        }
         px[i * 4 + 3] = a;
+        level8[i] = uint32_t(s[3]) << 24 | uint32_t(s[0]) << 16 | uint32_t(s[1]) << 8 | s[2];
     }
     uint32_t levels = LevelCount(w, h);
     out->w = uint32_t(w);
     out->h = uint32_t(h);
-    for (uint32_t level = 0; level < levels; ++level) {
-        std::vector<uint32_t> level8(size_t(w) * h);
-        for (size_t i = 0; i < level8.size(); ++i) {
-            float a = px[i * 4 + 3], k = a > 1e-6f ? 1.0f / a : 0.0f;
-            level8[i] = Byte(a) << 24 | Byte(px[i * 4] * k) << 16 | Byte(px[i * 4 + 1] * k) << 8 | Byte(px[i * 4 + 2] * k);
-        }
-        out->levels.push_back(std::move(level8));
-        if (level + 1 == levels)
-            break;
+    out->levels.push_back(std::move(level8));
+    for (uint32_t level = 1; level < levels; ++level) {
         int nw, nh;
         px = Halve(px, w, h, 4, &nw, &nh);
+        plain = Halve(plain, w, h, 3, &nw, &nh);
         w = nw;
         h = nh;
+        level8.assign(size_t(w) * h, 0);
+        for (size_t i = 0; i < level8.size(); ++i) {
+            float a = px[i * 4 + 3], rgb[3];
+            for (int c = 0; c < 3; ++c)
+                rgb[c] = a > 1e-6f ? px[i * 4 + c] / a : plain[i * 3 + c];
+            level8[i] = Byte(a) << 24 | Byte(rgb[0]) << 16 | Byte(rgb[1]) << 8 | Byte(rgb[2]);
+        }
+        out->levels.push_back(std::move(level8));
     }
     return true;
 }

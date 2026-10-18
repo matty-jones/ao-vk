@@ -62,7 +62,8 @@ Decoding is `rvk/material_maps.h`, shared with `rvk_demo --pbr-maps`:
 - occlusion / roughness / metallic: occlusion and metallic average; roughness averages as GGX alpha squared
   (roughness^4) and is widened by what the normal map's bumps lose at that level (the averaged normal's length,
   vMF lobe: alpha^2 += 2 / kappa) - far away a bumpy glossy surface turns satin instead of sparkling;
-- albedo: box filtered, colour weighted by alpha.
+- albedo: box filtered, colour weighted by alpha; the top level as the file has it, and where a texel has no alpha
+  at all the plain average colour (a texture's alpha isn't always coverage: the colour under alpha 0 can be drawn).
 
 ## Rendering
 
