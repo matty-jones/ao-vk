@@ -1267,7 +1267,7 @@ private:
     float m_skyDayFogL = 0.7f;                   // the game's sky by day: its fog's brightness (eased)
     uint64_t m_atmosViewFrame = ~0ull;
     uint32_t m_domeSkipVerts = 0, m_domeSkipTexture = 0;   // the dome last skipped (logged when it changes)
-    bool m_bandSkipLogged = false, m_tintSkipLogged = false;
+    bool m_bandSkipLogged = false, m_tintSkipLogged = false, m_layersSkipLogged = false;
     // The sky's horizon all round (FL.skyRing), read back from the sky view table a few frames late: the haze, the far
     // fog, the mist and the clouds low in the sky fade into it (sky_common.glsl SkyHorizonRing).
     VkBuffer m_atmosRingBuffer = VK_NULL_HANDLE;

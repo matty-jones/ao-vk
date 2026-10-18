@@ -2466,6 +2466,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                 if (m_dumpFile) std::fprintf(m_dumpFile, "  (the game's sky tint: not drawn - RVK_ProcSky)\n");
                 return;
             }
+            // (... and its four textured sky layers round the eye - lit, blended 584-vertex meshes: hidden by our cloud
+            // layer, but with it off they lay teal streaks over our sky - user, 2026-10-18.)
+            if (ProcSkyReady() && m_drawIsSkyMesh && primitive == d3d::TriangleList && vertexCount == 584 &&
+                m_rs[d3d::RS_ALPHABLENDENABLE]) {
+                if (!m_layersSkipLogged) {
+                    m_layersSkipLogged = true;
+                    Log("sky: the game's sky layers (584 vertices) left out under ours");
+                }
+                if (m_dumpFile) std::fprintf(m_dumpFile, "  (the game's sky layer: not drawn - RVK_ProcSky)\n");
+                return;
+            }
             if (m_skyDraws == 2) DrawSkyGlow();
         } else if (m_skyDrawFrame == m_frameNumber && m_skyGlowFrame != m_frameNumber) {
             DrawSkyGlow();
