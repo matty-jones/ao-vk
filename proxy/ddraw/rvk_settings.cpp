@@ -55,6 +55,7 @@ Setting g_settings[] = {
     {"RVK_Tess",       "Roundness",                                                "Lighting",         Float, 0.25f, 1, 0.05f, 0.6f, nullptr, 0, "RVK_TessOn"},
     {"RVK_TessLevel",  "Detail up close (pieces per triangle edge)",               "Lighting",         Int,   2, 8, 1, 3, nullptr, 0, "RVK_TessOn"},
     {"RVK_TessDist",   "Up to this distance (world units)",                        "Lighting",         Int,   5, 60, 1, 16, nullptr, 0, "RVK_TessOn"},
+    {"RVK_TessStatic", "Buildings and props too (their curved parts)",             "Lighting",         Bool,  0, 1, 1, 1, nullptr, 0, "RVK_TessOn"},
     {"RVK_Aniso", "Texture filtering (anisotropic; 1 = off)", "Lighting",         Choice, 1, 16, 1, 16, "RANDYVK_ANISOTROPY", 0, nullptr, "1 2 4 8 16"},
 
     {"RVK_HillShade",   "The terrain's shade from a low sun (valleys under mountains)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
@@ -514,6 +515,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Aniso")) d->SetAnisotropy(uint32_t(V(n)));
     else if (is("RVK_Tess") || is("RVK_TessLevel") || is("RVK_TessDist"))
         d->SetTessellation(V("RVK_Tess"), V("RVK_TessDist"), uint32_t(V("RVK_TessLevel")));
+    else if (is("RVK_TessStatic")) d->SetTessStatic(V(n) != 0.0f);
     else if (is("RVK_PtLight") || is("RVK_CharLight")) d->SetPointLightIntensity(V("RVK_PtLight"), V("RVK_CharLight"));
     else if (is("RVK_SunShadow")) d->SetShadows(V(n) != 0.0f);
     else if (is("RVK_StaticShad")) d->SetStatelMode(uint32_t(V(n)));
@@ -1008,7 +1010,7 @@ namespace {
 
 struct PresetValue { const char* name; float value; };
 const PresetValue kClassicPlus[] = {
-    {"RVK_Bump", 0.75f}, {"RVK_Tess", 0.5f}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_WaterStyle", 0}, {"RVK_WaterQual", 2},
+    {"RVK_Bump", 0.75f}, {"RVK_Tess", 0.5f}, {"RVK_TessStatic", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_WaterStyle", 0}, {"RVK_WaterQual", 2},
     {"RVK_SunStrength", 0.5f}, {"RVK_PtShadows", 4}, {"RVK_Contact", 0.4f}, {"RVK_Bloom", 0.5f},
     {"RVK_NightGlow", 0.35f}, {"RVK_BloomWide", 0.2f}, {"RVK_NeonSat", 0.3f}, {"RVK_Ao", 0.75f}, {"RVK_GiOn", 0}, {"RVK_VolOn", 0}, {"RVK_SsrGloss", 0.15f},
     {"RVK_MBlurOn", 0}, {"RVK_Warmth", 0}, {"RVK_Dof", 0}, {"RVK_Particles", 0},
