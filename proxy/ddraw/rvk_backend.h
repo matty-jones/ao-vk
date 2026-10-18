@@ -36,6 +36,20 @@ void FreeCamToggle(HWND window);
 void FreeCamFrame(rvk::ThreadedDevice* device, HWND window);
 bool FreeCamOn();
 bool FreeCamWorld(const float game[16], float out[16]);
+void FreeCamWheel(float notches);                 // the mouse wheel while it is on (rvk_input.cpp)
+// The game kept from the keyboard / mouse (rvk_input.cpp): DirectInput and its window's messages, while any owner
+// asks. InputAttach subclasses the game's window (once).
+enum InputOwner : unsigned { kInputFreeCam = 1, kInputConsole = 2 };
+void InputAttach(HWND window);
+void InputBlock(unsigned owner, bool keys, bool mouse);
+bool InputFocused();                              // the game's window is the foreground one
+// The console (rvk_console.cpp, the key left of 1): the game window's messages, first (true: taken); each present.
+bool ConsoleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+void ConsoleFrame(rvk::ThreadedDevice* device, HWND window);
+bool ConsoleOpen();
+// The hotkeys' actions by name, for the console (rvk_ddraw.cpp): hideui, freecam, lightdebug, luts, dump, profile.
+// False: no such action.
+bool RunAction(const char* name);
 bool PatchSlot(HMODULE module, uint32_t vtable, uint32_t slot, uint32_t expected, void* hook, void** original,
                const char* what);                 // (rvk_particles.cpp) module-relative vtable, expected entry
 void* PatchImport(HMODULE module, const char* dll, const char* function, void* hook);   // (com_trace.cpp) the old target

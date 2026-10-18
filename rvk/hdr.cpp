@@ -461,12 +461,12 @@ void Device::EndScene()
     bool contact = RenderContactShadows(cmd);
     ProfileMark("contact shadows");
     Transition(cmd, m_albedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    // The upsampled bloom chain sums every level's light: averaged here.
+    // The upsampled bloom chain sums every level's light (weighted: RenderBloom): averaged here.
     // params[3]: how much bloom reaches objects nearer than its light (-1: the bloom carries no depth).
     // params[8..15]: colour grading (identity lookup tables until the proxy loads others).
     for (Texture*& lut : m_lut)
         if (!lut) lut = CreateLut(16, nullptr);
-    float params[16] = {m_tonemapKnee, m_exposure, bloom ? m_bloomStrength / float(m_bloomLevels.size()) : 0.0f,
+    float params[16] = {m_tonemapKnee, m_exposure, bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
                         m_bloomDepth ? m_bloomOverNearer : -1.0f, m_aoProj.m[2][2], m_aoProj.m[3][2],
                         gi ? m_giStrength : 0.0f,
                         float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0))};
@@ -816,7 +816,7 @@ bool Device::RenderDof(VkCommandBuffer cmd, bool bloom, bool ao, bool gi, bool v
 // One full-target pass: dst <- pipeline(src, src2). load: keep dst's contents (blended onto) instead of overwriting.
 void Device::FullscreenPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pipeline, VkImageView src, VkImageView src2,
                             VkSampler sampler, const float* params, uint32_t paramBytes, bool load, VkImageView src3,
-                            VkImageView src4)
+                            VkImageView src4, const VkRect2D* scissorRect)
 {
     Transition(cmd, dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -831,7 +831,7 @@ void Device::FullscreenPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pipeli
     ri.pColorAttachments = &color;
     vkCmdBeginRendering(cmd, &ri);
     VkViewport viewport{0.0f, 0.0f, float(dst->m_width), float(dst->m_height), 0.0f, 1.0f};
-    VkRect2D scissor{{0, 0}, {dst->m_width, dst->m_height}};
+    VkRect2D scissor = scissorRect ? *scissorRect : VkRect2D{{0, 0}, {dst->m_width, dst->m_height}};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -1463,9 +1463,16 @@ void Device::RenderBloom(VkCommandBuffer cmd)
                        m_bloomDepth ? m_depthView : VK_NULL_HANDLE);
         src = m_bloomLevels[i];
     }
+    // Each smaller level is added to the next larger one with this weight: level 0 ends up with level i's light x weight^i.
+    // RVK_BloomWide raises it (a wide haze round a tight core), more in rain or a storm by night - lamps' halos spread
+    // in wet air. The tone mapping divides by the weights' sum, so only the shape changes, not how bright.
+    const float wetAir = NightAmount() * std::max(StormOvercast(), std::clamp(m_wetness, 0.0f, 1.0f));
+    const float weight = 1.0f + 0.6f * std::clamp(m_bloomWide, 0.0f, 1.0f) * (1.0f + 0.5f * wetAir);
+    m_bloomWeightSum = 0.0f;
+    for (size_t i = 0; i < m_bloomLevels.size(); ++i) m_bloomWeightSum += std::pow(weight, float(i));
     for (size_t i = m_bloomLevels.size() - 1; i-- > 0;) {
         Texture* smaller = m_bloomLevels[i + 1];
-        float params[4] = {1.0f / float(smaller->m_width), 1.0f / float(smaller->m_height), 0.0f, 0.0f};
+        float params[4] = {1.0f / float(smaller->m_width), 1.0f / float(smaller->m_height), weight, 0.0f};
         Transition(cmd, smaller, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         FullscreenPass(cmd, m_bloomLevels[i], m_bloomUp, smaller->m_view, smaller->m_view, m_linearSampler, params, 16, true);
     }

@@ -184,6 +184,10 @@ public:
     // characters are dropped, and the interface layer isn't put over the frame. Not a setting: off at each start.
     void SetHideInterface(bool hide) { m_hideInterface = hide; }
     bool HideInterface() const { return m_hideInterface; }
+    // The console (the proxy's rvk_console.cpp): an image put over the top of the finished frame, after the interface
+    // and after a screenshot's copy (screenshots leave it out) - A8R8G8B8 premultiplied by its coverage, tightly
+    // packed, `width` the main target's. Copied; uploaded at the next EndFrame. Null / height 0: none.
+    void SetConsoleImage(uint32_t width, uint32_t height, const void* pixels);
     // Enhancement, with per-pixel lighting: every lit draw gets the frame's active point / spot lights nearest
     // the camera instead of the (at most 8) the game enabled for it. Directional lights stay as the game set them.
     void SetLightOverride(bool enable) { if (m_lightOverride != enable) { m_lightOverride = enable; m_constantsDirty = true; } }
@@ -309,6 +313,11 @@ public:
     void SetSsr(float strength, float water, float gloss, float wet)
     { m_ssr = strength; m_ssrWater = water; m_ssrGloss = gloss; m_ssrWet = wet; m_constantsDirty = true; }
     void SetBloomOverNearer(float keep) { m_bloomOverNearer = keep; }
+    // With HDR, the neon look: how much saturated light above white keeps its colour in the tone mapping (and the
+    // bloom's halo a little more saturated; 0 = to white as before); how much the bloom's wide levels weigh against
+    // its core (0 = all alike as before, 1 = a wide haze - wider still in rain and storms at night).
+    void SetNeonSat(float s) { m_neonSat = s; m_frameLightsDirty = true; }
+    void SetBloomWide(float w) { m_bloomWide = w; }
     // With HDR: colour grading after the tone mapping (grading.cpp). Neutral: 1, 1, 0, any, 0, 0.
     void SetGrading(float saturation, float contrast, float warmth, float lutAmount, float nightTint, float vignette)
     { m_saturation = saturation; m_contrast = contrast; m_warmth = warmth; m_lutAmount = lutAmount;
@@ -472,6 +481,9 @@ public:
     void SetFoliageLod(float distance) { m_foliageLod = distance; }
     // Depth pre-pass (prepass.cpp): the scene's opaque draws' depth first, so each pixel is shaded about once.
     void SetDepthPrepass(bool on) { m_prepassOn = on; }
+    // Phong tessellation of static meshes too - buildings and props, where they are curved (with SetTessellation's
+    // shape, distance and level).
+    void SetTessStatic(bool on) { m_tessStatic = on; }
     // Phong tessellation of characters: shape (0 = off, 1 = fully round), distance, the level up close.
     void SetTessellation(float shape, float distance, uint32_t level)
     {
@@ -1320,6 +1332,11 @@ private:
     Texture* m_scene = nullptr;
     bool m_scenePhase = false;                   // 3D drawn into m_scene; ends at the first interface draw
     bool m_hideInterface = false;                // SetHideInterface
+    std::vector<uint8_t> m_consolePixels;        // SetConsoleImage (interface.cpp DrawConsole)
+    uint32_t m_consoleW = 0, m_consoleH = 0;
+    bool m_consoleDirty = false;
+    Texture* m_consoleTex = nullptr;
+    void DrawConsole(VkCommandBuffer cmd);       // EndFrame: m_main in TRANSFER_SRC, left so
     bool m_sceneSaw3D = false;
     uint32_t m_sceneEndDraw = 0, m_sceneEndFvf = 0;   // frame dumps: where the scene phase ended
     VkPipeline m_pipelinesHdr[3] = {};           // m_pipelines for the float target
@@ -1331,16 +1348,23 @@ private:
     // Phong tessellation of characters near the camera (draw.cpp TessellateDraw): RVK_Tess*.
     float m_tessShape = 0.0f;                    // 0 = off; how far towards the smooth shape (Phong's alpha)
     float m_tessDistance = 20.0f;                // world units: full level up close, none from here on
+    bool m_tessStatic = false;                   // SetTessStatic: static meshes too
+    bool m_drawTessStatic = false;               // the current draw is a static mesh tessellated (StaticTessellation)
     uint32_t m_tessLevel = 4;
     bool m_drawTess = false;                     // the current draw is tessellated (ApplyDynamicState, the pipeline)
     struct TessTopology { uint64_t frames[3] = {}; };   // the last 3 frames a topology was drawn animated, newest first
     std::unordered_map<uint64_t, TessTopology> m_tessTopologies;
-    float TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount);   // the level (0 = none)
+    float TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount, const void* vertices,
+                         const uint16_t* indices, uint32_t indexCount, const detail::FvfLayout& layout,
+                         bool swaying);   // the level (0 = none)
+    bool StaticTessellation(uint32_t fvf, const void* vertices, uint32_t vertexCount, const uint16_t* indices,
+                            uint32_t indexCount, const detail::FvfLayout& layout, bool swaying);
     bool CharacterDraw(uint32_t fvf, uint32_t vertexCount);   // the current draw is a character's (body or part)
     bool m_drawIsCharacter = false;
     struct TessCharacter { float x, z, minY, maxY; };
     std::vector<TessCharacter> m_tessChars, m_tessCharsPrev;   // animated characters' boxes: this / last frame
     bool SmoothNormals(const void* vertices, uint32_t vertexCount, const detail::FvfLayout& layout);
+    bool SmoothNormalsCreased(const void* vertices, uint32_t vertexCount, const detail::FvfLayout& layout);
     std::vector<float> m_smoothNormals;          // the draw's averaged normals (binding 10)
     std::vector<int32_t> m_smoothTable;          // their position hash table
     // Skinned pieces: which vertices share a position (the first of each), found once per mesh in its rest pose.
@@ -1497,6 +1521,10 @@ private:
         bool rawSame = false;                    // ... one of them has its vertex bytes too
         bool skyScenery = false;                 // ... a mesh of the sky's scenery (the ships over the cities: mesh_id.h
                                                  // kSkyScenery): kept inside the far plane, fogged as the far sky
+        // Phong tessellation of static meshes (StaticTessellation): whether the mesh has curved parts (1), none
+        // (0), not looked at (-1); its averaged normals (SmoothNormals), made once.
+        mutable int8_t roundable = -1;
+        mutable std::shared_ptr<const std::vector<float>> smooth;
     };
     std::unordered_map<uint64_t, MeshInfo> m_meshInfo;
     // Mesh ids (meshids.cpp).
@@ -2444,6 +2472,8 @@ private:
     bool TaaParams(float out[24]);               // before MotionBlurParams (it moves on the last frame's camera)
     void RenderTaa(VkCommandBuffer cmd, Texture* dst, const float params[24]);
     float m_bloomOverNearer = 0.15f;             // bloom left on objects in front of its light (1 = all)
+    float m_neonSat = 0.0f, m_bloomWide = 0.0f;  // RVK_NeonSat, RVK_BloomWide (SetNeonSat, SetBloomWide)
+    float m_bloomWeightSum = 1.0f;               // the bloom levels' weights summed this frame (RenderBloom)
     bool m_bloomDepth = false;                   // this frame's bloom carries its light's depth
     std::vector<Texture*> m_bloomLevels;         // half resolution and down, float
     float m_effectGlow = 1.0f;
@@ -2467,7 +2497,8 @@ private:
     // One full-target pass into dst reading src (binding 0) and src2 (binding 1), which must be readable already.
     void FullscreenPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pipeline, VkImageView src, VkImageView src2,
                         VkSampler sampler, const float* params, uint32_t paramBytes, bool load,
-                        VkImageView src3 = VK_NULL_HANDLE, VkImageView src4 = VK_NULL_HANDLE);
+                        VkImageView src3 = VK_NULL_HANDLE, VkImageView src4 = VK_NULL_HANDLE,
+                        const VkRect2D* scissor = nullptr);   // (only this part of dst drawn)
     void RenderObjectMotionBlur(VkCommandBuffer cmd, const float params[24]);
     float m_aoStrength = 1.0f, m_aoRadius = 1.5f;
     Texture* m_aoTex[2] = {};                    // half resolution: raw, blurred (ping-pong)

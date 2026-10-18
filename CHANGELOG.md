@@ -6,10 +6,21 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- **In-game console** for the renderer's settings: press the key left of 1. Change any setting by name
+  (applied at once and saved), with completion and history; `find`, `list`, `changed`, `reset`, `try` and
+  `preset` commands, and the hotkeys' actions.
+- **Neon look:** coloured light (signs, screens, coloured lamps) keeps its colour instead of washing out to
+  white (`RVK_NeonSat`), and bloom has a tight core with a wide haze, wider in rain and storms at night
+  (`RVK_BloomWide`). `RVK_NeonNight` adds an optional night colour grade: teal shadows, richer lights.
+- **Rounder objects:** curved parts of buildings and props (pipes, rims, domes) are smoothed with
+  tessellation, while box edges stay sharp (`RVK_TessStatic`, on by default).
 - Texture packs: put a pack's maps in `randy-vk\packs\<name>\`. They are used for any texture `materials\`
   has nothing for. Packs are found at startup and listed in the log.
 
 ### Fixed
+- The PF map's black areas showed the world through them when the interface refresh rate (`RVK_UiRate`)
+  was on.
+- Held weapons swayed and bent like plants, most visibly while sitting. (#12)
 - AOReloaded (`version.dll`) not loading when compatibility settings were set on `AnarchyOnline.exe`.
   The renderer now loads the `version.dll` beside it if Windows skipped it. (#7)
 - Valley mist ended in a hard line against the sky at the hilltops. (#14)
@@ -18,6 +29,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### Diagnostics
 - `[Native] Pick=off|on|verify` in `randy-vk.ini` for problems clicking on characters. `off` uses the
   game's own picking, `verify` runs both and logs where they disagree. (#16)
+- Frame captures (Ctrl+Shift+F9) show which character each drawn object belongs to.
 
 ## 0.6.0 - 2026-10-16
 

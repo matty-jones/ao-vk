@@ -77,6 +77,7 @@ public:
     bool LightingDebug() const { return m_lightingDebug; }
     void SetHideInterface(bool hide);
     bool HideInterface() const { return m_hideInterface; }
+    void SetConsoleImage(uint32_t width, uint32_t height, const void* pixels);   // copied
     void SetLightOverride(bool enable);
     void SetCarrierLit(bool enable);
     bool LightOverride() const { return m_lightOverride; }
@@ -94,6 +95,8 @@ public:
     void SetBloom(float strength, float threshold);
     void SetEffectGlow(float gain);
     void SetBloomOverNearer(float keep);
+    void SetNeonSat(float s);
+    void SetBloomWide(float w);
     void SetGrading(float saturation, float contrast, float warmth, float lutAmount, float nightTint, float vignette);
     void SetColorLut(uint32_t slot, uint32_t size, const uint8_t* rgba);   // copied
     void LoadMeshIds(const char* path);                                       // (the path copied)
@@ -121,6 +124,7 @@ public:
     void SetShadowResolution(uint32_t sun, uint32_t point);
     void SetPointLightIntensity(float lights, float characters);
     void SetTessellation(float shape, float distance, uint32_t level);
+    void SetTessStatic(bool on);
     void SetTaa(bool enable, float sharpen);
     void SetFxaa(bool enable);
     void SetWindStorm(float scale);

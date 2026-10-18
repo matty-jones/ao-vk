@@ -685,6 +685,16 @@ void ThreadedDevice::SetHideInterface(bool hide)
     Enqueue([this, hide](const uint8_t*) { m_device.SetHideInterface(hide); });
 }
 
+void ThreadedDevice::SetConsoleImage(uint32_t width, uint32_t height, const void* pixels)
+{
+    std::vector<uint8_t> data;
+    if (pixels && width && height)
+        data.assign(static_cast<const uint8_t*>(pixels), static_cast<const uint8_t*>(pixels) + size_t(width) * height * 4);
+    Enqueue([this, width, height, data = std::move(data)](const uint8_t*) {
+        m_device.SetConsoleImage(width, data.empty() ? 0 : height, data.empty() ? nullptr : data.data());
+    });
+}
+
 void ThreadedDevice::SetLightingDebug(bool enable)
 {
     m_lightingDebug = enable;
@@ -1189,9 +1199,24 @@ void ThreadedDevice::SetTessellation(float shape, float distance, uint32_t level
     Enqueue([this, shape, distance, level](const uint8_t*) { m_device.SetTessellation(shape, distance, level); });
 }
 
+void ThreadedDevice::SetTessStatic(bool on)
+{
+    Enqueue([this, on](const uint8_t*) { m_device.SetTessStatic(on); });
+}
+
 void ThreadedDevice::SetBloomOverNearer(float keep)
 {
     Enqueue([this, keep](const uint8_t*) { m_device.SetBloomOverNearer(keep); });
+}
+
+void ThreadedDevice::SetNeonSat(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetNeonSat(s); });
+}
+
+void ThreadedDevice::SetBloomWide(float w)
+{
+    Enqueue([this, w](const uint8_t*) { m_device.SetBloomWide(w); });
 }
 
 void ThreadedDevice::SetEffectGlow(float gain)

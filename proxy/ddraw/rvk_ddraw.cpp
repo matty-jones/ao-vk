@@ -2,6 +2,7 @@
 #include "rvk_backend.h"
 #include "rvk_settings.h"
 #include "native/gui.h"
+#include "native/scene.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -200,6 +201,51 @@ static void ProfileSweep(bool start)
     }
 }
 
+namespace {
+bool g_sweepRequested = false;                   // RunAction("profile"): the sweep starts at the next present
+}
+
+// A dump of the next frame's 3D draws + a screenshot next to the log (logs\rvk-frame-HHMMSS.*); burst: the next 60
+// frames' draws, <base>-NN.txt - what the game changes frame to frame.
+static void RequestFrameDump(rvk::ThreadedDevice* device, bool burst)
+{
+    char dir[MAX_PATH] = "";
+    GetEnvironmentVariableA("RANDYVK_LOG", dir, sizeof(dir));
+    if (char* slash = std::strrchr(dir, '\\')) slash[1] = 0; else dir[0] = 0;
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char base[MAX_PATH];
+    std::snprintf(base, sizeof(base), "%srvk-frame-%02d%02d%02d", dir, t.wHour, t.wMinute, t.wSecond);
+    device->RequestFrameDump(std::string(base) + ".txt", burst ? 60 : 1);
+    rnative::scene::NoteDumpRequested();          // (the visuals' frames to the log, matched by the draws' @address)
+    device->RequestScreenshot(std::string(base) + ".bmp");
+    RvkLog("frame dump: %s.txt / .bmp", base);
+}
+
+bool RunAction(const char* name)
+{
+    rvk::ThreadedDevice* device = g_rvk.device;
+    if (!device || !name) return false;
+    if (std::strcmp(name, "hideui") == 0) {
+        device->SetHideInterface(!device->HideInterface());
+        RvkLog("interface %s", device->HideInterface() ? "hidden" : "shown");
+    } else if (std::strcmp(name, "freecam") == 0) {
+        FreeCamToggle(g_rvk.window);
+    } else if (std::strcmp(name, "lightdebug") == 0) {
+        device->SetLightingDebug(!device->LightingDebug());
+        RvkLog("lighting debug view %s", device->LightingDebug() ? "on" : "off");
+    } else if (std::strcmp(name, "luts") == 0) {
+        rvk_settings::LoadLuts(device);
+    } else if (std::strcmp(name, "dump") == 0) {
+        RequestFrameDump(device, false);
+    } else if (std::strcmp(name, "profile") == 0) {
+        g_sweepRequested = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 void RvkState::Frame()
 {
     if (device && !device->InFrame())
@@ -222,8 +268,9 @@ void RvkState::Present()
     SmokeFrame();
     TimeFrame();
     StatelFrame();
-    // Hotkeys (Ctrl+Shift+...). Those for options change the setting (saved, shown in the settings window).
-    bool chord = (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000);
+    // Hotkeys (Ctrl+Shift+...). Those for options change the setting (saved, shown in the settings window). None
+    // while the console is open (it takes the keyboard).
+    bool chord = !ConsoleOpen() && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000);
     static bool down[256];
     auto pressed = [&](int key) {                  // edge: pressed this frame, with the chord
         bool now = chord && (GetAsyncKeyState(key) & 0x8000);
@@ -381,22 +428,18 @@ void RvkState::Present()
     }
     // Ctrl+Shift+L: reload the colour lookup tables (randy-vk-day/night.cube).
     if (pressed('L'))
-        rvk_settings::LoadLuts(device);
+        RunAction("luts");
     // Ctrl+Shift+H: hide the game's interface (screenshots; not a setting).
-    if (pressed('H')) {
-        device->SetHideInterface(!device->HideInterface());
-        RvkLog("interface %s", device->HideInterface() ? "hidden" : "shown");
-    }
+    if (pressed('H'))
+        RunAction("hideui");
     // Ctrl+Shift+C: a free camera for debugging (not a setting; rvk_freecam.cpp) - the mouse and WASD, the game's own
     // input held back meanwhile.
     if (pressed('C'))
         FreeCamToggle(window);
     FreeCamFrame(device, window);
     // Ctrl+Shift+F11: lighting debug view (not a setting).
-    if (pressed(VK_F11)) {
-        device->SetLightingDebug(!device->LightingDebug());
-        RvkLog("lighting debug view %s", device->LightingDebug() ? "on" : "off");
-    }
+    if (pressed(VK_F11))
+        RunAction("lightdebug");
     // Ctrl+Shift+F9: dump the next frame's 3D draws + a screenshot next to the log (logs\rvk-frame-HHMMSS.*).
     // RANDYVK_DUMP_AT_FRAME=N: the same at the N-th presented frame (tests).
     static bool f9Down;
@@ -406,22 +449,14 @@ void RvkState::Present()
     }();
     static int presented;
     bool f9 = chord && (GetAsyncKeyState(VK_F9) & 0x8000);
-    if ((f9 && !f9Down) || ++presented == dumpAt) {
-        char dir[MAX_PATH] = "";
-        GetEnvironmentVariableA("RANDYVK_LOG", dir, sizeof(dir));
-        if (char* slash = std::strrchr(dir, '\\')) slash[1] = 0; else dir[0] = 0;
-        SYSTEMTIME t;
-        GetLocalTime(&t);
-        char base[MAX_PATH];
-        std::snprintf(base, sizeof(base), "%srvk-frame-%02d%02d%02d", dir, t.wHour, t.wMinute, t.wSecond);
-        // (Alt too: the next 60 frames' draws, <base>-NN.txt - what the game changes frame to frame.)
-        const bool burst = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-        device->RequestFrameDump(std::string(base) + ".txt", burst ? 60 : 1);
-        device->RequestScreenshot(std::string(base) + ".bmp");
-        RvkLog("frame dump: %s.txt / .bmp", base);
-    }
+    if ((f9 && !f9Down) || ++presented == dumpAt)
+        RequestFrameDump(device, (GetAsyncKeyState(VK_MENU) & 0x8000) != 0);   // (Alt too: 60 frames' draws)
     f9Down = f9;
-    ProfileSweep(pressed('O'));
+    const bool sweep = pressed('O') || g_sweepRequested;
+    g_sweepRequested = false;
+    ProfileSweep(sweep);
+    // The console (the key left of 1): its typing, commands and image (drawn over the next frame).
+    ConsoleFrame(device, window);
     // Slow frames: averages hide stutter, so each frame's time is checked too. A frame over 50 ms gets a line with
     // the time of day (players can match it to what they did), up to 5 per 600 frames; the 600-frame line counts
     // them all.

@@ -160,6 +160,121 @@ const void* CharacterAbove(const void* object)
 // The character carrying a light: one up its parents, or one next to it under its parent (a character's visual hangs
 // its light on its own frame) - only under a small parent (not a zone's root, which may hold characters too).
 constexpr uint32_t kFirstChild = 0x1C, kNextSibling = 0x18;   // RRefFrame_t children list
+
+// What hangs on characters' attractors (a held weapon, a shield, a back item): RCATMesh_t::AddAttractorChild keeps
+// those frames in the character's own map (std::map<std::string, std::vector<RRefFrame_t*>>, RCATMesh_t +0x1E8;
+// cat_life.cpp) and ProcessAttractorChilds moves them to the hand each frame - they are no children of the character
+// in the scene's frames (a held weapon was taken for a prop: swayed as a plant, leaves, ao-vk #12). Indexed when a
+// character is drawn: frame -> the character's visual (RCATMesh_t's RVisual_t, at +0x3C in it).
+constexpr uint32_t kAttachedMap = 0x1E8 - 0x3C;   // the map, from the visual: allocator, head, size
+constexpr uint32_t kNodeName = 0x0C, kNodeFrames = 0x28, kNodeIsHead = 0x39;
+std::unordered_map<const void*, const void*> g_attachedTo;   // attractor child frame -> character visual
+struct AttachedFrames {
+    uint32_t stamp = 0;                          // g_renders when indexed
+    std::vector<const void*> frames;
+};
+std::unordered_map<const void*, AttachedFrames> g_attachments;   // character visual -> its frames
+
+void IndexAttachments(const void* character)
+{
+    AttachedFrames& a = g_attachments[character];
+    if (a.stamp == g_renders && !a.frames.empty())
+        return;                                  // (once a render)
+    a.stamp = g_renders;
+    for (const void* f : a.frames) {
+        auto it = g_attachedTo.find(f);
+        if (it != g_attachedTo.end() && it->second == character) g_attachedTo.erase(it);
+    }
+    a.frames.clear();
+    const void* head = SafeRead(character, kAttachedMap + 4);
+    if (!head) return;
+    // In-order walk of the red-black tree (VS2010: head->parent = root; the head node and nil leaves are the head).
+    const void* stack[64];
+    int depth = 0, nodes = 0;
+    const void* n = SafeRead(head, 4);
+    static int logged = 0;
+    while ((n && n != head) || depth > 0) {
+        while (n && n != head && depth < 64 && Readable(static_cast<const uint8_t*>(n) + kNodeIsHead, 1) &&
+               !static_cast<const uint8_t*>(n)[kNodeIsHead]) {
+            stack[depth++] = n;
+            n = SafeRead(n, 0);                  // left
+        }
+        if (depth == 0 || ++nodes > 64) break;
+        n = stack[--depth];
+        const auto* first = static_cast<const void* const*>(SafeRead(n, kNodeFrames));
+        const auto* last = static_cast<const void* const*>(SafeRead(n, kNodeFrames + 4));
+        if (first && last >= first && last - first <= 16 && Readable(first, size_t(last - first) * sizeof(void*)))
+            for (const void* const* f = first; f < last; ++f)
+                if (*f) {
+                    g_attachedTo[*f] = character;
+                    a.frames.push_back(*f);
+                    if (logged < 8) {
+                        ++logged;
+                        // (the name: a VS2010 std::string - inline below 16 characters)
+                        const auto* s = static_cast<const uint8_t*>(n) + kNodeName;
+                        const uint32_t cap = Readable(s + 0x14, 4) ? *reinterpret_cast<const uint32_t*>(s + 0x14) : 0;
+                        const char* name = cap < 16 ? reinterpret_cast<const char*>(s)
+                                                    : static_cast<const char*>(SafeRead(n, kNodeName));
+                        Log("visuals: attractor \"%.31s\" holds %s", name && Readable(name, 32) ? name : "?", ClassName(*f));
+                    }
+                }
+        n = SafeRead(n, 8);                      // right
+    }
+    // Characters not drawn for a while: their frames forgotten.
+    if ((g_renders & 1023) == 0)
+        for (auto it = g_attachments.begin(); it != g_attachments.end();) {
+            if (g_renders - it->second.stamp > 2000) {
+                for (const void* f : it->second.frames) {
+                    auto at = g_attachedTo.find(f);
+                    if (at != g_attachedTo.end() && at->second == it->first) g_attachedTo.erase(at);
+                }
+                it = g_attachments.erase(it);
+            } else {
+                ++it;
+            }
+        }
+}
+
+// Frame dump diagnostics (NoteDumpRequested): until this render, visuals' frame chains and the attractor index logged.
+uint32_t g_chainLogUntil = 0;
+std::unordered_set<const void*> g_chainLogged;
+
+void LogChain(const void* visual)
+{
+    if (!g_chainLogged.insert(visual).second || g_chainLogged.size() > 4000)
+        return;
+    std::string line;
+    char part[96];
+    const void* frame = visual;
+    for (int depth = 0; frame && depth < 12; ++depth, frame = SafeRead(frame, kParent)) {
+        std::snprintf(part, sizeof(part), "%s%08X %s%s", depth ? " < " : "", unsigned(reinterpret_cast<uintptr_t>(frame)),
+                      ClassName(frame), g_attachedTo.count(frame) ? " [attractor child]" : "");
+        line += part;
+    }
+    Log("dump chain: %s", line.c_str());
+}
+
+void LogFrameTree(const void* frame, int depth, std::string indent)
+{
+    for (const void* child = SafeRead(frame, kFirstChild); child && depth < 3; child = SafeRead(child, kNextSibling)) {
+        Log("dump attractor tree: %s%08X %s", indent.c_str(), unsigned(reinterpret_cast<uintptr_t>(child)), ClassName(child));
+        LogFrameTree(child, depth + 1, indent + "  ");
+    }
+}
+
+// The character an object hangs on by an attractor: it, or a frame up its parents, is one's attractor child.
+const void* AttachedOwner(const void* object)
+{
+    if (g_attachedTo.empty())
+        return nullptr;
+    const void* frame = object;
+    for (int depth = 0; frame && depth < 12; ++depth, frame = SafeRead(frame, kParent)) {
+        auto it = g_attachedTo.find(frame);
+        if (it != g_attachedTo.end())
+            return it->second;
+    }
+    return nullptr;
+}
 const void* CarrierOf(const void* light)
 {
     if (const void* character = CharacterAbove(light))
@@ -250,29 +365,54 @@ const char* ClassChain(const void* visual)
     return out;
 }
 
+void NoteDumpRequested()
+{
+    g_chainLogUntil = g_renders + 60;            // (several renders a frame: past the dumped one)
+    g_chainLogged.clear();
+    for (const auto& [character, a] : g_attachments)
+        for (const void* f : a.frames) {
+            const void* parent = SafeRead(f, kParent);
+            Log("dump attractor child: %08X %s of character %08X; parent %08X %s", unsigned(reinterpret_cast<uintptr_t>(f)),
+                ClassName(f), unsigned(reinterpret_cast<uintptr_t>(character)), unsigned(reinterpret_cast<uintptr_t>(parent)),
+                ClassName(parent));
+            LogFrameTree(f, 0, "  ");
+        }
+}
+
 VisualInfo Describe(const void* visual)
 {
     ForgetPages();
     if (!visual)
         return {};
+    if (g_renders <= g_chainLogUntil)
+        LogChain(visual);
     const void* vtable = *static_cast<const void* const*>(visual);
     Cached& c = g_visuals[visual];
-    if (c.vtable == vtable && g_renders - c.stamp < 2000)
-        return c.info;
-    c.vtable = vtable;
-    c.stamp = g_renders;
-    c.info.className = ClassName(visual);
-    c.info.kind = KindOf(c.info.className);
-    // Attached to a character (somewhere up its frames): one of its parts.
-    c.info.owner = c.info.kind == Kind::Character ? visual : nullptr;
-    if (c.info.kind != Kind::Character && c.info.kind != Kind::BlobShadow)
-        if (const void* character = CharacterAbove(visual)) {
-            c.info.kind = Kind::CharacterPart;
-            c.info.owner = character;
-        }
+    if (c.vtable != vtable || g_renders - c.stamp >= 2000) {
+        c.vtable = vtable;
+        c.stamp = g_renders;
+        c.info.className = ClassName(visual);
+        c.info.kind = KindOf(c.info.className);
+        // Attached to a character (somewhere up its frames): one of its parts.
+        c.info.owner = c.info.kind == Kind::Character ? visual : nullptr;
+        if (c.info.kind != Kind::Character && c.info.kind != Kind::BlobShadow)
+            if (const void* character = CharacterAbove(visual)) {
+                c.info.kind = Kind::CharacterPart;
+                c.info.owner = character;
+            }
+    }
     VisualInfo info = c.info;
     if (g_visuals.size() > 20000)                       // visuals come and go: start over now and then
         g_visuals.clear();
+    // What hangs on a character's attractors - looked up every time, not cached: a part may be drawn before its
+    // character is (heads are), and weapons are put in and out of hands.
+    if (info.kind == Kind::Character)
+        IndexAttachments(visual);
+    else if (info.kind != Kind::CharacterPart && info.kind != Kind::BlobShadow)
+        if (const void* character = AttachedOwner(visual)) {
+            info.kind = Kind::CharacterPart;
+            info.owner = character;
+        }
     return info;
 }
 

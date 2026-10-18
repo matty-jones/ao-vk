@@ -60,5 +60,7 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
                                 // cover map's heights' reference (world y)
     vec4 cover;                 // the rain's cover map (rvk sand_map.cpp RainCoverMap): corner x, z, 1 / size, bindless
                                 // image + 1 | sampler << 20 (the float's bits; 0 = none)
+    vec4 neon;                  // the tone mapping's neon look: x how much saturated light keeps its colour
+                                // (RVK_NeonSat), y the lens streaks' strength (RVK_Streaks), z, w unused
     Light lights[64];
 } FL;
