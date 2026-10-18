@@ -118,6 +118,10 @@ void TimeFrame()
         g_baseSpeed = speed;
     }
     g_setRealTime(const_cast<uint8_t*>(self), edx, float(current()));
+    // (Every ~2 s: the hour, for the dusk log's lines between - rvk sky.cpp UpdateSunClock.)
+    static uint32_t frames = 0;
+    if (++frames % 120 == 0)
+        RvkLog("time: %.3f h", current() / secondsPerHour);
 }
 
 }  // namespace rvkproxy

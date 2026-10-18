@@ -161,9 +161,12 @@ public:
     void SetGameSun(bool on);
     void SetSunSize(float s);
     void SetSunBleed(float s);
-    void SetTwilight(float twilight, float glow);
+    void SetTwilight(float twilight, float glow, float blueHour);
     void SetMornHaze(float s);
     void SetDawnLight(float s);
+    void SetAfterglow(float s);
+    void SetStarFade(bool on);
+    void SetDuskRays(float s);
     void SetGoldenHour(float s);
     void SetShadowMemory(uint32_t mode);
     void SetHillShade(bool on);

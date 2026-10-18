@@ -729,7 +729,7 @@ void Device::LandHaze(float out[24]) const
                 return t * t * (3.0f - 2.0f * t);
             };
             morning = smooth(-0.1f, -0.02f, up) * (1.0f - smooth(0.1f, 0.26f, up)) *
-                      (m_mistSunTrend >= 0.0f ? 1.0f : 0.5f) * std::max(m_mornHaze, 0.0f);
+                      (0.5f + 0.5f * m_sunRising) * std::max(m_mornHaze, 0.0f);
         }
         out[10] = 0.6f / fogParams[1] * weather * (1.0f + morning);
         out[11] = 150.0f;
@@ -1048,7 +1048,10 @@ bool Device::RenderVolume(VkCommandBuffer cmd)
     push.shafts[0] = 2.0f * m_volumeShafts;
     push.shafts[1] = CloudShadowView() != m_blackTexture->m_view ? m_volumeRays : 0.0f;   // (clouds casting shadows)
     push.shafts[2] = 3000.0f;                                     // the rays' reach
-    push.shafts[3] = 0.0f;
+    // The sunset rays (RVK_DuskRays): their strength - negative without this frame's clouds (binding 5: none then).
+    const bool cover = m_cloudCover && m_cloudCoverFrame == m_frameNumber &&
+                       m_cloudCover->m_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    push.shafts[3] = cover ? DuskRaysNow() : -DuskRaysNow();
     static_assert(sizeof(push) <= 128, "push constant range");
 
     Texture* dst = m_volumeTex[0];
@@ -1076,14 +1079,17 @@ bool Device::RenderVolume(VkCommandBuffer cmd)
     const bool terrainMap = m_terrainSunMap && m_terrainSunMap->m_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     VkDescriptorImageInfo terrain{m_linearSampler, terrainMap ? m_terrainSunMap->m_view : m_blackTexture->m_view,
                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet wr[5] = {};
+    VkDescriptorImageInfo coverInfo{m_linearSampler, cover ? m_cloudCover->m_view : m_blackTexture->m_view,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr[6] = {};
     for (auto& x : wr) { x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; x.descriptorCount = 1; }
     wr[0].dstBinding = 0; wr[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[0].pImageInfo = &depth;
     wr[1].dstBinding = 1; wr[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[1].pImageInfo = &shadow;
     wr[2].dstBinding = 4; wr[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; wr[2].pBufferInfo = &lights;
     wr[3].dstBinding = 2; wr[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[3].pImageInfo = &clouds;
     wr[4].dstBinding = 3; wr[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[4].pImageInfo = &terrain;
-    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_volumeLayout, 0, 5, wr);
+    wr[5].dstBinding = 5; wr[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[5].pImageInfo = &coverInfo;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_volumeLayout, 0, 6, wr);
     vkCmdPushConstants(cmd, m_volumeLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRendering(cmd);

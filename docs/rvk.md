@@ -77,6 +77,21 @@
   camera next moves onto another tile. Decompiles: `re/n3_ring.c`, `re/n3_popin*.c`, `re/n3_statel_controller.c`.
   Measured (a 245 fps spot, 60): the interface's game-thread time 1.5 -> 0.34 ms, its GPU time 0.3 -> 0.07 ms;
   cursor, interface look and input unchanged in play. 60 is the recommended value.
+- **Dawn, dusk and the night's coming** (`rvk/sky.cpp`, `shaders/sky_common.glsl`; docs/twilight-plan.md,
+  docs/dusk-plan.md): one *sun clock* (`UpdateSunClock`) eases the true sun's direction (the game's brightest
+  directional light, which by night points up from under the ground) over a second of real time and derives the
+  dusk's phases from its height - golden hour, afterglow, blue hour, night (`FL.phase`). The night grade
+  (`NightAmount`), the moon's light and shadows, the low sun's light and tint, the stars and the sky all read it, so day
+  turns to night over game minutes, not at once; the sun's light ends at the horizon and the moon's starts ~2 degrees
+  under it, so the shadow map changes hands with both out. The sky pass (`sky_glow.frag`) lays a twilight palette over
+  the game's dome (`RVK_Twilight`, up to 1.5 for more vivid; `RVK_BlueHour`; `RVK_SkyGlow`), handing the sky back to the
+  game ~12-16 degrees under; the far land, haze, mist and low clouds fade into the same colours (`SkyHorizonDelta`); the
+  clouds take the sunset's colours and stay lit from below after the land's sunset (`RVK_Afterglow`,
+  `cloud_light.glsl`); the land's shade takes the sky's hue (`SkyTwilightCpu`, the model on the CPU - keep the two
+  alike); the game's stars fade in by the sun's height (`RVK_StarFade`); sunset rays over the hills and through the
+  clouds' gaps (`RVK_DuskRays`, `volume.frag`). With the sun near the horizon the log gets a `dusk:` line every ~2 s
+  (and `time:` with the hour while `RVK_TimeOfDay` / `RVK_TimeSpeed` run the clock). The demo's `--sun-sweep A B N`
+  renders a dusk and `tools/sun-sweep.py` makes a contact sheet and flags jumps between shots.
 - **Ground grass** (setting `RVK_GrassOn`, Plants; **off** by default): our own grass over the game's terrain, an
   addition on top of its dated foliage cards (grass.cpp, grass.vert / grass.frag).
   - *Ground*: the terrain's own draws are captured (`Device::CaptureTerrain`, from `Draw`) into world-aligned 8-unit

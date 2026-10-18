@@ -9,6 +9,7 @@ layout(set = 0, binding = 0) uniform sampler2D depthTex;
 layout(set = 0, binding = 1) uniform sampler2DArrayShadow shadowMap;
 layout(set = 0, binding = 2) uniform sampler2D cloudShadow;   // the clouds' (rvk clouds.cpp; FL.clouds: where, if any)
 layout(set = 0, binding = 3) uniform sampler2D terrainSun;    // the terrain's shade from a low sun (rvk terrain_sun.cpp)
+layout(set = 0, binding = 5) uniform sampler2D cloudCover;    // this frame's clouds (alpha: their cover; the sunset rays)
 
 // At a point of the air: 1 in the sun, 0 under the terrain hiding a low sun (FL.terrainSun: where, its weight).
 float TerrainSunAt(vec3 q)
@@ -27,7 +28,8 @@ layout(push_constant) uniform Push {
     vec4 params;        // haze density, sun strength, this frame's noise offset, D3D projection m[2][2]
     vec4 size;          // full target width, height, steps, D3D projection m[3][2]
     vec4 shafts;        // x: contrast of the shafts (power on the ray's lit fraction - 1); y: the rays through the
-                        // clouds' gaps, x (0: none); z: their reach (world)
+                        // clouds' gaps, x (0: none); z: their reach (world); w: the sunset rays' strength (rvk
+                        // sky.cpp DuskRaysNow; negative: no clouds this frame - binding 5 then not theirs)
 } P;
 layout(location = 0) out vec4 outVolume;
 
@@ -131,6 +133,64 @@ void main()
             float cosAngle = dot(dir, -normalize(FL.sunDir.xyz));
             float phase = min((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosAngle, 1.5), 6.0);
             light += FL.sunColor.rgb * (beams * stepLen * 0.0001 * P.shafts.y * phase);
+        }
+    }
+
+    float dusk = abs(P.shafts.w);
+    if (dusk > 0.0) {
+        // Sunset rays over the hills (docs/dusk-plan.md): with the sun this low the shadow map is off (the block above
+        // skipped), but the terrain's shade from it is known - the air marched out to ~1.5 km through it alone, the
+        // beams where the hills' shade and the sun's light cross (as the rays through the clouds: 4 f (1 - f)).
+        if (FL.shadowParams.x <= 0.5 && dot(FL.sunColor.rgb, FL.sunColor.rgb) > 0.0) {
+            const int kSteps = 20;
+            float reach = min(d >= 1.0 ? 1500.0 : dist, 1500.0), stepLen = reach / float(kSteps);
+            float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.0471, 0.0619))) + P.params.z);
+            float lit = 0.0, open = 0.0;
+            for (int i = 0; i < kSteps; ++i) {
+                float t = (float(i) + noise) * stepLen;
+                vec3 q = P.eye.xyz + dir * t;
+                float w = exp(-max(q.y - P.eye.y, 0.0) / 200.0) * exp(-t / 1200.0);
+                lit += TerrainSunAt(q) * w;
+                open += w;
+            }
+            if (open > 1e-6) {
+                float f = lit / open;
+                const float g = 0.7;
+                float cosAngle = dot(dir, -normalize(FL.sunDir.xyz));
+                float phase = min((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosAngle, 1.5), 6.0);
+                light += FL.sunColor.rgb * (open * 4.0 * f * (1.0 - f) * f * stepLen * 0.0004 * dusk * phase);
+            }
+        }
+        // Sunset rays in the sky: from each point towards the sun on the screen, how much of the way is open sky
+        // (not land, not cloud) - beams where the clouds' gaps and the hills' notches let the low sun's glow through,
+        // dark lanes behind the clouds; again only the mix of lit and shaded (4 f (1 - f)), not a second glow. In the
+        // glow's colour (FL.sky[3]), strongest towards the sun.
+        // (The sky's own pixels only: over the land and water the way to the sun half "not sky" lit everything in front
+        // of the horizon.)
+        if (FL.dusk.z < 100.0 && d >= 1.0) {
+            vec2 uv = (pix + 0.5) / P.size.xy;
+            vec2 sunUv = vec2(FL.dusk.z * 0.5 + 0.5, 0.5 - FL.dusk.w * 0.5);
+            vec2 delta = sunUv - uv;
+            float aspect = P.size.x / P.size.y;
+            float away = length(delta * vec2(aspect, 1.0));
+            float fade = exp(-away * 1.6);
+            if (fade > 0.02) {
+                const int kSamples = 24;
+                float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.0711, 0.0383))) + P.params.z);
+                // (At most ~0.7 of the screen's height towards it: the beams' length on screen.)
+                vec2 step = delta * min(1.0, 0.7 / max(away, 1e-3)) / float(kSamples);
+                float open = 0.0;
+                bool cover = P.shafts.w > 0.0;
+                for (int i = 0; i < kSamples; ++i) {
+                    vec2 q = uv + step * (float(i) + noise);
+                    if (any(lessThan(q, vec2(0.0))) || any(greaterThan(q, vec2(1.0)))) { open += 1.0; continue; }
+                    float sky = textureLod(depthTex, q, 0.0).r >= 1.0 ? 1.0 : 0.0;
+                    float clear = cover ? 1.0 - clamp(textureLod(cloudCover, q, 0.0).a, 0.0, 1.0) : 1.0;
+                    open += sky * clear;
+                }
+                float f = open / float(kSamples);
+                light += FL.sky[3].rgb * (4.0 * f * (1.0 - f) * fade * 0.25 * dusk);
+            }
         }
     }
 

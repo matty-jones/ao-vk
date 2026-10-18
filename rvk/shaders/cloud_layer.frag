@@ -61,7 +61,7 @@ vec4 Aerial(vec3 light, float alpha, float dist, vec3 dir)
     // (By night at least a quarter of the air's colour, as the game's sheets have: the heaps grey among them - user.)
     float haze = max(max(min(air * 1.1, 1.0), low), 0.25 * Night());
     // (Low in the sky the air in the twilight's colours, as the sky drawn behind - sky_common.glsl.)
-    light = mix(light, AirColour(L.haze.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1]), low) * alpha, haze);
+    light = mix(light, AirColour(L.haze.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1], FL.sky[3]), low) * alpha, haze);
     return vec4(light, alpha) * (1.0 - smoothstep(0.6 * L.layer.w, L.layer.w, dist));
 }
 
@@ -253,6 +253,7 @@ vec4 Deck(vec3 eye, vec3 dir, float jitter)
     float sigma = L.shape.w * 0.9, transmit = 1.0;
     vec3 sunL = normalize(FL.sunTrue.xyz + vec3(0.0, 1e-6, 0.0));   // (the sun's: below the horizon too)
     vec3 sun = SunLight(sunL) * 0.35 + Afterglow(sunL) * 0.45 + MoonLight() * 0.35;   // (its underside: the afterglow)
+    vec3 duskSky = DuskSkyTint();
     vec3 light = vec3(0.0);
     for (int i = 0; i < kSteps && transmit > 0.02; ++i) {
         vec3 p = eye + dir * (t0 + (float(i) + jitter) * dt);
@@ -261,7 +262,7 @@ vec4 Deck(vec3 eye, vec3 dir, float jitter)
             continue;
         float h = (float(i) + 0.5) / float(kSteps);
         // (Seen from below: mostly its underside - darker than the layer's sunlit tops; thick parts darker still.)
-        vec3 S = (L.ambient.rgb * mix(0.38, 0.8, h) * mix(0.55, 1.0, exp(-d * 2.0)) * NightSky() * (1.0 + Night()) *
+        vec3 S = (L.ambient.rgb * duskSky * mix(0.38, 0.8, h) * mix(0.55, 1.0, exp(-d * 2.0)) * NightSky() * (1.0 + Night()) *
                   mix(1.0, 0.7, MoonShare()) + sun) * L.tint.rgb * L.tint.w;
         const vec3 luma = vec3(0.3, 0.59, 0.11);   // (contrast, as the layer: RVK_CloudShade)
         S *= clamp(pow(max(dot(S, luma) / max(dot(L.tint.rgb, luma) * L.tint.w, 1e-3), 1e-3), L.horizon.y - 1.0), 0.15, 3.0);
@@ -346,10 +347,10 @@ vec4 Cirrus(vec3 eye, vec3 dir)
     vec3 glow = Afterglow(sunL);
     float glowing = clamp(dot(glow, vec3(0.3, 0.59, 0.11)) * 2.0, 0.0, 1.0);
     // (At the layer's clouds' brightness, RVK_CloudBright: brighter they went white in the tone mapping's roll-off.)
-    vec3 S = (SunLight(sunL) * (0.45 + 0.25 * min(forward, 4.0)) + glow * 2.0 + L.ambient.rgb * 0.6 * (1.0 - 0.6 * glowing) +
+    vec3 S = (SunLight(sunL) * (0.45 + 0.25 * min(forward, 4.0)) + glow * 2.0 + L.ambient.rgb * DuskSkyTint() * 0.6 * (1.0 - 0.6 * glowing) +
               MoonLight() * 0.3) * L.tint.w;
     float low = HorizonBand(dir, L.horizon.x);
-    S = mix(S, AirColour(L.haze.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1]), low), low);
+    S = mix(S, AirColour(L.haze.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1], FL.sky[3]), low), low);
     return vec4(S * a, a);
 }
 
@@ -554,6 +555,7 @@ void main()
     // (By night the heaps' sky light twice the sheets': cloud dimmed inside, they came out greyer and darker than
     // the game's sheets round them - user. Under the moon less: the side away from it darker.)
     float nightSky = NightSky() * (1.0 + Night()) * mix(1.0, 0.7, MoonShare());
+    vec3 duskSky = DuskSkyTint();               // (round sunset the sky's light in the twilight's colours)
     float sigma = L.shape.w;
     float transmit = 1.0;
     vec3 light = vec3(0.0);
@@ -645,7 +647,7 @@ void main()
         float h = Height(p);
         // The sky's light: the sky's colour from above (lighter at the tops), less and warmer from below (the ground
         // lit by it), dimmed by the cloud over the point (the sun's way through it stands in for up: dark storm bases).
-        vec3 skyTop = L.ambient.rgb * 1.15, skyLow = L.ambient.rgb * vec3(0.66, 0.62, 0.58);
+        vec3 skyTop = L.ambient.rgb * 1.15 * duskSky, skyLow = L.ambient.rgb * vec3(0.66, 0.62, 0.58) * duskSky;
         // (Dimmed by the cloud towards the sun only over a short way - from far off, the cloud's shadows lie through
         // it as long streaks all one way.)
         vec3 sky = mix(skyLow * mix(1.0, 0.75, L.ambient.w), skyTop, smoothstep(0.0, 0.8, h)) *

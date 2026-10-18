@@ -22,7 +22,7 @@ void main()
     vec2 ndc = vec2(gl_FragCoord.x / P.view.x * 2.0 - 1.0, 1.0 - gl_FragCoord.y / P.view.y * 2.0);
     vec4 a = P.invViewProj * vec4(ndc, 0.0, 1.0), b = P.invViewProj * vec4(ndc, 1.0, 1.0);
     vec3 dir = normalize(b.xyz / b.w - a.xyz / a.w);
-    float t = clamp(P.sky0.w * SkyTwilightAmount(P.sky1.y), 0.0, 1.0);
-    vec3 c = t > 0.0 ? SkyTwilight(dir, P.sky0, P.sky1) * t : vec3(0.0);
+    float t = clamp(min(P.sky0.w, 1.0) * SkyTwilightAmount(P.sky1.y, P.sky3.w), 0.0, 1.0);
+    vec3 c = t > 0.0 ? SkyTwilight(dir, P.sky0, P.sky1, P.sky3) * t : vec3(0.0);
     outScene = vec4(c + SkyGlow(dir, P.sky1, P.sky2, P.sky3), t);
 }

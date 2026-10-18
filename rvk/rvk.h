@@ -539,11 +539,19 @@ public:
     void SetSunBleed(float s) { m_sunBleed = s; }
     // The sky's twilight (0: the game's sky; 1: the twilight palette in its place) and the glow round the sun, x
     // (sky.cpp).
-    void SetTwilight(float twilight, float glow) { m_twilight = twilight; m_skyGlow = glow; }
+    void SetTwilight(float twilight, float glow, float blueHour = 1.0f)
+    {
+        m_twilight = twilight;
+        m_skyGlow = glow;
+        m_blueHour = blueHour;
+    }
     // The haze round sunrise thicker (hdr.cpp LandHaze; 0 none, 1 as planned; half of it round sunset).
     void SetMornHaze(float s) { m_mornHaze = s; }
     // A low sun's light warm on the land and things, their shade cool (sky.cpp; 0 the game's colours, 1 as planned).
     void SetDawnLight(float s) { m_dawnLight = s; }
+    void SetAfterglow(float s) { m_afterglow = s; }
+    void SetStarFade(bool on) { m_starFade = on; }
+    void SetDuskRays(float s) { m_duskRays = s; }
     // The golden hour's grade round sunrise and sunset (tonemap.frag Grade; 0 none).
     void SetGoldenHour(float s) { m_goldenHour = s; }
     // Remembered shadow casters (things out of view still casting) and the terrain's shade from a low sun, on / off.
@@ -1211,7 +1219,18 @@ private:
     static const char* SkyName(float cloudiness);
     // The sky's twilight and the glow round the sun (sky.cpp; sky_common.glsl): its model, made once a frame
     // (UpdateSkyModel: s0..s3 as sky_common.glsl reads them), drawn over the game's sky once its dome is down.
-    float m_twilight = 0.5f;                     // RVK_Twilight: how far the twilight palette replaces the game's sky
+    float m_twilight = 0.85f;                    // RVK_Twilight: how far the twilight palette replaces the game's sky
+                                                 // (above 1: more saturated)
+    float m_blueHour = 1.0f;                     // RVK_BlueHour: the blue hour's depth and length after sunset
+    float m_afterglow = 1.0f;                    // RVK_Afterglow: how strongly the clouds take the sunset's colours
+    float m_blueGrade = 0.0f;                    // the blue hour's grade now (UpdateSkyModel; tonemap.frag FL.dusk.y)
+    bool m_starFade = true;                      // RVK_StarFade: the game's stars come out as the sky darkens
+    float m_starsShown = 1.0f;                   // ... how much of them now (UpdateSunClock)
+    float m_starsAge = 0.0f;                     // seconds the game has drawn its stars without a break
+    float m_duskRays = 1.0f;                     // RVK_DuskRays: beams from a low sun through cloud gaps and over hills
+    Texture* m_cloudCover = nullptr;             // this frame's clouds at half size (premultiplied: alpha their cover)
+    uint64_t m_cloudCoverFrame = ~0ull;
+    float DuskRaysNow() const;                   // RVK_DuskRays x how low the sun is (volume.frag P.shafts.w)
     float m_mornHaze = 1.0f;                     // RVK_MornHaze: the haze round sunrise thicker, x (hdr.cpp LandHaze)
     float m_dawnLight = 1.0f;                    // RVK_DawnLight: a low sun's light warm, the shade cool, x
     float m_goldenHour = 0.5f;                   // RVK_GoldenHour: the grade round sunrise and sunset (FL.dawn[1].w)
@@ -1227,6 +1246,22 @@ private:
     VkPipelineLayout m_skyGlowLayout = VK_NULL_HANDLE;
     void UpdateSkyModel();
     void DrawSkyGlow();
+    // The sun's clock (sky.cpp UpdateSunClock; docs/dusk-plan.md): the true sun's direction eased over real time (the
+    // game's light, below the horizon too: m_trueSunDir), and from its height the dusk's phases - one smooth day to
+    // night that the sky, the light handover and the grading all read, instead of each its own narrow ramp.
+    double m_sunClockLast = -1.0, m_sunLightClock = -1.0;
+    float m_frameDt = 0.0f;                      // real seconds since the last frame (0..0.25)
+    float m_sunPhase[4] = {};                    // golden hour, afterglow, blue hour, night (FL.phase)
+    float m_nightAmount = 0.0f;                  // NightAmount, eased
+    float m_sunRising = 1.0f;                    // 1 rising .. 0 setting, eased (the trend over minutes)
+    bool m_nightSet = false;
+    void UpdateSunClock();
+    float SunUp() const;                         // the eased sun's height (the sine of its elevation)
+    bool SunKnown() const { return m_sunLightClock >= 0.0 && m_frameClock - m_sunLightClock < 5.0; }
+    // The game's sky as it goes dark (the dusk log): its dome (the biggest lit sky mesh) and stars (point lists).
+    struct DuskSky { uint32_t domeVerts = 0, domeTexture = 0, domeAmbient = 0, stars = 0, starVerts = 0; uint64_t frame = ~0ull; };
+    DuskSky m_duskSky, m_duskSkyLast;
+    void NoteDuskSky(uint32_t primitive, uint32_t vertexCount);
     bool m_shadowIsMoon = false;                 // ... the moon (FrameLights moon.w)
     bool m_drawIsSkyMesh = false;                // the current visual is a mesh in the sky (a moon?)
     void NoteSkyMesh(uint32_t fvf, const void* vertices, uint32_t vertexCount);
@@ -1866,9 +1901,10 @@ private:
     bool ShadingOn() const { return m_shadowValid || (m_tsWeight > 0.0f && m_tsMadeFrame != ~0ull); }
     float m_sceneAmbient = -1.0f;
     uint64_t m_sceneAmbientFrame = ~0ull;
-    // How much it is night for the grading (tone map, bloom, night glow): the sun's light on flat ground, but no more
-    // than the game's ambient says (at dawn its light is still level and off while its world has brightened).
-    float NightAmount() const;
+    // How much it is night for the grading (tone map, bloom, night glow): by the sun's eased height (UpdateSunClock),
+    // from ~2 degrees under the horizon to ~14; without a sun (indoors) the game's light and ambient, as before.
+    float NightAmount() const { return m_nightAmount; }
+    float NightByLight() const;
     void SceneFog(float colour[4], float params[4]) const;
     void RenderStateFog(float colour[4], float params[4]) const;
     float m_terrainSun[8] = {};                  // ... the directional light it takes: colour, direction

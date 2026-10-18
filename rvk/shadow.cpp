@@ -1468,7 +1468,8 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     // The sun's true direction (FrameLights sunTrue), kept: frame lights written before this frame's sun is seen
     // read it (the cloud layer's: with the shadow light's direction - the moon's, above the horizon - it took night for
     // day and its clouds went dark).
-    if (m_sunLuminance > 0.0f) std::memcpy(m_trueSunDir, m_sunDir, sizeof(m_trueSunDir));
+    // (Eased over real time, with the dusk's phases from its height: sky.cpp UpdateSunClock.)
+    UpdateSunClock();
     // With the sun down, the moon's light (night.cpp) - the map drawn from it. The valley mist (mist.cpp).
     UpdateMoon();
     UpdateMist();
@@ -1478,7 +1479,9 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     // the frame's sun for our effects - clouds, leaves, air - fading in from the horizon: at dawn and dusk the game
     // lights its world in gold, and with the sun off ours stayed in the night's colours (user, 2026-10-13).
     const bool lowSun = !haveSun && m_sunLuminance > 0.0f && m_sunDir[1] < 0.0f;
-    const float lowFade = lowSun ? std::clamp(-m_sunDir[1] / 0.02f, 0.0f, 1.0f) : 0.0f;
+    // (Over the last ~3 degrees, smoothly: over ~1 its light went out at once while the game's still lit its world.)
+    const float lowT = lowSun ? std::clamp(-m_sunDir[1] / 0.05f, 0.0f, 1.0f) : 0.0f;
+    const float lowFade = lowT * lowT * (3.0f - 2.0f * lowT);
     const bool moon = !haveSun && !lowSun && MoonOn();
     const float* lightDir = haveSun || lowSun ? m_sunDir : m_moonDir;
     m_shadowValid = false;
@@ -1704,7 +1707,7 @@ void Device::FinishShadowFrame()
     }
     // Daylight for point shadows: the sun's brightness on flat ground, smoothed so a frame without it doesn't pop.
     float daylight = m_sunLuminance * std::max(0.0f, -m_sunDir[1]);
-    m_daylight += (daylight - m_daylight) * 0.1f;
+    m_daylight += (daylight - m_daylight) * (1.0f - std::exp(-m_frameDt / 0.3f));
     m_casters.clear();
     m_shadowItems.clear();
     m_animatedItems.clear();

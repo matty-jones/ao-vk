@@ -918,14 +918,29 @@ void ThreadedDevice::SetSunBleed(float s)
     Enqueue([this, s](const uint8_t*) { m_device.SetSunBleed(s); });
 }
 
-void ThreadedDevice::SetTwilight(float twilight, float glow)
+void ThreadedDevice::SetTwilight(float twilight, float glow, float blueHour)
 {
-    Enqueue([this, twilight, glow](const uint8_t*) { m_device.SetTwilight(twilight, glow); });
+    Enqueue([this, twilight, glow, blueHour](const uint8_t*) { m_device.SetTwilight(twilight, glow, blueHour); });
 }
 
 void ThreadedDevice::SetMornHaze(float s)
 {
     Enqueue([this, s](const uint8_t*) { m_device.SetMornHaze(s); });
+}
+
+void ThreadedDevice::SetDuskRays(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetDuskRays(s); });
+}
+
+void ThreadedDevice::SetStarFade(bool on)
+{
+    Enqueue([this, on](const uint8_t*) { m_device.SetStarFade(on); });
+}
+
+void ThreadedDevice::SetAfterglow(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetAfterglow(s); });
 }
 
 void ThreadedDevice::SetDawnLight(float s)

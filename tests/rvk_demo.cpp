@@ -1203,6 +1203,11 @@ bool g_grassBenchLamp = false;    // --grass-bench-lamp: a lamp just over the gr
 bool g_grassBenchNight = false;   // --grass-bench-night: a dim lightmap and ambient, a faint bluish moon
 float g_sunDir[3] = {}, g_sunColour[3] = {};   // --sun-dir X Y Z, --sun-colour R G B: the water scenes' and the grass
 bool g_sunDirSet = false, g_sunColourSet = false;   // bench's sun
+// --sun-sweep A B N (the water scenes): the sun's elevation from A to B degrees over the run (its azimuth --sun-dir's,
+// else ahead of the camera), a shot sweep_NNN.bmp at each of N steps - tools/sun-sweep.py makes them a contact sheet
+// and looks for jumps between them (docs/dusk-plan.md). Below the horizon the light points up, as the game's.
+float g_sweepFrom = 0.0f, g_sweepTo = 0.0f;
+int g_sweepSteps = 0, g_sweepHold = 6;
 bool g_grassBenchSteep = false;   // --grass-bench-steep: the bench's hills steep (slopes up to ~56 degrees)
 int g_grassBenchLoading = 0;      // --grass-bench-loading N: the ground's texture a plain green stand-in until frame N
 bool g_grassBenchLoadingNull = false;   // --grass-bench-loading-null: ... drawn untextured instead
@@ -2140,7 +2145,8 @@ double g_skyTime = -1.0;          // --sky-time T: the sky weather's clock (seco
 float g_moonLight = 1.0f;         // --moon-light X: RVK_MoonLight
 float g_nightDark = 1.0f;         // --night-dark X: RVK_NightDark
 bool g_atmos = true;              // --atmos 0|1: RVK_Atmos
-float g_twilight = 0.5f, g_skyGlow = 1.0f;   // --twilight T G: RVK_Twilight, RVK_SkyGlow
+float g_twilight = 0.85f, g_skyGlow = 1.0f;   // --twilight T G: RVK_Twilight, RVK_SkyGlow
+float g_duskRays = 1.0f;                      // --dusk-rays X: RVK_DuskRays
 float g_dawnLight = 1.0f;         // --dawn-light X: RVK_DawnLight
 int g_textureFlood = 0;                         // --texture-flood: textures alive before the shadow test's label
 float g_mist = 1.0f;              // --mist X: RVK_Mist
@@ -2448,12 +2454,38 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
     if (g_waterNoPrepass)
         dev.SetDepthPrepass(false);
     const uint32_t sky = g_waterNight ? 0xFF101828u : 0xFF8FB0CCu;
+    if (g_sweepSteps > 0)
+        frames = g_sweepSteps * g_sweepHold;
     for (int frame = 0; frame < frames; ++frame) {
-        if (frame == frames - 1)
+        float sweepDir[3] = {}, sweepDim = 1.0f;
+        uint32_t skyNow = sky;
+        if (g_sweepSteps > 0) {
+            const int step = frame / g_sweepHold;
+            const float t = g_sweepSteps > 1 ? float(frame) / float(frames - 1) : 0.0f;
+            const float e = (g_sweepFrom + (g_sweepTo - g_sweepFrom) * t) * kPi / 180.0f;
+            float az[2] = {0.35f, 0.75f};
+            if (g_sunDirSet) { az[0] = g_sunDir[0]; az[1] = g_sunDir[2]; }
+            const float al = std::max(std::sqrt(az[0] * az[0] + az[1] * az[1]), 1e-4f);
+            sweepDir[0] = std::cos(e) * az[0] / al;
+            sweepDir[1] = -std::sin(e);
+            sweepDir[2] = std::cos(e) * az[1] / al;
+            // (A stand-in for the game's own dusk: its sky and fog darkening from ~6 degrees up to ~15 under, its
+            // light going out at the horizon. The game's real curve: the dusk log.)
+            const float hs = std::sin(e), k = std::clamp((hs + 0.26f) / 0.36f, 0.0f, 1.0f);
+            const float sky01 = 0.12f + 0.88f * k * k * (3.0f - 2.0f * k);
+            sweepDim = std::clamp(hs / 0.05f, 0.0f, 1.0f);
+            const uint32_t r = uint32_t(0x8F * sky01), g = uint32_t(0xB0 * sky01), b = uint32_t(0xCC * std::sqrt(sky01));
+            skyNow = 0xFF000000u | r << 16 | g << 8 | b;
+            if (frame % g_sweepHold == g_sweepHold - 1) {
+                char name[32];
+                std::snprintf(name, sizeof(name), "sweep_%03d.bmp", step);
+                dev.RequestScreenshot(name);
+            }
+        } else if (frame == frames - 1)
             dev.RequestScreenshot(shot);
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
-        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, sky, 1.0f);
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, skyNow, 1.0f);
         // Standing on the shore (the eye 1.8 above the ground there, or --water-height above the water), looking out.
         const float ex = coast ? 2.0f : 0.0f, ez = g_waterZ > -1e5f ? g_waterZ : coast ? 22.0f : -25.0f;
         const float eyeY = g_waterHeight >= 0.0f ? g_waterHeight : std::max(height(ex, ez), 0.0f) + 1.8f;
@@ -2479,7 +2511,7 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         dev.SetRenderState(RS_CULLMODE, CULL_NONE);
         dev.SetRenderState(RS_ALPHATESTENABLE, 0);
         dev.SetRenderState(RS_FOGENABLE, 1);
-        dev.SetRenderState(RS_FOGCOLOR, sky);
+        dev.SetRenderState(RS_FOGCOLOR, skyNow);
         dev.SetRenderState(RS_FOGTABLEMODE, FOG_LINEAR);
         dev.SetRenderState(RS_FOGSTART, FloatBits(coast ? 200.0f : 120.0f));
         dev.SetRenderState(RS_FOGEND, FloatBits(coast ? 1400.0f : 600.0f));
@@ -2490,7 +2522,11 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         sun.diffuse = g_waterNight ? Color{0.1f, 0.12f, 0.2f, 1} : Color{1.0f, 0.93f, 0.8f, 1};
         sun.direction = {0.35f, -0.55f, 0.75f};             // the sun ahead of the camera, low: a glint on the water
         if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};
+        if (g_sweepSteps > 0) sun.direction = {sweepDir[0], sweepDir[1], sweepDir[2]};
         if (g_sunColourSet) sun.diffuse = {g_sunColour[0], g_sunColour[1], g_sunColour[2], 1};
+        if (g_sweepSteps > 0)
+            sun.diffuse = {sun.diffuse.r * std::max(sweepDim, 0.15f), sun.diffuse.g * std::max(sweepDim, 0.2f),
+                           sun.diffuse.b * std::max(sweepDim, 0.3f), 1};
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         if (g_waterLamp) {
@@ -3874,6 +3910,12 @@ int main(int argc, char** argv)
         else if (a == "--clouds-full") g_cloudsHalf = false;
         else if (a == "--cloud-puffs") g_cloudLayer = false;
         else if (a == "--sun-dir" && i + 3 < argc) { for (float& x : g_sunDir) x = float(std::atof(argv[++i])); g_sunDirSet = true; }
+        else if (a == "--sun-sweep" && i + 3 < argc) {
+            g_sweepFrom = float(std::atof(argv[++i]));
+            g_sweepTo = float(std::atof(argv[++i]));
+            g_sweepSteps = std::atoi(argv[++i]);
+        }
+        else if (a == "--sweep-hold" && i + 1 < argc) g_sweepHold = std::max(std::atoi(argv[++i]), 1);
         else if (a == "--sun-colour" && i + 3 < argc) { for (float& x : g_sunColour) x = float(std::atof(argv[++i])); g_sunColourSet = true; }
         else if (a == "--cloud-cover" && i + 1 < argc) g_cloudCover = float(std::atof(argv[++i]));
         else if (a == "--cloud-thick" && i + 1 < argc) g_cloudThick = float(std::atof(argv[++i]));
@@ -3980,6 +4022,7 @@ int main(int argc, char** argv)
             g_twilight = float(std::atof(argv[++i]));
             g_skyGlow = float(std::atof(argv[++i]));
         }
+        else if (a == "--dusk-rays" && i + 1 < argc) g_duskRays = float(std::atof(argv[++i]));
         else if (a == "--mist" && i + 1 < argc) g_mist = float(std::atof(argv[++i]));
         else if (a == "--water-z" && i + 1 < argc) g_waterZ = float(std::atof(argv[++i]));
         else if (a == "--water-noshadow") shadows = false;
@@ -4216,6 +4259,7 @@ int main(int argc, char** argv)
     dev.SetNightDark(g_nightDark);
     dev.SetAtmos(g_atmos);
     dev.SetTwilight(g_twilight, g_skyGlow);
+    dev.SetDuskRays(g_duskRays);
     dev.SetDawnLight(g_dawnLight);
     dev.SetMist(g_mist);
     dev.SetContactShadows(contact);

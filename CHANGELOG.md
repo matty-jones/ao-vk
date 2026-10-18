@@ -15,6 +15,18 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   these colours replace the game's sky (0.5 by default, 0 for the game's), `RVK_SkyGlow` the glow (1; 0 for none).
   Clouds and rain mute them. The distant land, the haze, the valley mist and the clouds low in the sky take on the
   same colours, so the hills fade into the sky behind them.
+- Vivid sunsets and sunrises: the horizon under the sun goes gold, then orange and red, with pink above it and a
+  violet sky overhead; after the sun has set, a red line on the horizon under a pink-purple arch. `RVK_Twilight` now
+  defaults to 0.85 and goes up to 1.5 for stronger colours. Only an overcast, storms and rain mute them now, not a
+  few clouds.
+- Blue hour: after sunset (and before sunrise) the sky deepens to blue and indigo before the night's sky takes over,
+  and the picture turns cooler with it (`RVK_BlueHour`, 1; 0 for none).
+- Clouds take the sunset's colours: gold and orange, then red and pink, lit from below for a while after the sun has
+  gone from the land, then violet (`RVK_Afterglow`, 1; 0 for the game's hues, 2 stronger). The land's shade takes the
+  sky's pink-violet tint at the same time, so the land and the sky match.
+- Stars come out slowly as the sky darkens after sunset, and fade before sunrise (`RVK_StarFade`, on).
+- Sunset rays: with the sun low, beams of its light between the hills and through the gaps in the clouds
+  (`RVK_DuskRays` under volumetric light, 1; 0 for none).
 - Morning haze: the air is thicker round sunrise, and a little round sunset (`RVK_MornHaze`, 1; 0 for none).
 - Low sun light: round sunrise and sunset the land, grass, water and everything the sun reaches turn golden to
   orange, and the shade a little cooler, instead of the game's grey light (`RVK_DawnLight`, 1; 0 for the game's
@@ -26,6 +38,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   0 for none). Before, a clear sky had no cloud at all.
 
 ### Fixed
+- Day turned to night all at once: the picture darkened and took on its night colours within a second, the land's
+  light switched to the moon's with its shadows at full strength, and the hills' shade and the low sun's warm tint
+  went out together. The change from dusk to night now follows the sun as it sinks, over several minutes of game time.
+- Under a storm the land brightened the moment night fell.
 - Replacement textures from `materials\` or texture packs whose alpha channel isn't see-through-ness (the bank's
   front plate, where it is a glow mask) showed black where that alpha was 0.
 - Free camera (Ctrl+Shift+C): things at the edges of the screen vanished when looking a different way from the game's
@@ -45,6 +61,11 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   far land into the storm's own sky. `RVK_StormDark` sets how much.
 - The suns still showed as a wide bright halo through dense cloud and storms. Their glow over the clouds
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
+
+### Diagnostics
+- With the sun near the horizon, `randy-vk.log` gets a `dusk:` line every couple of seconds (the game's light, ambient,
+  fog, sky dome and stars, and ours), and a `time:` line with the hour while `RVK_TimeOfDay` / `RVK_TimeSpeed` run
+  the clock: watch a sunset go by and see what changes when.
 
 ## 0.6.1 - 2026-10-18
 

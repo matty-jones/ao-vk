@@ -572,7 +572,7 @@ vec3 CloudSheet(vec4 tex)
     vec3 sun = SunLight(sunL) * (0.3 + 0.2 * phase) * (1.0 - 0.45 * thick) * mix(tint, vec3(dot(tint, luma)), 0.5);
     float moonPhase = min((1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * dot(dir, MoonDir()), 1.5), 8.0);
     sun += MoonLight() * (0.3 + 0.2 * moonPhase) * (1.0 - 0.45 * thick) * mix(tint, vec3(dot(tint, luma)), 0.5);
-    vec3 sky = FL.cloudSky.rgb * mix(1.0, 0.72, thick) * NightSky() * mix(1.0, 0.7, MoonShare()) * tint;
+    vec3 sky = FL.cloudSky.rgb * DuskSkyTint() * mix(1.0, 0.72, thick) * NightSky() * mix(1.0, 0.7, MoonShare()) * tint;
     vec3 S = (sun + sky + Afterglow(sunL) * 0.6 * tint) * FL.cloudTint.w * mix(0.8, 1.05, dot(tex.rgb, luma));
     // Lightning (rvk rain.cpp Lightning): the sheet lit as the cloud layer is (cloud_layer.frag FlashInCloud) - the
     // sheets sit on the game's small sky, so where this one would be at the clouds' height (~900 over the eye), by
@@ -582,7 +582,7 @@ vec3 CloudSheet(vec4 tex)
         S += vec3(0.8, 0.85, 1.0) * tint * (FL.flash.w * 1.2 * (1.0 - 0.3 * thick) / (1.0 + dot(at, at) / (1500.0 * 1500.0)));
     }
     float low = HorizonBand(dir, FL.cloudAir.w);
-    return mix(S, AirColour(FL.cloudAir.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1]), low), max(0.25, low));
+    return mix(S, AirColour(FL.cloudAir.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1], FL.sky[3]), low), max(0.25, low));
 }
 
 void main()
@@ -800,7 +800,10 @@ void main()
         if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
     }
     if (!shadeSun)
-        current.rgb *= FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) : flatShade;   // (by night the moon's: unlit, half of it)
+        // (By night the moon's: unlit, half of it - and a storm's dimming kept, as FlatShade has it by day: without,
+        // the stormy land brightened the moment the moon took over at dusk.)
+        current.rgb *= FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) * (1.0 - kCloudSunShare * FL.rainNear.y) * (1.0 - 0.5 * FL.rainNear.y)
+                                       : flatShade;
     // Sunlight through leaves: where the sun is behind a leaf (seen from the camera), its light comes through tinted
     // by the leaf, most looking into the sun; other leaves' shadows still block it. Only textures with holes around
     // this point (their coarse mip's alpha) are leaves - not walls drawn the same way.

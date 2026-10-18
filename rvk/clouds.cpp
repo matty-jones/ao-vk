@@ -999,6 +999,8 @@ void Device::DrawClouds(VkCommandBuffer cmd)
             vkCmdEndRendering(work);
             Transition(work, m_cloudHalf, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
+        m_cloudCover = clouds;                   // (the dusk rays: what of the sky the clouds cover - volume.frag)
+        m_cloudCoverFrame = m_frameNumber;
         if (skipCovered)
             ImageBarrier(work, m_depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                          VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, tests,

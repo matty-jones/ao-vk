@@ -192,9 +192,12 @@ Setting g_settings[] = {
     {"RVK_TimeOfDay",   "Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h)", "Debug", Float, -1, 27, 0.25f, -1, nullptr, 0},
     {"RVK_TimeSpeed",   "Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own)", "Debug", Float, 0, 500, 0.5f, 1, nullptr, 0},
     {"RVK_SkyVary",     "Clouds: the sky changes, clear to overcast (0: always some cloud)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
-    {"RVK_Twilight",    "Sky: dawn and dusk colours - a warm band towards the sun, the pink band opposite (0: the game's sky)", "Sky", Float, 0, 1, 0.05f, 0.5f, nullptr, 0, "RVK_Hdr"},
+    {"RVK_Twilight",    "Sky: sunrise and sunset colours - orange and red towards the sun, pink above, the pink band opposite (0: the game's sky; above 1 more vivid)", "Sky", Float, 0, 1.5f, 0.05f, 0.85f, nullptr, 0, "RVK_Hdr"},
+    {"RVK_BlueHour",    "Sky: the blue hour after sunset and before sunrise - a deep blue sky going over to the night's (0: none)", "Sky", Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyGlow",     "Sky: the glow round the sun and along the horizon under it (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyZones",    "Clouds: each zone its own skies - deserts clearer, coasts and forests cloudier (0: the same everywhere)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
+    {"RVK_Afterglow",   "Clouds: how strongly they take the sunset's colours - gold, orange, red, pink undersides after the sun has set (0: the game's hues)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
+    {"RVK_StarFade",    "Sky: the stars come out slowly as the sky darkens after sunset, and fade before sunrise (off: as the game shows them)", "Sky", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Cirrus",      "Clouds: thin high wisps, most on clear days - pink and gold round sunrise and sunset (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudDetail", "Clouds: billows and wisps (0 smooth)",                    "Sky",     Float, 0, 2, 0.1f, 2, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudHalf",   "Clouds: drawn at half resolution (much cheaper)",         "Sky",     Bool,  0, 1, 1, 1, nullptr, 0, "RVK_CloudsOn"},
@@ -251,6 +254,7 @@ Setting g_settings[] = {
     {"RVK_VolHaze", "Haze", "Effects",  Float, 0.25f, 4, 0.25f, 0.5f, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolShafts", "Shaft contrast (0 = physical)", "Effects",  Float, 0, 3, 0.25f, 1, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolRays", "Light rays through gaps in the clouds", "Effects",  Float, 0, 3, 0.25f, 1, nullptr, 0, "RVK_VolOn"},
+    {"RVK_DuskRays", "Sunset rays: beams fanning from a low sun through the clouds and over the hills (0: none)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolLand", "Haze over distant land (cool, as the air makes it)", "Effects",  Float, 0, 1, 0.05f, 0.1f, nullptr, 0},
     {"RVK_NightDark", "Night darkness (0 = the game's, 2 = dark)", "Effects",  Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_Sun", "Sun brightness (0 = the game's own sun)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
@@ -347,8 +351,8 @@ const Vanilla kVanilla[] = {
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
-    {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
-    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0},
+    {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
+    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -617,6 +621,9 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Mist")) d->SetMist(V(n));
     else if (is("RVK_MornHaze")) d->SetMornHaze(V(n));
     else if (is("RVK_DawnLight")) d->SetDawnLight(V(n));
+    else if (is("RVK_Afterglow")) d->SetAfterglow(V(n));
+    else if (is("RVK_StarFade")) d->SetStarFade(V(n) > 0.5f);
+    else if (is("RVK_DuskRays")) d->SetDuskRays(V(n));
     else if (is("RVK_GoldenHour")) d->SetGoldenHour(V(n));
     // The game's sun sprites: with RVK_GameSun, or whenever our suns are off (HDR off, RVK_Sun 0) - never no sun.
     else if (is("RVK_Sun") || is("RVK_GameSun")) {
@@ -625,7 +632,8 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     }
     else if (is("RVK_SunSize")) d->SetSunSize(V(n));
     else if (is("RVK_SunBleed")) d->SetSunBleed(V(n));
-    else if (is("RVK_Twilight") || is("RVK_SkyGlow")) d->SetTwilight(V("RVK_Twilight"), V("RVK_SkyGlow"));
+    else if (is("RVK_Twilight") || is("RVK_SkyGlow") || is("RVK_BlueHour"))
+        d->SetTwilight(V("RVK_Twilight"), V("RVK_SkyGlow"), V("RVK_BlueHour"));
     else if (is("RVK_ShadowView")) d->SetShadowView(V(n) != 0.0f);
     else if (is("RVK_AlienMap")) d->SetAlienMap(V(n) != 0.0f);
     else if (is("RVK_Occlusion")) rnative::occluder::SetHorizonCulling(V(n) != 0.0f);

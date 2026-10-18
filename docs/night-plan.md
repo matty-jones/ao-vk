@@ -1,7 +1,8 @@
 # Nights: darker, moonlit, the land matching the sky
 
 Status: planned (2026-10-13). Builds on the cloud layer and sheets (`docs/clouds-sheets-plan.md`), the grading in
-`tonemap.frag`, the sun shadows (`rvk/shadow.cpp`).
+`tonemap.frag`, the sun shadows (`rvk/shadow.cpp`). The dusk's handover to the night (the sun clock, the moon coming in
+under the horizon, the stars' fade): docs/dusk-plan.md.
 
 ## Why
 

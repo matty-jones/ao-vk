@@ -89,7 +89,9 @@ void Device::SetColorLut(uint32_t slot, uint32_t size, const uint8_t* rgba)
 }
 
 // The grading part of the tone mapping's parameters (params[8..15], tonemap.frag Grade).
-float Device::NightAmount() const
+// Night by the game's light and ambient (NightAmount without a sun: indoors): the sun's light on flat ground, but no
+// more than the game's ambient says.
+float Device::NightByLight() const
 {
     const float byLight = 1.0f - std::clamp(m_daylight / 0.35f, 0.0f, 1.0f);
     if (m_sceneAmbient < 0.0f)

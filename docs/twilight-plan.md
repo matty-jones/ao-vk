@@ -2,6 +2,8 @@
 
 Status: all steps built 2026-10-18 (staged randy31-dawn1..9): sky model and glow pass (RVK_Twilight, RVK_SkyGlow); haze, far fog, mist and low clouds in the sky's colours (SkyHorizonDelta), morning haze (RVK_MornHaze); low sun light (RVK_DawnLight: the ground's light pass tinted by where the sun reaches, not by its facing - by facing a 2 degree sun turned level desert grey); warm sun disc; golden-hour grade (RVK_GoldenHour); cirrus (RVK_Cirrus). Also storms: the air, the sky light on the land and the suns' glow dimmed under the deck. In-game tuning open.
 
+Continued in docs/dusk-plan.md: the vivid palette, the blue hour, the smooth day-to-night handover.
+
 ## Context
 
 The user's dawn dump (`C:\linux\logs\rvk-frame-022831.*`, Mutant Domain at 06:45, sky "clear") looks flat:

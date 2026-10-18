@@ -31,6 +31,14 @@ vec3 Grade(vec3 c, float far)
         vec3 split = mix(vec3(0.95, 0.98, 1.06), vec3(1.06, 1.0, 0.88), smoothstep(0.1, 0.6, dot(c, kLuma)));
         c *= mix(vec3(1.0), split, golden);
     }
+    // The blue hour (RVK_BlueHour; rvk sky.cpp FL.dusk.y): after sunset the picture cooler, its darks greyer and bluer,
+    // leading into the night's tint.
+    float blueHour = FL.dusk.y;
+    if (blueHour > 0.0) {
+        float l = dot(c, kLuma);
+        c = mix(c, c * vec3(0.9, 0.96, 1.12), 0.6 * blueHour);
+        c = mix(c, l * vec3(0.88, 0.96, 1.14), 0.3 * blueHour * (1.0 - smoothstep(0.05, 0.5, l)));
+    }
     vec3 s = sqrt(max(c, vec3(0.0)));
     s = (s - 0.5) * (P.grade.y + 0.06 * golden) + 0.5;
     c = max(s, vec3(0.0)) * max(s, vec3(0.0));
@@ -113,7 +121,7 @@ vec3 gSkyDelta = vec3(0.0);
 vec3 SkyDelta(vec3 Vv)
 {
     vec3 w = vec3(dot(FL.skyView[0].xyz, Vv), dot(FL.skyView[1].xyz, Vv), dot(FL.skyView[2].xyz, Vv));
-    return SkyHorizonDelta(w, FL.sky[0], FL.sky[1]);
+    return SkyHorizonDelta(w, FL.sky[0], FL.sky[1], FL.sky[3]);
 }
 
 vec3 Mist(vec3 c, vec3 V, float dist, float phase)

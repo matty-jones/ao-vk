@@ -68,5 +68,9 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 dawn[2];               // a low sun's light (rvk sky.cpp, RVK_DawnLight): [0] the sun's warm tint (rgb, w how
                                 // much), [1] the sky's cool one in the shade (rgb) - 1 1 1 by day -, w the golden
                                 // hour's grade (tonemap.frag Grade, RVK_GoldenHour)
+    vec4 phase;                 // the dusk's phases (rvk sky.cpp UpdateSunClock), each 0..1: x the golden hour, y the
+                                // afterglow, z the blue hour, w night - by the sun's eased height
+    vec4 dusk;                  // x: RVK_Afterglow (cloud_light.glsl DuskVivid), y the blue hour's grade (tonemap.frag
+                                // Grade; rvk sky.cpp), z w the sun on the world camera's screen (NDC; 1e3 behind it)
     Light lights[64];
 } FL;

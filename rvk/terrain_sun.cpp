@@ -110,7 +110,10 @@ void Device::UpdateTerrainSun(VkCommandBuffer cmd)
     // (user, 2026-10-14); a high sun is seldom behind a hill. None once it's down: no sunlight to take - by night
     // the ground's lightmap would only darken.)
     const float t = std::clamp((to[1] - 0.6f) / (0.85f - 0.6f), 0.0f, 1.0f);
-    m_tsWeight = m_hillShade ? (1.0f - t * t * (3.0f - 2.0f * t)) * std::clamp((to[1] + 0.03f) / 0.03f, 0.0f, 1.0f) : 0.0f;
+    // (Going out over the sun's last ~3 degrees, as its light: over the ~2 under the horizon the hills' shade still lay
+    // on the land as the moon took over, and went at once.)
+    const float down = std::clamp((to[1] + 0.005f) / 0.055f, 0.0f, 1.0f);
+    m_tsWeight = m_hillShade ? (1.0f - t * t * (3.0f - 2.0f * t)) * down * down * (3.0f - 2.0f * down) : 0.0f;
     if (m_tsWeight <= 0.0f && !fog)
         return;
     const float flat = std::sqrt(to[0] * to[0] + to[2] * to[2]);

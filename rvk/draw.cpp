@@ -412,7 +412,9 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->taa[2] = FrameNoise();                   // noise patterns move on each frame (averaged by the TAA)
     fl->taa[3] = float(m_windTimePrev);         // the wind's time last frame (plants' motion vectors)
     fl->shadowParams[0] = m_shadowValid ? 1.0f : 0.0f;
-    fl->shadowParams[1] = m_shadowValid && m_shadowIsMoon ? 0.8f * m_shadowStrength : m_shadowStrength;
+    // (The moon's shadows come in with its light: at full strength from the first frame they switched on at dusk.)
+    fl->shadowParams[1] = m_shadowValid && m_shadowIsMoon ? 0.8f * m_shadowStrength * std::min(2.0f * m_moonFade, 1.0f)
+                                                          : m_shadowStrength;
     // Fading out as the light nears the horizon (full from ~10 degrees up, none at the ~3 degrees where the map stops):
     // that low, the shadows of things on a ridge lie hundreds of metres down the slopes facing the light, in the far
     // cascade's coarse texels - dark blocks on the mountains, switching off at once at the cut (user, 2026-10-13).
@@ -439,11 +441,26 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     for (int i = 0; i < 3; ++i) fl->moon[i] = m_moonColour[i];
     fl->moon[3] = m_shadowValid && m_shadowIsMoon ? 1.0f : 0.0f;
     {
-        // (This frame's sun once seen, else the last frame's - never the shadow light's: by night that's the moon.)
-        const float* d = m_sunLuminance > 0.0f ? m_sunDir : m_trueSunDir;
+        // (The sun's clock's, eased - never the shadow light's: by night that's the moon.)
+        const float* d = m_trueSunDir;
         const float l = std::max(std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]), 1e-6f);
         for (int i = 0; i < 3; ++i) fl->sunTrue[i] = -d[i] / l;
         fl->sunTrue[3] = night;
+    }
+    std::memcpy(fl->phase, m_sunPhase, sizeof(fl->phase));   // (the dusk's phases: sky.cpp UpdateSunClock)
+    fl->dusk[0] = std::clamp(m_afterglow, 0.0f, 2.0f);
+    fl->dusk[1] = m_hdr ? m_blueGrade : 0.0f;
+    // (The sun on the world camera's screen, NDC - the sunset rays fan from it: volume.frag. Behind the camera: far off.)
+    fl->dusk[2] = fl->dusk[3] = 1e3f;
+    if (m_aoProjValid) {
+        const d3d::Matrix vp = MulMatrix(m_aoView, m_aoProj);
+        float c[4];
+        for (int k = 0; k < 4; ++k)
+            c[k] = -m_trueSunDir[0] * vp.m[0][k] - m_trueSunDir[1] * vp.m[1][k] - m_trueSunDir[2] * vp.m[2][k];
+        if (c[3] > 1e-4f) {
+            fl->dusk[2] = std::clamp(c[0] / c[3], -1e3f, 1e3f);
+            fl->dusk[3] = std::clamp(c[1] / c[3], -1e3f, 1e3f);
+        }
     }
     {
         float ts[8];
@@ -2462,6 +2479,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         return;                                  // replaced by a volume (DrawClouds)
     if (m_drawIsSkyMesh && !m_external && !m_drawGpu)
         NoteSkyMesh(fvf, vertices, vertexCount);   // the moons (night.cpp)
+    if (VisualKind(m_drawVisualKind) == VisualKind::Sky && m_scenePhase && !m_external)
+        NoteDuskSky(primitive, vertexCount);     // (the dusk log: sky.cpp)
     // The sun's disc (sun.cpp): where the game draws its sun's ray sprites - in the sky, before its cloud sheets.
     if (VisualKind(m_drawVisualKind) == VisualKind::Sky && std::strncmp(m_drawVisualName, "VisualSunRays_t", 15) == 0 &&
         m_scenePhase && !m_external) {
@@ -2483,7 +2502,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         if (m_sceneAmbientFrame != m_frameNumber) {   // (once a frame: eased - a zone's change shouldn't pop)
             const uint32_t a = m_rs[d3d::RS_AMBIENT];
             const float luma = (0.3f * float((a >> 16) & 0xFF) + 0.59f * float((a >> 8) & 0xFF) + 0.11f * float(a & 0xFF)) / 255.0f;
-            m_sceneAmbient = m_sceneAmbient < 0.0f ? luma : m_sceneAmbient + (luma - m_sceneAmbient) * 0.05f;
+            m_sceneAmbient = m_sceneAmbient < 0.0f ? luma : m_sceneAmbient + (luma - m_sceneAmbient) * (1.0f - std::exp(-m_frameDt / 0.5f));
             m_sceneAmbientFrame = m_frameNumber;
         }
     }
@@ -2898,8 +2917,12 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     c.eyePos[3] = 1.0f;
     c.eyeDir[3] = 0.0f;
     c.vtx[0] = fvf;
-    std::memcpy(&c.vtx[1], &m_drawColorScale, 4);
-    if (m_drawColorScale == 1.0f) c.vtx[1] = 0;
+    // (The game's stars - the sky's point lists, added - faded in as the sky darkens: sky.cpp UpdateSunClock.)
+    float colorScale = m_drawColorScale;
+    if (primitive == d3d::PointList && VisualKind(m_drawVisualKind) == VisualKind::Sky && m_scenePhase && !m_external)
+        colorScale *= std::max(m_starsShown, 1e-6f);   // (0's bits mean "as drawn")
+    std::memcpy(&c.vtx[1], &colorScale, 4);
+    if (colorScale == 1.0f) c.vtx[1] = 0;
     // Reflectivity (screen-space reflections, the scene's attachment 2 G): water; glossy (specular) surfaces; and a
     // wet look on surfaces facing up, which the shader scales by how much the surface faces up.
     float reflectivity = 0.0f, wet = 0.0f;

@@ -117,14 +117,15 @@ void Device::UpdateMoon()
             Normalize(m_moonPos);
         }
     }
-    // Night by the sun's height: none with it 3 degrees up (where its shadows end), full 6 degrees down. The moon's
-    // light by its own height: none at the horizon, full from ~27 degrees.
-    const float sunUp = m_sunLuminance > 0.0f ? -m_sunDir[1] : -1.0f;
-    const float night = 1.0f - Smooth(-0.10f, 0.05f, sunUp);
+    // Night by the sun's eased height (sky.cpp UpdateSunClock): none until it is ~2 degrees under the horizon - our
+    // sun's light is gone at the horizon, so the two never overlap and the shadow map turns to the moon with both out
+    // -, full ~8 degrees down. The moon's light by its own height: none at the horizon, full from ~27 degrees.
+    const float sunUp = SunUp();
+    const float night = 1.0f - Smooth(-0.14f, -0.035f, sunUp);
     const float target2 = have && m_moonLight > 0.0f ? night * Smooth(0.05f, 0.45f, m_moonPos[1]) : 0.0f;
     if (m_moonFade > 0.0f || target2 > 0.0f)
         m_constantsDirty = true;                 // (the draws' lights: MoonLightFor)
-    m_moonFade += (target2 - m_moonFade) * 0.05f;
+    m_moonFade += (target2 - m_moonFade) * (1.0f - std::exp(-m_frameDt / 1.5f));
     if (m_moonFade < 0.002f && target2 == 0.0f) m_moonFade = 0.0f;
     if ((m_frameNumber % 600) == 30 || wasOn != MoonOn())
         Log("moon: %s, towards (%.2f %.2f %.2f), night %.2f, light %.2f (sun up %.2f, sky %s)",
