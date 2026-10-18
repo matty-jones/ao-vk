@@ -1495,6 +1495,39 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     static std::vector<std::vector<uint32_t>> fallTris;
     meshOut.resize(vertexCount);
     BuildFallVertices(vertices, vertexCount, steep, meshOut.data(), shore, fallTris);
+    // Frame dump: the water mesh as it came (<dump>-water.bin: vertex count, index count, the vertices, the 16-bit
+    // indices - rvk_demo --water-mesh replays it) and what each fall became.
+    if (m_dumpFile) {
+        std::string bin = m_dumpPath;
+        if (bin.size() > 4 && bin.compare(bin.size() - 4, 4, ".txt") == 0) bin.resize(bin.size() - 4);
+        bin += "-water.bin";
+        if (FILE* w = std::fopen(bin.c_str(), "wb")) {
+            std::fwrite(&vertexCount, 4, 1, w);
+            std::fwrite(&indexCount, 4, 1, w);
+            std::fwrite(vertices, sizeof(WaterVertex), vertexCount, w);
+            std::fwrite(indices, 2, indexCount, w);
+            std::fclose(w);
+        }
+        std::fprintf(m_dumpFile, "# water: %u vertices, %u triangles (%zu steep, %zu as shore steps), %zu falls -> %s\n",
+                     vertexCount, indexCount / 3, steep.size() / 3, shore.size() / 3, fallTris.size(), bin.c_str());
+        for (const std::vector<uint32_t>& tris : fallTris) {
+            float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f}, cLo = 1e30f, cHi = -1e30f, aHi = 0.0f;
+            for (uint32_t t : tris)
+                for (int k = 0; k < 3; ++k) {
+                    const MeshVertexOut& o = meshOut[steep[t + k]];
+                    for (int c = 0; c < 3; ++c) { lo[c] = std::min(lo[c], o.pos[c]); hi[c] = std::max(hi[c], o.pos[c]); }
+                    cLo = std::min(cLo, o.across); cHi = std::max(cHi, o.across); aHi = std::max(aHi, o.along);
+                }
+            const uint64_t key = FallKey(meshOut.data(), steep, tris);
+            auto it = std::find_if(m_waterFalls.begin(), m_waterFalls.end(), [&](const WaterFall& w) { return w.key == key; });
+            std::fprintf(m_dumpFile, "#   fall %016llx: %zu triangles, box (%.1f %.1f %.1f)..(%.1f %.1f %.1f), across %.2f..%.2f, "
+                         "drop %.2f, sheet %s\n", (unsigned long long)key, tris.size(), lo[0], lo[1], lo[2], hi[0], hi[1],
+                         hi[2], cLo, cHi, aHi,
+                         it == m_waterFalls.end() ? "not built yet" :
+                         it->indices.empty() ? "EMPTY (the fall's triangles not drawn)" :
+                         (std::to_string(it->indices.size() / 3) + " triangles").c_str());
+        }
+    }
     // (Keys, not pointers, while m_waterFalls changes: adding or dropping a fall moves the others.)
     std::vector<uint64_t> sheetKeys;
     for (const std::vector<uint32_t>& tris : fallTris) {
