@@ -6,6 +6,7 @@
 #define FL_BINDING 15
 #include "frame_lights.glsl"                    // (the lightning's flash: FL.flash)
 #include "dither.glsl"                         // (8-bit output: no bands in smooth skies)
+#include "sky_common.glsl"                     // (the sky's twilight: the haze, far fog and mist in its colours)
 layout(set = 0, binding = 16) uniform sampler2D rainNear;   // the rain (rvk rain.cpp m_rainNear: premultiplied; FL.rainNear.x)
 layout(location = 0) out vec4 outColor;
 
@@ -23,10 +24,17 @@ vec3 Grade(vec3 c, float far)
     float nightTint = P.grade2.x * P.grade2.y;
     float darks = 1.0 - smoothstep(0.08, 0.45, dot(c, kLuma));
     c = mix(c, dot(c, kLuma) * vec3(0.78, 0.9, 1.18), min(nightTint * mix(0.3, 1.2, darks), 1.0));
+    // The golden hour (RVK_GoldenHour; rvk sky.cpp FL.dawn[1].w): round sunrise and sunset the light warmer and the
+    // shade a little cooler - split by brightness -, a touch more contrast and colour.
+    float golden = FL.dawn[1].w;
+    if (golden > 0.0) {
+        vec3 split = mix(vec3(0.95, 0.98, 1.06), vec3(1.06, 1.0, 0.88), smoothstep(0.1, 0.6, dot(c, kLuma)));
+        c *= mix(vec3(1.0), split, golden);
+    }
     vec3 s = sqrt(max(c, vec3(0.0)));
-    s = (s - 0.5) * P.grade.y + 0.5;
+    s = (s - 0.5) * (P.grade.y + 0.06 * golden) + 0.5;
     c = max(s, vec3(0.0)) * max(s, vec3(0.0));
-    c = mix(vec3(dot(c, kLuma)), c, P.grade.x);
+    c = mix(vec3(dot(c, kLuma)), c, P.grade.x + 0.05 * golden);
     c = clamp(c, 0.0, 1.0);
     if (P.grade.w > 0.0) {
         vec3 size = vec3(textureSize(lutDay, 0));
@@ -99,6 +107,15 @@ float DustDepth(vec2 uv, float z)
 
 // The valley mist (rvk mist.cpp) along the view ray V (view space, length dist): a layer up to P.fog.z over the eye,
 // fading over ~8 units above. phase: the air's glow towards the sun (Air).
+// The twilight's difference to the game's fog colour along the horizon towards a view-space direction
+// (sky_common.glsl SkyHorizonDelta): the game's far fog, the haze and the mist in the sky's colours.
+vec3 gSkyDelta = vec3(0.0);
+vec3 SkyDelta(vec3 Vv)
+{
+    vec3 w = vec3(dot(FL.skyView[0].xyz, Vv), dot(FL.skyView[1].xyz, Vv), dot(FL.skyView[2].xyz, Vv));
+    return SkyHorizonDelta(w, FL.sky[0], FL.sky[1]);
+}
+
 vec3 Mist(vec3 c, vec3 V, float dist, float phase)
 {
     // Its depth along the ray: the density's integral over the heights the ray crosses, over how fast it climbs.
@@ -118,7 +135,7 @@ vec3 Mist(vec3 c, vec3 V, float dist, float phase)
         tauM *= P.fog.w;
         float m = 1.0 - exp(-tauM);
         float l = dot(P.haze.rgb, vec3(0.3, 0.59, 0.11));
-        vec3 mist = mix(P.haze.rgb, vec3(l), 0.45) * 1.2 + P.air3.rgb * (phase * P.air1.w * 0.5);
+        vec3 mist = mix(P.haze.rgb, vec3(l), 0.45) * 1.2 + P.air3.rgb * (phase * P.air1.w * 0.5) + gSkyDelta;
         c = mix(c, mist, m);
     }
     return c;
@@ -140,7 +157,7 @@ vec3 Air(vec3 c, vec3 V, float dist, float phase)
     float f = abs(x) < 1e-3 ? 1.0 : (1.0 - exp(-x)) / x;
     float tau = P.air0.z * dist * clamp(f, 0.0, 4.0);
     vec3 through = exp(-tau * vec3(0.8, 1.0, 1.3));
-    vec3 scattered = (1.0 - through) * P.haze.rgb + (1.0 - exp(-tau)) * P.air3.rgb * (phase * P.air1.w);
+    vec3 scattered = (1.0 - through) * (P.haze.rgb + gSkyDelta) + (1.0 - exp(-tau)) * P.air3.rgb * (phase * P.air1.w);
     return c * through + scattered;
 }
 
@@ -186,6 +203,15 @@ void main()
         float z = P.proj.y / min(d - P.proj.x, -1e-9);
         float zFar = P.proj.x > 1.000001 ? P.proj.y / (1.0 - P.proj.x) : 3000.0;
         far = clamp(z / zFar, 0.0, 1.0);
+        // The game's far fog in the sky's twilight colours (SkyDelta): as much as the game fogged the land, the
+        // difference the twilight makes to its colour there - the land fades into the sky drawn behind it.
+        if (P.fog.y > P.fog.x) {
+            vec3 Vd;
+            float dd, ph;
+            AirRay(z, Vd, dd, ph);
+            gSkyDelta = SkyDelta(Vd / max(dd, 1e-4));
+            c = max(c + gSkyDelta * clamp((z - P.fog.x) / (P.fog.y - P.fog.x), 0.0, 1.0), vec3(0.0));
+        }
         // The haze over the distant land (RVK_VolLand): the air between the eye and the land, thickening from the
         // eye out - each ridge farther paler and bluer - and giving way to the game's own fog where that starts
         // (its fog end the far land's colour: no seam with the sky).
@@ -210,6 +236,7 @@ void main()
         vec3 V;
         float dist, phase;
         AirRay(P.fog.y, V, dist, phase);
+        gSkyDelta = SkyDelta(V / max(dist, 1e-4));
         c = mix(c, Mist(c, V, dist, phase), min(P.haze.w * 2.5, 1.0));
     }
     // A sand or ash storm (rvk wind.cpp): the air thick with sand to the horizon - the sky wholly, the land through a

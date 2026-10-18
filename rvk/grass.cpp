@@ -253,20 +253,12 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
         m_terrainAmbient[1] = amb[1] * m_material.ambient.g;
         m_terrainAmbient[2] = amb[2] * m_material.ambient.b;
         m_terrainAmbient[3] = 1.0f;
-        // ... and its directional light: the scene keeps it off the ground under the light override (draw.cpp: the
-        // lightmap has the sun baked in), otherwise D3D lights the ground with it as with any light.
+        // ... but not its directional light: the lightmap has the sun baked in (the scene keeps the light off the
+        // ground under the light override, draw.cpp, for that reason). Taken from the light pass, the grass went from
+        // dark to bright as the view turned: the game gives each draw only its nearest few lights, the sun last, and
+        // with lamps about (another area's, hundreds of units off) the ground's pass went without it one frame and had
+        // it the next. The user liked the grass without it - with it, bright in a storm (2026-10-18).
         std::memset(m_terrainSun, 0, sizeof(m_terrainSun));
-        if (!(m_pixelLighting && m_lightOverride))
-            for (const LightSlot& slot : m_lights)
-                if (slot.enabled && slot.light.type == d3d::LIGHT_DIRECTIONAL) {
-                    const float k = LightScale(slot.light);
-                    m_terrainSun[0] += slot.light.diffuse.r * k;
-                    m_terrainSun[1] += slot.light.diffuse.g * k;
-                    m_terrainSun[2] += slot.light.diffuse.b * k;
-                    m_terrainSun[4] = slot.light.direction.x;
-                    m_terrainSun[5] = slot.light.direction.y;
-                    m_terrainSun[6] = slot.light.direction.z;
-                }
         if (!tex || !tex->m_thumbValid)
             return;                              // no lightmap to read (an unsupported format): the shader's fallback
         tex->m_lightmap = true;
@@ -630,6 +622,28 @@ void Device::CaptureCover(uint32_t primitive, const FvfLayout& layout, const voi
     };
     // The cells it can reach: those of the new tiles.
     const int32_t lx = gx0 * kGroundN, lz = gz0 * kGroundN, hx = (gx1 + 1) * kGroundN - 1, hz = (gz1 + 1) * kGroundN - 1;
+    // A surface at height y over cell (cx, cz) of a new tile, kept among the cell's lowest few.
+    auto addCover = [&](int32_t cx, int32_t cz, float y) {
+        const int32_t tx = FloorDiv(cx, kGroundN), tz = FloorDiv(cz, kGroundN);
+        GrassTile* tile = grid[size_t(tz - gz0) * gw + (tx - gx0)];
+        if (!tile)
+            return;                              // not a new tile (it has this object already)
+        float* layers = tile->cover[(cz - tz * kGroundN) * kGroundN + (cx - tx * kGroundN)];
+        int slot = GrassTile::kCoverLayers;
+        for (int k = 0; k < GrassTile::kCoverLayers; ++k) {
+            if (std::fabs(layers[k] - y) < 0.05f) { slot = -1; break; }   // (that surface already)
+            if (y < layers[k]) { slot = k; break; }
+        }
+        if (slot < 0 || slot >= GrassTile::kCoverLayers)
+            return;
+        for (int k = GrassTile::kCoverLayers - 1; k > slot; --k)
+            layers[k] = layers[k - 1];
+        layers[slot] = y;
+        if (tile->lastChange != m_frameNumber) {   // its blades rebuilt without the covered cells
+            ++tile->version;
+            tile->lastChange = m_frameNumber;
+        }
+    };
     const uint32_t triangles = indices ? indexCount / 3 : vertexCount / 3;
     for (uint32_t t = 0; t < triangles; ++t) {
         uint32_t i0 = indices ? indices[t * 3] : t * 3, i1 = indices ? indices[t * 3 + 1] : t * 3 + 1,
@@ -653,34 +667,82 @@ void Device::CaptureCover(uint32_t primitive, const FvfLayout& layout, const voi
         const int32_t cx1 = std::min(int32_t(std::floor(std::max({a[0], b[0], c[0]}) / kGroundCell)), hx);
         const int32_t cz0 = std::max(int32_t(std::floor(std::min({a[2], b[2], c[2]}) / kGroundCell)), lz);
         const int32_t cz1 = std::min(int32_t(std::floor(std::max({a[2], b[2], c[2]}) / kGroundCell)), hz);
-        for (int32_t cz = cz0; cz <= cz1; ++cz) {
-            const int32_t tz = FloorDiv(cz, kGroundN);
+        for (int32_t cz = cz0; cz <= cz1; ++cz)
             for (int32_t cx = cx0; cx <= cx1; ++cx) {
-                const int32_t tx = FloorDiv(cx, kGroundN);
-                GrassTile* tile = grid[size_t(tz - gz0) * gw + (tx - gx0)];
-                if (!tile)
-                    continue;                    // not a new tile (it has this object already)
                 const float px = (float(cx) + 0.5f) * kGroundCell, pz = (float(cz) + 0.5f) * kGroundCell;
                 const float l0 = ((b[2] - c[2]) * (px - c[0]) + (c[0] - b[0]) * (pz - c[2])) / det;
                 const float l1 = ((c[2] - a[2]) * (px - c[0]) + (a[0] - c[0]) * (pz - c[2])) / det;
                 const float l2 = 1.0f - l0 - l1;
                 if (l0 < -0.01f || l1 < -0.01f || l2 < -0.01f)
                     continue;
-                const float y = l0 * a[1] + l1 * b[1] + l2 * c[1];
-                float* layers = tile->cover[(cz - tz * kGroundN) * kGroundN + (cx - tx * kGroundN)];
-                int slot = GrassTile::kCoverLayers;
-                for (int k = 0; k < GrassTile::kCoverLayers; ++k) {
-                    if (std::fabs(layers[k] - y) < 0.05f) { slot = -1; break; }   // (that surface already)
-                    if (y < layers[k]) { slot = k; break; }
-                }
-                if (slot < 0 || slot >= GrassTile::kCoverLayers)
+                addCover(cx, cz, l0 * a[1] + l1 * b[1] + l2 * c[1]);
+            }
+    }
+    // Its footprint: an object standing in the ground - a tree's trunk and roots, a rock - has no surface one could
+    // stand on there, only steep sides, and the grass grew up through it (user, 2026-10-18). Cut at a little over the
+    // ground at its middle, its sides make the outline of what stands there; every cell inside (even-odd along each
+    // row) takes the ground's height as a surface. Only things up to kFootprintMax across: a long wall or a building
+    // cut so would take whatever its outline happened to enclose.
+    constexpr float kFootprintMax = 12.0f, kFootprintCut = 0.25f;
+    if (seen.box[2] - seen.box[0] <= kFootprintMax && seen.box[3] - seen.box[1] <= kFootprintMax) {
+        const float mx = 0.5f * (seen.box[0] + seen.box[2]), mz = 0.5f * (seen.box[1] + seen.box[3]);
+        const int32_t mcx = int32_t(std::floor(mx / kGroundCell)), mcz = int32_t(std::floor(mz / kGroundCell));
+        const GrassTile* mid = GrassTileAt(FloorDiv(mcx, kGroundN), FloorDiv(mcz, kGroundN));
+        const int mcell = mid ? (mcz - FloorDiv(mcz, kGroundN) * kGroundN) * kGroundN +
+                                    (mcx - FloorDiv(mcx, kGroundN) * kGroundN) : 0;
+        if (mid && mid->rank[mcell] != 255) {
+            const float cut = mid->y[mcell] + kFootprintCut;
+            std::vector<float>& seg = m_grassFootprint;   // x0 z0 x1 z1 per side crossing the cut
+            seg.clear();
+            for (uint32_t t = 0; t < triangles; ++t) {
+                uint32_t i0 = indices ? indices[t * 3] : t * 3, i1 = indices ? indices[t * 3 + 1] : t * 3 + 1,
+                         i2 = indices ? indices[t * 3 + 2] : t * 3 + 2;
+                if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
                     continue;
-                for (int k = GrassTile::kCoverLayers - 1; k > slot; --k)
-                    layers[k] = layers[k - 1];
-                layers[slot] = y;
-                if (tile->lastChange != m_frameNumber) {   // its blades rebuilt without the covered cells
-                    ++tile->version;
-                    tile->lastChange = m_frameNumber;
+                float v[3][3];
+                at(i0, v[0]);
+                at(i1, v[1]);
+                at(i2, v[2]);
+                float pts[4];
+                int n = 0;
+                for (int e = 0; e < 3 && n < 4; ++e) {
+                    const float* p = v[e];
+                    const float* q = v[(e + 1) % 3];
+                    if ((p[1] < cut) == (q[1] < cut))
+                        continue;
+                    const float k = (cut - p[1]) / (q[1] - p[1]);
+                    pts[n++] = p[0] + (q[0] - p[0]) * k;
+                    pts[n++] = p[2] + (q[2] - p[2]) * k;
+                }
+                if (n == 4)
+                    seg.insert(seg.end(), pts, pts + 4);
+            }
+            const int32_t fz0 = std::max(int32_t(std::floor(seen.box[1] / kGroundCell)), lz);
+            const int32_t fz1 = std::min(int32_t(std::floor(seen.box[3] / kGroundCell)), hz);
+            std::vector<float> xs;
+            for (int32_t cz = fz0; cz <= fz1 && !seg.empty(); ++cz) {
+                const float pz = (float(cz) + 0.5f) * kGroundCell;
+                xs.clear();
+                for (size_t i = 0; i + 3 < seg.size(); i += 4) {
+                    const float z0 = seg[i + 1], z1 = seg[i + 3];
+                    if ((z0 <= pz) == (z1 <= pz))
+                        continue;
+                    xs.push_back(seg[i] + (seg[i + 2] - seg[i]) * (pz - z0) / (z1 - z0));
+                }
+                if (xs.size() < 2 || (xs.size() & 1u))
+                    continue;                    // (not a closed outline on this row)
+                std::sort(xs.begin(), xs.end());
+                for (size_t i = 0; i + 1 < xs.size(); i += 2) {
+                    const int32_t c0 = std::max(int32_t(std::ceil(xs[i] / kGroundCell - 0.5f)), lx);
+                    const int32_t c1 = std::min(int32_t(std::floor(xs[i + 1] / kGroundCell - 0.5f)), hx);
+                    for (int32_t cx = c0; cx <= c1; ++cx) {
+                        const int32_t tx = FloorDiv(cx, kGroundN), tz = FloorDiv(cz, kGroundN);
+                        const GrassTile* tile = grid[size_t(tz - gz0) * gw + (tx - gx0)];
+                        if (!tile)
+                            continue;
+                        const int cell = (cz - tz * kGroundN) * kGroundN + (cx - tx * kGroundN);
+                        addCover(cx, cz, tile->rank[cell] != 255 ? tile->y[cell] : cut - kFootprintCut);
+                    }
                 }
             }
         }

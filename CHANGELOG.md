@@ -5,9 +5,46 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+### New
+- Rocks and shrubs are shown further out (`RVK_DetailRange`, 2x the game's by default; 1 for the game's own).
+  They used to vanish about 150 m away while their shadows stayed on the ground.
+- AI missions' PF map shows its rooms black on a green background (`RVK_AlienMap`, on by default). The map
+  had become black on black, so you couldn't tell which room you were in.
+- Dawn and dusk skies: a warm glow round the sun and along the horizon under it, a cooler sky overhead and a pink
+  band opposite the sun around sunrise and sunset, in place of the game's one flat colour. `RVK_Twilight` sets how far
+  these colours replace the game's sky (0.5 by default, 0 for the game's), `RVK_SkyGlow` the glow (1; 0 for none).
+  Clouds and rain mute them. The distant land, the haze, the valley mist and the clouds low in the sky take on the
+  same colours, so the hills fade into the sky behind them.
+- Morning haze: the air is thicker round sunrise, and a little round sunset (`RVK_MornHaze`, 1; 0 for none).
+- Low sun light: round sunrise and sunset the land, grass, water and everything the sun reaches turn golden to
+  orange, and the shade a little cooler, instead of the game's grey light (`RVK_DawnLight`, 1; 0 for the game's
+  colours, 2 stronger). Cloud and storms mute it.
+- The sun's disc turns golden below about 25 degrees and orange near the horizon, instead of staying white-hot.
+- Golden-hour colour grade round sunrise and sunset: warmer light, slightly cooler shade, a touch more contrast
+  (`RVK_GoldenHour` under Colour grading, 0.5; 0 for none).
+- Thin high wisps of cloud, most on clear days, that catch the light round sunrise and sunset (`RVK_Cirrus`, 1;
+  0 for none). Before, a clear sky had no cloud at all.
+
 ### Fixed
 - Replacement textures from `materials\` or texture packs whose alpha channel isn't see-through-ness (the bank's
   front plate, where it is a glow mask) showed black where that alpha was 0.
+- Free camera (Ctrl+Shift+C): things at the edges of the screen vanished when looking a different way from the game's
+  camera, and hills hid what was behind them even when flying high above.
+- The ground and its grass lit up and darkened as you turned the camera: the sun was added on top of the ground's
+  baked-in sunlight whenever only a few lamps were about. They now stay at the darker, intended level. Without pixel
+  lighting this was the case everywhere; with it, the grass still had it.
+- Ground grass stayed bright under a thunderstorm that darkened the land around it.
+- Ground grass grew up through tree trunks, roots and rocks. It now stops at their base.
+- Ambient occlusion showed through fog as dark smudges in corners, most visibly in AI missions' thick fog. It
+  now fades with the fog.
+- Distant land and valley mist glowed white towards a sun hidden behind thick cloud or a storm. The haze's
+  glow towards the sun now dims with the light the clouds let through.
+- Under a thunderstorm the land stayed lit as if under a clear sky, and the distance, trees, the fog over the
+  water and the rain mist stood pale under the dark green sky (distant trees paler still than the ground under
+  them). The sky's light on the ground, grass and everything else now dims with the storm too, and the air fades the
+  far land into the storm's own sky. `RVK_StormDark` sets how much.
+- The suns still showed as a wide bright halo through dense cloud and storms. Their glow over the clouds
+  (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ## 0.6.1 - 2026-10-18
 

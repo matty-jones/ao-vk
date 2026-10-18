@@ -696,6 +696,10 @@ void Device::LandHaze(float out[24]) const
     float fog[4], fogParams[4];
     SceneFog(fog, fogParams);
     const bool linear = fog[3] > 0.5f && uint32_t(fogParams[3]) == 3 && fogParams[1] > fogParams[0] && fogParams[1] > 1.0f;
+    if (linear) {                                // (also without the haze: the ambient occlusion fades into the fog)
+        out[4] = fogParams[0];
+        out[5] = fogParams[1];
+    }
     if (m_landHaze <= 0.0f || !linear)
         return;
     const float l = 0.3f * fog[0] + 0.59f * fog[1] + 0.11f * fog[2];
@@ -713,7 +717,21 @@ void Device::LandHaze(float out[24]) const
         const float weather = (1.0f + (0.7f + 0.7f * SkyCloudiness() - 1.0f) * vary) * (1.0f + StormSky());
         out[8] = m_aoProj.m[0][0];
         out[9] = m_aoProj.m[1][1];
-        out[10] = 0.6f / fogParams[1] * weather;
+        // The morning's haze (RVK_MornHaze): thicker round sunrise - the sun from ~6 degrees under the horizon to
+        // ~15 up -, half as much round sunset (docs/twilight-plan.md).
+        float morning = 0.0f;
+        {
+            const float l = std::max(std::sqrt(m_trueSunDir[0] * m_trueSunDir[0] + m_trueSunDir[1] * m_trueSunDir[1] +
+                                               m_trueSunDir[2] * m_trueSunDir[2]), 1e-6f);
+            const float up = -m_trueSunDir[1] / l;
+            auto smooth = [](float a, float b, float x) {
+                const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+                return t * t * (3.0f - 2.0f * t);
+            };
+            morning = smooth(-0.1f, -0.02f, up) * (1.0f - smooth(0.1f, 0.26f, up)) *
+                      (m_mistSunTrend >= 0.0f ? 1.0f : 0.5f) * std::max(m_mornHaze, 0.0f);
+        }
+        out[10] = 0.6f / fogParams[1] * weather * (1.0f + morning);
         out[11] = 150.0f;
         // (D3D row vectors: a world direction's view-space form is d.x * row 0 + d.y * row 1 + d.z * row 2.)
         for (int k = 0; k < 3; ++k) out[12 + k] = v[1][k];
@@ -735,7 +753,12 @@ void Device::LandHaze(float out[24]) const
         const float through = 0.35f + 0.65f * std::clamp(to[1] / 0.3f, 0.0f, 1.0f);
         // (The sun's glow in the air, as the eye stands: none under the mountains hiding a low sun - terrain_sun.cpp.)
         const float terrain = moon ? 1.0f : 1.0f + (m_tsEye - 1.0f) * m_tsWeight;
-        for (int k = 0; k < 3; ++k) out[20 + k] = light[k] * tint[k] * (moon ? 1.0f : 0.5f * through) * terrain;
+        // (Nor with the clouds hiding the sun, at any height - the light they let through towards it (MakeCloudSunRay)
+        // and a storm's deck: the frame's sun is only dimmed by them low, and behind an overcast at ~11 degrees the far
+        // land and the valley mist glowed white towards it - user, 2026-10-18.)
+        const float clouds = moon ? 1.0f : std::clamp(m_sunThrough, 0.0f, 1.0f) * (1.0f - StormOvercast());
+        for (int k = 0; k < 3; ++k)
+            out[20 + k] = light[k] * tint[k] * (moon ? 1.0f : 0.5f * through) * terrain * clouds;
     }
     if (m_frameNumber % 600 == 3)
         Log("land haze: colour %.2f %.2f %.2f x %.2f, the game's fog %.0f..%.0f", double(out[0]), double(out[1]),
@@ -1154,7 +1177,9 @@ bool Device::RenderSandFog(VkCommandBuffer cmd)
         float green[3], dust[3];
         StormGreen(green);                       // (the mist cast green with the storm: RVK_StormGreen)
         float mist[3];
-        for (int i = 0; i < 3; ++i) mist[i] = kMist[i] * green[i];
+        // (Dimmed with the air under the storm's deck - StormAirColour: the far land through it stood pale under the sky.)
+        const float dim = StormAirDim();
+        for (int i = 0; i < 3; ++i) mist[i] = kMist[i] * green[i] * dim;
         for (int i = 0; i < 3; ++i) dust[i] = air.sandShare > 0.0f ? push.albedo[i] : mist[i];
         for (int i = 0; i < 3; ++i) push.albedo[i] = mist[i] + (dust[i] - mist[i]) * air.sandShare;
     }

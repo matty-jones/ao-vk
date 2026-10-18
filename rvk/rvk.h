@@ -81,6 +81,9 @@ private:
     Format m_format = Format::A8R8G8B8;
     bool m_renderTarget = false;
     bool m_opaque = false;             // the texture's pixels are all alpha 1 (a blended static draw can be opaque)
+    // Up to 64 x 64, from level-0 uploads: every texel black - with m_opaque, the PF map's tiles in AI missions
+    // (RVK_AlienMap).
+    bool m_blackRgb = false;
     // A small RGB copy of level 0 for the ground grass (PixelsThumbnail): textures up to 64 x 64 (the terrain's
     // lightmaps) whole, bigger ones on a 16 x 16 grid (enough to classify a ground atlas' tiles).
     std::vector<uint8_t> m_thumb;
@@ -393,6 +396,9 @@ public:
     float StormSky() const { return std::clamp(m_stormSky, 0.0f, 1.0f); }   // how much a storm's sky (rain.cpp)
     void StormSmokeWind(float out[3]) const;                       // a storm's own wind on the smoke (smoke.cpp)                                   // how much a thunderstorm hides the sun (rain.cpp)
     void StormHue(float rgb[3]) const;                             // a colour turned the storm's dark yellow-green (rain.cpp)
+    void StormAirColour(float rgb[3]) const;                             // ... and the air's (fog, haze) dimmed under its deck
+    float StormAirDim() const;                                     // ... by this (1 without a storm)
+    float StormSkyLight() const;                                   // the sky's light left under its deck (0.5 .. 1)
     // A thunderstorm's green cast (RVK_StormGreen x how hard it rains): per channel, about unit brightness (rain.cpp).
     void StormGreen(float out[3]) const;
     bool SandFogOn() const { return m_sandFog > 0.0f && ((m_sand > 0.01f && m_sandHaze > 0.0f) || (m_rain + 0.3f * m_stormSky) * m_rainFog > 0.01f); }
@@ -531,12 +537,22 @@ public:
     // Their size (x the game's sun sprites) and the share of their glow over the clouds (sun.cpp).
     void SetSunSize(float s) { m_sunSize = s; }
     void SetSunBleed(float s) { m_sunBleed = s; }
+    // The sky's twilight (0: the game's sky; 1: the twilight palette in its place) and the glow round the sun, x
+    // (sky.cpp).
+    void SetTwilight(float twilight, float glow) { m_twilight = twilight; m_skyGlow = glow; }
+    // The haze round sunrise thicker (hdr.cpp LandHaze; 0 none, 1 as planned; half of it round sunset).
+    void SetMornHaze(float s) { m_mornHaze = s; }
+    // A low sun's light warm on the land and things, their shade cool (sky.cpp; 0 the game's colours, 1 as planned).
+    void SetDawnLight(float s) { m_dawnLight = s; }
+    // The golden hour's grade round sunrise and sunset (tonemap.frag Grade; 0 none).
+    void SetGoldenHour(float s) { m_goldenHour = s; }
     // Remembered shadow casters (things out of view still casting) and the terrain's shade from a low sun, on / off.
     // (0 off, 1 on, 2 on without the remembered sway, 3 only big things, 4 drawn solid; switched: the churn trace and a few seconds of
     // the shadow items' counts anew - finding a blinking shadow)
     void SetShadowMemory(uint32_t mode) { m_shadowMemory = mode; m_cacheTraceLines = 0; m_memoryTraceFrames = 240; }
     void SetHillShade(bool on) { m_hillShade = on; }
     void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
+    void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
     // The game's own sun sprites (its glow, VisualSunRays_t), shown or not.
     void SetGameSun(bool on) { m_gameSun = on; }
     // Tests: the sky weather's clock (seconds, as UTC; < 0 the wall clock).
@@ -712,6 +728,7 @@ public:
         float sheet = 1.0f;                      // RVK_CloudSheet: the game's flat sheets behind the layer, x (0: none)
         float morph = 1.0f;                      // RVK_CloudMorph: how fast the clouds churn and change, x (0: still)
         uint32_t quality = 1;                    // RVK_CloudQual: 0 low .. 3 ultra (the layer's step length, steps to the sun)
+        float cirrus = 1.0f;                     // RVK_Cirrus: thin high wisps over the layer, x (0: none)
     };
     void SetCloudParams(const CloudParams& params);
     void SmokeSourceFrame(uint64_t key, const SmokeSource& source);
@@ -1192,6 +1209,24 @@ private:
     float Gusts() const { return std::max(m_grassGusts, 0.0f) * m_windGusts; }   // RVK_GrassGusts x the storm's
     float m_cloudWindSpeed = 8.0f;               // the clouds' drift (world units a second), eased (UpdateCloudDrift)
     static const char* SkyName(float cloudiness);
+    // The sky's twilight and the glow round the sun (sky.cpp; sky_common.glsl): its model, made once a frame
+    // (UpdateSkyModel: s0..s3 as sky_common.glsl reads them), drawn over the game's sky once its dome is down.
+    float m_twilight = 0.5f;                     // RVK_Twilight: how far the twilight palette replaces the game's sky
+    float m_mornHaze = 1.0f;                     // RVK_MornHaze: the haze round sunrise thicker, x (hdr.cpp LandHaze)
+    float m_dawnLight = 1.0f;                    // RVK_DawnLight: a low sun's light warm, the shade cool, x
+    float m_goldenHour = 0.5f;                   // RVK_GoldenHour: the grade round sunrise and sunset (FL.dawn[1].w)
+    float m_dawnTint[2][4] = {{1, 1, 1, 0}, {1, 1, 1, 0}};   // ... this frame's: the sun's, the sky's (UpdateSkyModel)
+    float m_skyGlow = 1.0f;                      // RVK_SkyGlow: the glow round the sun and along the horizon, x
+    float m_skyModel[16] = {};
+    float m_skyFog[3] = {};                      // the game's fog colour, eased (the model's horizon)
+    bool m_skyFogSet = false;
+    double m_skyFogClock = -1.0;
+    uint64_t m_skyDrawFrame = ~0ull, m_skyGlowFrame = ~0ull;
+    uint32_t m_skyDraws = 0;                     // the sky's draws so far this frame (the glow before the second)
+    VkPipeline m_skyGlowPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_skyGlowLayout = VK_NULL_HANDLE;
+    void UpdateSkyModel();
+    void DrawSkyGlow();
     bool m_shadowIsMoon = false;                 // ... the moon (FrameLights moon.w)
     bool m_drawIsSkyMesh = false;                // the current visual is a mesh in the sky (a moon?)
     void NoteSkyMesh(uint32_t fvf, const void* vertices, uint32_t vertexCount);
@@ -1706,6 +1741,7 @@ private:
     float m_trailSeconds = 12.0f, m_trailShade = 1.0f;   // SetGrassTrailLook
     float m_grassEven = 1.0f;
     bool m_grassShadows = true;                  // RVK_GrassShadow: the blades cast the sun's shadow                    // RVK_GrassEven: the blades' colour from one green, not the texel
+    std::vector<float> m_grassFootprint;         // CaptureCover's scratch: an object's sides crossing its footprint cut
     // The ground under one tile and its baked blades. A cell is written by the finest terrain triangle seen there
     // (rank: the triangle's size class), so a coarse level of detail never overwrites a finer one; a capture block
     // whose cells are all known at least as finely as a triangle skips that triangle.
@@ -2621,6 +2657,7 @@ private:
     Texture* m_uiLayer = nullptr;
     Texture* m_uiLayerReturn = nullptr;          // the target the interface began on (the main one)
     bool m_uiLayerActive = false;                // the interface's draws go into the layer
+    bool m_alienMap = true;                      // RVK_AlienMap
     bool m_uiLayerOpen = false;                  // between InterfaceBegin and InterfaceEnd
     std::atomic<bool> m_uiLayerReady{false};
     VkPipeline m_uiCompositePipeline = VK_NULL_HANDLE;

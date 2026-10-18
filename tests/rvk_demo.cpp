@@ -1201,6 +1201,8 @@ bool g_grassBenchCross = false;   // --grass-bench-cross: ... crossing the view 
                                   // --grass-bench-still: the trail it leaves lies across the screenshot)
 bool g_grassBenchLamp = false;    // --grass-bench-lamp: a lamp just over the grass ahead (point light shadows)
 bool g_grassBenchNight = false;   // --grass-bench-night: a dim lightmap and ambient, a faint bluish moon
+float g_sunDir[3] = {}, g_sunColour[3] = {};   // --sun-dir X Y Z, --sun-colour R G B: the water scenes' and the grass
+bool g_sunDirSet = false, g_sunColourSet = false;   // bench's sun
 bool g_grassBenchSteep = false;   // --grass-bench-steep: the bench's hills steep (slopes up to ~56 degrees)
 int g_grassBenchLoading = 0;      // --grass-bench-loading N: the ground's texture a plain green stand-in until frame N
 bool g_grassBenchLoadingNull = false;   // --grass-bench-loading-null: ... drawn untextured instead
@@ -1474,6 +1476,8 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
         sun.type = LIGHT_DIRECTIONAL;
         sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
         sun.direction = {0.55f, -0.7f, 0.45f};
+        if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};
+        if (g_sunColourSet) sun.diffuse = {g_sunColour[0], g_sunColour[1], g_sunColour[2], 1};
         if (g_grassBenchNight) {
             // As the game's nights: its light from the sun under the ground, pointing up, dim blue; a sky seen (the
             // moon: opposite the sun, night.cpp).
@@ -2122,8 +2126,6 @@ std::vector<std::string> g_meshPieces;   // --mesh-piece FILE: a piece dumped fr
 bool g_clouds = false;            // --clouds: cloud puffs in the sky, as the game's (VisualSingleCloud_t)
 bool g_cloudsGame = false;
 float g_cloudCover = 0.0f;        // --cloud-cover X: RVK_CloudCover
-float g_sunDir[3] = {}, g_sunColour[3] = {};   // --sun-dir X Y Z, --sun-colour R G B: the water scenes' sun
-bool g_sunDirSet = false, g_sunColourSet = false;
 float g_cloudThick = 1.0f;        // --cloud-thick X: RVK_CloudThick
 float g_cloudShade = 1.6f;        // --cloud-shade X: RVK_CloudShade
 float g_cloudHeight = 900.0f;     // --cloud-height X: RVK_CloudHeight
@@ -2138,6 +2140,8 @@ double g_skyTime = -1.0;          // --sky-time T: the sky weather's clock (seco
 float g_moonLight = 1.0f;         // --moon-light X: RVK_MoonLight
 float g_nightDark = 1.0f;         // --night-dark X: RVK_NightDark
 bool g_atmos = true;              // --atmos 0|1: RVK_Atmos
+float g_twilight = 0.5f, g_skyGlow = 1.0f;   // --twilight T G: RVK_Twilight, RVK_SkyGlow
+float g_dawnLight = 1.0f;         // --dawn-light X: RVK_DawnLight
 int g_textureFlood = 0;                         // --texture-flood: textures alive before the shadow test's label
 float g_mist = 1.0f;              // --mist X: RVK_Mist
 bool g_cloudLayer = true;         // --cloud-puffs: RVK_CloudLayer off (a volume per puff)
@@ -3971,6 +3975,11 @@ int main(int argc, char** argv)
         else if (a == "--moon-light" && i + 1 < argc) g_moonLight = float(std::atof(argv[++i]));
         else if (a == "--night-dark" && i + 1 < argc) g_nightDark = float(std::atof(argv[++i]));
         else if (a == "--atmos" && i + 1 < argc) g_atmos = std::atoi(argv[++i]) != 0;
+        else if (a == "--dawn-light" && i + 1 < argc) g_dawnLight = float(std::atof(argv[++i]));
+        else if (a == "--twilight" && i + 2 < argc) {
+            g_twilight = float(std::atof(argv[++i]));
+            g_skyGlow = float(std::atof(argv[++i]));
+        }
         else if (a == "--mist" && i + 1 < argc) g_mist = float(std::atof(argv[++i]));
         else if (a == "--water-z" && i + 1 < argc) g_waterZ = float(std::atof(argv[++i]));
         else if (a == "--water-noshadow") shadows = false;
@@ -4206,6 +4215,8 @@ int main(int argc, char** argv)
     dev.SetMoonLight(g_moonLight);
     dev.SetNightDark(g_nightDark);
     dev.SetAtmos(g_atmos);
+    dev.SetTwilight(g_twilight, g_skyGlow);
+    dev.SetDawnLight(g_dawnLight);
     dev.SetMist(g_mist);
     dev.SetContactShadows(contact);
     dev.SetSway(sway);

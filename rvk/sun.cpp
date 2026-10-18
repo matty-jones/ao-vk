@@ -146,9 +146,10 @@ void Device::DrawSun()
         const float* to = s.dir;
         if (to[1] < -0.03f)
             continue;                            // (under the horizon)
-        // Golden then red low in the sky, a third through the air at the horizon, gone just under it.
-        const float low = 1.0f - std::clamp(to[1] / 0.3f, 0.0f, 1.0f), low2 = low * low;
-        const float tint[3] = {1.0f, 1.0f - 0.35f * low2, 1.0f - 0.65f * low2};
+        // Golden then red low in the sky, a third through the air at the horizon, gone just under it. (Golden from
+        // ~25 degrees, orange under ~12 - at /0.3 a sun 8 degrees up stayed white-hot at dawn: user dump 2026-10-18.)
+        const float low = 1.0f - std::clamp(to[1] / 0.45f, 0.0f, 1.0f), low2 = low * low;
+        const float tint[3] = {1.0f, 1.0f - 0.4f * low2, 1.0f - 0.75f * low2};
         const float through = (0.35f + 0.65f * std::clamp(to[1] / 0.3f, 0.0f, 1.0f)) *
                               std::clamp((to[1] + 0.03f) / 0.05f, 0.0f, 1.0f);
         SunDrawn d{};
@@ -164,7 +165,14 @@ void Device::DrawSun()
             if (o.dir[0] * to[0] + o.dir[1] * to[1] + o.dir[2] * to[2] > 0.9945f) smallest = std::min(smallest, o.size);
         const float rel = s.size > 0.0f ? smallest / s.size : 1.0f;
         d.core = rel * rel;
-        for (int j = 0; j < 3; ++j) d.colour[j] = s.colour[j] * tint[j] * through * m_sun;
+        // Low, the warm light leads each sprite's own hue: the game's orange and blue pair, added, made a white disc
+        // whatever the sun's height (its brightness kept, its hue the air's by how low).
+        const float tl = 0.3f * tint[0] + 0.59f * tint[1] + 0.11f * tint[2];
+        const float sl = 0.3f * s.colour[0] + 0.59f * s.colour[1] + 0.11f * s.colour[2];
+        for (int j = 0; j < 3; ++j) {
+            const float hue = s.colour[j] + (sl * tint[j] / tl - s.colour[j]) * low;
+            d.colour[j] = hue * tint[j] * through * m_sun;
+        }
         d.rimFade = s.rimFade;
         d.seed = float(k) * 17.31f;
         m_sunsDrawn.push_back(d);
@@ -294,7 +302,10 @@ void Device::DrawSuns(bool over)
         push.toSun[3] = d.size;
         std::memcpy(push.colour, d.colour, sizeof(d.colour));
         push.colour[3] = d.rimFade;
-        push.view[3] = std::clamp(m_sunBleed, 0.0f, 0.999f) + std::floor(d.core * 1000.0f);   // (bleed . its core's share)
+        // (The bleed as the clouds let the sun's light through - their rays towards it (MakeCloudSunRay), a storm's
+        // deck: behind a dense layer, its glow over the clouds still made a wide bright halo - user, 2026-10-18.)
+        const float through = std::clamp(m_sunThrough, 0.0f, 1.0f) * (1.0f - StormOvercast());
+        push.view[3] = std::clamp(m_sunBleed * through, 0.0f, 0.999f) + std::floor(d.core * 1000.0f);   // (bleed . core share)
         push.view[0] = float(m_scene->m_width);
         push.view[1] = float(m_scene->m_height);
         push.view[2] = over ? 1.0f : 0.0f;       // under the clouds: all but the glow's bleed; over: the bleed alone

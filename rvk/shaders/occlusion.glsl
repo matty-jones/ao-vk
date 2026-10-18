@@ -122,6 +122,14 @@ float AmbientFactor()
         float sunShare = texelFetch(localFraction, ivec2(gl_FragCoord.xy), 0).b;
         factor *= 1.0 - (1.0 - Upsample(contact, 1, 2.0).r) * sunShare;
     }
+    // Both fade into the game's fog (P.fog.xy: its linear start and end): the colour is already fogged here, and the
+    // occlusion darkened the fog itself - corners showing through thick fog as dark smudges (AI missions' fog ends at
+    // ~44 units - user, 2026-10-18).
+    float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r;
+    if (factor < 1.0 && P.fog.y > P.fog.x && d < 1.0) {
+        float z = P.proj.y / (min(d, 0.999999) - P.proj.x);
+        factor = mix(1.0, factor, clamp((P.fog.y - z) / (P.fog.y - P.fog.x), 0.0, 1.0));
+    }
     return factor;
 }
 

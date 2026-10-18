@@ -64,6 +64,17 @@
   alpha-blended and additive interface draws; an unblended one keeps its texture's alpha as coverage, one multiplying
   the frame is approximated. Hooks are only made with a rate set; the two entries' code is checked (MSVC's exception
   prologue calling GUI.dll's `_EH_prolog`), so another GUI.dll build is left alone (logged).
+- **Detail range** (setting `RVK_DetailRange`, General; 1 = the game's own, 2 the default): N3.dll shows a
+  playfield's placed objects zone by zone. When the game's camera moves onto another tile, each loaded zone gets a
+  ring by how far its middle is from the camera (radii of the view distance x 0.5 x 0.10, 0.15, 0.30, 0.40, 0.55,
+  none under 40 m), and the ring switches the zone's lists of statels on or off. Rocks and shrubs go at the second
+  ring, about 150 m with the view distance near 2000, a whole zone at a time, while the statel shadows
+  (`RVK_StaticShad`) still cast them. `rnative::rings` (proxy/native/rings.cpp) wraps the ring function
+  (`N3.dll+0x28AB7`, its first 21 bytes checked): while it runs the two inner factors are scaled (the outer ones, trees
+  and buildings, stay the game's, moved out only to stay in order: scaling all five cost a lot of frame rate), each
+  kept within the zones N3 keeps loaded (the view distance x the grid's +0x28), then put back. The game's factors
+  aren't always the constants above: with a high detail option they ran 0.2, 0.3, 0.6, 0.8, 1.1. A change is taken up when the
+  camera next moves onto another tile. Decompiles: `re/n3_ring.c`, `re/n3_popin*.c`, `re/n3_statel_controller.c`.
   Measured (a 245 fps spot, 60): the interface's game-thread time 1.5 -> 0.34 ms, its GPU time 0.3 -> 0.07 ms;
   cursor, interface look and input unchanged in play. 60 is the recommended value.
 - **Ground grass** (setting `RVK_GrassOn`, Plants; **off** by default): our own grass over the game's terrain, an

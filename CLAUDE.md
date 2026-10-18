@@ -45,6 +45,20 @@ Everything runs under Wine (`WINEPREFIX` defaults to `~/.wine-prk`). There is no
 - `tools/crash-check.sh`: crash / hang reporting.
 - `tools/port-status.py`: porting progress against `docs/port-ledger.tsv`.
 
+## Staging a build for the game
+
+**Every change that touches the DLL gets staged for the game right away, without being asked**, so the user's next
+launch runs it:
+
+1. Build (`cmake --build --preset linux-release`).
+2. Copy `build/linux-release/randy31.dll` and `randy31.map` to `~/.wine-prk/drive_c/linux/randy-vk/` as
+   `randy31-<name>.dll` / `.map`, with a short new name for what changed (`randy31-albedo.dll`, `randy31-neon16.dll`;
+   a later round of the same work gets a number). Never overwrite a staged DLL the game may be running.
+3. In `~/.wine-prk/drive_c/linux/ao-wine.sh` (the launcher; not `~/Games/anarchy-online/ao-wine.sh`), point
+   `AO_RANDYVK_DLL=` at it, its comment saying what the build adds and which DLL it replaced
+   (`# randy-vk main + albedo maps keep colour under alpha 0 (was randy31-neon16.dll)`). Change only that line.
+4. Tell the user the staged name; it takes effect at the next launch (ao-wine.sh copies it over `client/randy31.dll`).
+
 ## Architecture
 
 Three layers, see `docs/architecture.md`, `docs/frame.md`, `docs/rvk.md`, `docs/native.md`:

@@ -35,6 +35,8 @@ layout(set = 0, binding = 0, std140) uniform LayerFrame {
     vec4 morph;         // the churn (rvk clouds.cpp UpdateCloudDrift): x its field's phase (tiles, wrapping), y how far
                         // it pushes the cells (body tiles), z the detail's extra rise (world); w: the rain veils (Veils)
     vec4 quality;       // x: the march's step length, x (RVK_CloudQual: 1.4 low .. 0.5 ultra)
+    vec4 cirrus;        // thin high wisps (Cirrus): x how much (RVK_Cirrus, less as the layer thickens), y their height
+                        // (world y)
 } L;
 layout(set = 0, binding = 1) uniform sampler2D weatherMap;
 layout(set = 0, binding = 2) uniform sampler3D shapeNoise;
@@ -58,7 +60,8 @@ vec4 Aerial(vec3 light, float alpha, float dist, vec3 dir)
     float low = HorizonBand(dir, L.horizon.x);
     // (By night at least a quarter of the air's colour, as the game's sheets have: the heaps grey among them - user.)
     float haze = max(max(min(air * 1.1, 1.0), low), 0.25 * Night());
-    light = mix(light, AirColour(L.haze.rgb, low) * alpha, haze);
+    // (Low in the sky the air in the twilight's colours, as the sky drawn behind - sky_common.glsl.)
+    light = mix(light, AirColour(L.haze.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1]), low) * alpha, haze);
     return vec4(light, alpha) * (1.0 - smoothstep(0.6 * L.layer.w, L.layer.w, dist));
 }
 
@@ -318,6 +321,38 @@ vec4 Veils(vec3 eye, vec3 dir, float jitter)
 
 vec4 Veiled(vec4 c) { return gVeil + (1.0 - gVeil.a) * c; }
 
+// Thin high wisps (RVK_Cirrus; docs/twilight-plan.md): a sheet far over the layer, the shape noise sampled flat and
+// stretched along the wind into streaks, drifting with it - sparse, most on clear days (rvk clouds.cpp). So high, they
+// catch the sun before the land at dawn and after it at dusk: lit by the sun's light through the air and the
+// afterglow (pink, gold), the sky's light, the moon's; low in the sky in the air's colour as the layer's clouds.
+// Premultiplied; behind the layer and the deck.
+vec4 Cirrus(vec3 eye, vec3 dir)
+{
+    float amount = L.cirrus.x;
+    if (amount <= 0.0 || dir.y < 0.02)
+        return vec4(0.0);
+    float t = max(L.cirrus.y - eye.y, 100.0) / max(dir.y, 0.04);
+    vec2 q = eye.xz + dir.xz * t + L.wind.xz * 2.5;   // (higher: drifting faster than the layer)
+    vec2 along = length(L.wind.xz) > 1e-3 ? normalize(L.wind.xz) : vec2(1.0, 0.0), across = vec2(-along.y, along.x);
+    vec2 uv = vec2(dot(q, along) / 14000.0, dot(q, across) / 3500.0);
+    float n = textureLod(shapeNoise, vec3(uv, 0.31), 0.0).r * 0.65 + textureLod(detailNoise, vec3(uv * 3.7, 0.73), 0.0).r * 0.35;
+    float edge = 0.78 - 0.18 * min(amount, 1.5);
+    float a = smoothstep(edge, edge + 0.2, n) * smoothstep(0.02, 0.15, dir.y) * min(0.35 * amount, 0.6);
+    if (a <= 0.0)
+        return vec4(0.0);
+    vec3 sunL = normalize(FL.sunTrue.xyz + vec3(0.0, 1e-6, 0.0));
+    float forward = 4.0 * kPi * HG(dot(dir, sunL), 0.6);   // (1 scattered evenly; ice glows towards the sun)
+    // (Round sunrise and sunset the afterglow leads: in the sky's grey light as well they came out white-lilac.)
+    vec3 glow = Afterglow(sunL);
+    float glowing = clamp(dot(glow, vec3(0.3, 0.59, 0.11)) * 2.0, 0.0, 1.0);
+    // (At the layer's clouds' brightness, RVK_CloudBright: brighter they went white in the tone mapping's roll-off.)
+    vec3 S = (SunLight(sunL) * (0.45 + 0.25 * min(forward, 4.0)) + glow * 2.0 + L.ambient.rgb * 0.6 * (1.0 - 0.6 * glowing) +
+              MoonLight() * 0.3) * L.tint.w;
+    float low = HorizonBand(dir, L.horizon.x);
+    S = mix(S, AirColour(L.haze.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1]), low), low);
+    return vec4(S * a, a);
+}
+
 #ifdef RVK_CLOUD_SUNRAY
 // How much sunlight the clouds let through to the eye (rvk/clouds.cpp MakeCloudSunRay): 16 rays from the eye towards
 // the sun (spread over ~2 degrees round it: a patch of sky, not one point), each marched through the layer and the
@@ -481,6 +516,7 @@ void main()
     vec2 blue = texelFetch(blueNoise, ivec2(hp) & 63, 0).rg;
     float jitter = fract(blue.r + FL.taa.z);
     vec4 deck = Deck(eye, dir, jitter);          // (below the layer: in front of it, looking up)
+    vec4 cirrus = Cirrus(eye, dir);              // (far over the layer: behind it and the deck)
     gVeil = Veils(eye, dir, jitter);             // (the storm's rain veils far off: in front of both)
     vec2 si = Sphere(eye, dir, gCentre, gInner), so = Sphere(eye, dir, gCentre, outer);
     float r0 = length(eye - gCentre);
@@ -492,13 +528,13 @@ void main()
         t0 = 0.0;
         t1 = si.y > 0.0 && si.x > 0.0 ? si.x : so.y;
     } else {                                     // above it
-        if (so.y < 0.0 || so.x > so.y) { outScene = Veiled(deck); return; }
+        if (so.y < 0.0 || so.x > so.y) { outScene = Veiled(deck + (1.0 - deck.a) * cirrus); return; }
         t0 = max(so.x, 0.0);
         t1 = si.x > 0.0 && si.y > si.x ? si.x : so.y;
     }
     t1 = min(t1, L.layer.w);
     if (t1 <= t0) {
-        outScene = Veiled(deck);
+        outScene = Veiled(deck + (1.0 - deck.a) * cirrus);
         return;
     }
     // Steps growing with the distance (short near the eye: the near clouds' detail; long far off), at most L.view.z.
@@ -635,11 +671,11 @@ void main()
     // show - user. What is left under 4% is none.)
     float alpha = 1.0 - max(transmit - 0.04, 0.0) / 0.96;
     if (alpha <= 0.0) {
-        outScene = Veiled(deck);
+        outScene = Veiled(deck + (1.0 - deck.a) * cirrus);
         return;
     }
     // The air: by where along the ray the cloud is.
     vec4 layer = Aerial(light, alpha, depthSum / max(weightSum, 1e-6), dir);
-    outScene = Veiled(deck + (1.0 - deck.a) * layer);
+    outScene = Veiled(deck + (1.0 - deck.a) * (layer + (1.0 - layer.a) * cirrus));
 }
 #endif

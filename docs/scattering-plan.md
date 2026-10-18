@@ -1,6 +1,6 @@
 # Light scattering in the air (atmosphere)
 
-Status: phase 1 done analytically (2026-10-13, see below); later phases open. Replaces the separate, hand-tuned air effects - the land haze (RVK_VolLand,
+Status: phase 1 done analytically (2026-10-13, see below); phases 2-4 continue in docs/twilight-plan.md. Replaces the separate, hand-tuned air effects - the land haze (RVK_VolLand,
 tonemap.frag), the clouds' Aerial() / AirColour() / HorizonBand() (cloud_light.glsl, cloud_layer.frag), the sunset
 tints (SunLight, Afterglow) - with one model of the air everything is lit through. Builds on the volumetric light
 (volume.frag), the cloud layer, the nights (docs/night-plan.md).

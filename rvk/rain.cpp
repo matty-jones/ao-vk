@@ -831,4 +831,32 @@ void Device::StormHue(float rgb[3]) const
     }
 }
 
+// The air's colour under a thunderstorm (the game's fog, the water's, the clouds' horizon haze, the rain mist): its
+// hue as above, and dimmed as the storm hides the sun - the clouds go to about a sixth of their light in a storm, the
+// fog only to 0.7, and the far land (fog from the eye in most zones: wholly the fog's colour there) stood pale under
+// a black-green sky (user, 2026-10-18). With RVK_StormDark, and without rain none.
+void Device::StormAirColour(float rgb[3]) const
+{
+    StormHue(rgb);
+    const float dim = StormAirDim();
+    for (int i = 0; i < 3; ++i) rgb[i] *= dim;
+}
+
+// (0.3 in a full storm: with the hue's own 0.7, about a fifth of the game's fog - the storm sky's own brightness at
+// the horizon, so the far land meets it; at 0.45 fogged land stood half as bright again as the sky over it - user
+// dump 2026-10-18.)
+float Device::StormAirDim() const
+{
+    return 1.0f - 0.7f * StormOvercast();
+}
+
+// The light of the sky under a thunderstorm (0.5 .. 1): the game's lighting holds a clear day's sky - the ground's
+// baked light, the global ambient on things and grass - and the storm took only the sun's part of it: the land stayed
+// lit by a clear sky under a black-green one (user, 2026-10-18). Half of it at a full storm, with RVK_StormDark.
+// (The ground's share in the shaders: ffp_main FlatShade, grass.vert - FL.rainNear.y, the same overcast.)
+float Device::StormSkyLight() const
+{
+    return 1.0f - 0.5f * StormOvercast();
+}
+
 }  // namespace rvk

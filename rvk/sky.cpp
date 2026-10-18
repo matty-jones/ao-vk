@@ -9,8 +9,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 namespace rvk {
+
+using namespace vk;
+using namespace detail;
 
 namespace {
 
@@ -129,6 +133,127 @@ void Device::SkyWind(float out[2]) const
 const char* Device::SkyName(float c)
 {
     return c < 0.08f ? "clear" : c < 0.3f ? "fair" : c < 0.55f ? "scattered" : c < 0.8f ? "broken" : "overcast";
+}
+
+// The sky's twilight and glow (docs/twilight-plan.md; sky_common.glsl): its model for this frame, s0..s3 - the game's
+// fog colour (eased over ~2 s: a zone's change shouldn't pop) and RVK_Twilight; towards the true sun and RVK_SkyGlow;
+// towards the sun disc seen and whether it is rising; the glow's colour. The twilight gives way to cloud, storms and
+// rain (their own grey skies); the glow too, as the clouds hide the sun.
+void Device::UpdateSkyModel()
+{
+    float* m = m_skyModel;
+    std::memset(m_skyModel, 0, sizeof(m_skyModel));
+    for (auto& t : m_dawnTint) t[0] = t[1] = t[2] = 1.0f, t[3] = 0.0f;
+    float fog[4], params[4];
+    SceneFog(fog, params);
+    const float dt = m_skyFogClock < 0.0 ? 1.0f : float(std::clamp(m_frameClock - m_skyFogClock, 0.0, 1.0));
+    m_skyFogClock = m_frameClock;
+    if (fog[3] > 0.5f) {
+        const float k = m_skyFogSet ? 1.0f - std::exp(-dt / 2.0f) : 1.0f;
+        for (int i = 0; i < 3; ++i) m_skyFog[i] += (fog[i] - m_skyFog[i]) * k;
+        m_skyFogSet = true;
+    }
+    const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
+    const float cloudy = m_cloudParams.enable ? SkyCloudiness() * vary : 0.0f;
+    const float clear = (1.0f - 0.7f * cloudy) * (1.0f - StormSky()) * (1.0f - 0.6f * std::clamp(m_mistWet, 0.0f, 1.0f));
+    std::memcpy(m, m_skyFog, sizeof(m_skyFog));
+    m[3] = std::clamp(m_twilight, 0.0f, 1.0f) * clear;
+    float to[3];
+    {
+        const float* d = m_sunLuminance > 0.0f ? m_sunDir : m_trueSunDir;
+        const float l = std::max(std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]), 1e-6f);
+        for (int i = 0; i < 3; ++i) to[i] = -d[i] / l;
+    }
+    std::memcpy(m + 4, to, sizeof(to));
+    m[7] = std::max(m_skyGlow, 0.0f) * clear;
+    // The disc seen: the brightest of the game's sun sprites lately (its tint over its size), else the true sun.
+    float seen[3] = {to[0], to[1], to[2]};
+    if (m_sunSpritesFrame + 3 >= m_frameNumber) {
+        float best = 0.0f;
+        for (const SunSprite& s : m_sunSprites) {
+            const float b = (0.3f * s.colour[0] + 0.59f * s.colour[1] + 0.11f * s.colour[2]) * s.size;
+            if (b > best) { best = b; std::memcpy(seen, s.dir, sizeof(seen)); }
+        }
+    }
+    std::memcpy(m + 8, seen, sizeof(seen));
+    m[11] = m_mistSunTrend >= 0.0f ? 1.0f : 0.0f;
+    // The glow's colour: the sun's light through the air at the disc's height (golden from ~25 degrees, orange low),
+    // at the sky's brightness - brighter round sunrise and sunset, through the clouds as they let it.
+    const float low = 1.0f - std::clamp(seen[1] / 0.4f, 0.0f, 1.0f), low2 = low * low;
+    const float tint[3] = {1.0f, 1.0f - 0.4f * low2, 1.0f - 0.75f * low2};
+    const float fogL = std::max(0.3f * m_skyFog[0] + 0.59f * m_skyFog[1] + 0.11f * m_skyFog[2], 0.02f);
+    const float t = std::clamp((to[1] - 0.06f) / (0.4f - 0.06f), 0.0f, 1.0f);
+    const float dawn = 1.0f - t * t * (3.0f - 2.0f * t);
+    const float b = fogL * (0.8f + 1.2f * dawn) * std::clamp(m_sunThrough, 0.0f, 1.0f);
+    for (int i = 0; i < 3; ++i) m[12 + i] = tint[i] * b;
+    // A low sun's light (RVK_DawnLight): golden then orange on what faces it - its light through much air -, the
+    // shade cooler - lit by the sky alone, bluer than the game's grey ambient. Strongest with the sun under ~20
+    // degrees, none by day; the moon's nights untouched; grey under cloud as the light is spread by it.
+    {
+        const float up = to[1];
+        const float lowT = 1.0f - std::clamp(up / 0.35f, 0.0f, 1.0f), low2 = lowT * lowT;
+        const float day = std::clamp((up + 0.06f) / 0.06f, 0.0f, 1.0f);   // (gone with the sun ~3 degrees under)
+        const float k = std::clamp(m_dawnLight, 0.0f, 2.0f) * low2 * day * clear;
+        // The sun's: a third less blue and a sixth less green at the horizon, about 85% as bright as the game's light.
+        float sun[3] = {1.0f, 1.0f - 0.22f * k, 1.0f - 0.45f * k};
+        const float sl = 0.3f * sun[0] + 0.59f * sun[1] + 0.11f * sun[2];
+        const float keep = 1.0f - 0.15f * std::min(k, 1.0f);
+        // The sky's in the shade: a little bluer at the same brightness (more turned the desert grey).
+        float sky[3] = {1.0f - 0.06f * k, 1.0f, 1.0f + 0.15f * k};
+        const float kl = 0.3f * sky[0] + 0.59f * sky[1] + 0.11f * sky[2];
+        for (int i = 0; i < 3; ++i) {
+            m_dawnTint[0][i] = sun[i] / sl * keep;
+            m_dawnTint[1][i] = sky[i] / kl;
+        }
+        m_dawnTint[0][3] = k;
+        // The golden hour's grade (RVK_GoldenHour, tonemap.frag Grade): most with the sun from ~2 degrees under the
+        // horizon to ~8 up, gone by ~17; muted by cloud as the light.
+        const float rise = std::clamp((up + 0.1f) / 0.07f, 0.0f, 1.0f), fall = std::clamp((up - 0.14f) / 0.16f, 0.0f, 1.0f);
+        m_dawnTint[1][3] = std::clamp(m_goldenHour, 0.0f, 1.0f) * rise * rise * (3.0f - 2.0f * rise) *
+                           (1.0f - fall * fall * (3.0f - 2.0f * fall)) * clear;
+    }
+    // (No fog seen yet: no sky to fit the twilight to - the model off; the low sun's light above needs none.)
+    if (!m_skyFogSet)
+        std::memset(m_skyModel, 0, sizeof(m_skyModel));
+    if (m_frameNumber % 600 == 7)
+        Log("sky model: sun up %.2f (%s), disc up %.2f; fog %.2f %.2f %.2f; twilight %.2f, glow %.2f (%.2f %.2f %.2f); "
+            "clear %.2f; low sun's light %.2f %.2f %.2f, shade %.2f %.2f %.2f", double(to[1]), m[11] > 0.5f ? "rising" : "setting", double(seen[1]), double(m_skyFog[0]),
+            double(m_skyFog[1]), double(m_skyFog[2]), double(m[3]), double(m[7]), double(m[12]), double(m[13]),
+            double(m[14]), double(clear), double(m_dawnTint[0][0]), double(m_dawnTint[0][1]), double(m_dawnTint[0][2]),
+            double(m_dawnTint[1][0]), double(m_dawnTint[1][1]), double(m_dawnTint[1][2]));
+}
+
+// The sky's twilight and glow drawn over the game's sky (sky_glow.frag): once a frame, after its dome, before the
+// moons, the suns, the game's cloud sheets and the cloud layer.
+void Device::DrawSkyGlow()
+{
+    if (m_skyGlowFrame == m_frameNumber)
+        return;
+    m_skyGlowFrame = m_frameNumber;
+    if (!m_skyGlowPipeline || !m_rendering || m_target != m_scene || !m_glow || !m_localFraction || !m_motionVectors ||
+        !m_albedo || m_external || (m_skyModel[3] <= 0.0f && m_skyModel[7] <= 0.0f))
+        return;
+    struct Push {
+        d3d::Matrix invViewProj;
+        float view[4], sky[16];
+    } push{};
+    static_assert(sizeof(Push) == 144, "sky_glow.frag's push constants");
+    if (!InvertMatrix(MulMatrix(m_view, m_proj), &push.invViewProj))
+        return;
+    push.view[0] = float(m_scene->m_width);
+    push.view[1] = float(m_scene->m_height);
+    std::memcpy(push.sky, m_skyModel, sizeof(push.sky));
+    FlushGroup();
+    VkCommandBuffer cmd = m_frames[m_frameIndex].main;
+    const VkViewport full{0.0f, 0.0f, float(m_scene->m_width), float(m_scene->m_height), 0.0f, 1.0f};
+    const VkRect2D area{{0, 0}, {m_scene->m_width, m_scene->m_height}};
+    vkCmdSetViewport(cmd, 0, 1, &full);
+    vkCmdSetScissor(cmd, 0, 1, &area);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyGlowPipeline);
+    vkCmdPushConstants(cmd, m_skyGlowLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    m_cache = StateCache{};                      // (not the scene's pipeline: its state set again)
+    m_arenaBound = m_bindlessBound = false;
 }
 
 }  // namespace rvk

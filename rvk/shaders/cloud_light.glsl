@@ -1,5 +1,6 @@
 // Light on clouds, shared by the cloud layer (cloud_layer.frag) and the game's cloud sheets drawn with it
 // (ffp_main.glsl, MAT_CLOUDSHEET). The includer declares the frame lights (FL).
+#include "sky_common.glsl"                     // (the twilight's colours along the horizon: SkyHorizonDelta)
 
 // The game's sunlight on its own clouds (rvk clouds.cpp NoteCloudGameLight: its hue - amber at dawn, white by day), when
 // known: our clouds lit in it keep to the game's palette (user, 2026-10-13: pink dawn clouds over a world the game

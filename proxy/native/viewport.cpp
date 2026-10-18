@@ -14,6 +14,7 @@
 // current, +0x164 the visual being drawn, +0x170 rectangle changed.
 #include "native/viewport.h"
 #include "native/device.h"
+#include "native/occluder.h"
 #include "native/orig_api.gen.h"
 #include "native/popin.h"
 #include "native/scene.h"
@@ -500,15 +501,23 @@ void __fastcall Process(uint8_t* vp, void*, void* root)
     // frustum are made - what is drawn and culled follows it.
     // Off again: its world matrix marked out of date (+0x9E), made from the game's own placement at once - not left
     // where the free camera was until the game next moves it.
+    // Its rotation goes in too (+0x2C), until the scene has been processed: the frustum's side planes and the terrain
+    // occluder take the camera's up from it, not from the world matrix - with the game's left there, the planes were
+    // turned away from where the free camera looks and things at the screen's edges were culled. The game's is put
+    // back after, so the game finds its camera as it left it.
     static bool s_free = false;
-    float freeWorld[16];
-    if (rvkproxy::FreeCamWorld(static_cast<const float*>(orig::RRefFrame_t_GetWorldMatrix(camera)), freeWorld)) {
+    float freeWorld[16], gameRotation[4];
+    const bool free = rvkproxy::FreeCamWorld(static_cast<const float*>(orig::RRefFrame_t_GetWorldMatrix(camera)), freeWorld);
+    if (free) {
         std::memcpy(&Field<float>(camera, 0x44), freeWorld, 64);
+        std::memcpy(gameRotation, &Field<float>(camera, 0x2C), 16);
+        xm::ToQuaternion(xm::Load(freeWorld), &Field<float>(camera, 0x2C));
         s_free = true;
     } else if (s_free) {
         Field<uint8_t>(camera, 0x9E) |= 1;
         s_free = false;
     }
+    occluder::SetFreeCamera(free);
     popin::FrameStart(vp, root);
     orig::RCamera_t_GetViewMatrix(camera, g_viewMatrix);
     orig::render_t_SetTransformMatrix(Render(), 2, g_viewMatrix);
@@ -524,6 +533,7 @@ void __fastcall Process(uint8_t* vp, void*, void* root)
     reinterpret_cast<void(__fastcall*)(void*)>((*static_cast<void***>(root))[8])(root);   // Process
     for (void** l = Global<void**>(kLightsBegin); l != Global<void**>(kLightsEnd); ++l)
         orig::render_t_SetLight(Render(), Field<uint32_t>(*l, 0x110), static_cast<uint8_t*>(*l) + 0xA4);
+    if (free) std::memcpy(&Field<float>(camera, 0x2C), gameRotation, 16);
     scene::AfterProcess();
 }
 

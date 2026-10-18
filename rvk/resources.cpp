@@ -369,6 +369,22 @@ static bool PixelsThumbnail(Format fmt, const void* data, uint32_t width, uint32
 }
 
 // One texel's alpha (0..255), for the leaves' alpha mask below; false for a format it can't read.
+// Whether every texel is black (an alpha-only format reads black; false for a format it can't read): with no alpha,
+// the PF map's tiles in AI missions (RVK_AlienMap).
+static bool PixelsBlack(Format fmt, const void* data, uint32_t width, uint32_t height, uint32_t pitch)
+{
+    const uint8_t* base = static_cast<const uint8_t*>(data);
+    for (uint32_t y = 0; y < height; ++y)
+        for (uint32_t x = 0; x < width; ++x) {
+            uint8_t rgb[3] = {0, 0, 0};
+            if (fmt != Format::A8 && !TexelRgb(fmt, base, pitch, x, y, rgb))
+                return false;
+            if ((rgb[0] | rgb[1] | rgb[2]) != 0)
+                return false;
+        }
+    return true;
+}
+
 static bool TexelAlpha(Format fmt, const uint8_t* base, uint32_t pitch, uint32_t x, uint32_t y, uint8_t* out)
 {
     switch (fmt) {
@@ -479,6 +495,15 @@ void Device::UpdateTexture(Texture* t, uint32_t level, uint32_t x, uint32_t y, u
             t->m_opaque = t->m_opaque && PixelsOpaque(t->m_format, data, t->m_width, height, pitch);
         else
             t->m_opaque = false;
+        // Black all over (RVK_AlienMap): small textures. A full level-0 upload decides; whole rows (the surface sends
+        // only the rows a Lock wrote, once the GPU has the level whole) keep it if they are black too.
+        const bool small = t->m_width <= 64 && t->m_height <= 64 && pitch >= FormatRowBytes(t->m_format, t->m_width);
+        if (small && x == 0 && y == 0 && width >= t->m_width && height >= t->m_height)
+            t->m_blackRgb = PixelsBlack(t->m_format, data, t->m_width, t->m_height, pitch);
+        else if (small && x == 0 && width >= t->m_width && y + height <= t->m_height)
+            t->m_blackRgb = t->m_blackRgb && PixelsBlack(t->m_format, data, t->m_width, height, pitch);
+        else
+            t->m_blackRgb = false;
         // The colour grid the ground-grass classification reads (grass.cpp): a full level-0 upload only.
         // Small textures (the terrain's 64 x 64 lightmaps) are kept whole, bigger ones on a 16 x 16 grid.
         // (A ground texture's old grid, to tell a new picture from the same one uploaded again.)

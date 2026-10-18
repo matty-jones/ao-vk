@@ -141,6 +141,10 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // image + 1 | sampler << 20 (the float's bits; 0 = none)
     float neon[4];                 // the tone mapping's neon look (tonemap.frag): x how much saturated light keeps
                                    // its colour (RVK_NeonSat), y the lens streaks' strength (RVK_Streaks), z, w unused
+    float sky[4][4];               // the sky's model (sky.cpp UpdateSkyModel; sky_common.glsl s0..s3)
+    float skyView[3][4];           // the world camera's rotation: row i . a view-space direction = its world part i
+    float dawn[2][4];              // low sun's light (sky.cpp): the sun's tint (rgb), w how much; the sky's (shade)
+                                   // tint, w the golden hour's grade (tonemap.frag)
     GpuLight lights[kFrameLights];
 };
 

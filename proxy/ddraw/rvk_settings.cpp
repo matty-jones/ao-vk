@@ -4,6 +4,7 @@
 #include "rvk_backend.h"
 #include "native/mesh.h"
 #include "native/occluder.h"
+#include "native/rings.h"
 
 #include <windows.h>
 
@@ -41,6 +42,8 @@ Setting g_settings[] = {
     {"RVK_Enhance",    "All enhancements (Ctrl+Shift+E)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Prepass",    "Depth pre-pass", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
+    {"RVK_AlienMap", "AI missions' PF map: rooms shown black on green (the game's is black on black)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
 
     {"RVK_PixelLight", "Per-pixel lighting",                                       "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_PIXEL_LIGHTING", 0},
     {"RVK_LightOver",  "All nearby lights (light override)",   "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_LIGHT_OVERRIDE", 0},
@@ -189,7 +192,10 @@ Setting g_settings[] = {
     {"RVK_TimeOfDay",   "Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h)", "Debug", Float, -1, 27, 0.25f, -1, nullptr, 0},
     {"RVK_TimeSpeed",   "Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own)", "Debug", Float, 0, 500, 0.5f, 1, nullptr, 0},
     {"RVK_SkyVary",     "Clouds: the sky changes, clear to overcast (0: always some cloud)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
+    {"RVK_Twilight",    "Sky: dawn and dusk colours - a warm band towards the sun, the pink band opposite (0: the game's sky)", "Sky", Float, 0, 1, 0.05f, 0.5f, nullptr, 0, "RVK_Hdr"},
+    {"RVK_SkyGlow",     "Sky: the glow round the sun and along the horizon under it (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyZones",    "Clouds: each zone its own skies - deserts clearer, coasts and forests cloudier (0: the same everywhere)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
+    {"RVK_Cirrus",      "Clouds: thin high wisps, most on clear days - pink and gold round sunrise and sunset (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudDetail", "Clouds: billows and wisps (0 smooth)",                    "Sky",     Float, 0, 2, 0.1f, 2, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudHalf",   "Clouds: drawn at half resolution (much cheaper)",         "Sky",     Bool,  0, 1, 1, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudShadow", "Shadows on the ground (0 = none)", "Sky",     Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_CloudsOn"},
@@ -252,6 +258,8 @@ Setting g_settings[] = {
     {"RVK_SunBleed", "How much of the suns' glow shows through thick cloud (0 none)", "Effects", Float, 0, 1, 0.05f, 0.3f, nullptr, 0, "RVK_Sun"},
     {"RVK_Atmos", "Atmospheric haze", "Effects", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Mist", "Valley mist (night and dawn)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Atmos"},
+    {"RVK_DawnLight", "Low sun's light: golden on what faces it, the shade cooler, round sunrise and sunset (0: the game's colours)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
+    {"RVK_MornHaze", "Morning haze: the air thicker round sunrise, half as much round sunset (0: none)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Atmos"},
     {"RVK_GameSun", "The game's own sun glow sprites (off: only the suns above)", "Effects", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_SsrOn", "Reflections (screen-space)", "Effects",  Bool,  0, 1, 1, 0, nullptr, 0},
     {"RVK_Ssr", "Strength", "Effects",  Float, 0.25f, 2, 0.25f, 1, nullptr, 0, "RVK_SsrOn"},
@@ -274,6 +282,7 @@ Setting g_settings[] = {
     {"RVK_NightTint", "Night tint (cooler, paler)", "Colour grading",   Float, 0, 1, 0.05f, 0.25f, nullptr, 0, "RVK_GradeOn"},
     {"RVK_Vignette",   "Vignette (darker corners)",                                "Colour grading",   Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_GradeOn"},
     {"RVK_LutAmount",  "Look-up tables (Ctrl+Shift+L)", "Colour grading", Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_GradeOn"},
+    {"RVK_GoldenHour", "Golden hour: round sunrise and sunset the light warmer, the shade a little cooler, a touch more contrast", "Colour grading", Float, 0, 1, 0.05f, 0.5f, nullptr, 0, "RVK_GradeOn"},
     {"RVK_NeonNight",  "Neon nights: teal shadows, lights keep their colour (in place of randy-vk-night.cube)", "Colour grading", Bool, 0, 1, 1, 0, nullptr, 0, "RVK_GradeOn"},
     {"RVK_Exposure", "Brightness", "Colour grading",  Float, 0.5f, 2, 0.05f, 1, "RANDYVK_EXPOSURE", 0, "RVK_Hdr"},
 
@@ -338,7 +347,8 @@ const Vanilla kVanilla[] = {
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
-    {"RVK_SmokeOn", 0},
+    {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
+    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -605,6 +615,9 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_NightDark")) d->SetNightDark(V(n));
     else if (is("RVK_Atmos")) d->SetAtmos(V(n) != 0.0f);
     else if (is("RVK_Mist")) d->SetMist(V(n));
+    else if (is("RVK_MornHaze")) d->SetMornHaze(V(n));
+    else if (is("RVK_DawnLight")) d->SetDawnLight(V(n));
+    else if (is("RVK_GoldenHour")) d->SetGoldenHour(V(n));
     // The game's sun sprites: with RVK_GameSun, or whenever our suns are off (HDR off, RVK_Sun 0) - never no sun.
     else if (is("RVK_Sun") || is("RVK_GameSun")) {
         d->SetSun(V("RVK_Sun"));
@@ -612,8 +625,11 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     }
     else if (is("RVK_SunSize")) d->SetSunSize(V(n));
     else if (is("RVK_SunBleed")) d->SetSunBleed(V(n));
+    else if (is("RVK_Twilight") || is("RVK_SkyGlow")) d->SetTwilight(V("RVK_Twilight"), V("RVK_SkyGlow"));
     else if (is("RVK_ShadowView")) d->SetShadowView(V(n) != 0.0f);
+    else if (is("RVK_AlienMap")) d->SetAlienMap(V(n) != 0.0f);
     else if (is("RVK_Occlusion")) rnative::occluder::SetHorizonCulling(V(n) != 0.0f);
+    else if (is("RVK_DetailRange")) rnative::rings::SetScale(V(n));
     else if (is("RVK_ShadowMem")) d->SetShadowMemory(V(n) != 0.0f ? 1u : 0u);
     else if (is("RVK_HillShade")) d->SetHillShade(V(n) != 0.0f);
     else if (is("RVK_Contact")) d->SetContactShadows(V(n));
@@ -677,7 +693,8 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         s.budget = V("RVK_SmokeBudget");
         d->SetSmokeParams(s);
     }
-    else if (std::strncmp(n, "RVK_Cloud", 9) == 0 || std::strcmp(n, "RVK_SkyVary") == 0 || std::strcmp(n, "RVK_SkyZones") == 0) {
+    else if (std::strncmp(n, "RVK_Cloud", 9) == 0 || std::strcmp(n, "RVK_SkyVary") == 0 || std::strcmp(n, "RVK_SkyZones") == 0 ||
+             std::strcmp(n, "RVK_Cirrus") == 0) {
         rvk::Device::CloudParams c;
         c.enable = V("RVK_CloudsOn") != 0.0f;
         c.density = V("RVK_CloudThick");
@@ -697,6 +714,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         c.morph = V("RVK_CloudMorph");
         c.quality = uint32_t(V("RVK_CloudQual"));
         c.sheet = V("RVK_CloudSheet");
+        c.cirrus = V("RVK_Cirrus");
         d->SetCloudParams(c);
     }
     else if (std::strncmp(n, "RVK_Vol", 7) == 0) d->SetVolume(V("RVK_Volume"), V("RVK_VolHaze"), V("RVK_VolShafts"),

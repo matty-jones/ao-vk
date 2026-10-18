@@ -390,6 +390,14 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     }
     fl->neon[0] = m_hdr ? m_neonSat : 0.0f;
     fl->neon[1] = fl->neon[2] = fl->neon[3] = 0.0f;
+    // The sky's model (sky.cpp: the haze and the far fog in its colours) and the world camera's rotation (the tone
+    // mapping works in view space; the model in the world's).
+    std::memcpy(fl->sky, m_skyModel, sizeof(fl->sky));
+    std::memcpy(fl->dawn, m_dawnTint, sizeof(fl->dawn));
+    for (int i = 0; i < 3; ++i) {
+        for (int k = 0; k < 3; ++k) fl->skyView[i][k] = m_aoView.m[i][k];
+        fl->skyView[i][3] = 0.0f;
+    }
     FillPushers(fl, eye);
     fl->leaves[0] = m_leaf.on ? m_leaf.wind : 0.0f;
     fl->leaves[1] = m_leaf.on ? m_leaf.flutter : 0.0f;
@@ -425,7 +433,7 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     // A thunderstorm's deck hides the sun: its light on the grass, the clouds, the air and the water mostly gone
     // (lighting.glsl and the ground's shade take the rest - FL.rainNear.y).
     const float overcast = StormOvercast();
-    for (int i = 0; i < 3; ++i) fl->sunColor[i] *= 1.0f - 0.65f * overcast;
+    for (int i = 0; i < 3; ++i) fl->sunColor[i] *= (1.0f - 0.65f * overcast) * m_dawnTint[0][i];   // (a low sun's: warm)
     // The moon's light on the ground and grass (night.cpp); whether the shadow map is its. The sun's true direction
     // (below the horizon too) for the clouds' light.
     for (int i = 0; i < 3; ++i) fl->moon[i] = m_moonColour[i];
@@ -1613,7 +1621,7 @@ void Device::RenderStateFog(float colour[4], float params[4]) const
     colour[1] = float((c >> 8) & 0xFF) / 255.0f;
     colour[2] = float(c & 0xFF) / 255.0f;
     colour[3] = m_rs[d3d::RS_FOGENABLE] ? 1.0f : 0.0f;
-    StormHue(colour);                            // (a thunderstorm's: its air dark yellow-green)
+    StormAirColour(colour);                            // (a thunderstorm's: its air dark yellow-green, dimmed)
     uint32_t bits[3] = {m_rs[d3d::RS_FOGSTART], m_rs[d3d::RS_FOGEND], m_rs[d3d::RS_FOGDENSITY]};
     std::memcpy(params, bits, sizeof(bits));
     params[3] = float(m_rs[d3d::RS_FOGTABLEMODE] ? m_rs[d3d::RS_FOGTABLEMODE] : m_rs[d3d::RS_FOGVERTEXMODE]);
@@ -2389,6 +2397,16 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             EndScene();
         }
     }
+    // The sky's twilight and glow (sky.cpp): drawn before the sky's second draw - after its dome, before the moons,
+    // the suns and the clouds - or, a sky of one draw, at its end.
+    if (m_scenePhase && m_target == m_scene && !m_external && (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW) {
+        if (VisualKind(m_drawVisualKind) == VisualKind::Sky) {
+            if (m_skyDrawFrame != m_frameNumber) { m_skyDrawFrame = m_frameNumber; m_skyDraws = 0; }
+            if (++m_skyDraws == 2) DrawSkyGlow();
+        } else if (m_skyDrawFrame == m_frameNumber && m_skyGlowFrame != m_frameNumber) {
+            DrawSkyGlow();
+        }
+    }
     // RVK_CloudsOn: the game's cloud puffs taken instead of drawn; drawn as volumes where the sky ends - before the
     // frame's first 3D draw after them that isn't the sky's.
     // Looking down or away the game draws no puffs: with the layer, the last ones seen (a few seconds), so its shadows
@@ -2845,8 +2863,19 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     Copy4(c.matSpecular, m_material.specular);
     Copy4(c.matEmissive, m_material.emissive);
     ArgbToFloat(m_rs[d3d::RS_AMBIENT], c.ambient);
+    // (A thunderstorm's sky: dimmer than the clear day's the ambient holds. Not the ground's light pass - its shade
+    // takes the storm's sky with the lightmap, ffp FlatShade.)
+    // (And a low sun's shade the sky's cool light - sky.cpp; the ground's light pass tinted whole in ffp_main.)
+    if (!(IsTerrain(fvf) && IsMultiplyPass())) {
+        const float sky = StormSkyLight();
+        const bool sky_ = VisualKind(m_drawVisualKind) == VisualKind::Sky;
+        for (int i = 0; i < 3; ++i) c.ambient[i] *= sky * (sky_ ? 1.0f : m_dawnTint[1][i]);
+    }
     ArgbToFloat(m_rs[d3d::RS_FOGCOLOR], c.fogColor);
-    StormHue(c.fogColor);                        // (a thunderstorm's: its air dark yellow-green)
+    // (A thunderstorm's: its air dark yellow-green, dimmed. Not the ground's light pass's white fog: multiplying the
+    // base pass, already in the storm's air, it took the air's colour twice - the far land darker than the trees and
+    // things on it, which stood out pale - user, 2026-10-18.)
+    if (!IsMultiplyPass()) StormAirColour(c.fogColor);
     c.fogParams[0] = AsFloat(m_rs[d3d::RS_FOGSTART]);
     c.fogParams[1] = AsFloat(m_rs[d3d::RS_FOGEND]);
     c.fogParams[2] = AsFloat(m_rs[d3d::RS_FOGDENSITY]);
@@ -2982,7 +3011,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     const bool layerReplace = m_uiLayerActive && m_target == m_uiLayer &&
                               (!m_rs[d3d::RS_ALPHABLENDENABLE] || (m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_ONE &&
                                                                     m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ZERO));
-    c.flags[3] = m_rs[d3d::RS_ALPHAFUNC] | (layerReplace ? 256u : 0u);
+    // (Bit 9: a PF map tile of an AI mission (RVK_AlienMap). That map is an untextured fill in transparent black, then
+    // opaque black tiles (32 x 32, no alpha) over all that isn't a room: the rooms are the fill showing between them.
+    // On the frame, black on black; in the interface layer the rooms showed only as long as the fill came out
+    // see-through (player reports). The tiles are drawn green: the rooms black on it. Other maps' empty space is
+    // tiles with alpha 0, not opaque black ones.)
+    const bool alienMap = m_alienMap && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW && m_textures[0] &&
+                          m_textures[0]->m_blackRgb && m_textures[0]->m_opaque && m_textures[0]->Width() == 32 &&
+                          m_textures[0]->Height() == 32 &&
+                          (!m_rs[d3d::RS_ALPHABLENDENABLE] ||
+                           (m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_ONE && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ZERO));
+    c.flags[3] = m_rs[d3d::RS_ALPHAFUNC] | (layerReplace ? 256u : 0u) | (alienMap ? 512u : 0u);
     c.matSources[0] = m_rs[d3d::RS_DIFFUSEMATERIALSOURCE];
     c.matSources[1] = m_rs[d3d::RS_AMBIENTMATERIALSOURCE];
     c.matSources[2] = m_rs[d3d::RS_SPECULARMATERIALSOURCE];
@@ -3030,8 +3069,10 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                 continue;                        // replaced by the frame lights
             // The ground's lightmap has the sun baked in, and the game means to keep directional lights off it
             // (CullLights mask 0xfffffffe) - but skips that mask when there are 8 lights or fewer. The sun then
-            // saturates the ground's lighting pass and local lights (the player's) vanish on it.
-            if (override && terrain && slot.light.type == d3d::LIGHT_DIRECTIONAL)
+            // saturates the ground's lighting pass and local lights (the player's) vanish on it. Per vertex too:
+            // turning the view changed how many lights the game gathered, and the ground lit up and darkened with
+            // the sun coming and going (user, 2026-10-18).
+            if (terrain && slot.light.type == d3d::LIGHT_DIRECTIONAL)
                 continue;
             // By night the game's light from under the ground fades out as the moon's comes in (night.cpp).
             d3d::Light scaled;
@@ -3039,6 +3080,18 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                                VisualKind(m_drawVisualKind) != VisualKind::Sky && MoonScaledGameLight(slot.light, &scaled);
             FillGpuLight(night ? scaled : slot.light, slot.cosHalfTheta, slot.cosHalfPhi, c.lights[lightCount++],
                          LightScale(slot.light));
+            // The sun's light low in the sky warm (sky.cpp RVK_DawnLight): the game's directional light along the
+            // sun's way - not other directional lights (effects' coloured ones), not the sky's own.
+            if (!night && slot.light.type == d3d::LIGHT_DIRECTIONAL && m_dawnTint[0][3] > 0.0f &&
+                VisualKind(m_drawVisualKind) != VisualKind::Sky) {
+                const d3d::Vector& d = slot.light.direction;
+                const float l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) *
+                                std::sqrt(m_sunDir[0] * m_sunDir[0] + m_sunDir[1] * m_sunDir[1] + m_sunDir[2] * m_sunDir[2]);
+                if (l > 1e-6f && (d.x * m_sunDir[0] + d.y * m_sunDir[1] + d.z * m_sunDir[2]) / l > 0.995f) {
+                    GpuLight& g = c.lights[lightCount - 1];
+                    for (int i = 0; i < 3; ++i) { g.diffuse[i] *= m_dawnTint[0][i]; g.specular[i] *= m_dawnTint[0][i]; }
+                }
+            }
             if (slot.light.type != d3d::LIGHT_DIRECTIONAL) ++localLights;
         }
     // ... and the moon's light (the ground too, which the game keeps directional light off).

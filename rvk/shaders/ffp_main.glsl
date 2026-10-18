@@ -295,13 +295,25 @@ float TerrainShade()
 // lightmap holds the sun and the sky's light together; unlit surfaces), only about the sun's part of it goes - a cloud
 // over the sun had left the ground near black (user, 2026-10-13).
 const float kCloudSunShare = 0.5;
+// A low sun's light on a surface lit as a whole (the ground's lightmap, the grass): the sun's warm tint where its
+// light reaches - however grazing: how bright is the lightmap's say, its colour the sun's (by the facing alone, level
+// ground under a sun 2 degrees up went grey-blue) -, the sky's cool one where it faces away or lies in shade
+// (FL.dawn; rvk sky.cpp).
+vec3 DawnTint(vec3 n, float lit)
+{
+    vec3 nn = dot(n, n) > 0.0 ? normalize(n) : vec3(0.0, 1.0, 0.0);
+    float reached = smoothstep(-0.03, 0.05, dot(nn, -normalize(FL.sunDir.xyz + vec3(0.0, -1e-6, 0.0)))) * lit;
+    return mix(FL.dawn[1].rgb, FL.dawn[0].rgb, reached);
+}
+
 float FlatShade()
 {
     // (A thunderstorm - FL.rainNear.y: the sun hidden as by cloud everywhere, more than a cloud's shadow takes - its
-    // share of the land's light gone, so the shadows of things with it.)
+    // share of the land's light gone, so the shadows of things with it; and the sky's share halved, a storm's sky far
+    // dimmer than the clear one the lightmap holds - rvk Device::StormSkyLight: a quarter of the light left.)
     float o = FL.rainNear.y;
     return min(1.0 - (1.0 - gCasterVisibility) * FL.shadowParams.y * (1.0 - o), mix(TerrainShade(), 1.0, o)) *
-           (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o)) * (1.0 - 0.15 * o);
+           (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o)) * (1.0 - 0.5 * o);
 }
 
 int gShadowCascade = -1;                         // the cascade SunVisibilityCasters read (RVK_ShadowView)
@@ -570,7 +582,7 @@ vec3 CloudSheet(vec4 tex)
         S += vec3(0.8, 0.85, 1.0) * tint * (FL.flash.w * 1.2 * (1.0 - 0.3 * thick) / (1.0 + dot(at, at) / (1500.0 * 1500.0)));
     }
     float low = HorizonBand(dir, FL.cloudAir.w);
-    return mix(S, AirColour(FL.cloudAir.rgb, low), max(0.25, low));
+    return mix(S, AirColour(FL.cloudAir.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1]), low), max(0.25, low));
 }
 
 void main()
@@ -756,6 +768,11 @@ void main()
 #endif
     t0.rgb *= texShade * gLightmapRelief;
     vec4 current = Cascade(t0, t1, 1.0);
+    // A low sun's light (rvk sky.cpp, RVK_DawnLight): the ground's lightmap holds the sun's and the sky's light
+    // together - warm where the sun reaches, cool where the ground faces away or lies in shade. (The ground's light
+    // pass by F_NOALBEDO: with the sun's shadows off too.)
+    if ((C.flags.x & F_NOALBEDO) != 0u && FL.dawn[0].w > 0.0)
+        current.rgb *= DawnTint(vNormalW.xyz, texShade);
 #ifdef RVK_GLOW
     if (wantAlbedo && (C.flags.x & F_LIGHTING) == 0u)
         albedo = current.rgb;
@@ -979,6 +996,9 @@ void main()
 #endif
     if ((C.flags.x & F_OVERBRIGHT2X) != 0u)
         current.rgb *= 0.5;                               // blended as dst * src * 2
+    // An AI mission's PF map tile (RVK_AlienMap, draw.cpp): the space that isn't a room, drawn green - the rooms black.
+    if ((C.flags.w & 512u) != 0u)
+        current = vec4(0.10, 0.32, 0.14, 1.0);
     if ((C.flags.w & 256u) != 0u)
         current.a = 1.0;                                  // the interface layer: a replacing draw covers fully
     // RVK_ShadowView (debug): the sun shadow map's say at each point - white lit, dark shadowed by things - tinted by

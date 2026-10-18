@@ -43,6 +43,9 @@ const uint32_t kCloudUpFragSpirv[] = {
 const uint32_t kSunFragSpirv[] = {             // the suns (sun.cpp)
 #include "sun.frag.inc"
 };
+const uint32_t kSkyGlowFragSpirv[] = {         // the sky's twilight and the glow round the sun (sky.cpp)
+#include "sky_glow.frag.inc"
+};
 const uint32_t kSunVisCompSpirv[] = {          // how much of each sun is seen (sun.cpp)
 #include "sun_vis.comp.inc"
 };
@@ -112,7 +115,7 @@ struct UpFrame {                                 // cloud_up.frag's block: the c
 struct LayerFrame {
     d3d::Matrix invViewProj;
     float eye[4], layer[4], weather[4], shape[4], wind[4], tint[4], ambient[4], haze[4], view[4], sub[4], horizon[4],
-        shadowArea[4], deck[4], scud[4], morph[4], quality[4];
+        shadowArea[4], deck[4], scud[4], morph[4], quality[4], cirrus[4];
 };
 
 struct ResolveFrame {
@@ -377,6 +380,13 @@ bool Device::CreateCloudResources(std::string* error)
             !pipeline(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), kSunFragSpirv, sizeof(kSunFragSpirv), m_sunLayout,
                       sceneFormats, 5, kDepthFormat, &m_sunPipeline))
             return false;
+        // The sky's twilight and glow (sky.cpp DrawSkyGlow): the same, its push constants the sky model too.
+        VkPushConstantRange skyPush{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 144};
+        pl.pPushConstantRanges = &skyPush;
+        if (!Check(vkCreatePipelineLayout(m_device, &pl, nullptr, &m_skyGlowLayout), "sky glow layout", error) ||
+            !pipeline(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), kSkyGlowFragSpirv, sizeof(kSkyGlowFragSpirv),
+                      m_skyGlowLayout, sceneFormats, 5, kDepthFormat, &m_skyGlowPipeline))
+            return false;
         // How much of each is seen (sun_vis.comp): depth, clouds, the result (pushed); the result read by the CPU.
         const VkShaderStageFlags comp = VK_SHADER_STAGE_COMPUTE_BIT;
         const VkDescriptorSetLayoutBinding vb[3] = {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
@@ -621,6 +631,8 @@ void Device::DestroyCloudResources()
     if (m_sunVisBuffer) { vmaDestroyBuffer(m_allocator, m_sunVisBuffer, m_sunVisAllocation); m_sunVisBuffer = VK_NULL_HANDLE; }
     m_sunVisCpu = nullptr;
     if (m_sunLayout) { vkDestroyPipelineLayout(m_device, m_sunLayout, nullptr); m_sunLayout = VK_NULL_HANDLE; }
+    if (m_skyGlowPipeline) { vkDestroyPipeline(m_device, m_skyGlowPipeline, nullptr); m_skyGlowPipeline = VK_NULL_HANDLE; }
+    if (m_skyGlowLayout) { vkDestroyPipelineLayout(m_device, m_skyGlowLayout, nullptr); m_skyGlowLayout = VK_NULL_HANDLE; }
     for (VkPipeline* p : {&m_cloudPipeline, &m_cloudHalfPipeline, &m_cloudUpPipeline, &m_cloudUpScenePipeline,
                           &m_cloudShadowPipeline, &m_cloudLayerNoisePipeline, &m_cloudWeatherPipeline, &m_cloudLayerPipeline,
                           &m_cloudResolvePipeline, &m_cloudLayerShadowPipeline, &m_cloudSunRayPipeline})
@@ -1616,7 +1628,7 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
                    : sceneFog[3] > 0.5f ? sceneFog[k] : (m_terrainAmbient[3] > 0.5f ? m_terrainAmbient[k] : 0.35f);
     }
     StormHue(tintNow);                           // (a thunderstorm: the game's puffs and its fog dark yellow-green)
-    StormHue(hazeNow);
+    StormAirColour(hazeNow);
     const float foggedNow = weight > 0.0f ? fogged / weight : 0.0f;
     {
         const double gap = m_cloudColourClock < 0.0 ? 1e9 : m_frameClock - m_cloudColourClock;
@@ -1683,6 +1695,14 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     const uint32_t quality = std::min(m_cloudParams.quality, 3u);
     lf.view[3] = kSunSteps[quality];
     lf.quality[0] = kStepScale[quality];
+    // Thin high wisps (RVK_Cirrus; cloud_layer.frag Cirrus): most on a clear day, fewer as the layer thickens (it hides
+    // them anyway), none in a storm; ~4 layers' heights over the layer's base.
+    {
+        const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
+        const float cloudy = SkyCloudiness() * vary;
+        lf.cirrus[0] = std::clamp(m_cloudParams.cirrus, 0.0f, 2.0f) * (0.35f + 0.65f * (1.0f - cloudy)) * (1.0f - StormSky());
+        lf.cirrus[1] = m_cloudBase + 4.0f * std::max(m_cloudParams.height, 200.0f);
+    }
     std::memcpy(lf.sub, sub, sizeof(lf.sub));
     if (shadowArea)
         std::memcpy(lf.shadowArea, shadowArea, sizeof(lf.shadowArea));

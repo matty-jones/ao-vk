@@ -62,5 +62,11 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
                                 // image + 1 | sampler << 20 (the float's bits; 0 = none)
     vec4 neon;                  // the tone mapping's neon look: x how much saturated light keeps its colour
                                 // (RVK_NeonSat), y the lens streaks' strength (RVK_Streaks), z, w unused
+    vec4 sky[4];                // the sky's model (rvk sky.cpp UpdateSkyModel; sky_common.glsl s0..s3)
+    vec4 skyView[3];            // the world camera's rotation: dot(skyView[i].xyz, a view-space direction) = its world
+                                // part i
+    vec4 dawn[2];               // a low sun's light (rvk sky.cpp, RVK_DawnLight): [0] the sun's warm tint (rgb, w how
+                                // much), [1] the sky's cool one in the shade (rgb) - 1 1 1 by day -, w the golden
+                                // hour's grade (tonemap.frag Grade, RVK_GoldenHour)
     Light lights[64];
 } FL;

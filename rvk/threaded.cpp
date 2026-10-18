@@ -918,6 +918,26 @@ void ThreadedDevice::SetSunBleed(float s)
     Enqueue([this, s](const uint8_t*) { m_device.SetSunBleed(s); });
 }
 
+void ThreadedDevice::SetTwilight(float twilight, float glow)
+{
+    Enqueue([this, twilight, glow](const uint8_t*) { m_device.SetTwilight(twilight, glow); });
+}
+
+void ThreadedDevice::SetMornHaze(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetMornHaze(s); });
+}
+
+void ThreadedDevice::SetDawnLight(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetDawnLight(s); });
+}
+
+void ThreadedDevice::SetGoldenHour(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetGoldenHour(s); });
+}
+
 void ThreadedDevice::SetShadowMemory(uint32_t mode)
 {
     Enqueue([this, mode](const uint8_t*) { m_device.SetShadowMemory(mode); });
@@ -926,6 +946,11 @@ void ThreadedDevice::SetShadowMemory(uint32_t mode)
 void ThreadedDevice::SetHillShade(bool on)
 {
     Enqueue([this, on](const uint8_t*) { m_device.SetHillShade(on); });
+}
+
+void ThreadedDevice::SetAlienMap(bool on)
+{
+    Enqueue([this, on](const uint8_t*) { m_device.SetAlienMap(on); });
 }
 
 void ThreadedDevice::SetShadowView(bool on)

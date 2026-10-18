@@ -20,7 +20,7 @@ layout(set = 0, binding = 0) uniform GrassFrame {
     vec4 camera;        // xyz: the camera; w: 1 = apply the TAA jitter
     vec4 ambient;       // rgb: the terrain's global ambient this frame; w: 1 = captured
     vec4 look;          // x: brightness; y: local light scale; z: glow (backlight, sheen, rounded shading); w: gusts
-    vec4 sunColour;     // rgb: the directional light the terrain's light pass takes (0 under the light override)
+    vec4 sunColour;     // rgb: none (the lightmap has the sun baked in: grass.cpp); kept for the layout
     vec4 sunDir;        // xyz: the direction it travels
     vec4 lod;           // x: pixels per world unit at view depth 1; y: the least width a blade is drawn at (pixels)
     vec4 trail;         // xy: the trail window's first cell (world cells); z: its cell size; w: cells a side (0 = none)
@@ -261,15 +261,21 @@ void main()
     // sun and the ambient stand in for the lightmap.
     vec3 baked = (bl.b.w >> 24u) != 0u ? Unpack8(bl.b.w) : FL.sunColor.rgb * 0.6;
     vec3 amb = GF.ambient.w > 0.5 ? GF.ambient.rgb : vec3(0.3);
-    float shade = 1.0;
+    // A thunderstorm (FL.rainNear.y), as on the ground (ffp FlatShade): the sun hidden everywhere, more than a cloud's
+    // shadow takes, and the things' shadows fading with it. Without it the grass stayed bright under a storm that
+    // darkened the land round it (user, 2026-10-18).
+    float storm = FL.rainNear.y;
+    float shade = 1.0 - 0.5 * storm;
     if (FL.shadowParams.x > 0.5)
         // (Taken at the blade's axis a little towards the sun: the blades cast into the map too, and a blade
         // mustn't shadow itself - the map's copy of it faces the sun, this one the camera.)
     {
         // (The clouds' part takes only about the sun's share of the ground's light, as on the ground: ffp FlatShade.)
         vec3 q = axis - normalize(FL.sunDir.xyz + vec3(0.0, -1e-6, 0.0)) * 0.05;
-        shade = (1.0 - (1.0 - SunShadowCasters(q)) * FL.shadowParams.y) * (1.0 - 0.5 * (1.0 - CloudShadowMap(q)));
+        shade = (1.0 - (1.0 - SunShadowCasters(q)) * FL.shadowParams.y * (1.0 - storm)) *
+                (1.0 - 0.5 * max(1.0 - CloudShadowMap(q), storm));
     }
+    shade *= 1.0 - 0.5 * storm;                  // (the storm's sky dimmer too: as the ground, ffp FlatShade)
     // The terrain's shade from a low sun, as on the ground (ffp FlatShade: the darker of it and the shadows, at the
     // shadows' own strength) - the eye's place (grass is drawn near it). Brighter than the game's ground grass under
     // the mountains, ours stood out until the game's took over further off (user, 2026-10-13).
@@ -294,6 +300,12 @@ void main()
     }
     vec3 moon = FL.moon.rgb * (max(dot(groundN, -normalize(FL.sunDir.xyz + vec3(0.0, -1e-6, 0.0))), 0.0) * moonShade);
     vec3 base = min(baked + amb + sun, vec3(1.0)) * shade, local = LocalLights(p, groundN) * GF.look.y;
+    // A low sun's light (rvk sky.cpp, RVK_DawnLight): as the ground's (ffp_main DawnTint) - warm where the sun reaches,
+    // cool in the shade.
+    if (FL.dawn[0].w > 0.0) {
+        float reached = smoothstep(-0.03, 0.05, dot(groundN, -normalize(FL.sunDir.xyz + vec3(0.0, -1e-6, 0.0)))) * shade;
+        base *= mix(FL.dawn[1].rgb, FL.dawn[0].rgb, reached);
+    }
     vec3 light = base + local + moon;
     // The colour: a gentle root-to-tip gradient around the ground's own brightness, the base darkened by the canopy
     // around it (in a dense tuft deeper) - over the blade's area (wider at the root) each averages 1, so the field as a

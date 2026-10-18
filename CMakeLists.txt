@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")   # static CRT: no extra runtime DLL next to the game
 
 # Native Randy: our implementations of randy31_orig's code (proxy/native, docs/native.md), shared with the tests.
-add_library(randy_native STATIC proxy/native/stb_image.cpp proxy/native/hook.cpp proxy/native/crash.cpp proxy/native/gui.cpp proxy/native/native.cpp proxy/native/cat_skin.cpp proxy/native/cat_anim.cpp proxy/native/scene.cpp proxy/native/popin.cpp
+add_library(randy_native STATIC proxy/native/stb_image.cpp proxy/native/hook.cpp proxy/native/crash.cpp proxy/native/gui.cpp proxy/native/rings.cpp proxy/native/native.cpp proxy/native/cat_skin.cpp proxy/native/cat_anim.cpp proxy/native/scene.cpp proxy/native/popin.cpp
             proxy/native/vc10.cpp proxy/native/orig_api.gen.cpp proxy/native/cat_render.cpp proxy/native/cat_mesh.cpp
             proxy/native/cat_query.cpp proxy/native/device.cpp proxy/native/state_blob.cpp proxy/native/dynamic_vb.cpp proxy/native/randy.cpp proxy/native/surface.cpp proxy/native/resource.cpp proxy/native/serialize.cpp proxy/native/texture.cpp proxy/native/material.cpp proxy/native/viewport.cpp proxy/native/refframe.cpp proxy/native/visual.cpp proxy/native/camera.cpp proxy/native/mesh.cpp proxy/native/mesh_data.cpp proxy/native/occluder.cpp proxy/native/cat_life.cpp proxy/native/cat_pick.cpp proxy/native/cat_data.cpp proxy/native/cat_anim_data.cpp proxy/native/bvolume.cpp proxy/native/dxerror.cpp proxy/native/devices.cpp proxy/native/randy_init.cpp proxy/native/debugger.cpp proxy/native/gone_trap.cpp proxy/native/keyframe.cpp proxy/native/sprite.cpp proxy/native/shadowlands.cpp proxy/native/color.cpp proxy/native/pixfmt.cpp proxy/native/lbitmap.cpp proxy/native/helpers.cpp proxy/native/texture_stream.cpp proxy/native/faf.cpp proxy/native/rshadow.cpp proxy/native/connector.cpp proxy/native/cat_status.cpp
             proxy/native/rgrid.cpp proxy/native/timer.cpp proxy/native/funcom.cpp proxy/native/findobject.cpp proxy/native/d3dx.cpp)
@@ -33,7 +33,7 @@ find_program(GLSLC glslc HINTS "${VULKAN_SDK_DIR}/bin" REQUIRED)
 
 set(RVK_SHADER_OUT "${CMAKE_CURRENT_BINARY_DIR}/rvk-shaders")
 set(RVK_SHADER_INCS)
-foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag ffp_glow_nocut.frag prepass_cutout.frag shadow.vert shadow.frag fullscreen.vert tonemap.frag bloom_down.frag bloom_up.frag ao.frag ao_blur.frag gi.frag gi_blur.frag volume.frag volume_blur.frag sand_fog.frag sand_fog_blur.frag ssr.frag contact.frag taa.frag sharpen.frag fxaa.frag motion_blur.frag motion_tilemax.frag motion_neighbourmax.frag motion_object.frag dof_composite.frag dof_focus.frag dof_prefilter.frag dof_tiles.frag dof_gather.frag dof_final.frag ui_composite.frag grass.vert grass.frag grass_shadow.vert particles.comp skin.comp water.vert water.frag water_spray.vert water_spray.frag water_sim.comp rain.vert rain.frag splash.vert splash.frag bolt.vert bolt.frag debris.vert debris.frag smoke_sim.comp smoke.vert smoke.frag smoke_up.frag cloud.vert cloud.frag cloud_up.frag cloud_shadow.frag cloud_noise.comp cloud_layer_noise.comp cloud_weather.frag cloud_layer.frag cloud_resolve.frag sun.frag sun_vis.comp terrain_sun.frag env_accum.frag env_filter.frag)
+foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag ffp_glow_nocut.frag prepass_cutout.frag shadow.vert shadow.frag fullscreen.vert tonemap.frag bloom_down.frag bloom_up.frag ao.frag ao_blur.frag gi.frag gi_blur.frag volume.frag volume_blur.frag sand_fog.frag sand_fog_blur.frag ssr.frag contact.frag taa.frag sharpen.frag fxaa.frag motion_blur.frag motion_tilemax.frag motion_neighbourmax.frag motion_object.frag dof_composite.frag dof_focus.frag dof_prefilter.frag dof_tiles.frag dof_gather.frag dof_final.frag ui_composite.frag grass.vert grass.frag grass_shadow.vert particles.comp skin.comp water.vert water.frag water_spray.vert water_spray.frag water_sim.comp rain.vert rain.frag splash.vert splash.frag bolt.vert bolt.frag debris.vert debris.frag smoke_sim.comp smoke.vert smoke.frag smoke_up.frag cloud.vert cloud.frag cloud_up.frag cloud_shadow.frag cloud_noise.comp cloud_layer_noise.comp cloud_weather.frag cloud_layer.frag cloud_resolve.frag sun.frag sky_glow.frag sun_vis.comp terrain_sun.frag env_accum.frag env_filter.frag)
     set(src "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/${shader}")
     set(out "${RVK_SHADER_OUT}/${shader}.inc")
     add_custom_command(OUTPUT "${out}"
@@ -56,6 +56,7 @@ foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag 
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/clouds_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/cloud_shadow_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/cloud_light.glsl"
+                "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/sky_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/dither.glsl"
         COMMENT "glslc ${shader}")
     list(APPEND RVK_SHADER_INCS "${out}")
@@ -81,6 +82,8 @@ foreach(entry "leaf.vert|ffp.vert|RVK_LEAF" "leaf_shadow.vert|shadow.vert|RVK_LE
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/wind.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/smoke_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/clouds_common.glsl"
+                "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/cloud_light.glsl"
+                "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/sky_common.glsl"
         COMMENT "glslc ${name}")
     list(APPEND RVK_SHADER_INCS "${out}")
 endforeach()

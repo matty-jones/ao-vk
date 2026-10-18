@@ -298,9 +298,18 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
                          WaterWritesDepth(fvf) ? "forced (water)" : "as the game sets it");
         } else {                                 // (the rest of 2D: what it is, how it blends - a screen flash shows)
             const Texture* t = m_textures[0];
-            std::fprintf(m_dumpFile, "Q %u: 2D, prim %u fvf 0x%x v %u i %u | tex0 %ux%u | blend %u %u/%u | z %u/%u/%u | target %s\n",
+            // (The texture: its format, uploads, black (RVK_AlienMap), opaque, level 0's non-zero bytes;
+            // the alpha test and stage 0's colour and alpha operations - what the PF map's tiles are made of.)
+            std::fprintf(m_dumpFile, "Q %u: 2D, prim %u fvf 0x%x v %u i %u | tex0 %ux%u fmt %u up %u black %u "
+                         "opaque %u nz %u | blend %u %u/%u | alphatest %u %u/%u | st0 c %u/%u/%u a %u/%u/%u | "
+                         "z %u/%u/%u | target %s\n",
                          n, primitive, fvf, vertexCount, indexCount, t ? t->Width() : 0, t ? t->Height() : 0,
+                         t ? uint32_t(t->GetFormat()) : 0, t ? t->m_uploads : 0, t ? uint32_t(t->m_blackRgb) : 0,
+                         t ? uint32_t(t->m_opaque) : 0, t ? t->m_level0NonZero : 0,
                          m_rs[d3d::RS_ALPHABLENDENABLE], m_rs[d3d::RS_SRCBLEND], m_rs[d3d::RS_DESTBLEND],
+                         m_rs[d3d::RS_ALPHATESTENABLE], m_rs[d3d::RS_ALPHAFUNC], m_rs[d3d::RS_ALPHAREF],
+                         m_tss[0][d3d::TSS_COLOROP], m_tss[0][d3d::TSS_COLORARG1], m_tss[0][d3d::TSS_COLORARG2],
+                         m_tss[0][d3d::TSS_ALPHAOP], m_tss[0][d3d::TSS_ALPHAARG1], m_tss[0][d3d::TSS_ALPHAARG2],
                          m_rs[d3d::RS_ZENABLE], m_rs[d3d::RS_ZWRITEENABLE], m_rs[d3d::RS_ZFUNC],
                          m_target == m_scene ? "scene" : m_target == m_main ? "main" : "other");
         }
