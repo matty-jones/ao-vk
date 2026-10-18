@@ -957,6 +957,10 @@ void main()
         glow = current.rgb * ((C.flags.x & F_GLOWALPHA) != 0u ? clamp(current.a, 0.0, 1.0) : 1.0) * C.misc.z;
     // Alpha: its brightness over its view depth (1 / w), summed like the colour - the bloom's light's distance.
     outGlow = vec4(glow, dot(glow, vec3(0.3, 0.59, 0.11)) * gl_FragCoord.w);
+    // A solid surface (F_GLOWALPHA alone): blended to scale the glow there by 1 - its coverage - an effect drawn
+    // before it behind it no longer glows through it.
+    if ((C.flags.x & (F_GLOW | F_GLOWALPHA)) == F_GLOWALPHA)
+        outGlow = vec4(0.0, 0.0, 0.0, (C.flags.x & F_BLENDED) != 0u ? clamp(current.a, 0.0, 1.0) : 1.0);
     // Blended with this fragment's alpha like the colour (attachment 2's blend state follows the colour's).
     outLocal = vec4(gLocalFraction, clamp(reflectivity, 0.0, 1.0), gSunShare, current.a);
     // Motion vectors (written by depth-writing draws only, see the blend state): where this point was last frame.

@@ -849,7 +849,8 @@ private:
         bool drawSetValid = false;
         VkDeviceSize frameLights = 0, prevOffset = 0, prevRange = 0, smoothOffset = 0, smoothRange = 0;
         VkBuffer prevBuffer = VK_NULL_HANDLE, smoothBuffer = VK_NULL_HANDLE;
-        bool glowBlendSet = false;               // attachment 1 (glow) blend state, HDR pipelines
+        bool glowBlendSet = false;               // attachment 1 (glow) blend enabled, HDR pipelines
+        uint8_t glowBlendMode = 0;               // ... its equation: 0 not set, 1 adds (effects), 2 occludes (GlowOccluder)
         uint32_t fractionEnable = ~0u, fractionSrc = ~0u, fractionDst = ~0u;   // attachment 2 (local-light fraction)
         uint32_t motionKeep = ~0u;               // attachment 3 (motion vectors): 1 = kept (draw doesn't write)
         uint32_t albedoEnable = ~0u, albedoSrc = ~0u, albedoDst = ~0u;   // attachment 4 (surface colour)
@@ -2493,6 +2494,7 @@ private:
     bool m_glowCleared = false;                  // this frame
     uint32_t m_glowDraws = 0;                    // this frame's draws feeding the glow (frame dumps)
     bool GlowDraw(uint32_t fvf) const;
+    bool GlowOccluder(uint32_t fvf) const;
     bool IsInterfaceDraw(uint32_t fvf) const;
     // The scene's pre-transformed draws (FVF 0x1C4, out of ProcessVertices: the game's water, floating text) - not
     // the game's screen sprites in the same format (the timer bars): the proxy says which (SetDrawProcessed).

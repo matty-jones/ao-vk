@@ -1117,6 +1117,63 @@ void RunPbrTest(D& dev, int frames, const std::string& shot)
     for (Texture* t : wallTex) dev.DestroyTexture(t);
 }
 
+// Glow occlusion test (--glow-occlude-test, with --bloom S): a bright additive quad drawn first, then a solid wall in
+// front of all of it - drawn after it, as the game drew a rock after the Temple of the Three Winds portal. The wall
+// must hide the quad's glow too: no bloom on the wall from behind it (the wall stays as grey as its far edge).
+template <typename D>
+void RunGlowOccludeTest(D& dev, int frames, const std::string& shot)
+{
+    uint32_t white = 0xFFFFFFFF, grey = 0xFF606060;
+    Texture* glowTex = dev.CreateTexture(1, 1, &white);
+    Texture* wallTex = dev.CreateTexture(1, 1, &grey);
+    VtxDiffuseTex glow[4] = {{-1.5f, -1.5f, 8, 0xFFFFE0A0, 0, 0}, {-1.5f, 1.5f, 8, 0xFFFFE0A0, 0, 1},
+                             {1.5f, -1.5f, 8, 0xFFFFE0A0, 1, 0}, {1.5f, 1.5f, 8, 0xFFFFE0A0, 1, 1}};
+    // (Vertex alpha just under 255: kept out of the depth pre-pass, as the rock was - pre-passed, its depth hid the
+    // quad from the start.)
+    VtxDiffuseTex wall[4] = {{-3.0f, -3.0f, 4, 0xFEFFFFFF, 0, 0}, {-3.0f, 3.0f, 4, 0xFEFFFFFF, 0, 1},
+                             {3.0f, -3.0f, 4, 0xFEFFFFFF, 1, 0}, {3.0f, 3.0f, 4, 0xFEFFFFFF, 1, 1}};
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1)
+            dev.RequestScreenshot(shot);
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF101418, 1.0f);
+        dev.SetTransform(View, LookAtLH({0, 0, -4}, {0, 0, 0}, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.1f, 100.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_LIGHTING, 0);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        dev.SetTextureStageState(1, TSS_COLOROP, TOP_DISABLE);
+        // The glow first: additive, no depth written.
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+        dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+        dev.SetRenderState(RS_DESTBLEND, BLEND_ONE);
+        dev.SetRenderState(RS_ZWRITEENABLE, 0);
+        dev.SetTexture(0, glowTex);
+        for (int k = 0; k < 4; ++k)                    // (stacked: well above the bloom's threshold)
+            dev.DrawPrimitive(TriangleStrip, kFvfDiffuseTex, glow, 4);
+        // Then the wall in front of it: solid, writing depth - blended (SRCALPHA / INVSRCALPHA, opaque texture) the way
+        // the game draws most static objects, the rock in front of the portal too (so not in the depth pre-pass).
+        dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+        dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_MODULATE);
+        dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+        dev.SetTexture(0, wallTex);
+        dev.DrawPrimitive(TriangleStrip, kFvfDiffuseTex, wall, 4);
+        dev.EndFrame();
+    }
+    dev.DestroyTexture(glowTex);
+    dev.DestroyTexture(wallTex);
+}
+
 float g_cameraYaw = 0.0f;  // --camera-yaw: the shadow test's camera turns this much a frame (motion blur)
 float g_cameraPitch = -1000.0f;   // --camera-pitch DEG: the shadow test's camera looks this far up (the sky: clouds)
 bool g_sunView = false;    // --sun-view: the shadow test's camera low, looking into the sun
@@ -3771,7 +3828,7 @@ int main(int argc, char** argv)
     float saturation = 1.0f, contrast = 1.0f, warmth = 0.0f, nightTint = 0.0f, vignette = 0.0f;
     bool lutSepia = false, taa = false, fxaa = false;
     float sharpen = 0.4f;
-    bool normalMapTest = false, pbrTest = false;
+    bool normalMapTest = false, pbrTest = false, glowOccludeTest = false;
     uint32_t anisotropy = 1;
     float motionBlur = 0.0f, dof = 0.0f, dofFocus = 0.0f;
     bool dofBokeh = true, dofFar = true;
@@ -3995,6 +4052,7 @@ int main(int argc, char** argv)
         else if (a == "--bump" && i + 1 < argc) bump = float(std::atof(argv[++i]));
         else if (a == "--normal-map-test") normalMapTest = true;
         else if (a == "--pbr-test") pbrTest = true;
+        else if (a == "--glow-occlude-test") { glowOccludeTest = true; hdr = true; }
         else if (a == "--pbr-maps" && i + 1 < argc) { g_pbrMaps = argv[++i]; pbrTest = true; }
         else if (a == "--pbr-off") g_pbrOff = true;
         else if (a == "--pbr-probe" && i + 1 < argc) g_pbrProbe = float(std::atof(argv[++i]));
@@ -4188,6 +4246,11 @@ int main(int argc, char** argv)
     dev.SetMotionBlurMode(motionMode);
     dev.SetDof(dof > 0.0f, dofBokeh, true, dof, 16.0f, dofFocus, 0.2f, dofFar, 3.0f);
     dev.SetPointShadowFadeIn(fadeIn);    // frames here are milliseconds apart: no fade-in unless asked
+    if (glowOccludeTest) {
+        RunGlowOccludeTest(dev, frames, shot);
+        std::printf("rendered; screenshot %s\n", shot.c_str());
+        return 0;
+    }
     if (pbrTest) {
         RunPbrTest(dev, frames, shot);
         std::printf("rendered; screenshot %s\n", shot.c_str());

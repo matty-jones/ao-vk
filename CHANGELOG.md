@@ -20,6 +20,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### Fixed
 - Squares around glowing effects such as the Temple of the Three Winds portal: their see-through corners were
   shaded as if solid. (#15)
+- Glowing effects (the Temple of the Three Winds portal, for one) could be seen glowing through walls and rocks in
+  front of them.
 - Floating damage and XP numbers (and other text over the world) were dimmed by smoke and changed by fog, bloom
   and colour grading. They are now drawn over the finished picture, still hidden behind walls.
 - Light beams and glows on lamps (under the billboards in the cities, for example) swayed like trees and grew

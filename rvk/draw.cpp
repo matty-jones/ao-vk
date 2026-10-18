@@ -1512,6 +1512,18 @@ bool Device::GlowDraw(uint32_t fvf) const
     return dst == d3d::BLEND_ONE && (src == d3d::BLEND_ONE || src == d3d::BLEND_SRCALPHA);
 }
 
+// A solid surface drawn into the scene - depth-writing, not additive, not the ground's light pass: it covers the glow
+// (additive effects' light, for the bloom) drawn before it behind it, as it covers their colour. Else an effect drawn
+// before a wall in front of it bloomed through the wall (the Temple of the Three Winds portal through a rock).
+bool Device::GlowOccluder(uint32_t fvf) const
+{
+    if (m_effectGlow <= 0.0f || m_target != m_scene || (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW ||
+        !m_rs[d3d::RS_ZENABLE] || !m_rs[d3d::RS_ZWRITEENABLE] || m_rs[d3d::RS_ZFUNC] == d3d::CMP_ALWAYS ||
+        m_drawIsLabel || m_drawTerrainLight || IsMultiplyPass())
+        return false;
+    return !(m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE);
+}
+
 // A multiplying pass (the ground's lightmap + lights) lit by the frame lights with headroom: it outputs half its
 // colour and is blended at 2x, so the lights can brighten the surface under it beyond the texture.
 bool Device::Overbright2x(uint32_t fvf) const
@@ -1907,13 +1919,24 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     // The attachments' blend enables changed here are set together below (one call for the range, not one each: the
     // statics' blend toggling set three of them ~900 times a frame over a city).
     uint32_t blendDirty = 0;
-    if (hdrTarget && !c.glowBlendSet) {
-        // The glow attachment always adds: what each additive effect contributes (others write 0).
-        blendDirty |= 2u;
-        VkColorBlendEquationEXT eq{VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD,
-                                   VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD};
-        vkCmdSetColorBlendEquationEXT(cmd, 1, 1, &eq);
-        c.glowBlendSet = true;
+    if (hdrTarget) {
+        // The glow attachment: an additive effect adds what it contributes; a solid surface (GlowOccluder) scales what
+        // is there by 1 - its coverage (it writes 0, 0, 0, coverage): what it covers no longer glows. Others don't
+        // write it (masks below).
+        if (!c.glowBlendSet) {
+            blendDirty |= 2u;
+            c.glowBlendSet = true;
+        }
+        const uint8_t mode = GlowOccluder(fvf) ? 2 : 1;
+        if (c.glowBlendMode != mode) {
+            VkColorBlendEquationEXT eq = mode == 1
+                ? VkColorBlendEquationEXT{VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD,
+                                          VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD}
+                : VkColorBlendEquationEXT{VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD,
+                                          VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD};
+            vkCmdSetColorBlendEquationEXT(cmd, 1, 1, &eq);
+            c.glowBlendMode = mode;
+        }
     }
     // The interface layer (interface.cpp): every draw blends - its colour as asked (unblended: ONE, ZERO) - and its
     // alpha accumulates its coverage.
@@ -2005,7 +2028,7 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
         if (m_dynamicWriteMask) {
             const uint32_t all = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
                                  VK_COLOR_COMPONENT_A_BIT;
-            uint32_t masks[5] = {all, GlowDraw(fvf) ? all : 0u,
+            uint32_t masks[5] = {all, GlowDraw(fvf) || GlowOccluder(fvf) ? all : 0u,
                                  blend && fSrc == d3d::BLEND_ZERO && fDst == d3d::BLEND_ONE ? 0u : all,
                                  keep ? 0u : all,
                                  blend && aSrc == d3d::BLEND_ZERO && aDst == d3d::BLEND_ONE ? 0u : all};
@@ -2889,6 +2912,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     else if ((flags & F_PERPIXEL) && m_drawBumpBase)
         flags |= F_BUMP | F_BUMPBASE;
     if (GlowDraw(fvf)) flags |= F_GLOW | (m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_SRCALPHA ? F_GLOWALPHA : 0u);
+    else if (GlowOccluder(fvf)) flags |= F_GLOWALPHA;   // (alone: covers the glow - ffp_main.glsl)
     if (override && (m_lightHeadroom > 1.0f || hdrTarget)) flags |= F_OVERBRIGHT;
     if (Overbright2x(fvf)) flags |= F_OVERBRIGHT2X;
     if (ShadowReceiver(fvf)) flags |= F_SHADOW;
