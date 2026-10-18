@@ -85,6 +85,12 @@ vec3 Afterglow(vec3 sunL)
 vec3 DuskSkyTint()
 {
     float v = min(DuskVivid(), 1.0);
+    // Our own sky (RVK_ProcSky): the sky over them its colour (FL.skyUp) - a little of its blue by day in their shade,
+    // more round sunset (its pinks and violets).
+    if (FL.skyUp.w > 0.5) {
+        vec3 c = FL.skyUp.rgb / max(dot(FL.skyUp.rgb, vec3(0.3, 0.59, 0.11)), 1e-4);
+        return mix(vec3(1.0), c, mix(0.2, 0.5, v));
+    }
     if (v <= 0.0)
         return vec3(1.0);
     vec3 up = normalize(vec3(FL.sky[1].x * 0.4, 0.75, FL.sky[1].z * 0.4));

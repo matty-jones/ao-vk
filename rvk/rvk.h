@@ -552,6 +552,12 @@ public:
     void SetAfterglow(float s) { m_afterglow = s; }
     void SetStarFade(bool on) { m_starFade = on; }
     void SetDuskRays(float s) { m_duskRays = s; }
+    void SetProcSky(bool on, float zone, float bright)
+    {
+        m_procSky = on;
+        m_skyZone = zone;
+        m_skyBright = bright;
+    }
     // The golden hour's grade round sunrise and sunset (tonemap.frag Grade; 0 none).
     void SetGoldenHour(float s) { m_goldenHour = s; }
     // Remembered shadow casters (things out of view still casting) and the terrain's shade from a low sun, on / off.
@@ -1244,6 +1250,34 @@ private:
     uint32_t m_skyDraws = 0;                     // the sky's draws so far this frame (the glow before the second)
     VkPipeline m_skyGlowPipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_skyGlowLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_skyGlowSetLayout = VK_NULL_HANDLE;   // (the sky view table)
+    // Our own sky (atmosphere.cpp; RVK_ProcSky): the atmosphere's tables, the sky view's frame; the dome's draw skipped.
+    bool m_procSky = true;                       // RVK_ProcSky
+    float m_skyZone = 0.25f;                     // RVK_SkyZone: how much of the zone's own sky colour is kept
+    float m_skyBright = 1.0f;                    // RVK_SkyBright: the sky's brightness against the game's
+    Texture* m_atmosTrans = nullptr;
+    Texture* m_atmosMulti = nullptr;
+    Texture* m_atmosView = nullptr;
+    VkPipeline m_atmosTransPipeline = VK_NULL_HANDLE, m_atmosMultiPipeline = VK_NULL_HANDLE,
+               m_atmosViewPipeline = VK_NULL_HANDLE;
+    bool m_atmosReady = false;
+    float m_atmosTune[2] = {};
+    float m_skyDayFogL = 0.7f;                   // the game's sky by day: its fog's brightness (eased)
+    uint64_t m_atmosViewFrame = ~0ull;
+    uint32_t m_domeSkipVerts = 0, m_domeSkipTexture = 0;   // the dome last skipped (logged when it changes)
+    bool m_bandSkipLogged = false, m_tintSkipLogged = false;
+    // The sky's horizon all round (FL.skyRing), read back from the sky view table a few frames late: the haze, the far
+    // fog, the mist and the clouds low in the sky fade into it (sky_common.glsl SkyHorizonRing).
+    VkBuffer m_atmosRingBuffer = VK_NULL_HANDLE;
+    VmaAllocation_T* m_atmosRingAllocation = nullptr;
+    uint8_t* m_atmosRingCpu = nullptr;
+    bool m_atmosRingWritten[kFramesInFlight] = {};
+    float m_skyRing[8][4] = {};                  // rgb, w 1 when known
+    float m_skyUp[4] = {};                       // the sky over the land (overhead, 35 degrees up), w 1 when known
+    void SunThroughAir(float up, float out[3]) const;   // the sun's colour through the air (unit luma)
+    bool ProcSkyReady() const;
+    void UpdateAtmosphere(VkCommandBuffer cmd);
+    void DestroyAtmosphere();
     void UpdateSkyModel();
     void DrawSkyGlow();
     // The sun's clock (sky.cpp UpdateSunClock; docs/dusk-plan.md): the true sun's direction eased over real time (the

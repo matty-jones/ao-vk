@@ -1474,6 +1474,7 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     UpdateMoon();
     UpdateMist();
     UpdateSkyModel();                            // (the sky's twilight and glow: sky.cpp)
+    UpdateAtmosphere(cmd);                       // (our own sky's tables, for the next frame: atmosphere.cpp)
     UpdateTerrainSun(cmd);                       // (the terrain's shade from a low sun: terrain_sun.cpp)
     // Low (under ~3 degrees, still above the horizon): no shadows (too long, too ragged), but the game's light stays
     // the frame's sun for our effects - clouds, leaves, air - fading in from the horizon: at dawn and dusk the game

@@ -121,7 +121,7 @@ vec3 gSkyDelta = vec3(0.0);
 vec3 SkyDelta(vec3 Vv)
 {
     vec3 w = vec3(dot(FL.skyView[0].xyz, Vv), dot(FL.skyView[1].xyz, Vv), dot(FL.skyView[2].xyz, Vv));
-    return SkyHorizonDelta(w, FL.sky[0], FL.sky[1], FL.sky[3]);
+    return SkyHorizonDeltaAll(w, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing);
 }
 
 vec3 Mist(vec3 c, vec3 V, float dist, float phase)

@@ -2147,6 +2147,11 @@ float g_nightDark = 1.0f;         // --night-dark X: RVK_NightDark
 bool g_atmos = true;              // --atmos 0|1: RVK_Atmos
 float g_twilight = 0.85f, g_skyGlow = 1.0f;   // --twilight T G: RVK_Twilight, RVK_SkyGlow
 float g_duskRays = 1.0f;                      // --dusk-rays X: RVK_DuskRays
+// --sky-dome RRGGBB (the water scenes): a dome like the game's - the sky's first draw, a lit unblended mesh round the
+// eye - in that colour, which the fog takes too (the zone's sky: 4FE6D9 the user's teal); RVK_ProcSky replaces it.
+uint32_t g_skyDome = 0;
+bool g_procSky = true;                        // --proc-sky 0|1: RVK_ProcSky
+float g_skyZoneHint = 0.25f;                  // --sky-zone-hint X: RVK_SkyZone
 float g_dawnLight = 1.0f;         // --dawn-light X: RVK_DawnLight
 int g_textureFlood = 0;                         // --texture-flood: textures alive before the shadow test's label
 float g_mist = 1.0f;              // --mist X: RVK_Mist
@@ -2474,7 +2479,9 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
             const float hs = std::sin(e), k = std::clamp((hs + 0.26f) / 0.36f, 0.0f, 1.0f);
             const float sky01 = 0.12f + 0.88f * k * k * (3.0f - 2.0f * k);
             sweepDim = std::clamp(hs / 0.05f, 0.0f, 1.0f);
-            const uint32_t r = uint32_t(0x8F * sky01), g = uint32_t(0xB0 * sky01), b = uint32_t(0xCC * std::sqrt(sky01));
+            const uint32_t base = g_skyDome ? g_skyDome : 0xFF8FB0CCu;
+            const uint32_t r = uint32_t(float((base >> 16) & 0xFF) * sky01), g = uint32_t(float((base >> 8) & 0xFF) * sky01),
+                           b = uint32_t(float(base & 0xFF) * std::sqrt(sky01));
             skyNow = 0xFF000000u | r << 16 | g << 8 | b;
             if (frame % g_sweepHold == g_sweepHold - 1) {
                 char name[32];
@@ -2544,6 +2551,37 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
         dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
         dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        if (g_skyDome) {
+            // (A UV sphere of 17 x 9 rings round the eye in the fog's colour, lit, unblended: the game's dome.)
+            static std::vector<VtxMesh> dome;
+            static std::vector<uint16_t> domeIdx;
+            if (dome.empty()) {
+                for (int i = 0; i <= 8; ++i)
+                    for (int j = 0; j <= 16; ++j) {
+                        const float el = (float(i) / 8.0f - 0.5f) * kPi, az = float(j) / 16.0f * 2.0f * kPi;
+                        const float x = std::cos(el) * std::cos(az), y = std::sin(el), z = std::cos(el) * std::sin(az);
+                        dome.push_back({x * 500.0f, y * 500.0f, z * 500.0f, -x, -y, -z, 0xFFFFFFFFu, 0.0f, 0.0f});
+                    }
+                for (int i = 0; i < 8; ++i)
+                    for (int j = 0; j < 16; ++j) {
+                        const uint16_t a = uint16_t(i * 17 + j), b = uint16_t(a + 17);
+                        domeIdx.insert(domeIdx.end(), {a, b, uint16_t(a + 1), uint16_t(a + 1), b, uint16_t(b + 1)});
+                    }
+            }
+            for (VtxMesh& v : dome) v.diffuse = skyNow;
+            dev.SetDrawVisual(uint32_t(VisualKind::Sky), "GenericMeshObject_t");
+            dev.SetTransform(World, Translate(eye.x, eye.y, eye.z));
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_ZWRITEENABLE, 0);
+            dev.SetRenderState(RS_FOGENABLE, 0);
+            dev.SetTexture(0, nullptr);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, dome.data(), uint32_t(dome.size()), domeIdx.data(),
+                                     uint32_t(domeIdx.size()));
+            dev.SetDrawVisual(0, nullptr);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetRenderState(RS_FOGENABLE, 1);
+            dev.SetTransform(World, Identity());
+        }
         // --clouds: the sky's puffs first (as the game: the sky, then the scene), each a sheet turned to the camera.
         if (g_clouds)
             DrawDemoPuffs(dev, eye, kPi * 0.5f + g_waterYaw, puffTex, puffMesh, puffIdx, 1.0f);
@@ -4023,6 +4061,9 @@ int main(int argc, char** argv)
             g_skyGlow = float(std::atof(argv[++i]));
         }
         else if (a == "--dusk-rays" && i + 1 < argc) g_duskRays = float(std::atof(argv[++i]));
+        else if (a == "--sky-dome" && i + 1 < argc) g_skyDome = 0xFF000000u | uint32_t(std::strtoul(argv[++i], nullptr, 16));
+        else if (a == "--proc-sky" && i + 1 < argc) g_procSky = std::atoi(argv[++i]) != 0;
+        else if (a == "--sky-zone-hint" && i + 1 < argc) g_skyZoneHint = float(std::atof(argv[++i]));
         else if (a == "--mist" && i + 1 < argc) g_mist = float(std::atof(argv[++i]));
         else if (a == "--water-z" && i + 1 < argc) g_waterZ = float(std::atof(argv[++i]));
         else if (a == "--water-noshadow") shadows = false;
@@ -4260,6 +4301,7 @@ int main(int argc, char** argv)
     dev.SetAtmos(g_atmos);
     dev.SetTwilight(g_twilight, g_skyGlow);
     dev.SetDuskRays(g_duskRays);
+    dev.SetProcSky(g_procSky, g_skyZoneHint, 1.0f);
     dev.SetDawnLight(g_dawnLight);
     dev.SetMist(g_mist);
     dev.SetContactShadows(contact);

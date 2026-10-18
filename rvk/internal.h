@@ -146,6 +146,8 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float dawn[2][4];              // low sun's light (sky.cpp): the sun's tint (rgb), w how much; the sky's (shade)
                                    // tint, w the golden hour's grade (tonemap.frag)
     float phase[4];                // the dusk's phases (sky.cpp UpdateSunClock): golden hour, afterglow, blue hour, night
+    float skyRing[8][4];           // our sky's horizon all round (atmosphere.cpp): from +x towards +z, w 1 when known
+    float skyUp[4];                // our sky over the land (overhead and 35 degrees up), w 1 when known
     float dusk[4];                 // x: RVK_Afterglow (the clouds' sunset colours), y the blue hour's grade, z w the sun on
                                    // the world camera's screen (NDC; 1e3 behind it)
     GpuLight lights[kFrameLights];

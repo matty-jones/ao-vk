@@ -128,4 +128,22 @@ vec3 SkyHorizonDelta(vec3 dirW, vec4 s0, vec4 s1, vec4 s3)
     return (SkyTwilight(h, s0, s1, s3) - s0.rgb) * t;
 }
 
+// Our own sky's horizon towards a world direction (RVK_ProcSky; rvk atmosphere.cpp: FL.skyRing, eight colours round
+// the horizon read back from the sky view table) - and as SkyHorizonDelta, how far it differs from the game's fog
+// colour: added where the air takes the fog's colour, so the land fades into our sky, not the zone's.
+vec3 SkyHorizonRing(vec3 dirW, vec4 ring[8])
+{
+    float az = atan(dirW.z, dirW.x) / 0.78539816;             // (sectors of 45 degrees from +x towards +z)
+    float f = fract(az / 8.0) * 8.0;
+    int i = int(floor(f)) & 7;
+    return mix(ring[i].rgb, ring[(i + 1) & 7].rgb, f - floor(f));
+}
+
+vec3 SkyHorizonDeltaAll(vec3 dirW, vec4 s0, vec4 s1, vec4 s3, vec4 ring[8])
+{
+    if (ring[0].w > 0.5)
+        return SkyHorizonRing(dirW, ring) - s0.rgb;
+    return SkyHorizonDelta(dirW, s0, s1, s3);
+}
+
 #endif

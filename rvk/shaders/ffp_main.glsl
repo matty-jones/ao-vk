@@ -582,7 +582,7 @@ vec3 CloudSheet(vec4 tex)
         S += vec3(0.8, 0.85, 1.0) * tint * (FL.flash.w * 1.2 * (1.0 - 0.3 * thick) / (1.0 + dot(at, at) / (1500.0 * 1500.0)));
     }
     float low = HorizonBand(dir, FL.cloudAir.w);
-    return mix(S, AirColour(FL.cloudAir.rgb + SkyHorizonDelta(dir, FL.sky[0], FL.sky[1], FL.sky[3]), low), max(0.25, low));
+    return mix(S, AirColour(FL.cloudAir.rgb + SkyHorizonDeltaAll(dir, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing), low), max(0.25, low));
 }
 
 void main()

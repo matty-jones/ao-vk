@@ -70,6 +70,9 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
                                 // hour's grade (tonemap.frag Grade, RVK_GoldenHour)
     vec4 phase;                 // the dusk's phases (rvk sky.cpp UpdateSunClock), each 0..1: x the golden hour, y the
                                 // afterglow, z the blue hour, w night - by the sun's eased height
+    vec4 skyRing[8];            // our sky's horizon all round (rvk atmosphere.cpp; RVK_ProcSky): the colour just over the
+                                // horizon at azimuths k * 45 degrees from +x towards +z; w 1 when known
+    vec4 skyUp;                 // our sky over the land (overhead, 35 degrees up all round); w 1 when known
     vec4 dusk;                  // x: RVK_Afterglow (cloud_light.glsl DuskVivid), y the blue hour's grade (tonemap.frag
                                 // Grade; rvk sky.cpp), z w the sun on the world camera's screen (NDC; 1e3 behind it)
     Light lights[64];

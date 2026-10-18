@@ -4,7 +4,14 @@ Status: built 2026-10-18 (staged randy31-dusk1..3): the dusk log and sun clock, 
 blue hour, the land's shade and the blue-hour grade, the clouds' sunset colours, the stars' fade, the sunset rays.
 Open: the game's own dusk measured (the `dusk:` log over a forced sunset - §0) and in-game tuning; the moons' fade
 (§6) left out - an alpha-blended lit disc can't be faded by its colour, and the game lights them dimly by day itself.
-Next: §8, our own sky in place of the game's dome (user, 2026-10-18: its bright teal fights the sunset).
+§8 step 1 built 2026-10-18 (randy31-sky1): the three tables, the sky pass in the dome's place, the brightness fitted
+by an adaptation table (atmosphere.cpp SkyAdaptLog - the demo's sweep: 0.6 at 4 degrees under, 0.25 at 8, ~0.04 at
+night), the zone's hint, weather, the night's floor. Steps 2-4 built the same day (randy31-sky2..5): the game's
+sky tint quad (6 vertices) and horizon band (121) left out too; the sky view's horizon, the sky 35 degrees up and
+overhead read back each frame (FL.skyRing, FL.skyUp) for the haze, far fog, mist, clouds and the land's shade (no
+CPU copy of the atmosphere needed); the sun's colour on the land from its air mass (SunThroughAir); the brightness
+recalibrated twice against the user's game (kZenithRef 0.18, the user's RVK_SkyBright 0.25 of 0.045). Open: step 5,
+tuning in game (midday, night, a green zone, overcast, storm), and the GPU cost.
 
 ## Context
 

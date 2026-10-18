@@ -192,6 +192,9 @@ Setting g_settings[] = {
     {"RVK_TimeOfDay",   "Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h)", "Debug", Float, -1, 27, 0.25f, -1, nullptr, 0},
     {"RVK_TimeSpeed",   "Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own)", "Debug", Float, 0, 500, 0.5f, 1, nullptr, 0},
     {"RVK_SkyVary",     "Clouds: the sky changes, clear to overcast (0: always some cloud)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
+    {"RVK_ProcSky",     "Sky: our own sky in place of the game's - blue by day, sunsets, the blue hour and night from the sun's height (off: the game's sky)", "Sky", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Hdr"},
+    {"RVK_SkyZone",     "Sky: how much of each zone's own sky colour is kept (0: none, 1: mostly the zone's)", "Sky", Float, 0, 1, 0.05f, 0.25f, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_SkyBright",   "Sky: our sky's brightness against the game's (and the far haze's, which takes its colour)", "Sky", Float, 0.25f, 2, 0.05f, 1, nullptr, 0, "RVK_ProcSky"},
     {"RVK_Twilight",    "Sky: sunrise and sunset colours - orange and red towards the sun, pink above, the pink band opposite (0: the game's sky; above 1 more vivid)", "Sky", Float, 0, 1.5f, 0.05f, 0.85f, nullptr, 0, "RVK_Hdr"},
     {"RVK_BlueHour",    "Sky: the blue hour after sunset and before sunrise - a deep blue sky going over to the night's (0: none)", "Sky", Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyGlow",     "Sky: the glow round the sun and along the horizon under it (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
@@ -352,7 +355,7 @@ const Vanilla kVanilla[] = {
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
-    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0},
+    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -624,6 +627,8 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Afterglow")) d->SetAfterglow(V(n));
     else if (is("RVK_StarFade")) d->SetStarFade(V(n) > 0.5f);
     else if (is("RVK_DuskRays")) d->SetDuskRays(V(n));
+    else if (is("RVK_ProcSky") || is("RVK_SkyZone") || is("RVK_SkyBright"))
+        d->SetProcSky(V("RVK_ProcSky") > 0.5f, V("RVK_SkyZone"), V("RVK_SkyBright"));
     else if (is("RVK_GoldenHour")) d->SetGoldenHour(V(n));
     // The game's sun sprites: with RVK_GameSun, or whenever our suns are off (HDR off, RVK_Sun 0) - never no sun.
     else if (is("RVK_Sun") || is("RVK_GameSun")) {

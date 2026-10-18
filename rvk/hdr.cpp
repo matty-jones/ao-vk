@@ -50,6 +50,15 @@ const uint32_t kEnvFilterSpirv[] = {
 const uint32_t kVolumeSpirv[] = {
 #include "volume.frag.inc"
 };
+const uint32_t kAtmosTransSpirv[] = {
+#include "atmos_transmittance.frag.inc"
+};
+const uint32_t kAtmosMultiSpirv[] = {
+#include "atmos_multi.frag.inc"
+};
+const uint32_t kAtmosViewSpirv[] = {
+#include "atmos_view.frag.inc"
+};
 const uint32_t kVolumeBlurSpirv[] = {
 #include "volume_blur.frag.inc"
 };
@@ -282,6 +291,9 @@ bool Device::CreateHdrResources(std::string* error)
               fullscreen(kEnvAccumSpirv, sizeof(kEnvAccumSpirv), hdrFormat, false, m_bloomLayout, &m_envAccumPipeline) &&
               fullscreen(kEnvFilterSpirv, sizeof(kEnvFilterSpirv), hdrFormat, false, m_bloomLayout, &m_envFilterPipeline) &&
               fullscreen(kVolumeSpirv, sizeof(kVolumeSpirv), hdrFormat, false, m_volumeLayout, &m_volumePipeline) &&
+              fullscreen(kAtmosTransSpirv, sizeof(kAtmosTransSpirv), hdrFormat, false, m_bloomLayout, &m_atmosTransPipeline) &&
+              fullscreen(kAtmosMultiSpirv, sizeof(kAtmosMultiSpirv), hdrFormat, false, m_bloomLayout, &m_atmosMultiPipeline) &&
+              fullscreen(kAtmosViewSpirv, sizeof(kAtmosViewSpirv), hdrFormat, false, m_bloomLayout, &m_atmosViewPipeline) &&
               fullscreen(kVolumeBlurSpirv, sizeof(kVolumeBlurSpirv), hdrFormat, false, m_bloomLayout, &m_volumeBlurPipeline) &&
               fullscreen(kSandFogSpirv, sizeof(kSandFogSpirv), hdrFormat, false, m_volumeLayout, &m_sandFogPipeline) &&
               fullscreen(kSandFogBlurSpirv, sizeof(kSandFogBlurSpirv), hdrFormat, false, m_bloomLayout, &m_sandFogBlurPipeline) &&
@@ -350,8 +362,8 @@ void Device::DestroyHdrResources()
     for (Texture** t : {&m_dofIn, &m_dofOut, &m_dofHalf, &m_dofBlur, &m_dofTiles[0], &m_dofTiles[1], &m_dofFocus[0], &m_dofFocus[1]})
         if (*t) { DestroyTextureNow(*t); *t = nullptr; }
     for (VkPipeline* p : {&m_bloomDown, &m_bloomUp, &m_aoPipeline, &m_aoBlurPipeline, &m_giPipeline, &m_giBlurPipeline,
-                          &m_envAccumPipeline, &m_envFilterPipeline,
-                          &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
+                          &m_envAccumPipeline, &m_envFilterPipeline, &m_atmosTransPipeline, &m_atmosMultiPipeline,
+                          &m_atmosViewPipeline, &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,

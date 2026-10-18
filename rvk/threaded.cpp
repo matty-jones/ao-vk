@@ -928,6 +928,11 @@ void ThreadedDevice::SetMornHaze(float s)
     Enqueue([this, s](const uint8_t*) { m_device.SetMornHaze(s); });
 }
 
+void ThreadedDevice::SetProcSky(bool on, float zone, float bright)
+{
+    Enqueue([this, on, zone, bright](const uint8_t*) { m_device.SetProcSky(on, zone, bright); });
+}
+
 void ThreadedDevice::SetDuskRays(float s)
 {
     Enqueue([this, s](const uint8_t*) { m_device.SetDuskRays(s); });

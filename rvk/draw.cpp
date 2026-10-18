@@ -448,6 +448,12 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
         fl->sunTrue[3] = night;
     }
     std::memcpy(fl->phase, m_sunPhase, sizeof(fl->phase));   // (the dusk's phases: sky.cpp UpdateSunClock)
+    std::memcpy(fl->skyRing, m_skyRing, sizeof(fl->skyRing));
+    std::memcpy(fl->skyUp, m_skyUp, sizeof(fl->skyUp));
+    if (!ProcSkyReady()) {
+        for (auto& r : fl->skyRing) r[3] = 0.0f;
+        fl->skyUp[3] = 0.0f;
+    }
     fl->dusk[0] = std::clamp(m_afterglow, 0.0f, 2.0f);
     fl->dusk[1] = m_hdr ? m_blueGrade : 0.0f;
     // (The sun on the world camera's screen, NDC - the sunset rays fan from it: volume.frag. Behind the camera: far off.)
@@ -2419,7 +2425,48 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_scenePhase && m_target == m_scene && !m_external && (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW) {
         if (VisualKind(m_drawVisualKind) == VisualKind::Sky) {
             if (m_skyDrawFrame != m_frameNumber) { m_skyDrawFrame = m_frameNumber; m_skyDraws = 0; }
-            if (++m_skyDraws == 2) DrawSkyGlow();
+            // Our own sky (RVK_ProcSky; atmosphere.cpp): drawn before the sky's first draw, whatever it is (the stars
+            // first, and ours later would have covered them); that draw, if it is the game's dome - a lit unblended
+            // mesh - not drawn. The stars, moons, suns and sheets after it as the game draws them.
+            const bool ours = ++m_skyDraws == 1 && ProcSkyReady();
+            if (ours)
+                DrawSkyGlow();
+            if (ours && primitive == d3d::TriangleList && m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE] &&
+                vertexCount >= 100) {
+                const Texture* t = m_textures[0];
+                const uint32_t id = t ? t->m_rdbId : 0u;
+                if (vertexCount != m_domeSkipVerts || id != m_domeSkipTexture) {
+                    m_domeSkipVerts = vertexCount;
+                    m_domeSkipTexture = id;
+                    Log("sky: the game's dome (%u vertices, texture %u) replaced by ours", vertexCount, id);
+                }
+                NoteDuskSky(primitive, vertexCount);
+                if (m_dumpFile) std::fprintf(m_dumpFile, "  (the game's dome: not drawn - ours, RVK_ProcSky)\n");
+                return;
+            }
+            // (... and the game's horizon band - a lit, blended 121-vertex ring in the zone's colour, drawn after the
+            // moons: under our sky it stood as a teal strip along the horizon.)
+            if (ProcSkyReady() && primitive == d3d::TriangleList && vertexCount == 121 && m_rs[d3d::RS_LIGHTING] &&
+                m_rs[d3d::RS_ALPHABLENDENABLE]) {
+                if (!m_bandSkipLogged) {
+                    m_bandSkipLogged = true;
+                    Log("sky: the game's horizon band (121 vertices) left out under ours");
+                }
+                if (m_dumpFile) std::fprintf(m_dumpFile, "  (the game's horizon band: not drawn - RVK_ProcSky)\n");
+                return;
+            }
+            // (... and the game's sky tint: a screen-wide quad of 6 vertices, unlit and blended, in the time of day's
+            // colour - teal, violet, grey-blue - laid over the whole sky: under ours it turned the sunset teal.)
+            if (ProcSkyReady() && primitive == d3d::TriangleStrip && vertexCount == 6 && !m_rs[d3d::RS_LIGHTING] &&
+                m_rs[d3d::RS_ALPHABLENDENABLE]) {
+                if (!m_tintSkipLogged) {
+                    m_tintSkipLogged = true;
+                    Log("sky: the game's sky tint (6 vertices) left out under ours");
+                }
+                if (m_dumpFile) std::fprintf(m_dumpFile, "  (the game's sky tint: not drawn - RVK_ProcSky)\n");
+                return;
+            }
+            if (m_skyDraws == 2) DrawSkyGlow();
         } else if (m_skyDrawFrame == m_frameNumber && m_skyGlowFrame != m_frameNumber) {
             DrawSkyGlow();
         }

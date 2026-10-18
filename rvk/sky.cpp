@@ -375,13 +375,26 @@ void Device::UpdateSkyModel()
         // the game's light.
         const float vivid = std::clamp(m[3] / 0.85f, 0.0f, 1.2f) * (1.0f - SmoothRamp(0.04f, 0.2f, up));
         float sun[3] = {1.0f, 1.0f - (0.22f + 0.1f * vivid) * k, 1.0f - (0.45f + 0.17f * vivid) * k};
+        // (Our own sky: the sun's light through its air instead - atmosphere.cpp SunThroughAir.)
+        const bool ours = ProcSkyReady() && m_skyUp[3] > 0.5f;
+        if (ours) {
+            float through[3];
+            SunThroughAir(up, through);
+            const float w = std::min(k, 1.0f);
+            for (int i = 0; i < 3; ++i) sun[i] = 1.0f + (through[i] - 1.0f) * w;
+        }
         const float sl = 0.3f * sun[0] + 0.59f * sun[1] + 0.11f * sun[2];
         const float keep = 1.0f - 0.15f * std::min(k, 1.0f);
         // The sky's in the shade: a little bluer at the same brightness (more turned the desert grey) - and round a
         // vivid sunset the hue of the twilight sky over it (sky_common.glsl SkyTwilight, averaged round the upper
         // sky): pink-violet, so the shade under a red sky isn't the day's grey.
         float sky[3] = {1.0f - 0.06f * k, 1.0f, 1.0f + 0.15f * k};
-        if (vivid > 0.0f && m_skyFogSet) {
+        if (ours) {
+            // (Our own sky: the hue of the sky over the land, as drawn - FL.skyUp - at the low sun's strength.)
+            const float l = std::max(0.3f * m_skyUp[0] + 0.59f * m_skyUp[1] + 0.11f * m_skyUp[2], 1e-4f);
+            const float w = 0.45f * std::min(k, 1.0f);
+            for (int i = 0; i < 3; ++i) sky[i] += (m_skyUp[i] / l - sky[i]) * w;
+        } else if (vivid > 0.0f && m_skyFogSet) {
             V3 sum{0.0f, 0.0f, 0.0f};
             for (int j = 0; j < 8; ++j) {
                 const float a = float(j) * 0.785398f;
@@ -428,8 +441,9 @@ void Device::DrawSkyGlow()
     if (m_skyGlowFrame == m_frameNumber)
         return;
     m_skyGlowFrame = m_frameNumber;
+    const bool ours = ProcSkyReady();
     if (!m_skyGlowPipeline || !m_rendering || m_target != m_scene || !m_glow || !m_localFraction || !m_motionVectors ||
-        !m_albedo || m_external || (m_skyModel[3] <= 0.0f && m_skyModel[7] <= 0.0f))
+        !m_albedo || m_external || (!ours && m_skyModel[3] <= 0.0f && m_skyModel[7] <= 0.0f))
         return;
     struct Push {
         d3d::Matrix invViewProj;
@@ -440,6 +454,7 @@ void Device::DrawSkyGlow()
         return;
     push.view[0] = float(m_scene->m_width);
     push.view[1] = float(m_scene->m_height);
+    push.view[2] = ours ? 1.0f : 0.0f;
     std::memcpy(push.sky, m_skyModel, sizeof(push.sky));
     FlushGroup();
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
@@ -448,6 +463,14 @@ void Device::DrawSkyGlow()
     vkCmdSetViewport(cmd, 0, 1, &full);
     vkCmdSetScissor(cmd, 0, 1, &area);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyGlowPipeline);
+    VkDescriptorImageInfo view{m_linearSampler, ours ? m_atmosView->m_view : m_blackTexture->m_view,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    w.dstBinding = 0;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w.pImageInfo = &view;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyGlowLayout, 0, 1, &w);
     vkCmdPushConstants(cmd, m_skyGlowLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
     vkCmdDraw(cmd, 3, 1, 0, 0);
     m_cache = StateCache{};                      // (not the scene's pipeline: its state set again)

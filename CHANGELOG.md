@@ -15,6 +15,13 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   these colours replace the game's sky (0.5 by default, 0 for the game's), `RVK_SkyGlow` the glow (1; 0 for none).
   Clouds and rain mute them. The distant land, the haze, the valley mist and the clouds low in the sky take on the
   same colours, so the hills fade into the sky behind them.
+- Our own sky in place of the game's (`RVK_ProcSky`, on): a physical atmosphere that follows the sun - a blue day
+  sky, gold then red and pink at sunset with the pink band and the earth's shadow opposite, a violet and then cobalt
+  blue hour, a dark night under the game's stars and moons. The game's bright zone colours no longer fight the
+  sunset; `RVK_SkyZone` keeps a hint of each zone's colour by day (0.25; 0 none, 1 mostly the zone's), `RVK_SkyBright`
+  sets its brightness and the far haze's (1). Overcast and storms grey it. The distant land, the haze and the clouds
+  fade into its horizon, the clouds and the shade take the colour of the sky over them, and a low sun's light is
+  coloured by the air it passes through.
 - Vivid sunsets and sunrises: the horizon under the sun goes gold, then orange and red, with pink above it and a
   violet sky overhead; after the sun has set, a red line on the horizon under a pink-purple arch. `RVK_Twilight` now
   defaults to 0.85 and goes up to 1.5 for stronger colours. Only an overcast, storms and rain mute them now, not a

@@ -381,8 +381,19 @@ bool Device::CreateCloudResources(std::string* error)
                       sceneFormats, 5, kDepthFormat, &m_sunPipeline))
             return false;
         // The sky's twilight and glow (sky.cpp DrawSkyGlow): the same, its push constants the sky model too.
+        // (One image: our sky's view table - atmosphere.cpp.)
         VkPushConstantRange skyPush{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 144};
+        const VkDescriptorSetLayoutBinding skyBinding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+                                                      VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        VkDescriptorSetLayoutCreateInfo skySet{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        skySet.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+        skySet.bindingCount = 1;
+        skySet.pBindings = &skyBinding;
+        if (!Check(vkCreateDescriptorSetLayout(m_device, &skySet, nullptr, &m_skyGlowSetLayout), "sky set layout", error))
+            return false;
         pl.pPushConstantRanges = &skyPush;
+        pl.setLayoutCount = 1;
+        pl.pSetLayouts = &m_skyGlowSetLayout;
         if (!Check(vkCreatePipelineLayout(m_device, &pl, nullptr, &m_skyGlowLayout), "sky glow layout", error) ||
             !pipeline(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), kSkyGlowFragSpirv, sizeof(kSkyGlowFragSpirv),
                       m_skyGlowLayout, sceneFormats, 5, kDepthFormat, &m_skyGlowPipeline))
@@ -633,6 +644,8 @@ void Device::DestroyCloudResources()
     if (m_sunLayout) { vkDestroyPipelineLayout(m_device, m_sunLayout, nullptr); m_sunLayout = VK_NULL_HANDLE; }
     if (m_skyGlowPipeline) { vkDestroyPipeline(m_device, m_skyGlowPipeline, nullptr); m_skyGlowPipeline = VK_NULL_HANDLE; }
     if (m_skyGlowLayout) { vkDestroyPipelineLayout(m_device, m_skyGlowLayout, nullptr); m_skyGlowLayout = VK_NULL_HANDLE; }
+    if (m_skyGlowSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_skyGlowSetLayout, nullptr); m_skyGlowSetLayout = VK_NULL_HANDLE; }
+    DestroyAtmosphere();
     for (VkPipeline* p : {&m_cloudPipeline, &m_cloudHalfPipeline, &m_cloudUpPipeline, &m_cloudUpScenePipeline,
                           &m_cloudShadowPipeline, &m_cloudLayerNoisePipeline, &m_cloudWeatherPipeline, &m_cloudLayerPipeline,
                           &m_cloudResolvePipeline, &m_cloudLayerShadowPipeline, &m_cloudSunRayPipeline})
