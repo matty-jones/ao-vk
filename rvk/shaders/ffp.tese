@@ -2,9 +2,7 @@
 // Phong tessellation (Boubekeur & Alexa 2008): a point of the triangle is projected onto the tangent plane of each
 // corner (its averaged normal), the projections blended by the same barycentric weights - the surface bulges like the
 // smooth normals say, rounding low-polygon silhouettes. D.tess.y: how much (0 = flat); each corner's pull also
-// weighted by how smooth the model is there (t_vSmoothN's length: 0 at hard edges, which stay sharp). A static mesh's
-// crease corner (length 2: rvk SmoothNormalsCreased) holds the point to a line along the crease instead - both
-// surfaces meeting there bend their common edge alike. Then what the vertex shader
+// weighted by how smooth the model is there (t_vSmoothN's length: 0 at hard edges, which stay sharp). Then what the vertex shader
 // computes from the world position: the clip position (with the TAA jitter), the motion vector inputs, fog distance.
 #include "constants.glsl"
 #include "ffp_varyings.glsl"
@@ -31,11 +29,8 @@ void main()
     for (int i = 0; i < 3; ++i) {
         float weight = length(t_vSmoothN[i]);
         if (weight <= 0.0) continue;
-        vec3 n = t_vSmoothN[i] / weight, v = p - t_vPosW[i];
-        if (weight > 1.5)
-            pull -= b[i] * (v - n * dot(v, n));               // towards corner i's crease line
-        else
-            pull += b[i] * weight * (-dot(v, n) * n);         // towards corner i's tangent plane
+        vec3 n = t_vSmoothN[i] / weight;
+        pull += b[i] * weight * (-dot(p - t_vPosW[i], n) * n);   // towards corner i's tangent plane
     }
     vec3 posW = p + D.tess.y * pull;
     vec3 delta = posW - p;

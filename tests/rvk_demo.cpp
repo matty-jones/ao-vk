@@ -1117,118 +1117,6 @@ void RunPbrTest(D& dev, int frames, const std::string& shot)
     for (Texture* t : wallTex) dev.DestroyTexture(t);
 }
 
-// Static tessellation test (--tess-static-test [--tess S --tess-level N --tess-static]): low-polygon static meshes
-// (the game's static visual) - an 8-sided pipe lying across (rounds; its caps' hard rims stay sharp), an 8 x 6 ball
-// (rounds) and a box (flat faces, hard edges: must come out exactly the same), under a sun.
-template <typename D>
-void RunTessStaticTest(D& dev, int frames, const std::string& shot)
-{
-    const float kPi2 = 6.2831853f;
-    std::vector<VtxMesh> pipe, ball, box;
-    std::vector<uint16_t> pipeIdx, ballIdx, boxIdx;
-    const int kSides = 8;
-    for (int end = 0; end < 2; ++end)            // the side: a ring at each end, radial normals
-        for (int s = 0; s < kSides; ++s) {
-            float a = kPi2 * s / kSides, y = std::cos(a), z = std::sin(a);
-            pipe.push_back({end ? 1.2f : -1.2f, y * 0.5f, z * 0.5f, 0, y, z, 0xFFFFFFFF, float(s) / kSides, float(end)});
-        }
-    for (int s = 0; s < kSides; ++s) {
-        uint16_t a = uint16_t(s), b = uint16_t((s + 1) % kSides), c = uint16_t(a + kSides), d = uint16_t(b + kSides);
-        for (uint16_t i : {a, c, b, b, c, d}) pipeIdx.push_back(i);
-    }
-    for (int end = 0; end < 2; ++end) {          // the caps: their own vertices, flat (a hard rim)
-        uint16_t base = uint16_t(pipe.size());
-        float x = end ? 1.2f : -1.2f, nx = end ? 1.0f : -1.0f;
-        pipe.push_back({x, 0, 0, nx, 0, 0, 0xFFFFFFFF, 0.5f, 0.5f});
-        for (int s = 0; s < kSides; ++s) {
-            float a = kPi2 * s / kSides;
-            pipe.push_back({x, std::cos(a) * 0.5f, std::sin(a) * 0.5f, nx, 0, 0, 0xFFFFFFFF, 0, 0});
-        }
-        for (int s = 0; s < kSides; ++s)
-            for (uint16_t i : {base, uint16_t(base + 1 + s), uint16_t(base + 1 + (s + 1) % kSides)}) pipeIdx.push_back(i);
-    }
-    const int kSeg = 8, kRing = 6;
-    for (int r = 0; r <= kRing; ++r)
-        for (int s = 0; s <= kSeg; ++s) {
-            float th = 3.1415927f * r / kRing, ph = kPi2 * s / kSeg;
-            float x = std::sin(th) * std::cos(ph), y = std::cos(th), z = std::sin(th) * std::sin(ph);
-            ball.push_back({x * 0.7f, y * 0.7f, z * 0.7f, x, y, z, 0xFFFFFFFF, float(s) / kSeg, float(r) / kRing});
-        }
-    for (int r = 0; r < kRing; ++r)
-        for (int s = 0; s < kSeg; ++s) {
-            uint16_t a = uint16_t(r * (kSeg + 1) + s), b = uint16_t(a + kSeg + 1);
-            for (uint16_t i : {a, b, uint16_t(a + 1), uint16_t(a + 1), b, uint16_t(b + 1)}) ballIdx.push_back(i);
-        }
-    for (int f = 0; f < 6; ++f) {                // the box: 4 vertices per face, the face's normal
-        int axis = f / 2;
-        float sgn = f % 2 ? 1.0f : -1.0f, n[3] = {0, 0, 0};
-        n[axis] = sgn;
-        uint16_t base = uint16_t(box.size());
-        for (int k = 0; k < 4; ++k) {
-            float u = (k & 1) ? 0.6f : -0.6f, v = (k & 2) ? 0.6f : -0.6f, p[3];
-            p[axis] = 0.6f * sgn;
-            p[(axis + 1) % 3] = u;
-            p[(axis + 2) % 3] = v;
-            box.push_back({p[0], p[1], p[2], n[0], n[1], n[2], 0xFFFFFFFF, float(k & 1), float(k >> 1)});
-        }
-        for (uint16_t i : {base, uint16_t(base + 1), uint16_t(base + 2), uint16_t(base + 2), uint16_t(base + 1), uint16_t(base + 3)})
-            boxIdx.push_back(i);
-    }
-    uint32_t grey = 0xFFB0B0B0, floorArgb = 0xFF606868;
-    Texture* tex = dev.CreateTexture(1, 1, &grey);
-    Texture* floorTex = dev.CreateTexture(1, 1, &floorArgb);
-    VtxMesh floorQuad[4] = {{-8, 0, -8, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {-8, 0, 8, 0, 1, 0, 0xFFFFFFFF, 0, 1},
-                            {8, 0, -8, 0, 1, 0, 0xFFFFFFFF, 1, 0}, {8, 0, 8, 0, 1, 0, 0xFFFFFFFF, 1, 1}};
-    for (int frame = 0; frame < frames; ++frame) {
-        if (frame == frames - 1)
-            dev.RequestScreenshot(shot);
-        dev.BeginFrame();
-        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
-        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8098B8, 1.0f);
-        dev.SetRenderState(RS_ZENABLE, 1);
-        dev.SetRenderState(RS_ZWRITEENABLE, 1);
-        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
-        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
-        dev.SetRenderState(RS_LIGHTING, 1);
-        dev.SetRenderState(RS_AMBIENT, 0xFF404850);
-        dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_MATERIAL);
-        dev.SetRenderState(RS_NORMALIZENORMALS, 1);
-        Light sun{};
-        sun.type = LIGHT_DIRECTIONAL;
-        sun.diffuse = {1.0f, 0.95f, 0.85f, 1};
-        sun.direction = {0.4f, -0.7f, 0.6f};
-        dev.SetLight(0, sun);
-        dev.LightEnable(0, true);
-        dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
-        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
-        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
-        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
-        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
-        dev.SetTextureStageState(1, TSS_COLOROP, TOP_DISABLE);
-        dev.SetTransform(View, LookAtLH({0, 2.2f, -5.0f}, {0, 0.6f, 0}, {0, 1, 0}));
-        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.1f, 300.0f));
-        Material plain{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 1}, {0, 0, 0, 0}, 0.0f};
-        dev.SetMaterial(plain);
-        dev.SetTexture(0, floorTex);
-        dev.SetTransform(World, Translate(0, 0, 0));
-        dev.DrawPrimitive(TriangleStrip, kFvfMesh, floorQuad, 4);
-        dev.SetTexture(0, tex);
-        struct Shape { const std::vector<VtxMesh>* v; const std::vector<uint16_t>* i; float x, y, z; uint32_t visual; };
-        const Shape shapes[3] = {{&pipe, &pipeIdx, -1.4f, 0.5f, 1.2f, 0x2001}, {&ball, &ballIdx, 0.0f, 0.7f, -0.6f, 0x2002},
-                                 {&box, &boxIdx, 1.9f, 0.6f, 0.2f, 0x2003}};
-        for (const Shape& s : shapes) {
-            dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t", 0, s.visual);
-            dev.SetTransform(World, Translate(s.x, s.y, s.z));
-            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, s.v->data(), uint32_t(s.v->size()), s.i->data(),
-                                     uint32_t(s.i->size()));
-        }
-        dev.SetDrawVisual(0, nullptr);
-        dev.EndFrame();
-    }
-    dev.DestroyTexture(tex);
-    dev.DestroyTexture(floorTex);
-}
-
 float g_cameraYaw = 0.0f;  // --camera-yaw: the shadow test's camera turns this much a frame (motion blur)
 float g_cameraPitch = -1000.0f;   // --camera-pitch DEG: the shadow test's camera looks this far up (the sky: clouds)
 bool g_sunView = false;    // --sun-view: the shadow test's camera low, looking into the sun
@@ -3874,12 +3762,11 @@ int main(int argc, char** argv)
     float bloom = 0.0f, effectGlow = 1.0f, ao = 0.0f, aoRadius = 1.5f, gi = 0.0f, giRadius = 4.0f, volume = 0.0f, volHaze = 1.0f, volShafts = 1.0f, ssr = 0.0f, ssrWet = 0.0f, bloomOcc = 0.15f, neonSat = 0.0f, bloomWide = 0.0f, sunSoft = 0.0f, leaf = 0.0f, nightGlow = 0.0f, contact = 0.0f, sway = 0.0f, bump = 0.0f, grassPush = 1.0f, plantDetail = 1.0f, foliageLod = 35.0f;
     int sunRes = 4096, ptRes = 1024;
     float ptLight = 1.0f, tess = 0.0f;
-    bool tessStatic = false;
     int tessLevel = 4;
     float saturation = 1.0f, contrast = 1.0f, warmth = 0.0f, nightTint = 0.0f, vignette = 0.0f;
     bool lutSepia = false, taa = false, fxaa = false;
     float sharpen = 0.4f;
-    bool normalMapTest = false, pbrTest = false, tessStaticTest = false;
+    bool normalMapTest = false, pbrTest = false;
     uint32_t anisotropy = 1;
     float motionBlur = 0.0f, dof = 0.0f, dofFocus = 0.0f;
     bool dofBokeh = true, dofFar = true;
@@ -4088,7 +3975,6 @@ int main(int argc, char** argv)
         else if (a == "--grass-size" && i + 1 < argc) g_grassSize = float(std::atof(argv[++i]));
         else if (a == "--tess" && i + 1 < argc) tess = float(std::atof(argv[++i]));
         else if (a == "--tess-level" && i + 1 < argc) tessLevel = std::atoi(argv[++i]);
-        else if (a == "--tess-static") tessStatic = true;
         else if (a == "--pt-light" && i + 1 < argc) ptLight = float(std::atof(argv[++i]));
         else if (a == "--sun-res" && i + 1 < argc) sunRes = std::atoi(argv[++i]);
         else if (a == "--pt-res" && i + 1 < argc) ptRes = std::atoi(argv[++i]);
@@ -4103,7 +3989,6 @@ int main(int argc, char** argv)
         else if (a == "--bump" && i + 1 < argc) bump = float(std::atof(argv[++i]));
         else if (a == "--normal-map-test") normalMapTest = true;
         else if (a == "--pbr-test") pbrTest = true;
-        else if (a == "--tess-static-test") tessStaticTest = true;
         else if (a == "--pbr-maps" && i + 1 < argc) { g_pbrMaps = argv[++i]; pbrTest = true; }
         else if (a == "--pbr-off") g_pbrOff = true;
         else if (a == "--pbr-probe" && i + 1 < argc) g_pbrProbe = float(std::atof(argv[++i]));
@@ -4271,7 +4156,6 @@ int main(int argc, char** argv)
     dev.SetShadowResolution(uint32_t(sunRes), uint32_t(ptRes));
     dev.SetPointLightIntensity(ptLight, ptLight);
     dev.SetTessellation(tess, 20.0f, uint32_t(tessLevel));
-    dev.SetTessStatic(tessStatic);
     dev.SetTaa(taa, sharpen);
     dev.SetFxaa(fxaa);
     dev.SetGrading(saturation, contrast, warmth, 1.0f, nightTint, vignette);
@@ -4298,11 +4182,6 @@ int main(int argc, char** argv)
     dev.SetMotionBlurMode(motionMode);
     dev.SetDof(dof > 0.0f, dofBokeh, true, dof, 16.0f, dofFocus, 0.2f, dofFar, 3.0f);
     dev.SetPointShadowFadeIn(fadeIn);    // frames here are milliseconds apart: no fade-in unless asked
-    if (tessStaticTest) {
-        RunTessStaticTest(dev, frames, shot);
-        std::printf("rendered; screenshot %s\n", shot.c_str());
-        return 0;
-    }
     if (pbrTest) {
         RunPbrTest(dev, frames, shot);
         std::printf("rendered; screenshot %s\n", shot.c_str());

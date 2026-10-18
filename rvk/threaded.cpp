@@ -1199,11 +1199,6 @@ void ThreadedDevice::SetTessellation(float shape, float distance, uint32_t level
     Enqueue([this, shape, distance, level](const uint8_t*) { m_device.SetTessellation(shape, distance, level); });
 }
 
-void ThreadedDevice::SetTessStatic(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetTessStatic(on); });
-}
-
 void ThreadedDevice::SetBloomOverNearer(float keep)
 {
     Enqueue([this, keep](const uint8_t*) { m_device.SetBloomOverNearer(keep); });
