@@ -933,6 +933,11 @@ void ThreadedDevice::SetProcSky(bool on, float zone, float bright)
     Enqueue([this, on, zone, bright](const uint8_t*) { m_device.SetProcSky(on, zone, bright); });
 }
 
+void ThreadedDevice::SetHeapCheck(int level)
+{
+    Enqueue([this, level](const uint8_t*) { m_device.SetHeapCheck(level); });
+}
+
 void ThreadedDevice::SetDuskRays(float s)
 {
     Enqueue([this, s](const uint8_t*) { m_device.SetDuskRays(s); });

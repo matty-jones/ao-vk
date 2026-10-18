@@ -167,6 +167,7 @@ public:
     void SetAfterglow(float s);
     void SetStarFade(bool on);
     void SetDuskRays(float s);
+    void SetHeapCheck(int level);
     void SetProcSky(bool on, float zone, float bright);
     void SetGoldenHour(float s);
     void SetShadowMemory(uint32_t mode);

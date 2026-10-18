@@ -1497,6 +1497,8 @@ void Device::SetRenderTarget(Texture* target)
 
 void Device::BeginFrame()
 {
+    HeapCheck("the frame's start", 1);
+    if (!m_heapBroken && HeapCheckLevel() > 0) m_heapLastOk = "the frame's start";
     // Indoors (a room's playfield: rooms drawn, no terrain) for 10 frames running, or out again: no weather in there
     // (a forced storm went on raining and striking inside - the user). The weather goes at once, not eased.
     {

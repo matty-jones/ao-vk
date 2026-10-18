@@ -552,6 +552,7 @@ public:
     void SetAfterglow(float s) { m_afterglow = s; }
     void SetStarFade(bool on) { m_starFade = on; }
     void SetDuskRays(float s) { m_duskRays = s; }
+    void SetHeapCheck(int level) { m_heapCheck = level; }
     void SetProcSky(bool on, float zone, float bright)
     {
         m_procSky = on;
@@ -1275,6 +1276,12 @@ private:
     bool m_atmosRingWritten[kFramesInFlight] = {};
     float m_skyRing[8][4] = {};                  // rgb, w 1 when known
     float m_skyUp[4] = {};                       // the sky over the land (overhead, 35 degrees up), w 1 when known
+    // RANDYVK_HEAPCHECK (grass.cpp): the heap walked at points, the first broken one logged.
+    int HeapCheckLevel() const { return m_heapCheck; }
+    void HeapCheck(const char* where, int level);
+    int m_heapCheck = 0;                         // RVK_HeapCheck
+    bool m_heapBroken = false;
+    const char* m_heapLastOk = nullptr;
     void SunThroughAir(float up, float out[3]) const;   // the sun's colour through the air (unit luma)
     void OurSkyFog(float rgb[3]) const;          // the scene fog's colour into our sky's horizon (its mean), if on
     bool ProcSkyReady() const;

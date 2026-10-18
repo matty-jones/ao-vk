@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <malloc.h>
 #include <string>
 #include <vector>
 
@@ -527,9 +528,29 @@ constexpr double kCoverBudgetMs = 0.3;
 constexpr uint64_t kCoverSettleFrames = 120;   // frames an object must be seen in the same place first
 }
 
+// RVK_HeapCheck (randy-vk.ini only; diagnostics: a crash erasing from the grass's cover map, 2026-10-18 - its nodes
+// overwritten by something): 1 the heap walked at the frame's start and round the grass's per-frame work, 2 also round
+// every object's cover capture (slow); the first place it is found broken logged, with the frame. 0: nothing.
+void Device::HeapCheck(const char* where, int level)
+{
+    if (HeapCheckLevel() < level || m_heapBroken)
+        return;
+    const int r = _heapchk();
+    if (r == _HEAPOK || r == _HEAPEMPTY)
+        return;
+    m_heapBroken = true;
+    Log("heap check: the heap found broken (%d) at %s, frame %llu - the write was since the last check that passed (%s)",
+        r, where, (unsigned long long)m_frameNumber, m_heapLastOk ? m_heapLastOk : "none yet");
+}
+
 void Device::CaptureCover(uint32_t primitive, const FvfLayout& layout, const void* vertices, uint32_t vertexCount,
                           const uint16_t* indices, uint32_t indexCount)
 {
+    struct Check {
+        Device* d;
+        Check(Device* d_) : d(d_) { d->HeapCheck("before an object's cover capture", 2); }
+        ~Check() { d->HeapCheck("after an object's cover capture", 2); if (!d->m_heapBroken) d->m_heapLastOk = "an object's cover capture"; }
+    } check(this);
     if (!m_drawMesh || m_grassTiles.empty() || primitive != d3d::TriangleList || layout.offset[0] < 0)
         return;
     if (m_grassCoverFrame != m_frameNumber) {
@@ -1834,7 +1855,10 @@ void Device::DrawGrassTiles(VkCommandBuffer cmd)
     if (!m_frameEyeValid)
         return;
     m_grassDrawnThisFrame = true;
+    HeapCheck("before the grass's tiles", 1);
     UpdateGrassTiles();
+    HeapCheck("after the grass's tiles", 1);
+    if (!m_heapBroken) m_heapLastOk = "the grass's tiles";
     UpdateGrassTrail();
     const uint64_t frame = m_frameNumber;
     const float half = kGrassTileSize * 0.5f, diag = half * 1.4142136f;

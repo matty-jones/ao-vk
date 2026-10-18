@@ -70,6 +70,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ### Diagnostics
+- `RVK_HeapCheck` (in `randy-vk.ini` only): checks the game's memory for corruption at points each frame and logs the
+  first place it is found broken - to track down a crash in the ground grass (1 cheap, 2 thorough and slow).
 - With the sun near the horizon, `randy-vk.log` gets a `dusk:` line every couple of seconds (the game's light, ambient,
   fog, sky dome and stars, and ours), and a `time:` line with the hour while `RVK_TimeOfDay` / `RVK_TimeSpeed` run
   the clock: watch a sunset go by and see what changes when.
