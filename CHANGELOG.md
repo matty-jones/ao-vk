@@ -6,6 +6,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- You see further: the game's view distance x1.5 (`RVK_ViewRange`, 1 for the game's own, up to 3), and distant land
+  and mountains are kept and fogged by their true distance. Before, the game cut them off along a flat plane in front
+  of the camera, so far mountains popped in and out as you turned.
 - Rocks and shrubs are shown further out (`RVK_DetailRange`, 2x the game's by default; 1 for the game's own).
   They used to vanish about 150 m away while their shadows stayed on the ground.
 - AI missions' PF map shows its rooms black on a green background (`RVK_AlienMap`, on by default). The map

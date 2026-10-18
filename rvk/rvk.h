@@ -553,6 +553,10 @@ public:
     void SetStarFade(bool on) { m_starFade = on; }
     void SetDuskRays(float s) { m_duskRays = s; }
     void SetHeapCheck(int level) { m_heapCheck = level; }
+    // RVK_ViewRange: the game's fog distances x this (its cull goes out with it: rnative::camera::SetViewRange); not 1:
+    // fog by true distance, as the cull.
+    void SetViewRange(float range) { m_viewRange = range > 0.0f ? range : 1.0f; }
+    float m_viewRange = 1.0f;
     void SetProcSky(bool on, float zone, float bright)
     {
         m_procSky = on;

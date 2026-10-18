@@ -1541,8 +1541,8 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     ArgbTo4(m_rs[d3d::RS_FOGCOLOR], wf.fogColour);
     StormAirColour(wf.fogColour);
     wf.fogColour[3] = m_rs[d3d::RS_FOGENABLE] ? 1.0f : 0.0f;
-    wf.fogParams[0] = AsFloatBits(m_rs[d3d::RS_FOGSTART]);
-    wf.fogParams[1] = AsFloatBits(m_rs[d3d::RS_FOGEND]);
+    wf.fogParams[0] = AsFloatBits(m_rs[d3d::RS_FOGSTART]) * m_viewRange;   // (RVK_ViewRange)
+    wf.fogParams[1] = AsFloatBits(m_rs[d3d::RS_FOGEND]) * m_viewRange;
     wf.fogParams[2] = AsFloatBits(m_rs[d3d::RS_FOGDENSITY]);
     wf.fogParams[3] = float(m_rs[d3d::RS_FOGTABLEMODE] ? m_rs[d3d::RS_FOGTABLEMODE] : m_rs[d3d::RS_FOGVERTEXMODE]);
     // The environment probe (hdr.cpp RenderEnvProbe): what the reflections that miss the screen show, where it has

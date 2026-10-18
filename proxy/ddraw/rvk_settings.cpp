@@ -3,6 +3,7 @@
 
 #include "rvk_backend.h"
 #include "native/mesh.h"
+#include "native/camera.h"
 #include "native/occluder.h"
 #include "native/rings.h"
 
@@ -44,6 +45,7 @@ Setting g_settings[] = {
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
     {"RVK_AlienMap", "AI missions' PF map: rooms shown black on green (the game's is black on black)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
+    {"RVK_ViewRange",   "How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws)", "General", Float, 1, 3, 0.25f, 1.5f, nullptr, 0},
 
     {"RVK_PixelLight", "Per-pixel lighting",                                       "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_PIXEL_LIGHTING", 0},
     {"RVK_LightOver",  "All nearby lights (light override)",   "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_LIGHT_OVERRIDE", 0},
@@ -356,7 +358,7 @@ const Vanilla kVanilla[] = {
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
-    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0},
+    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_ViewRange", 1},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -630,6 +632,10 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_StarFade")) d->SetStarFade(V(n) > 0.5f);
     else if (is("RVK_DuskRays")) d->SetDuskRays(V(n));
     else if (is("RVK_HeapCheck")) d->SetHeapCheck(int(V(n) + 0.5f));
+    else if (is("RVK_ViewRange")) {
+        d->SetViewRange(V(n));
+        rnative::camera::SetViewRange(V(n));
+    }
     else if (is("RVK_ProcSky") || is("RVK_SkyZone") || is("RVK_SkyBright"))
         d->SetProcSky(V("RVK_ProcSky") > 0.5f, V("RVK_SkyZone"), V("RVK_SkyBright"));
     else if (is("RVK_GoldenHour")) d->SetGoldenHour(V(n));

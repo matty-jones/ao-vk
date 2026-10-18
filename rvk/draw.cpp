@@ -1647,6 +1647,8 @@ void Device::RenderStateFog(float colour[4], float params[4]) const
     StormAirColour(colour);                            // (a thunderstorm's: its air dark yellow-green, dimmed)
     uint32_t bits[3] = {m_rs[d3d::RS_FOGSTART], m_rs[d3d::RS_FOGEND], m_rs[d3d::RS_FOGDENSITY]};
     std::memcpy(params, bits, sizeof(bits));
+    params[0] *= m_viewRange;                    // (RVK_ViewRange: the fog out with the view)
+    params[1] *= m_viewRange;
     params[3] = float(m_rs[d3d::RS_FOGTABLEMODE] ? m_rs[d3d::RS_FOGTABLEMODE] : m_rs[d3d::RS_FOGVERTEXMODE]);
 }
 
@@ -2968,8 +2970,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         for (int i = 0; i < 3; ++i)
             c.fogColor[i] = added ? 0.0f : std::min(mean[i] + (m_skyUp[i] - mean[i]) * t, 1.0f);
     }
-    c.fogParams[0] = AsFloat(m_rs[d3d::RS_FOGSTART]);
-    c.fogParams[1] = AsFloat(m_rs[d3d::RS_FOGEND]);
+    c.fogParams[0] = AsFloat(m_rs[d3d::RS_FOGSTART]) * m_viewRange;   // (RVK_ViewRange: out with the view)
+    c.fogParams[1] = AsFloat(m_rs[d3d::RS_FOGEND]) * m_viewRange;
     c.fogParams[2] = AsFloat(m_rs[d3d::RS_FOGDENSITY]);
     // (w 1: fade into our own sky's horizon towards the pixel - RVK_ProcSky, FL.skyRing - not the zone's fog colour:
     // the land, the buildings, the far trees (blended, writing no depth, so the tone mapping's correction by depth
@@ -3057,7 +3059,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_rs[d3d::RS_SPECULARENABLE]) flags |= F_SPECULAR;
     if (m_rs[d3d::RS_NORMALIZENORMALS]) flags |= F_NORMALIZE;
     if (m_rs[d3d::RS_FOGENABLE]) flags |= F_FOG;
-    if (m_rs[d3d::RS_RANGEFOGENABLE]) flags |= F_RANGEFOG;
+    // (RVK_ViewRange: by true distance, as the cull - the same fog all round, nothing fading in as the camera turns.)
+    if (m_rs[d3d::RS_RANGEFOGENABLE] || m_viewRange != 1.0f) flags |= F_RANGEFOG;
     if (m_rs[d3d::RS_LOCALVIEWER]) flags |= F_LOCALVIEWER;
     if (m_textures[0]) flags |= F_TEX0;
     if (m_textures[1]) flags |= F_TEX1;
