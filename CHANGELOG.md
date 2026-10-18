@@ -18,6 +18,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   has nothing for. Packs are found at startup and listed in the log.
 
 ### Fixed
+- Light beams and glows on lamps (under the billboards in the cities, for example) swayed like trees and grew
+  leaves.
 - Grass on steep hillsides stood in visible rows, and grass grew in front of walls at the foot of grassy banks.
 - Waterfalls pouring from pipes (the subway and other narrow streams) showed as a wide dark wall of water,
   and the streams themselves were missing.

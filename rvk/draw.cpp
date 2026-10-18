@@ -676,6 +676,9 @@ bool Device::SwayParams(uint32_t primitive, uint32_t fvf, uint32_t stride, const
     // the GPU and in the depth pre-pass.
     if (m_textures[0]->m_opaque)
         return false;
+    // Nor a soft card - a lamp's glow or beam, smoke, a halo: no hard edges between leaf and hole (leaves.cpp).
+    if (!m_textures[0]->m_alphaMask.empty() && m_textures[0]->m_alphaHardEdges < 0.002f)
+        return false;
     // Static: the same vertices for the last two frames at least (the mesh cache's fingerprint).
     if (!m_drawMeshStatic || m_drawMesh->firstFrame + 2 > m_frameNumber)
         return false;

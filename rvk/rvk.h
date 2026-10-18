@@ -90,6 +90,9 @@ private:
     // (leaves.cpp: where a canopy card is leaf and where it is hole). Empty until a full level-0 upload.
     std::vector<uint8_t> m_alphaMask;
     uint32_t m_alphaW = 0, m_alphaH = 0;
+    // The share of neighbouring mask cells whose alpha jumps by more than 0.3: a cut-out's hard edges (leaves: from
+    // ~0.004 up), none in a soft glow, beam or smoke card (0). Plants are cut-outs (leaves.cpp, SwayParams).
+    float m_alphaHardEdges = 1.0f;
     uint32_t m_alphaVersion = 0;       // counts the uploads that changed the mask (a canopy's leaves are rebaked)
     VkDeviceSize m_bytes = 0;          // its image's memory (the GPU memory report)
     bool m_lightmap = false;           // captured as a terrain lightmap (a re-upload recaptures the grass's light)
