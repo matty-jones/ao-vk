@@ -1144,6 +1144,7 @@ bool g_grassBenchCross = false;   // --grass-bench-cross: ... crossing the view 
                                   // --grass-bench-still: the trail it leaves lies across the screenshot)
 bool g_grassBenchLamp = false;    // --grass-bench-lamp: a lamp just over the grass ahead (point light shadows)
 bool g_grassBenchNight = false;   // --grass-bench-night: a dim lightmap and ambient, a faint bluish moon
+bool g_grassBenchSteep = false;   // --grass-bench-steep: the bench's hills steep (slopes up to ~56 degrees)
 int g_grassBenchLoading = 0;      // --grass-bench-loading N: the ground's texture a plain green stand-in until frame N
 bool g_grassBenchLoadingNull = false;   // --grass-bench-loading-null: ... drawn untextured instead
 bool g_grassBenchPlatform = false;  // --grass-bench-platform: a flat slab lying on the ground ahead (no grass under it)
@@ -1300,7 +1301,11 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
     Texture* lightmap = dev.CreateTexture(64, 64, lightmapPixels.data());
     struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
     const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
-    auto height = [](float x, float z) { return 1.5f * std::sin(x * 0.13f) * std::cos(z * 0.11f); };
+    // (--grass-bench-steep: steep hills, slopes up to ~56 degrees - where the blades stood in rows.)
+    auto height = [](float x, float z) {
+        return g_grassBenchSteep ? 6.0f * std::sin(x * 0.25f) * std::cos(z * 0.2f)
+                                 : 1.5f * std::sin(x * 0.13f) * std::cos(z * 0.11f);
+    };
     constexpr int kChunks = 6, kChunkCells = 16;
     constexpr float kChunk = 32.0f, kCell = kChunk / kChunkCells, kOrigin = -kChunk * kChunks / 2;
     std::vector<std::vector<VtxTerrain>> chunks;
@@ -3920,6 +3925,7 @@ int main(int argc, char** argv)
         else if (a == "--grass-field-dist" && i + 1 < argc) g_grassFieldDist = float(std::atof(argv[++i]));
         else if (a == "--grass-bench-yaw" && i + 1 < argc) g_grassBenchYaw = float(std::atof(argv[++i]));
         else if (a == "--grass-bench-walker") g_grassBenchWalker = true;
+        else if (a == "--grass-bench-steep") g_grassBenchSteep = true;
         else if (a == "--grass-bench-cross") { g_grassBenchCross = true; g_grassBenchWalker = true; }
         else if (a == "--grass-bench-night") g_grassBenchNight = true;
         else if (a == "--grass-bench-lamp") g_grassBenchLamp = true;

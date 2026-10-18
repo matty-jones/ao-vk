@@ -18,6 +18,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   has nothing for. Packs are found at startup and listed in the log.
 
 ### Fixed
+- Grass on steep hillsides stood in visible rows, and grass grew in front of walls at the foot of grassy banks.
 - Waterfalls pouring from pipes (the subway and other narrow streams) showed as a wide dark wall of water,
   and the streams themselves were missing.
 - The PF map's black areas showed the world through them when the interface refresh rate (`RVK_UiRate`)

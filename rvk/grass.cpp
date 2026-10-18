@@ -1127,7 +1127,15 @@ bool Device::BuildGrassTile(GrassTile& tile)
             out[c] = a * (1.0f - tj) + b * tj;
         }
     };
-    // The ground under a blade: its own tile's cell, else the nearest known one around it (GroundAt).
+    // The ground under a blade: its own tile's cell, else the nearest known one around it (GroundAt). The height
+    // between the cells' centres (bilinear over the known ones): a cell's own height made each quarter-unit cell a
+    // little step, and on a steep slope the blades stood in rows along the steps.
+    auto cellY = [&](int cx, int cz, float* y) {
+        if (cx < 0 || cx >= kGroundN || cz < 0 || cz >= kGroundN || tile.rank[cz * kGroundN + cx] == 255)
+            return false;
+        *y = tile.y[cz * kGroundN + cx];
+        return true;
+    };
     auto ground = [&](float px, float pz, float* y, uint32_t* colour, uint32_t* light) {
         const int cx = int(std::floor((px - x0) / kGroundCell)), cz = int(std::floor((pz - z0) / kGroundCell));
         if (cx >= 0 && cx < kGroundN && cz >= 0 && cz < kGroundN) {
@@ -1136,10 +1144,39 @@ bool Device::BuildGrassTile(GrassTile& tile)
                 *y = tile.y[idx];
                 *colour = tile.colour[idx];
                 *light = tile.lightRank[idx] != 255 ? tile.light[idx] : 0u;
+                const float fx = (px - x0) / kGroundCell - 0.5f, fz = (pz - z0) / kGroundCell - 0.5f;
+                const int ix = int(std::floor(fx)), iz = int(std::floor(fz));
+                const float tx = fx - float(ix), tz = fz - float(iz);
+                float sum = 0.0f, weight = 0.0f;
+                for (int k = 0; k < 4; ++k) {
+                    float h;
+                    if (!cellY(ix + (k & 1), iz + (k >> 1), &h))
+                        continue;
+                    const float w = ((k & 1) ? tx : 1.0f - tx) * ((k >> 1) ? tz : 1.0f - tz);
+                    sum += h * w;
+                    weight += w;
+                }
+                if (weight > 1e-4f)
+                    *y = sum / weight;
                 return true;
             }
         }
         return GroundAt(px, pz, y, colour, light);
+    };
+    // The ground's slope right at a point, from the cells around it (quarter-unit steps): the coarse normals (above)
+    // smooth a narrow step - the terrain climbing from a paved floor up a bank at the foot of a wall - into a gentle
+    // slope, and grass stood on it in front of the wall. -> the slope's normal's y (1 when not known here).
+    auto localUp = [&](float px, float pz) {
+        const int cx = int(std::floor((px - x0) / kGroundCell)), cz = int(std::floor((pz - z0) / kGroundCell));
+        float c, l, r, d, u;
+        if (!cellY(cx, cz, &c))
+            return 1.0f;
+        const bool hl = cellY(cx - 1, cz, &l), hr = cellY(cx + 1, cz, &r), hd = cellY(cx, cz - 1, &d),
+                   hu = cellY(cx, cz + 1, &u);
+        // The steeper side each way: a step shows from whichever side it rises.
+        const float gx = std::max(hl ? std::fabs(c - l) : 0.0f, hr ? std::fabs(r - c) : 0.0f) / kGroundCell;
+        const float gz = std::max(hd ? std::fabs(c - d) : 0.0f, hu ? std::fabs(u - c) : 0.0f) / kGroundCell;
+        return 1.0f / std::sqrt(1.0f + gx * gx + gz * gz);
     };
     auto unorm = [](float v, float scale, uint32_t max) { return RoundU(v / scale * float(max), max); };
     // The slow noise fields - the clumps (density), the lean (direction, strength), the dry and the tall patches - on
@@ -1287,11 +1324,12 @@ bool Device::BuildGrassTile(GrassTile& tile)
         }
         float tn[3];
         sampleNormal(px, pz, tn);                // the blade grows along the ground's slope, not straight up
+        const float slopeUp = std::min(tn[1], localUp(px, pz));
         // Only steep ground stays bare (a cliff): from ~50 degrees, none past ~63 - the game's grassy banks and mounds
         // are steep too. (From 35 degrees it left whole tiles of a mound bare: a tile next to one not yet captured
         // takes its ground as flat, so the cut ran along the tile edges.) The grass thins and shortens towards the
         // edge of its ground (a path, a rock): the cells around the root that are grass.
-        if (w1 > (tn[1] - 0.45f) / 0.2f) {
+        if (w1 > (slopeUp - 0.45f) / 0.2f) {
             ++m_grassLeftOut[2];
             continue;
         }
