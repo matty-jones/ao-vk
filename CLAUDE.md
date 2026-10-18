@@ -111,11 +111,14 @@ The version exists only in the tag and `CHANGELOG.md`; nothing in the DLL carrie
 - Build from a clean directory (`cmake --preset linux-release -B build/release-X.Y.Z`, then
   `cmake --build build/release-X.Y.Z`) and run `tools/native-check.sh`, `tools/rvk-demo.sh`,
   `tools/crash-check.sh`, and `tools/calllog-ab.sh <Mode>` for any `[Native]` switch that changed.
-- Package `../dist/ao-vk-X.Y.Z.zip` with the previous release's layout, all in one folder `ao-vk-X.Y.Z/`:
-  `randy31.dll`, AOReloaded's `version.dll` (built from `../AOReloaded`), `INSTALL.txt`,
-  `README-ao-vk.md`, `LICENSE-ao-vk.txt`, `LICENSE-AOReloaded.txt`.
-- Create the GitHub release on the tag, named `ao-vk X.Y.Z`, with the zip and the notes
-  (`gh release create vX.Y.Z ../dist/ao-vk-X.Y.Z.zip --title "ao-vk X.Y.Z" --notes-file ...`).
+- Everything for a version lives in one folder, `../dist/ao-vk-X.Y.Z/`:
+  - `ao-vk-X.Y.Z/`: the zip's contents (the zip's one top-level folder): `randy31.dll`, AOReloaded's
+    `version.dll` (built from `../AOReloaded`), `INSTALL.txt`, `README-ao-vk.md`, `LICENSE-ao-vk.txt`,
+    `LICENSE-AOReloaded.txt`.
+  - `ao-vk-X.Y.Z.zip`: that folder zipped.
+  - `release-notes.md`: the GitHub release text, drafted from the version's `CHANGELOG.md` section.
+- Create the GitHub release on the tag, named `ao-vk X.Y.Z`, from that folder
+  (`gh release create vX.Y.Z ao-vk-X.Y.Z.zip --title "ao-vk X.Y.Z" --notes-file release-notes.md`).
 
 ## Conventions
 
