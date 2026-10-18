@@ -511,6 +511,17 @@ void Device::UpdateTexture(Texture* t, uint32_t level, uint32_t x, uint32_t y, u
                     mask.clear();
             }
             if (mask != t->m_alphaMask) {
+                t->m_alphaHardEdges = 1.0f;
+                if (!mask.empty() && mw > 1 && mh > 1) {
+                    uint32_t hard = 0, pairs = 0;
+                    for (uint32_t y = 0; y < mh; ++y)
+                        for (uint32_t x = 0; x < mw; ++x) {
+                            const int a = mask[size_t(y) * mw + x];
+                            if (x + 1 < mw) { hard += std::abs(a - int(mask[size_t(y) * mw + x + 1])) > 76; ++pairs; }
+                            if (y + 1 < mh) { hard += std::abs(a - int(mask[size_t(y + 1) * mw + x])) > 76; ++pairs; }
+                        }
+                    t->m_alphaHardEdges = pairs ? float(hard) / float(pairs) : 1.0f;
+                }
                 t->m_alphaMask.swap(mask);
                 t->m_alphaW = t->m_alphaMask.empty() ? 0 : mw;
                 t->m_alphaH = t->m_alphaMask.empty() ? 0 : mh;

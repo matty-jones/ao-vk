@@ -1120,6 +1120,11 @@ void ThreadedDevice::SetFoliageEdges(bool on)
     Enqueue([this, on](const uint8_t*) { m_device.SetFoliageEdges(on); });
 }
 
+void ThreadedDevice::OverlayBegin()
+{
+    Enqueue([this](const uint8_t*) { m_device.OverlayBegin(); });
+}
+
 void ThreadedDevice::InterfaceBegin(bool redraw)
 {
     Enqueue([this, redraw](const uint8_t*) { m_device.InterfaceBegin(redraw); });
@@ -1197,11 +1202,6 @@ void ThreadedDevice::SetPointLightIntensity(float lights, float characters)
 void ThreadedDevice::SetTessellation(float shape, float distance, uint32_t level)
 {
     Enqueue([this, shape, distance, level](const uint8_t*) { m_device.SetTessellation(shape, distance, level); });
-}
-
-void ThreadedDevice::SetTessStatic(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetTessStatic(on); });
 }
 
 void ThreadedDevice::SetBloomOverNearer(float keep)

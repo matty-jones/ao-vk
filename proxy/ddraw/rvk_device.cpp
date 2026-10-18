@@ -632,6 +632,7 @@ bool g_uiOpen;
 
 bool DirectInterfaceBegin()
 {
+    FlushOverlayText();                           // the world's floating text first, over the finished picture
     rvk::ThreadedDevice* dev = g_rvk.device;
     if (!dev || g_uiPeriodMs <= 0.0 || g_uiOpen)
         return true;

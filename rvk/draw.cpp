@@ -676,6 +676,9 @@ bool Device::SwayParams(uint32_t primitive, uint32_t fvf, uint32_t stride, const
     // the GPU and in the depth pre-pass.
     if (m_textures[0]->m_opaque)
         return false;
+    // Nor a soft card - a lamp's glow or beam, smoke, a halo: no hard edges between leaf and hole (leaves.cpp).
+    if (!m_textures[0]->m_alphaMask.empty() && m_textures[0]->m_alphaHardEdges < 0.002f)
+        return false;
     // Static: the same vertices for the last two frames at least (the mesh cache's fingerprint).
     if (!m_drawMeshStatic || m_drawMesh->firstFrame + 2 > m_frameNumber)
         return false;
@@ -800,12 +803,10 @@ bool Device::CharacterDraw(uint32_t fvf, uint32_t vertexCount)
 // Phong tessellation of characters (RVK_Tess): the level for this draw, 0 for none. Characters (CharacterDraw) drawn
 // as triangle lists (3-point patches), indexed or not, depth-writing, with normals (the shape follows them), near the
 // camera.
-float Device::TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount, const void* vertices,
-                             const uint16_t* indices, uint32_t indexCount, const FvfLayout& layout, bool swaying)
+float Device::TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount)
 {
-    m_drawTessStatic = false;
-    if (m_tessShape <= 0.0f || !m_tessSupported || (!m_drawIsCharacter && !m_tessStatic) ||
-        primitive != d3d::TriangleList || !m_rs[d3d::RS_ZWRITEENABLE] || !(fvf & d3d::FVF_NORMAL) || vertexCount > 20000)
+    if (m_tessShape <= 0.0f || !m_tessSupported || !m_drawIsCharacter || primitive != d3d::TriangleList ||
+        !m_rs[d3d::RS_ZWRITEENABLE] || !(fvf & d3d::FVF_NORMAL) || vertexCount > 20000)
         return 0.0f;
     float c[3], e[3];
     DrawWorldBox(c, e);
@@ -817,156 +818,7 @@ float Device::TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCo
     }
     float closeness = 1.0f - std::sqrt(d2) / std::max(m_tessDistance, 1.0f);
     float level = 1.0f + float(m_tessLevel - 1) * closeness;
-    if (level < 1.5f)
-        return 0.0f;
-    if (!m_drawIsCharacter) {                    // (only now: the first look at a mesh costs a pass over it)
-        if (!StaticTessellation(fvf, vertices, vertexCount, indices, indexCount, layout, swaying))
-            return 0.0f;
-        m_drawTessStatic = true;
-    }
-    return level;
-}
-
-// A static mesh's corners for the Phong shape, with creases (StaticTessellation; ffp.tese): the normals of the
-// vertices at each position grouped (within ~35 degrees: one smooth surface). One group: a smooth surface - its
-// tangent plane (the group's mean normal, unit length). Two: a crease, where two surfaces meet - a line along it
-// (the cross product of the two, length 2): points are pulled towards the line, so both surfaces bend their common
-// edge into the same curve - a capped pipe's rim rounds into a circle on its side and its cap alike (no gap opens;
-// the cap stays flat), a box's edge stays straight (the line is the edge). More (a box's corner) or two facing
-// apart (the two sides of a card): no pull (0). Per position, so every vertex there carries the same: the triangles
-// on either side of an edge bend it alike. Into m_smoothNormals; false without normals.
-bool Device::SmoothNormalsCreased(const void* vertices, uint32_t vertexCount, const FvfLayout& layout)
-{
-    if (layout.offset[1] < 0 || !vertexCount)
-        return false;
-    const uint8_t* v = static_cast<const uint8_t*>(vertices);
-    auto position = [&](uint32_t i, float p[3]) { std::memcpy(p, v + size_t(i) * layout.stride, 12); };
-    auto normal = [&](uint32_t i, float n[3]) {
-        std::memcpy(n, v + size_t(i) * layout.stride + layout.offset[1], 12);
-        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        if (len <= 0.0f) return false;
-        for (int k = 0; k < 3; ++k) n[k] /= len;
-        return true;
-    };
-    // The vertices at each position: a chain from its first vertex (owner).
-    uint32_t size = 64;
-    while (size < vertexCount * 2) size *= 2;
-    std::vector<int32_t> table(size, -1), next(vertexCount, -1), owner(vertexCount);
-    auto quant = [](float f) { return int32_t(std::lround(f * 2048.0f)); };   // positions within 1/2048 are one
-    for (uint32_t i = 0; i < vertexCount; ++i) {
-        float p[3];
-        position(i, p);
-        const int32_t q[3] = {quant(p[0]), quant(p[1]), quant(p[2])};
-        const uint32_t h = (uint32_t(q[0]) * 73856093u) ^ (uint32_t(q[1]) * 19349663u) ^ (uint32_t(q[2]) * 83492791u);
-        owner[i] = int32_t(i);
-        for (uint32_t slot = h & (size - 1);; slot = (slot + 1) & (size - 1)) {
-            const int32_t o = table[slot];
-            if (o < 0) { table[slot] = int32_t(i); break; }
-            float po[3];
-            position(uint32_t(o), po);
-            if (quant(po[0]) == q[0] && quant(po[1]) == q[1] && quant(po[2]) == q[2]) {
-                owner[i] = o;
-                next[i] = next[o];                   // (into the owner's chain)
-                next[o] = int32_t(i);
-                break;
-            }
-        }
-    }
-    m_smoothNormals.assign(size_t(vertexCount) * 3, 0.0f);
-    constexpr float kSameSurface = 0.82f;            // cos 35 degrees
-    for (uint32_t i = 0; i < vertexCount; ++i) {
-        if (owner[i] != int32_t(i))
-            continue;
-        float groups[2][3] = {}, out[3] = {0, 0, 0};
-        int count = 0;
-        bool corner = false;
-        for (int32_t j = int32_t(i); j >= 0 && !corner; j = next[j]) {
-            float n[3];
-            if (!normal(uint32_t(j), n)) continue;
-            int g = 0;
-            for (; g < count; ++g) {
-                float m[3], len = std::sqrt(groups[g][0] * groups[g][0] + groups[g][1] * groups[g][1] + groups[g][2] * groups[g][2]);
-                for (int k = 0; k < 3; ++k) m[k] = groups[g][k] / len;
-                if (m[0] * n[0] + m[1] * n[1] + m[2] * n[2] > kSameSurface) break;
-            }
-            if (g == count) {
-                if (count == 2) { corner = true; break; }
-                ++count;
-            }
-            for (int k = 0; k < 3; ++k) groups[g][k] += n[k];
-        }
-        if (!corner && count == 1) {
-            const float len = std::sqrt(groups[0][0] * groups[0][0] + groups[0][1] * groups[0][1] + groups[0][2] * groups[0][2]);
-            if (len > 0.0f)
-                for (int k = 0; k < 3; ++k) out[k] = groups[0][k] / len;
-        } else if (!corner && count == 2) {
-            const float* a = groups[0];
-            const float* b = groups[1];
-            float c[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
-            const float la = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]), lb = std::sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
-            const float lc = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
-            if (lc > 0.2f * la * lb)                 // (not two sides facing apart)
-                for (int k = 0; k < 3; ++k) out[k] = 2.0f * c[k] / lc;
-        }
-        for (int32_t j = int32_t(i); j >= 0; j = next[j])
-            std::memcpy(&m_smoothNormals[size_t(j) * 3], out, sizeof(out));
-    }
-    return true;
-}
-
-// Phong tessellation of a static mesh (RVK_TessStatic): a building's or prop's draw - the game's static visual, lit,
-// solid (a texture with holes is a plant, a fence, a grille: cards nothing would round), not a plant that sways or a
-// canopy, the ground or its lighting passes, a label, the sky's scenery - that the shape bends somewhere: an edge
-// whose corners pull its middle off the straight line (as ffp.tesc decides per edge). A mesh of flat faces and hard
-// edges (most buildings) would come out the same, at the tessellation's cost. Its corners (SmoothNormalsCreased) and
-// the verdict are made once, kept with the mesh.
-bool Device::StaticTessellation(uint32_t fvf, const void* vertices, uint32_t vertexCount, const uint16_t* indices,
-                                uint32_t indexCount, const FvfLayout& layout, bool swaying)
-{
-    if (VisualKind(m_drawVisualKind) != VisualKind::Static || !m_drawMesh || !m_drawMeshStatic || !vertices ||
-        m_drawIsLabel || IsTerrain(fvf) || IsMultiplyPass() || swaying || m_drawLeaves || m_drawMesh->skyScenery ||
-        !m_rs[d3d::RS_LIGHTING] || (m_target != m_scene && m_target != m_main) || !m_textures[0] || layout.offset[1] < 0)
-        return false;
-    if (!m_textures[0]->m_opaque && (m_rs[d3d::RS_ALPHATESTENABLE] || m_rs[d3d::RS_ALPHABLENDENABLE]))
-        return false;
-    const MeshInfo& mesh = *m_drawMesh;
-    if (mesh.roundable < 0) {
-        mesh.roundable = 0;
-        if (!SmoothNormalsCreased(vertices, vertexCount, layout))
-            return false;
-        // An edge a -> b bends by t (1 - t) (P_b - P_a)(b - a), P a corner's projector onto what it pulls along:
-        // n n^T for a plane, I - d d^T for a crease line, 0 for none (ffp.tesc).
-        const float* s = m_smoothNormals.data();
-        const uint8_t* v = static_cast<const uint8_t*>(vertices);
-        auto pull = [&](uint32_t i, const float e[3], float out[3]) {
-            const float* m = s + size_t(i) * 3;
-            const float len = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-            for (int k = 0; k < 3; ++k) out[k] = 0.0f;
-            if (len <= 0.0f) return;
-            const float d[3] = {m[0] / len, m[1] / len, m[2] / len}, de = d[0] * e[0] + d[1] * e[1] + d[2] * e[2];
-            for (int k = 0; k < 3; ++k) out[k] = len > 1.5f ? e[k] - d[k] * de : d[k] * de;
-        };
-        const uint32_t corners = indices ? indexCount : vertexCount;
-        for (uint32_t t = 0; t + 2 < corners && !mesh.roundable; t += 3)
-            for (int k = 0; k < 3 && !mesh.roundable; ++k) {
-                const uint32_t a = indices ? indices[t + k] : t + k, b = indices ? indices[t + (k + 1) % 3] : t + (k + 1) % 3;
-                if (a >= vertexCount || b >= vertexCount) continue;
-                float pa[3], pb[3], e[3], qa[3], qb[3];
-                std::memcpy(pa, v + size_t(a) * layout.stride, 12);
-                std::memcpy(pb, v + size_t(b) * layout.stride, 12);
-                for (int j = 0; j < 3; ++j) e[j] = pb[j] - pa[j];
-                const float len = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
-                if (len <= 0.0f) continue;
-                pull(a, e, qa);
-                pull(b, e, qb);
-                const float D[3] = {qb[0] - qa[0], qb[1] - qa[1], qb[2] - qa[2]};
-                if (std::sqrt(D[0] * D[0] + D[1] * D[1] + D[2] * D[2]) > 0.01f * len)
-                    mesh.roundable = 1;
-            }
-        if (mesh.roundable)
-            mesh.smooth = std::make_shared<const std::vector<float>>(m_smoothNormals);
-    }
-    return mesh.roundable == 1 && mesh.smooth && mesh.smooth->size() == size_t(vertexCount) * 3;
+    return level >= 1.5f ? level : 0.0f;
 }
 
 // The current draw's normals averaged over the vertices sharing a position (m_smoothNormals, model space): a hard
@@ -1660,6 +1512,18 @@ bool Device::GlowDraw(uint32_t fvf) const
     return dst == d3d::BLEND_ONE && (src == d3d::BLEND_ONE || src == d3d::BLEND_SRCALPHA);
 }
 
+// A solid surface drawn into the scene - depth-writing, not additive, not the ground's light pass: it covers the glow
+// (additive effects' light, for the bloom) drawn before it behind it, as it covers their colour. Else an effect drawn
+// before a wall in front of it bloomed through the wall (the Temple of the Three Winds portal through a rock).
+bool Device::GlowOccluder(uint32_t fvf) const
+{
+    if (m_effectGlow <= 0.0f || m_target != m_scene || (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW ||
+        !m_rs[d3d::RS_ZENABLE] || !m_rs[d3d::RS_ZWRITEENABLE] || m_rs[d3d::RS_ZFUNC] == d3d::CMP_ALWAYS ||
+        m_drawIsLabel || m_drawTerrainLight || IsMultiplyPass())
+        return false;
+    return !(m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE);
+}
+
 // A multiplying pass (the ground's lightmap + lights) lit by the frame lights with headroom: it outputs half its
 // colour and is blended at 2x, so the lights can brighten the surface under it beyond the texture.
 bool Device::Overbright2x(uint32_t fvf) const
@@ -2022,6 +1886,13 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     // back-to-front sorted list, so nothing drawn after them needs their depth.
     if (m_drawIsLabel && m_target == m_scene && m_aoStrength > 0.0f)
         zWrite = 0;
+    // An additive draw (blended onto ONE) only adds light - it hides nothing behind it - but some write depth (the
+    // Temple of the Three Winds portal's discs): their whole quads, clear corners too, stood in the depth as walls,
+    // and the passes reading it (ambient occlusion, contact shadows, haze and fog, reflections, volumetric light)
+    // drew their outlines as squares. Their depth isn't written. (ao-vk #15)
+    if (zWrite && m_target == m_scene && m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE &&
+        (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW)
+        zWrite = 0;
     // A blended overlay drawn over everything (ZFUNC ALWAYS) - a sandstorm's tint is a screen-sized sprite a few
     // units ahead of the camera - writes its depth over the whole frame: the post passes (ambient occlusion, depth
     // of field, contact shadows, volumetric light) would take the frame for a wall a few units away.
@@ -2048,13 +1919,24 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     // The attachments' blend enables changed here are set together below (one call for the range, not one each: the
     // statics' blend toggling set three of them ~900 times a frame over a city).
     uint32_t blendDirty = 0;
-    if (hdrTarget && !c.glowBlendSet) {
-        // The glow attachment always adds: what each additive effect contributes (others write 0).
-        blendDirty |= 2u;
-        VkColorBlendEquationEXT eq{VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD,
-                                   VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD};
-        vkCmdSetColorBlendEquationEXT(cmd, 1, 1, &eq);
-        c.glowBlendSet = true;
+    if (hdrTarget) {
+        // The glow attachment: an additive effect adds what it contributes; a solid surface (GlowOccluder) scales what
+        // is there by 1 - its coverage (it writes 0, 0, 0, coverage): what it covers no longer glows. Others don't
+        // write it (masks below).
+        if (!c.glowBlendSet) {
+            blendDirty |= 2u;
+            c.glowBlendSet = true;
+        }
+        const uint8_t mode = GlowOccluder(fvf) ? 2 : 1;
+        if (c.glowBlendMode != mode) {
+            VkColorBlendEquationEXT eq = mode == 1
+                ? VkColorBlendEquationEXT{VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD,
+                                          VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD}
+                : VkColorBlendEquationEXT{VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD,
+                                          VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_OP_ADD};
+            vkCmdSetColorBlendEquationEXT(cmd, 1, 1, &eq);
+            c.glowBlendMode = mode;
+        }
     }
     // The interface layer (interface.cpp): every draw blends - its colour as asked (unblended: ONE, ZERO) - and its
     // alpha accumulates its coverage.
@@ -2146,7 +2028,7 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
         if (m_dynamicWriteMask) {
             const uint32_t all = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
                                  VK_COLOR_COMPONENT_A_BIT;
-            uint32_t masks[5] = {all, GlowDraw(fvf) ? all : 0u,
+            uint32_t masks[5] = {all, GlowDraw(fvf) || GlowOccluder(fvf) ? all : 0u,
                                  blend && fSrc == d3d::BLEND_ZERO && fDst == d3d::BLEND_ONE ? 0u : all,
                                  keep ? 0u : all,
                                  blend && aSrc == d3d::BLEND_ZERO && aDst == d3d::BLEND_ONE ? 0u : all};
@@ -2699,7 +2581,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                                  : (m_drawStaticBuffer ? 0 : VkDeviceSize(layout.stride) * vertexCount) +
                                        VkDeviceSize(indexCount) * 2;
     m_drawIsCharacter = CharacterDraw(fvf, vertexCount);
-    float tessLevel = TessellateDraw(primitive, fvf, vertexCount, vertices, indices, indexCount, layout, swaying);
+    float tessLevel = TessellateDraw(primitive, fvf, vertexCount);
     // GPU-driven M2: reserve this frame's arrays (with the geometry) in the ring in one go; they are only
     // (re)reserved when the ring has been started. A frame that overflowed them grows the target below.
     bool reserveArenas = m_arenaGeneration != m_ringGeneration;
@@ -3030,6 +2912,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     else if ((flags & F_PERPIXEL) && m_drawBumpBase)
         flags |= F_BUMP | F_BUMPBASE;
     if (GlowDraw(fvf)) flags |= F_GLOW | (m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_SRCALPHA ? F_GLOWALPHA : 0u);
+    else if (GlowOccluder(fvf)) flags |= F_GLOWALPHA;   // (alone: covers the glow - ffp_main.glsl)
     if (override && (m_lightHeadroom > 1.0f || hdrTarget)) flags |= F_OVERBRIGHT;
     if (Overbright2x(fvf)) flags |= F_OVERBRIGHT2X;
     if (ShadowReceiver(fvf)) flags |= F_SHADOW;
@@ -3269,15 +3152,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             m_drawTess = true;
         }
     } else if (tessLevel > 0.0f &&
-        (m_drawTessStatic ||                     // (a static mesh's: made once, StaticTessellation)
-         (m_drawSkin && layout.stride == sizeof(skin::Vertex)
+        (m_drawSkin && layout.stride == sizeof(skin::Vertex)
              ? SmoothNormalsSkinned(vertices, uint32_t(static_cast<const skin::Vertex*>(vertices) - m_drawSkinBase), vertexCount)
-             : SmoothNormals(vertices, vertexCount, layout)))) {
-        const std::vector<float>& smooth = m_drawTessStatic ? *m_drawMesh->smooth : m_smoothNormals;
+             : SmoothNormals(vertices, vertexCount, layout))) {
         void* smoothCpu;
-        smoothBytes = smooth.size() * 4;
+        smoothBytes = m_smoothNormals.size() * 4;
         smoothOffset = Allocate(smoothBytes, m_props.limits.minStorageBufferOffsetAlignment, &smoothCpu);
-        std::memcpy(smoothCpu, smooth.data(), smoothBytes);
+        std::memcpy(smoothCpu, m_smoothNormals.data(), smoothBytes);
         dt.tess[0] = tessLevel;
         dt.tess[1] = m_tessShape;
         dt.tess[2] = float(vbOffset / layout.stride);
@@ -3598,6 +3479,7 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
     };
     const uint32_t n = indices ? indexCount : vertexCount;
     const uint32_t triangles = primitive == d3d::TriangleList ? n / 3 : n >= 3 ? n - 2 : 0;
+    uint32_t hit = ~0u;                          // this draw's nearest hit, if it is the nearest so far
     for (uint32_t t = 0; t < triangles; ++t) {
         uint32_t k[3];
         if (primitive == d3d::TriangleList) {
@@ -3629,6 +3511,44 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
         m_pickBestKind = m_drawVisualKind;
         m_pickBestVertices = vertexCount;
         m_pickBestIndices = indexCount;
+        m_pickBestTriangleCount = 0;
+        hit = t;
+    }
+    // A dungeon room hit (VisualKind::Room): the hit triangle and those joined to it by shared vertices - the room's
+    // vertices aren't shared between the tile pieces placed in it, so that is the piece's sub-mesh as placed.
+    if (hit == ~0u || VisualKind(m_drawVisualKind) != VisualKind::Room || primitive != d3d::TriangleList || !indices)
+        return;
+    auto corner = [&](uint32_t tri, int j) { return uint32_t(indices[tri * 3 + j]); };
+    auto put = [&](uint32_t tri) {
+        float* out = &m_pickBestTriangles[m_pickBestTriangleCount++ * 15];
+        for (int j = 0; j < 3; ++j) {
+            const uint8_t* v = base + size_t(corner(tri, j)) * layout.stride;
+            std::memcpy(&out[j * 5], v + layout.offset[0], 12);
+            if (layout.offset[4] >= 0)
+                std::memcpy(&out[j * 5 + 3], v + layout.offset[4], 8);
+            else
+                out[j * 5 + 3] = out[j * 5 + 4] = 0.0f;
+        }
+    };
+    std::vector<uint32_t> vertices_{corner(hit, 0), corner(hit, 1), corner(hit, 2)};
+    std::vector<bool> taken(triangles, false);
+    taken[hit] = true;
+    put(hit);
+    for (bool grew = true; grew && m_pickBestTriangleCount < kPickTriangles;) {   // (until nothing more joins)
+        grew = false;
+        for (uint32_t t = 0; t < triangles && m_pickBestTriangleCount < kPickTriangles; ++t) {
+            if (taken[t]) continue;
+            const uint32_t a = corner(t, 0), b = corner(t, 1), c = corner(t, 2);
+            if (a >= vertexCount || b >= vertexCount || c >= vertexCount) continue;
+            bool joined = false;
+            for (uint32_t v : vertices_)
+                if (v == a || v == b || v == c) { joined = true; break; }
+            if (!joined) continue;
+            taken[t] = grew = true;
+            put(t);
+            for (uint32_t v : {a, b, c})
+                if (std::find(vertices_.begin(), vertices_.end(), v) == vertices_.end()) vertices_.push_back(v);
+        }
     }
 }
 

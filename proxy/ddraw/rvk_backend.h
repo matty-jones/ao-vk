@@ -26,7 +26,10 @@ struct TextureWrites { uint32_t locks, partial; uint64_t bytes; double ms; };
 int GameTexturesAlive();                          // the game's texture surfaces with a GPU texture now (rvk_surface.cpp)
 TextureWrites TakeTextureWrites();
 void RvkLog(const char* fmt, ...);
-void ParticleFrame();                             // each presented frame (rvk_particles.cpp)
+void ParticleFrame();
+// The world's floating text (GfxVisualDiaBill with packed glyph rectangles: damage, XP, names), held back from the
+// scene and drawn here - just before the interface - over the finished picture (rvk_particles.cpp).
+void FlushOverlayText();                             // each presented frame (rvk_particles.cpp)
 void WeatherFrame();                              // each presented frame (rvk_weather.cpp)
 void SmokeFrame();                                // each presented frame (rvk_smoke.cpp)
 void TimeFrame();                                 // each presented frame (rvk_time.cpp: RVK_TimeOfDay)

@@ -86,7 +86,8 @@ const uint F_LIGHTING = 1u, F_COLORVERTEX = 2u, F_SPECULAR = 4u, F_NORMALIZE = 8
            F_OVERBRIGHT2X = 131072u, // multiplying pass blended at 2x (DESTCOLOR/SRCCOLOR): output halved, up to 2
            F_HDR = 262144u,          // drawn into the HDR scene (float): colours above 1 are kept
            F_GLOW = 524288u,         // an additive effect: also adds itself (x misc.z) to the glow attachment
-           F_GLOWALPHA = 1048576u,   // ... blended SRCALPHA: its contribution is colour x alpha
+           F_GLOWALPHA = 1048576u,   // ... blended SRCALPHA: its contribution is colour x alpha; without F_GLOW: a
+                                     // solid surface covering the glow behind it (writes 0, 0, 0, its coverage)
            F_BUMP = 2097152u,        // per-pixel lighting with a normal generated from texture 0 (C.misc.w = strength)
            F_BUMPBASE = 4194304u,    // ... from the ground's base texture (binding 7, coordinate set 0) instead
            F_FOLIAGE = 8388608u,     // lit with a cut-out texture: sunlight through it (FL.effects.x) if it has holes

@@ -458,9 +458,7 @@ void main()
             int i = (gl_VertexIndex - int(D.tess.z)) * 3;
             vec3 m = vec3(SN.smoothN[i], SN.smoothN[i + 1], SN.smoothN[i + 2]);
             vec3 s = mat3(D.world) * m;
-            // (A static mesh's crease (rvk SmoothNormalsCreased): a line along it, length 2 - passed on as such.)
-            float weight = length(m) > 1.5 ? 2.0 : smoothstep(0.85, 0.97, length(m));
-            vSmoothN = dot(s, s) > 0.0 ? normalize(s) * weight : vec3(0.0);
+            vSmoothN = dot(s, s) > 0.0 ? normalize(s) * smoothstep(0.85, 0.97, length(m)) : vec3(0.0);
         }
 #endif
         if ((C.flags.x & F_LIGHTING) != 0u) {

@@ -11,6 +11,8 @@
 
 #include <array>
 #include <memory>
+#include <mutex>
+#include <cstring>
 #include <cstdint>
 #include <string>
 #include <atomic>
@@ -88,6 +90,9 @@ private:
     // (leaves.cpp: where a canopy card is leaf and where it is hole). Empty until a full level-0 upload.
     std::vector<uint8_t> m_alphaMask;
     uint32_t m_alphaW = 0, m_alphaH = 0;
+    // The share of neighbouring mask cells whose alpha jumps by more than 0.3: a cut-out's hard edges (leaves: from
+    // ~0.004 up), none in a soft glow, beam or smoke card (0). Plants are cut-outs (leaves.cpp, SwayParams).
+    float m_alphaHardEdges = 1.0f;
     uint32_t m_alphaVersion = 0;       // counts the uploads that changed the mask (a canopy's leaves are rebaked)
     VkDeviceSize m_bytes = 0;          // its image's memory (the GPU memory report)
     bool m_lightmap = false;           // captured as a terrain lightmap (a re-upload recaptures the grass's light)
@@ -248,8 +253,12 @@ public:
     // gives them once that frame has ended (serial: one more each result; thread-safe). SetPickHighlight: draws with
     // that texture flash yellow (null: none).
     void RequestPick(float x, float y) { m_pickX = x; m_pickY = y; m_pickArmed = true; }
+    // triangles: the hit triangle (first) and those joined to it by shared vertices - in a dungeon room, the tile
+    // piece's sub-mesh as placed - each as its corners drawn (model space x y z, then u v of stage 0); what the
+    // workbench finds the piece by. Rooms only (triangleCount 0 otherwise).
+    static constexpr uint32_t kPickTriangles = 48;
     struct PickResult { Texture* texture = nullptr; uint32_t serial = 0, visual = 0, owner = 0, kind = 0, vertices = 0,
-                        indices = 0; };
+                        indices = 0; uint32_t triangleCount = 0; float triangles[kPickTriangles * 15] = {}; };
     PickResult LastPick() const
     {
         PickResult r;
@@ -260,6 +269,11 @@ public:
         r.kind = m_pickPublishedKind.load(std::memory_order_relaxed);
         r.vertices = m_pickPublishedVertices.load(std::memory_order_relaxed);
         r.indices = m_pickPublishedIndices.load(std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(m_pickTriangleMutex);
+            r.triangleCount = m_pickPublishedTriangleCount;
+            std::memcpy(r.triangles, m_pickPublishedTriangles, sizeof(r.triangles));
+        }
         return r;
     }
     void SetPickHighlight(Texture* t) { if (m_pickHighlight != t) { m_pickHighlight = t; m_constantsDirty = true; } }
@@ -481,9 +495,6 @@ public:
     void SetFoliageLod(float distance) { m_foliageLod = distance; }
     // Depth pre-pass (prepass.cpp): the scene's opaque draws' depth first, so each pixel is shaded about once.
     void SetDepthPrepass(bool on) { m_prepassOn = on; }
-    // Phong tessellation of static meshes too - buildings and props, where they are curved (with SetTessellation's
-    // shape, distance and level).
-    void SetTessStatic(bool on) { m_tessStatic = on; }
     // Phong tessellation of characters: shape (0 = off, 1 = fully round), distance, the level up close.
     void SetTessellation(float shape, float distance, uint32_t level)
     {
@@ -721,6 +732,10 @@ public:
     // this frame; End shows the layer over the main target.
     void InterfaceBegin(bool redraw);
     void InterfaceEnd();
+    // The world's floating text (damage, XP, names over heads) next: the scene ends here - its effects (smoke, fog,
+    // the tone mapping, bloom, grading) applied - and the text is drawn over the finished picture, still hidden by
+    // what stands in front of it (the scene's depth). The interface follows.
+    void OverlayBegin() { if (m_inFrame && m_main) InterfaceSceneEnd(); }
     // The layer holds an interface drawn at the current size (else the next frame must redraw it). Any thread.
     bool InterfaceLayerReady() const { return m_uiLayerReady.load(std::memory_order_relaxed); }
     Texture* GetRenderTarget() const { return m_target == m_main ? nullptr : m_target; }
@@ -834,7 +849,8 @@ private:
         bool drawSetValid = false;
         VkDeviceSize frameLights = 0, prevOffset = 0, prevRange = 0, smoothOffset = 0, smoothRange = 0;
         VkBuffer prevBuffer = VK_NULL_HANDLE, smoothBuffer = VK_NULL_HANDLE;
-        bool glowBlendSet = false;               // attachment 1 (glow) blend state, HDR pipelines
+        bool glowBlendSet = false;               // attachment 1 (glow) blend enabled, HDR pipelines
+        uint8_t glowBlendMode = 0;               // ... its equation: 0 not set, 1 adds (effects), 2 occludes (GlowOccluder)
         uint32_t fractionEnable = ~0u, fractionSrc = ~0u, fractionDst = ~0u;   // attachment 2 (local-light fraction)
         uint32_t motionKeep = ~0u;               // attachment 3 (motion vectors): 1 = kept (draw doesn't write)
         uint32_t albedoEnable = ~0u, albedoSrc = ~0u, albedoDst = ~0u;   // attachment 4 (surface colour)
@@ -911,6 +927,11 @@ private:
     uint32_t m_pickBestVisual = 0, m_pickBestOwner = 0, m_pickBestKind = 0, m_pickBestVertices = 0, m_pickBestIndices = 0;
     std::atomic<uint32_t> m_pickPublishedVisual{0}, m_pickPublishedOwner{0}, m_pickPublishedKind{0},
         m_pickPublishedVertices{0}, m_pickPublishedIndices{0};   // the draw's counts (the workbench matches meshes by them)
+    float m_pickBestTriangles[kPickTriangles * 15] = {};   // the nearest hit's triangles (PickResult::triangles)
+    uint32_t m_pickBestTriangleCount = 0;
+    mutable std::mutex m_pickTriangleMutex;      // (published by the render thread, read by the game's)
+    float m_pickPublishedTriangles[kPickTriangles * 15] = {};
+    uint32_t m_pickPublishedTriangleCount = 0;
     const void* m_pickSkinned = nullptr;         // a GPU-skinned draw's CPU-skinned vertices, for the pick (DrawSkinned)
     std::atomic<uint32_t> m_pickSerial{0};
     Texture* m_pickHighlight = nullptr;
@@ -1348,23 +1369,16 @@ private:
     // Phong tessellation of characters near the camera (draw.cpp TessellateDraw): RVK_Tess*.
     float m_tessShape = 0.0f;                    // 0 = off; how far towards the smooth shape (Phong's alpha)
     float m_tessDistance = 20.0f;                // world units: full level up close, none from here on
-    bool m_tessStatic = false;                   // SetTessStatic: static meshes too
-    bool m_drawTessStatic = false;               // the current draw is a static mesh tessellated (StaticTessellation)
     uint32_t m_tessLevel = 4;
     bool m_drawTess = false;                     // the current draw is tessellated (ApplyDynamicState, the pipeline)
     struct TessTopology { uint64_t frames[3] = {}; };   // the last 3 frames a topology was drawn animated, newest first
     std::unordered_map<uint64_t, TessTopology> m_tessTopologies;
-    float TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount, const void* vertices,
-                         const uint16_t* indices, uint32_t indexCount, const detail::FvfLayout& layout,
-                         bool swaying);   // the level (0 = none)
-    bool StaticTessellation(uint32_t fvf, const void* vertices, uint32_t vertexCount, const uint16_t* indices,
-                            uint32_t indexCount, const detail::FvfLayout& layout, bool swaying);
+    float TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount);   // the level (0 = none)
     bool CharacterDraw(uint32_t fvf, uint32_t vertexCount);   // the current draw is a character's (body or part)
     bool m_drawIsCharacter = false;
     struct TessCharacter { float x, z, minY, maxY; };
     std::vector<TessCharacter> m_tessChars, m_tessCharsPrev;   // animated characters' boxes: this / last frame
     bool SmoothNormals(const void* vertices, uint32_t vertexCount, const detail::FvfLayout& layout);
-    bool SmoothNormalsCreased(const void* vertices, uint32_t vertexCount, const detail::FvfLayout& layout);
     std::vector<float> m_smoothNormals;          // the draw's averaged normals (binding 10)
     std::vector<int32_t> m_smoothTable;          // their position hash table
     // Skinned pieces: which vertices share a position (the first of each), found once per mesh in its rest pose.
@@ -1521,10 +1535,6 @@ private:
         bool rawSame = false;                    // ... one of them has its vertex bytes too
         bool skyScenery = false;                 // ... a mesh of the sky's scenery (the ships over the cities: mesh_id.h
                                                  // kSkyScenery): kept inside the far plane, fogged as the far sky
-        // Phong tessellation of static meshes (StaticTessellation): whether the mesh has curved parts (1), none
-        // (0), not looked at (-1); its averaged normals (SmoothNormals), made once.
-        mutable int8_t roundable = -1;
-        mutable std::shared_ptr<const std::vector<float>> smooth;
     };
     std::unordered_map<uint64_t, MeshInfo> m_meshInfo;
     // Mesh ids (meshids.cpp).
@@ -2484,6 +2494,7 @@ private:
     bool m_glowCleared = false;                  // this frame
     uint32_t m_glowDraws = 0;                    // this frame's draws feeding the glow (frame dumps)
     bool GlowDraw(uint32_t fvf) const;
+    bool GlowOccluder(uint32_t fvf) const;
     bool IsInterfaceDraw(uint32_t fvf) const;
     // The scene's pre-transformed draws (FVF 0x1C4, out of ProcessVertices: the game's water, floating text) - not
     // the game's screen sprites in the same format (the timer bars): the proxy says which (SetDrawProcessed).
@@ -2987,6 +2998,7 @@ private:
 
     std::string m_screenshotPath;
     std::string m_dumpPath;
+    std::string m_dumpOpenPath;                  // the dump being written (its files beside it: water mesh)
     std::string m_dumpBurstBase;                 // a run of frames dumped: <base>-NN.txt (RequestFrameDump frames)
     int m_dumpBurstLeft = 0, m_dumpBurstIndex = 0;
     FILE* m_dumpFile = nullptr;
