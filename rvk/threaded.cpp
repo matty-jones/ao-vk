@@ -1204,6 +1204,16 @@ void ThreadedDevice::SetBloomOverNearer(float keep)
     Enqueue([this, keep](const uint8_t*) { m_device.SetBloomOverNearer(keep); });
 }
 
+void ThreadedDevice::SetNeonSat(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetNeonSat(s); });
+}
+
+void ThreadedDevice::SetBloomWide(float w)
+{
+    Enqueue([this, w](const uint8_t*) { m_device.SetBloomWide(w); });
+}
+
 void ThreadedDevice::SetEffectGlow(float gain)
 {
     m_effectGlow = gain < 0.0f ? 0.0f : gain;

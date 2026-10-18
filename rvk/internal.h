@@ -139,6 +139,8 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // ripples), w the cover map's heights' reference (world y)
     float cover[4];                // the rain's cover map (sand_map.cpp RainCoverMap): corner x, z, 1 / size, bindless
                                    // image + 1 | sampler << 20 (the float's bits; 0 = none)
+    float neon[4];                 // the tone mapping's neon look (tonemap.frag): x how much saturated light keeps
+                                   // its colour (RVK_NeonSat), y the lens streaks' strength (RVK_Streaks), z, w unused
     GpuLight lights[kFrameLights];
 };
 

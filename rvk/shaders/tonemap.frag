@@ -148,6 +148,11 @@ void main()
 {
     vec4 s = texelFetch(scene, ivec2(gl_FragCoord.xy), 0);
     vec3 glow = P.params.z > 0.0 ? Bloom() * P.params.z : vec3(0.0);
+    // The neon look (RVK_NeonSat): the halo a little more saturated - coloured light glows its colour.
+    if (FL.neon.x > 0.0) {
+        float gl = dot(glow, vec3(0.3, 0.59, 0.11));
+        glow = max(mix(vec3(gl), glow, 1.0 + 0.35 * FL.neon.x), vec3(0.0));
+    }
     vec3 c = Reflected(s.rgb * AmbientFactor() + Indirect());
     // How far the pixel is: its view depth over the far clip's (the sky: wholly).
     float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r;
@@ -296,6 +301,10 @@ void main()
         float room = 1.0 - k;
         float shown = room > 0.0 ? k + room * (1.0 - exp(-(m - k) / room)) : 1.0;
         float white = m > 1.0 ? 1.0 - 1.0 / (1.0 + 0.25 * (m - 1.0)) : 0.0;   // 0 at 1, 0.2 at 2, 0.5 at 5
+        // (The neon look, RVK_NeonSat: saturated light - signs, screens, coloured lamps - keeps its colour as it rolls
+        // off; near-grey light - the sun on pale stone - still goes white.)
+        float sat = (m - min(c.r, min(c.g, c.b))) / m;
+        white *= 1.0 - FL.neon.x * smoothstep(0.35, 0.8, sat);
         c = mix(c * (shown / m), vec3(shown), white);
     }
     // Alpha: with TAA (flag 16), how much of this pixel additive effects made - their glow, as shown (taa.frag gives

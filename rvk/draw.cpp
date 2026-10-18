@@ -388,6 +388,8 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
             std::memcpy(&fl->cover[3], &slot, 4);
         }
     }
+    fl->neon[0] = m_hdr ? m_neonSat : 0.0f;
+    fl->neon[1] = fl->neon[2] = fl->neon[3] = 0.0f;
     FillPushers(fl, eye);
     fl->leaves[0] = m_leaf.on ? m_leaf.wind : 0.0f;
     fl->leaves[1] = m_leaf.on ? m_leaf.flutter : 0.0f;

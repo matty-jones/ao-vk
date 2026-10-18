@@ -3759,7 +3759,7 @@ int main(int argc, char** argv)
     float headroom = 1.0f;
     double fadeIn = 0.0;
     bool hdr = false;
-    float bloom = 0.0f, effectGlow = 1.0f, ao = 0.0f, aoRadius = 1.5f, gi = 0.0f, giRadius = 4.0f, volume = 0.0f, volHaze = 1.0f, volShafts = 1.0f, ssr = 0.0f, ssrWet = 0.0f, bloomOcc = 0.15f, sunSoft = 0.0f, leaf = 0.0f, nightGlow = 0.0f, contact = 0.0f, sway = 0.0f, bump = 0.0f, grassPush = 1.0f, plantDetail = 1.0f, foliageLod = 35.0f;
+    float bloom = 0.0f, effectGlow = 1.0f, ao = 0.0f, aoRadius = 1.5f, gi = 0.0f, giRadius = 4.0f, volume = 0.0f, volHaze = 1.0f, volShafts = 1.0f, ssr = 0.0f, ssrWet = 0.0f, bloomOcc = 0.15f, neonSat = 0.0f, bloomWide = 0.0f, sunSoft = 0.0f, leaf = 0.0f, nightGlow = 0.0f, contact = 0.0f, sway = 0.0f, bump = 0.0f, grassPush = 1.0f, plantDetail = 1.0f, foliageLod = 35.0f;
     int sunRes = 4096, ptRes = 1024;
     float ptLight = 1.0f, tess = 0.0f;
     int tessLevel = 4;
@@ -4006,6 +4006,8 @@ int main(int argc, char** argv)
         else if (a == "--ssr" && i + 1 < argc) { ssr = float(std::atof(argv[++i])); hdr = true; }
         else if (a == "--ssr-wet" && i + 1 < argc) ssrWet = float(std::atof(argv[++i]));
         else if (a == "--bloom-occ" && i + 1 < argc) bloomOcc = float(std::atof(argv[++i]));
+        else if (a == "--neon-sat" && i + 1 < argc) neonSat = float(std::atof(argv[++i]));
+        else if (a == "--bloom-wide" && i + 1 < argc) bloomWide = float(std::atof(argv[++i]));
         else if (a == "--sun-soft" && i + 1 < argc) sunSoft = float(std::atof(argv[++i]));
         else if (a == "--leaf" && i + 1 < argc) leaf = float(std::atof(argv[++i]));
         else if (a == "--night-glow" && i + 1 < argc) { nightGlow = float(std::atof(argv[++i])); g_nightSign = true; }
@@ -4132,6 +4134,8 @@ int main(int argc, char** argv)
     dev.SetBloom(bloom, 1.0f);
     dev.SetEffectGlow(effectGlow);
     dev.SetBloomOverNearer(bloomOcc);
+    dev.SetNeonSat(neonSat);
+    dev.SetBloomWide(bloomWide);
     dev.SetSunSoftness(sunSoft);
     dev.SetLeafLight(leaf);
     dev.SetNightGlow(nightGlow);

@@ -226,6 +226,8 @@ Setting g_settings[] = {
     {"RVK_Bloom", "Strength", "Effects",  Float, 0.25f, 5, 0.25f, 1, "RANDYVK_BLOOM", 0, "RVK_BloomOn"},
     {"RVK_BloomThr", "Threshold (1 = above white)", "Effects",  Float, 0.5f, 2, 0.05f, 1, "RANDYVK_BLOOM_THRESHOLD", 0, "RVK_BloomOn"},
     {"RVK_BloomOcc", "Over objects in front of its light (1 = unchanged)", "Effects",  Float, 0, 1, 0.05f, 0.15f, nullptr, 0, "RVK_BloomOn"},
+    {"RVK_BloomWide", "Wide haze round its core (0 = even; wider in rain by night)", "Effects",  Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_BloomOn"},
+    {"RVK_NeonSat", "Bright coloured lights keep their colour (0 = they go white)", "Effects",  Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_Hdr"},
     {"RVK_FxGlowOn", "Glow of effects (spells, fire, light halos)", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_BloomFx", "Strength", "Effects",  Float, 0.25f, 4, 0.25f, 1, "RANDYVK_BLOOM_EFFECTS", 0, "RVK_FxGlowOn"},
     {"RVK_NightOn", "Night glow of windows, signs and screens", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
@@ -272,6 +274,7 @@ Setting g_settings[] = {
     {"RVK_NightTint", "Night tint (cooler, paler)", "Colour grading",   Float, 0, 1, 0.05f, 0.25f, nullptr, 0, "RVK_GradeOn"},
     {"RVK_Vignette",   "Vignette (darker corners)",                                "Colour grading",   Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_GradeOn"},
     {"RVK_LutAmount",  "Look-up tables (Ctrl+Shift+L)", "Colour grading", Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_GradeOn"},
+    {"RVK_NeonNight",  "Neon nights: teal shadows, lights keep their colour (in place of randy-vk-night.cube)", "Colour grading", Bool, 0, 1, 1, 0, nullptr, 0, "RVK_GradeOn"},
     {"RVK_Exposure", "Brightness", "Colour grading",  Float, 0.5f, 2, 0.05f, 1, "RANDYVK_EXPOSURE", 0, "RVK_Hdr"},
 
     {"RVK_Dof",        "Depth of field",                                           "Depth of field",   Bool,  0, 1, 1, 0, nullptr, 0},
@@ -331,7 +334,7 @@ struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
     {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
-    {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
+    {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
@@ -526,6 +529,8 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Bloom") || is("RVK_BloomThr")) d->SetBloom(V("RVK_Bloom"), V("RVK_BloomThr"));
     else if (is("RVK_BloomFx")) d->SetEffectGlow(V(n));
     else if (is("RVK_BloomOcc")) d->SetBloomOverNearer(V(n));
+    else if (is("RVK_BloomWide")) d->SetBloomWide(V(n));
+    else if (is("RVK_NeonSat")) d->SetNeonSat(V(n));
     else if (is("RVK_Sway")) d->SetSway(V(n));
     else if (is("RVK_GrassPush")) d->SetGrassPush(V(n));
     else if (is("RVK_PlantDetail")) d->SetPlantDetail(V(n));
@@ -591,6 +596,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
              is("RVK_Vignette") || is("RVK_LutAmount"))
         d->SetGrading(V("RVK_Saturation"), V("RVK_Contrast"), V("RVK_Warmth"), V("RVK_LutAmount"), V("RVK_NightTint"),
                       V("RVK_Vignette"));
+    else if (is("RVK_NeonNight")) rvk_settings::LoadLuts(d);
     else if (is("RVK_SunSoft")) d->SetSunSoftness(V(n));
     else if (is("RVK_LeafLightOn") || is("RVK_LeafLight")) d->SetLeafLight(V("RVK_LeafLight"));
     else if (is("RVK_CrownShade")) d->SetCrownShade(V(n));
@@ -917,6 +923,39 @@ static bool ReadCube(const char* path, uint32_t* size, std::vector<uint8_t>* rgb
     return true;
 }
 
+// The built-in neon night table (RVK_NeonNight), over the graded colour by night: the darks lean teal, saturated
+// colours above the darks a little more saturated (signs, screens, lamps), a touch of magenta in the upper middle
+// tones. Light: the darks stay as dark, white stays white.
+void NeonNightLut(uint32_t n, std::vector<uint8_t>* out)
+{
+    out->resize(size_t(n) * n * n * 4);
+    auto smooth = [](float a, float b, float x) {
+        float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    };
+    for (uint32_t b = 0; b < n; ++b)
+        for (uint32_t g = 0; g < n; ++g)
+            for (uint32_t r = 0; r < n; ++r) {
+                float c[3] = {r / float(n - 1), g / float(n - 1), b / float(n - 1)};
+                float l = 0.3f * c[0] + 0.59f * c[1] + 0.11f * c[2];
+                float hi = std::max(c[0], std::max(c[1], c[2])), lo = std::min(c[0], std::min(c[1], c[2]));
+                // Darks towards teal, as bright as they were.
+                const float teal[3] = {0.72f, 1.04f, 1.2f};   // (luma 0.98)
+                float dark = 1.0f - smooth(0.0f, 0.4f, l);
+                for (int k = 0; k < 3; ++k) c[k] += (l * teal[k] - c[k]) * 0.45f * dark;
+                // Saturated colours above the darks more so.
+                float boost = 0.3f * smooth(0.1f, 0.5f, hi - lo) * smooth(0.15f, 0.5f, l);
+                for (int k = 0; k < 3; ++k) c[k] = l + (c[k] - l) * (1.0f + boost);
+                // Magenta in the upper middle tones.
+                float mid = smooth(0.35f, 0.6f, l) * (1.0f - smooth(0.75f, 1.0f, l));
+                const float magenta[3] = {0.035f, -0.03f, 0.04f};
+                for (int k = 0; k < 3; ++k) c[k] += magenta[k] * mid;
+                uint8_t* p = &(*out)[((size_t(b) * n + g) * n + r) * 4];
+                for (int k = 0; k < 3; ++k) p[k] = uint8_t(std::lround(std::clamp(c[k], 0.0f, 1.0f) * 255.0f));
+                p[3] = 255;
+            }
+}
+
 void LoadLuts(rvk::ThreadedDevice* device)
 {
     if (!device) return;
@@ -932,6 +971,11 @@ void LoadLuts(rvk::ThreadedDevice* device)
         if (ReadCube((dir + names[i]).c_str(), &size[i], &data[i]))
             RvkLog("colour lookup table %s: %u^3", names[i], size[i]);
     if (!size[1] && size[0]) { size[1] = size[0]; data[1] = data[0]; }
+    if (Find("RVK_NeonNight") && Find("RVK_NeonNight")->value != 0.0f) {
+        size[1] = 33;
+        NeonNightLut(size[1], &data[1]);
+        RvkLog("colour lookup table for the night: neon (RVK_NeonNight)");
+    }
     for (uint32_t i = 0; i < 2; ++i)
         device->SetColorLut(i, size[i], size[i] ? data[i].data() : nullptr);
     // The static meshes' ids (ao-assets: python -m aoassets mesh-ids), from the same folder.
@@ -966,7 +1010,7 @@ struct PresetValue { const char* name; float value; };
 const PresetValue kClassicPlus[] = {
     {"RVK_Bump", 0.75f}, {"RVK_Tess", 0.5f}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_WaterStyle", 0}, {"RVK_WaterQual", 2},
     {"RVK_SunStrength", 0.5f}, {"RVK_PtShadows", 4}, {"RVK_Contact", 0.4f}, {"RVK_Bloom", 0.5f},
-    {"RVK_NightGlow", 0.35f}, {"RVK_Ao", 0.75f}, {"RVK_GiOn", 0}, {"RVK_VolOn", 0}, {"RVK_SsrGloss", 0.15f},
+    {"RVK_NightGlow", 0.35f}, {"RVK_BloomWide", 0.2f}, {"RVK_NeonSat", 0.3f}, {"RVK_Ao", 0.75f}, {"RVK_GiOn", 0}, {"RVK_VolOn", 0}, {"RVK_SsrGloss", 0.15f},
     {"RVK_MBlurOn", 0}, {"RVK_Warmth", 0}, {"RVK_Dof", 0}, {"RVK_Particles", 0},
     {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0}, {"RVK_SmokeOn", 0}, {"RVK_WaterOn", 0},   // (the new features off)
 };

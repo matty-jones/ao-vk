@@ -313,6 +313,11 @@ public:
     void SetSsr(float strength, float water, float gloss, float wet)
     { m_ssr = strength; m_ssrWater = water; m_ssrGloss = gloss; m_ssrWet = wet; m_constantsDirty = true; }
     void SetBloomOverNearer(float keep) { m_bloomOverNearer = keep; }
+    // With HDR, the neon look: how much saturated light above white keeps its colour in the tone mapping (and the
+    // bloom's halo a little more saturated; 0 = to white as before); how much the bloom's wide levels weigh against
+    // its core (0 = all alike as before, 1 = a wide haze - wider still in rain and storms at night).
+    void SetNeonSat(float s) { m_neonSat = s; m_frameLightsDirty = true; }
+    void SetBloomWide(float w) { m_bloomWide = w; }
     // With HDR: colour grading after the tone mapping (grading.cpp). Neutral: 1, 1, 0, any, 0, 0.
     void SetGrading(float saturation, float contrast, float warmth, float lutAmount, float nightTint, float vignette)
     { m_saturation = saturation; m_contrast = contrast; m_warmth = warmth; m_lutAmount = lutAmount;
@@ -2453,6 +2458,8 @@ private:
     bool TaaParams(float out[24]);               // before MotionBlurParams (it moves on the last frame's camera)
     void RenderTaa(VkCommandBuffer cmd, Texture* dst, const float params[24]);
     float m_bloomOverNearer = 0.15f;             // bloom left on objects in front of its light (1 = all)
+    float m_neonSat = 0.0f, m_bloomWide = 0.0f;  // RVK_NeonSat, RVK_BloomWide (SetNeonSat, SetBloomWide)
+    float m_bloomWeightSum = 1.0f;               // the bloom levels' weights summed this frame (RenderBloom)
     bool m_bloomDepth = false;                   // this frame's bloom carries its light's depth
     std::vector<Texture*> m_bloomLevels;         // half resolution and down, float
     float m_effectGlow = 1.0f;

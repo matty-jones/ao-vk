@@ -461,12 +461,12 @@ void Device::EndScene()
     bool contact = RenderContactShadows(cmd);
     ProfileMark("contact shadows");
     Transition(cmd, m_albedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    // The upsampled bloom chain sums every level's light: averaged here.
+    // The upsampled bloom chain sums every level's light (weighted: RenderBloom): averaged here.
     // params[3]: how much bloom reaches objects nearer than its light (-1: the bloom carries no depth).
     // params[8..15]: colour grading (identity lookup tables until the proxy loads others).
     for (Texture*& lut : m_lut)
         if (!lut) lut = CreateLut(16, nullptr);
-    float params[16] = {m_tonemapKnee, m_exposure, bloom ? m_bloomStrength / float(m_bloomLevels.size()) : 0.0f,
+    float params[16] = {m_tonemapKnee, m_exposure, bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
                         m_bloomDepth ? m_bloomOverNearer : -1.0f, m_aoProj.m[2][2], m_aoProj.m[3][2],
                         gi ? m_giStrength : 0.0f,
                         float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0))};
@@ -1463,9 +1463,16 @@ void Device::RenderBloom(VkCommandBuffer cmd)
                        m_bloomDepth ? m_depthView : VK_NULL_HANDLE);
         src = m_bloomLevels[i];
     }
+    // Each smaller level is added to the next larger one with this weight: level 0 ends up with level i's light x weight^i.
+    // RVK_BloomWide raises it (a wide haze round a tight core), more in rain or a storm by night - lamps' halos spread
+    // in wet air. The tone mapping divides by the weights' sum, so only the shape changes, not how bright.
+    const float wetAir = NightAmount() * std::max(StormOvercast(), std::clamp(m_wetness, 0.0f, 1.0f));
+    const float weight = 1.0f + 0.6f * std::clamp(m_bloomWide, 0.0f, 1.0f) * (1.0f + 0.5f * wetAir);
+    m_bloomWeightSum = 0.0f;
+    for (size_t i = 0; i < m_bloomLevels.size(); ++i) m_bloomWeightSum += std::pow(weight, float(i));
     for (size_t i = m_bloomLevels.size() - 1; i-- > 0;) {
         Texture* smaller = m_bloomLevels[i + 1];
-        float params[4] = {1.0f / float(smaller->m_width), 1.0f / float(smaller->m_height), 0.0f, 0.0f};
+        float params[4] = {1.0f / float(smaller->m_width), 1.0f / float(smaller->m_height), weight, 0.0f};
         Transition(cmd, smaller, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         FullscreenPass(cmd, m_bloomLevels[i], m_bloomUp, smaller->m_view, smaller->m_view, m_linearSampler, params, 16, true);
     }
