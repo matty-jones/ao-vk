@@ -388,19 +388,19 @@ VisualInfo Describe(const void* visual)
         LogChain(visual);
     const void* vtable = *static_cast<const void* const*>(visual);
     Cached& c = g_visuals[visual];
-    if (c.vtable == vtable && g_renders - c.stamp < 2000)
-        return c.info;
-    c.vtable = vtable;
-    c.stamp = g_renders;
-    c.info.className = ClassName(visual);
-    c.info.kind = KindOf(c.info.className);
-    // Attached to a character (somewhere up its frames): one of its parts.
-    c.info.owner = c.info.kind == Kind::Character ? visual : nullptr;
-    if (c.info.kind != Kind::Character && c.info.kind != Kind::BlobShadow)
-        if (const void* character = CharacterAbove(visual)) {
-            c.info.kind = Kind::CharacterPart;
-            c.info.owner = character;
-        }
+    if (c.vtable != vtable || g_renders - c.stamp >= 2000) {
+        c.vtable = vtable;
+        c.stamp = g_renders;
+        c.info.className = ClassName(visual);
+        c.info.kind = KindOf(c.info.className);
+        // Attached to a character (somewhere up its frames): one of its parts.
+        c.info.owner = c.info.kind == Kind::Character ? visual : nullptr;
+        if (c.info.kind != Kind::Character && c.info.kind != Kind::BlobShadow)
+            if (const void* character = CharacterAbove(visual)) {
+                c.info.kind = Kind::CharacterPart;
+                c.info.owner = character;
+            }
+    }
     VisualInfo info = c.info;
     if (g_visuals.size() > 20000)                       // visuals come and go: start over now and then
         g_visuals.clear();
