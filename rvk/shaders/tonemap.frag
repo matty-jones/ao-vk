@@ -124,6 +124,18 @@ vec3 SkyDelta(vec3 Vv)
     return SkyHorizonDeltaAll(w, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing);
 }
 
+// The air's colour along the pixel's ray (gSkyDelta set): the zone's haze in the twilight's colours - or with our own
+// sky (FL.skyRing) its horizon there, paled a little as the haze is.
+vec3 HazeColour()
+{
+    if (FL.skyRing[0].w > 0.5) {
+        vec3 r = FL.sky[0].rgb + gSkyDelta;     // (the horizon: SkyHorizonDeltaAll gives it minus the fog)
+        float l = dot(r, vec3(0.3, 0.59, 0.11));
+        return max(r + (l * vec3(0.78, 0.95, 1.25) - r) * 0.2, vec3(0.0));
+    }
+    return P.haze.rgb + gSkyDelta;
+}
+
 vec3 Mist(vec3 c, vec3 V, float dist, float phase)
 {
     // Its depth along the ray: the density's integral over the heights the ray crosses, over how fast it climbs.
@@ -142,8 +154,9 @@ vec3 Mist(vec3 c, vec3 V, float dist, float phase)
         }
         tauM *= P.fog.w;
         float m = 1.0 - exp(-tauM);
-        float l = dot(P.haze.rgb, vec3(0.3, 0.59, 0.11));
-        vec3 mist = mix(P.haze.rgb, vec3(l), 0.45) * 1.2 + P.air3.rgb * (phase * P.air1.w * 0.5) + gSkyDelta;
+        vec3 air = HazeColour();
+        float l = dot(air, vec3(0.3, 0.59, 0.11));
+        vec3 mist = mix(air, vec3(l), 0.45) * 1.2 + P.air3.rgb * (phase * P.air1.w * 0.5);
         c = mix(c, mist, m);
     }
     return c;
@@ -165,7 +178,7 @@ vec3 Air(vec3 c, vec3 V, float dist, float phase)
     float f = abs(x) < 1e-3 ? 1.0 : (1.0 - exp(-x)) / x;
     float tau = P.air0.z * dist * clamp(f, 0.0, 4.0);
     vec3 through = exp(-tau * vec3(0.8, 1.0, 1.3));
-    vec3 scattered = (1.0 - through) * (P.haze.rgb + gSkyDelta) + (1.0 - exp(-tau)) * P.air3.rgb * (phase * P.air1.w);
+    vec3 scattered = (1.0 - through) * HazeColour() + (1.0 - exp(-tau)) * P.air3.rgb * (phase * P.air1.w);
     return c * through + scattered;
 }
 

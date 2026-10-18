@@ -139,6 +139,17 @@ vec3 SkyHorizonRing(vec3 dirW, vec4 ring[8])
     return mix(ring[i].rgb, ring[(i + 1) & 7].rgb, f - floor(f));
 }
 
+// The air's colour towards a world direction, for what the game colours by its fog (base: the game's fog colour as
+// the includer paled it): with our own sky its horizon there, wholly - base + (ring - fog) left the base's
+// difference to the fog behind, the zone's teal (the valley mist a teal half-disc round a low sun: user,
+// 2026-10-18); else base and the twilight's difference.
+vec3 SkyAirAll(vec3 base, vec3 dirW, vec4 s0, vec4 s1, vec4 s3, vec4 ring[8])
+{
+    if (ring[0].w > 0.5)
+        return SkyHorizonRing(dirW, ring);
+    return base + SkyHorizonDelta(dirW, s0, s1, s3);
+}
+
 vec3 SkyHorizonDeltaAll(vec3 dirW, vec4 s0, vec4 s1, vec4 s3, vec4 ring[8])
 {
     if (ring[0].w > 0.5)

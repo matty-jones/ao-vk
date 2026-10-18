@@ -61,7 +61,7 @@ vec4 Aerial(vec3 light, float alpha, float dist, vec3 dir)
     // (By night at least a quarter of the air's colour, as the game's sheets have: the heaps grey among them - user.)
     float haze = max(max(min(air * 1.1, 1.0), low), 0.25 * Night());
     // (Low in the sky the air in the twilight's colours, as the sky drawn behind - sky_common.glsl.)
-    light = mix(light, AirColour(L.haze.rgb + SkyHorizonDeltaAll(dir, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing), low) * alpha, haze);
+    light = mix(light, AirColour(SkyAirAll(L.haze.rgb, dir, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing), low) * alpha, haze);
     return vec4(light, alpha) * (1.0 - smoothstep(0.6 * L.layer.w, L.layer.w, dist));
 }
 
@@ -350,7 +350,7 @@ vec4 Cirrus(vec3 eye, vec3 dir)
     vec3 S = (SunLight(sunL) * (0.45 + 0.25 * min(forward, 4.0)) + glow * 2.0 + L.ambient.rgb * DuskSkyTint() * 0.6 * (1.0 - 0.6 * glowing) +
               MoonLight() * 0.3) * L.tint.w;
     float low = HorizonBand(dir, L.horizon.x);
-    S = mix(S, AirColour(L.haze.rgb + SkyHorizonDeltaAll(dir, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing), low), low);
+    S = mix(S, AirColour(SkyAirAll(L.haze.rgb, dir, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing), low), low);
     return vec4(S * a, a);
 }
 

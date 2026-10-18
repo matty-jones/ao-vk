@@ -380,7 +380,7 @@ void Device::UpdateSkyModel()
         if (ours) {
             float through[3];
             SunThroughAir(up, through);
-            const float w = std::min(k, 1.0f);
+            const float w = 0.7f * std::min(k, 1.0f);
             for (int i = 0; i < 3; ++i) sun[i] = 1.0f + (through[i] - 1.0f) * w;
         }
         const float sl = 0.3f * sun[0] + 0.59f * sun[1] + 0.11f * sun[2];

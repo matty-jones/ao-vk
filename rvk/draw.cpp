@@ -2942,6 +2942,21 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // base pass, already in the storm's air, it took the air's colour twice - the far land darker than the trees and
     // things on it, which stood out pale - user, 2026-10-18.)
     if (!IsMultiplyPass()) StormAirColour(c.fogColor);
+    // (Our own sky - RVK_ProcSky: the sky's scenery, the ships over the cities, hazed into its horizon - the ring's
+    // mean - not the zone's fog colour, which stood out teal against it.)
+    // The sky's own draws the same: the moons, a few hundred units out, fogged wholly into the zone's colour - a teal
+    // moon by our sky (user, 2026-10-18) - fade into the sky round them instead (the horizon's for a low moon, the
+    // upper sky's for a high one), as the game had them fade into its own by day; the stars, added, into black.
+    const bool skyOwn = VisualKind(m_drawVisualKind) == VisualKind::Sky && !m_drawIsCloudPuff;
+    if ((skyScenery || skyOwn) && ProcSkyReady() && m_skyRing[0][3] > 0.5f && m_skyUp[3] > 0.5f && !IsMultiplyPass()) {
+        float mean[3] = {};
+        for (const auto& r : m_skyRing)
+            for (int i = 0; i < 3; ++i) mean[i] += r[i] * 0.125f;
+        const float t = skyScenery ? 0.0f : std::clamp(m_moonPos[1] / 0.5f, 0.0f, 1.0f);
+        const bool added = m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE;
+        for (int i = 0; i < 3; ++i)
+            c.fogColor[i] = added ? 0.0f : std::min(mean[i] + (m_skyUp[i] - mean[i]) * t, 1.0f);
+    }
     c.fogParams[0] = AsFloat(m_rs[d3d::RS_FOGSTART]);
     c.fogParams[1] = AsFloat(m_rs[d3d::RS_FOGEND]);
     c.fogParams[2] = AsFloat(m_rs[d3d::RS_FOGDENSITY]);

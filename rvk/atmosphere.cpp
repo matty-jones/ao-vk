@@ -83,7 +83,8 @@ float Ramp(float a, float b, float x)
 
 // The sun's light through the air at a height (the sine of its elevation; atmos_common.glsl's air, the column over
 // the ground x the Kasten-Young air mass): its colour at unit brightness, softened (a third of the reddening, in the
-// log: through the whole air at the horizon nearly no green or blue is left - the land would go blood red).
+// log: through the whole air at the horizon nearly no green or blue is left - the land would go blood red; a third
+// still turned the sand saturated orange at 3 degrees, so a fifth).
 void Device::SunThroughAir(float up, float out[3]) const
 {
     const float e = std::max(std::asin(std::clamp(up, -1.0f, 1.0f)) * 57.29578f, -0.5f);
@@ -92,7 +93,7 @@ void Device::SunThroughAir(float up, float out[3]) const
     const float column[3] = {5.802e-3f * 8.0f + 4.44e-3f * 1.2f * mie + 0.65e-3f * 15.0f * ozone,
                              13.558e-3f * 8.0f + 4.44e-3f * 1.2f * mie + 1.881e-3f * 15.0f * ozone,
                              33.1e-3f * 8.0f + 4.44e-3f * 1.2f * mie + 0.085e-3f * 15.0f * ozone};
-    for (int i = 0; i < 3; ++i) out[i] = std::exp(-0.35f * column[i] * mass);
+    for (int i = 0; i < 3; ++i) out[i] = std::exp(-0.2f * column[i] * mass);
     const float l = std::max(0.3f * out[0] + 0.59f * out[1] + 0.11f * out[2], 1e-4f);
     for (int i = 0; i < 3; ++i) out[i] /= l;
 }
