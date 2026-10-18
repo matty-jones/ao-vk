@@ -1,4 +1,88 @@
-# ao-vk (randy-vk)
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+ao-vk (files still named randy-vk: `randy-vk.ini`, `randy-vk.log`, `RANDYVK_*` env vars) is a drop-in replacement
+for Anarchy Online's renderer DLL `randy31.dll`: a 32-bit Windows DLL, cross-compiled on Linux and run under Wine.
+The game's original renderer is renamed `randy31_orig.dll` and still loaded; ao-vk sits under it (its Direct3D 7 /
+DirectDraw calls go to a D3D7-shaped Vulkan renderer) and is replacing its functions one by one with native code.
+
+## Build
+
+Cross-compile with clang-cl + lld-link against the MSVC CRT / Windows SDK unpacked by `xwin splat` into `~/.xwin`
+(`cmake/xwin-linux.cmake`), plus the Linux Vulkan SDK (glslc, headers, VMA):
+
+```sh
+cmake --preset linux-release -DVULKAN_SDK_DIR=/path/to/vulkan-sdk/x86_64   # default ~/repos/vulkan-sdk/1.4.321.1/x86_64
+cmake --build --preset linux-release
+```
+
+Output in `build/linux-release/`: `randy31.dll` (+ `randy31.map`), and the test exes `rvk_demo`, `native_check`,
+`crash_check`, `randy_harness`, `forward_check`. `compile_commands.json` is symlinked from that build dir.
+
+Source files and shaders are listed explicitly in `CMakeLists.txt`: a new `.cpp` must be added to its target
+(`randy_native`, `randy31` or `rvk`), a new shader to the glslc `foreach` list (or the define-variant list), and a new
+shared `.glsl` include to the `DEPENDS` lists. Shaders compile to `build/.../rvk-shaders/*.inc` and are embedded.
+
+## Testing
+
+Everything runs under Wine (`WINEPREFIX` defaults to `~/.wine-prk`). There is no unit-test framework; the checks are:
+
+- `tools/rvk-demo.sh [out-dir] [args]`: rvk alone, headless, with the Khronos validation layer; writes a PNG and
+  `validation.log`. Scene flags are in `tests/rvk_demo.cpp` (`--shadow-test`, `--grass-walk X`, `--tess 0.75`, ...).
+- `tools/native-check.sh`: each native replacement vs. the original function on the same synthetic input
+  (`tests/native_check.cpp`), against the test client's `randy31_orig.dll`.
+- `tools/calllog-ab.sh <Mode> [scene...]`: runs `randy_harness` scenes with `[Native] <Mode>=off` and `=on` and
+  requires identical Direct3D call logs of one frame. Pass scene names (e.g. `blend shadow statics`) to run only
+  those; the full list is in the script.
+- `tools/randy-harness.sh [out-dir] [args]`: boots the real renderer through the proxy outside the game
+  (`--character`, `--crowd N`, `--static`, `--pick`, ... see `tests/randy_harness.cpp` / `docs/native.md`). Character
+  and static inputs come from `tools/extract-character.py` / `extract-static.py` into `build/characters`,
+  `build/statics`. It copies exes into the client folder and refuses to run while the game runs unless `AO_CLIENT`
+  points at a separate test client (`~/.wine-prk/drive_c/linux/testclient`).
+- `tools/crash-check.sh`: crash / hang reporting.
+- `tools/port-status.py`: porting progress against `docs/port-ledger.tsv`.
+
+## Architecture
+
+Three layers, see `docs/architecture.md`, `docs/frame.md`, `docs/rvk.md`, `docs/native.md`:
+
+- **`proxy/`** — the `randy31.dll` proxy. It exports the same 771 functions as the original (`proxy/randy31.def`,
+  `exports.gen.cpp` thunks); unported exports forward to `randy31_orig.dll`. `trace.cpp` loads the original and runs
+  the native install. `RANDYVK_DDRAW=rvk|off|trace` picks the backend.
+- **`proxy/ddraw/`** — DirectDraw / Direct3D 7 COM objects implemented on rvk (`rvk_ddraw.cpp`, `rvk_device.cpp`,
+  `rvk_surface.cpp`), plus feature glue (weather, smoke, particles, statels, freecam, input, console). All user
+  settings are one table in `rvk_settings.cpp` (persisted to `randy-vk.ini` `[Renderer]`, hot-reloaded, exported as a
+  C interface `RvkSettings_*` that AOReloaded's options window uses; `kHidden` keeps a setting ini-only).
+- **`rvk/`** — static lib: a Vulkan 1.3 renderer with an `IDirect3DDevice7`-shaped front end (same enums/layouts).
+  One fixed-function uber-shader (`shaders/ffp.*`), no runtime pipeline compiles (everything dynamic state), and the
+  enhancements (shadows, HDR/post, grass, water, clouds, smoke, ...) as passes around it. `threaded.cpp` runs the
+  Vulkan work off the game thread.
+- **`proxy/native/`** — static lib `randy_native`: native rewrites of the original's functions. `HookEntry` /
+  `Replace` (`native.h`, `hook.cpp`) patch a jump over the original entry once the client build is recognised;
+  `HookSlot` patches vtable slots. Each part has a `[Native]` mode in `randy-vk.ini` (`off` / `on` / often `verify`,
+  which runs both and logs differences). Unported callees are reached through `orig_api.gen.h`; game heap /
+  containers through `vc10.h` (VS2010 STL layouts).
+
+Constraints that matter when touching native code: object layouts and vtables that other game DLLs see
+(`RVisual_t` 0x178, `RRefFrame_t` 0xA4, compiled-in allocation sizes, ~120 DisplaySystem subclasses) must stay
+binary-identical — the numbers are in `docs/architecture.md` and `interface/*.tsv`. A new port is checked with
+`native-check` (computations) and `calllog-ab` (drawing) before its default is switched on, and recorded in
+`docs/port-ledger.tsv` / `docs/native.md`.
+
+## Generated files (don't hand-edit)
+
+`*.gen.cpp` / `*.gen.h`: `proxy/exports.gen.cpp` and `interface/` (`tools/gen_interface.py`, which also owns the
+hooked exports in the `.def`), `proxy/ddraw/com_trace.gen.h` / `com_stub.gen.h` (`tools/gen_com_trace.py`),
+`proxy/native/orig_api.gen.*` (`tools/gen_orig_api.py`), `proxy/native/entry_guard.gen.h`
+(`tools/gen_entry_guard.py`).
+
+## Local-only material
+
+`orig/`, `re/` (decompiles), `ghidra/`, `logs/` and `proxy/native/private/` are gitignored; reverse-engineering
+scripts are in `ghidra-scripts/` (run via `tools/ghidra-run.sh`). No Funcom files may be committed.
 
 ## Changelog
 
@@ -17,3 +101,10 @@ new diagnostics. Keep it up to date as work lands.
   under `## Unreleased`.
 - **At release:** rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD`, start a fresh empty `## Unreleased`
   above it, and draft the GitHub release notes from that section.
+
+## Conventions
+
+- Comments and docs are plain prose describing behaviour ("what it does, and why"), matching the README's style.
+- Commit subjects describe the user-visible effect; issue references as `(ao-vk #N)` (in the changelog just `(#N)`).
+- New features get an `RVK_*` setting (and usually a hotkey/console name) so they can be switched off; plans for
+  larger features live in `docs/*-plan.md`.

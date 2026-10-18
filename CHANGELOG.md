@@ -5,6 +5,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+## 0.6.1 - 2026-10-18
+
 ### New
 - **In-game console** for the renderer's settings: press the key left of 1. Change any setting by name
   (applied at once and saved), with completion and history; `find`, `list`, `changed`, `reset`, `try` and
