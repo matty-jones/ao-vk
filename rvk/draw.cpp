@@ -1821,6 +1821,10 @@ void Device::Clear(uint32_t count, const Rect* rects, uint32_t flags, uint32_t a
     if (flags & d3d::CLEAR_TARGET) {
         att[n] = {VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
         ArgbToFloat(argb, att[n].clearValue.color.float32);
+        // In the interface layer a clear covers what is under it, as it would on the frame: alpha is coverage there,
+        // and the PF map's black (0x00000000) would clear it see-through.
+        if (m_uiLayerActive && m_target == m_uiLayer)
+            att[n].clearValue.color.float32[3] = 1.0f;
         ++n;
     }
     if (depth) {
@@ -3089,11 +3093,12 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         c.flags[1] = 1;                          // D3DFOG_EXP
         c.flags[2] = 0;
     }
-    // (Bit 8: in the interface layer, a draw replacing what is there - blended ONE, ZERO - covers it fully, whatever
-    // its alpha: on the frame it would. The PF map's light-map tiles have alpha 0; as coverage they left the map's
-    // black parts see-through.)
-    const bool layerReplace = m_uiLayerActive && m_target == m_uiLayer && m_rs[d3d::RS_ALPHABLENDENABLE] &&
-                              m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_ONE && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ZERO;
+    // (Bit 8: in the interface layer, a draw replacing what is there - unblended, or blended ONE, ZERO - covers it
+    // fully, whatever its alpha: on the frame it would. The PF map's light-map tiles have alpha 0; as coverage they
+    // left the map's black parts see-through.)
+    const bool layerReplace = m_uiLayerActive && m_target == m_uiLayer &&
+                              (!m_rs[d3d::RS_ALPHABLENDENABLE] || (m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_ONE &&
+                                                                    m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ZERO));
     c.flags[3] = m_rs[d3d::RS_ALPHAFUNC] | (layerReplace ? 256u : 0u);
     c.matSources[0] = m_rs[d3d::RS_DIFFUSEMATERIALSOURCE];
     c.matSources[1] = m_rs[d3d::RS_AMBIENTMATERIALSOURCE];
