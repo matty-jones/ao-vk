@@ -66,10 +66,12 @@
   prologue calling GUI.dll's `_EH_prolog`), so another GUI.dll build is left alone (logged).
 - **Native ground** (setting `RVK_NativeGround`, Terrain; on; `rvk/native_ground.cpp`, `proxy/ddraw/rvk_ground.cpp`,
   docs/native-ground-plan.md, docs/ground-format.md): rvk draws the playfield's ground itself, from the game's own
-  data, instead of the game's `AnarchyGround_t`. The first time the game tessellates a ground (`rnative::ground`'s
-  `Tesselate` hook: its `AnarchyGroundData_t` at +0x17C, new) the proxy decodes its patches' heights and tile codes
-  (zlib, stb's; deltas summed down then across) and, inside later `Tesselate` calls (the ground alive then), has the
-  game make each tile's texture (`FUN_10036594`), 24 a call; then hands it all over (`Device::SetNativeGround`).
+  data, instead of the game's `AnarchyGround_t`. The first time the game tessellates or updates a ground
+  (`rnative::ground`'s hooks of `Tesselate` and N3's `n3GroundRenderer_t::RunFunction`, which runs each frame - its
+  ground at +0xB4, whose `AnarchyGroundData_t` at +0x17C is new) the proxy decodes its patches' heights and tile codes
+  (zlib, stb's; deltas summed down then across) and, inside later `RunFunction` calls (the ground alive then), has the
+  game make each tile's texture (`FUN_10036594`), 24 a frame; then hands it all over (`Device::SetNativeGround`).
+  (`Tesselate` itself runs only when the player crosses into another cell: `RunFunction` compares.)
   Gamecode's `AnarchyGround_t::SetShadowMap` (its import patched) hands over the hour's baked lightmap and shade. rvk
   builds a static patch of (P+1)^2 vertices per 64 cells (the game's format: set 0 the cell coordinates, set 1 the
   whole playfield's lightmap; `DrawSharedIndexed`, arena-resident) and a tile-code texture (each cell's tile's bindless
@@ -80,7 +82,7 @@
   lightmap through the game's palette. So cliff faces and rock (tinted by each cell's tile's smallest mip level), sun
   shadows, hill shade, mist, wet ground and fog apply as on the game's ground. While it draws, the game's own ground
   does the least (`rnative::ground::SetNative`: radius 8, far patches baked at 2 texels a cell). A ground the game
-  stops tessellating for 10 frames (a loading screen, indoors) is dropped and the next read anew. The tiles' side-loaded
+  stops updating for 10 presented frames (a loading screen, indoors) is dropped and the next read anew. The tiles' side-loaded
   albedo maps (in the tile-code texture) and normal maps (a second per-cell texture, `D.terrain.z`: the lighting pass
   reads each cell's tile's own, turned) come with them, made again when a tile's maps or the settings change
   (`NativeMapsSignature`). The sky's visibility over the land (`RVK_GroundAo`, 0.6): a worker thread scans the horizon

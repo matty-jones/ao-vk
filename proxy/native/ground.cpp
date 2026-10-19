@@ -50,9 +50,13 @@ constexpr uint32_t kGroundData = 0x17C;                                   // Ana
 using TileTextureFn = void*(__fastcall*)(void* data, void* edx, uint32_t tile);
 TileTextureFn g_tileTexture;
 void (*g_onNewGround)(void*, void*);
-void (*g_onTesselate)(void*, void*);
+void (*g_onGroundFrame)(void*, void*);
 void* g_lastData;
-std::atomic<uint32_t> g_tesselates{0};
+std::atomic<uint32_t> g_groundFrames{0};
+// N3.dll's n3GroundRenderer_t::RunFunction: each frame, its ground (+0xB4) brought to the player's cell.
+constexpr uint32_t kRunFunctionRva = 0x832E, kRendererGround = 0xB4;
+using RunFunctionFn = void(__fastcall*)(void* renderer, void* edx);
+RunFunctionFn g_runFunction;
 std::atomic<bool> g_native{false};
 constexpr uint32_t kRadius = 0x1A8;                                      // AnarchyGround_t: the full-quality radius
 
@@ -79,6 +83,25 @@ void __fastcall SetRadiusHook(uint8_t* ground, void* edx, int radius)
     g_setRadius(ground, edx, used);
 }
 
+// n3GroundRenderer_t::RunFunction (N3.dll; thiscall, the renderer in ecx): each frame of a ground - the game's, then
+// the ground looked at (a new one read, the native ground's work for the frame).
+void __fastcall RunFunctionHook(uint8_t* renderer, void* edx)
+{
+    g_runFunction(renderer, edx);
+    uint8_t* ground;
+    std::memcpy(&ground, renderer + kRendererGround, 4);
+    if (!ground) return;
+    void* data;
+    std::memcpy(&data, ground + kGroundData, 4);
+    if (!data) return;
+    if (data != g_lastData) {
+        g_lastData = data;
+        if (g_onNewGround) g_onNewGround(ground, data);
+    }
+    g_groundFrames.fetch_add(1, std::memory_order_relaxed);
+    if (g_onGroundFrame) g_onGroundFrame(ground, data);
+}
+
 // AnarchyGround_t::Tesselate(int, int): a scale changed since the radius was set is taken up first (the original then
 // restarts its tessellation, as after the game's own slider).
 void __fastcall TesselateHook(uint8_t* ground, void* edx, int x, int z)
@@ -89,8 +112,6 @@ void __fastcall TesselateHook(uint8_t* ground, void* edx, int x, int z)
         g_lastData = data;
         if (g_onNewGround && data) g_onNewGround(ground, data);
     }
-    g_tesselates.fetch_add(1, std::memory_order_relaxed);
-    if (g_onTesselate && data) g_onTesselate(ground, data);
     int current;
     std::memcpy(&current, ground + kRadius, 4);
     int game = g_gameRadius.load(std::memory_order_relaxed);
@@ -130,14 +151,14 @@ void SetNewGround(void (*onNewGround)(void* ground, void* data))
     g_onNewGround = onNewGround;
 }
 
-void SetOnTesselate(void (*onTesselate)(void* ground, void* data))
+void SetOnGroundFrame(void (*onGroundFrame)(void* ground, void* data))
 {
-    g_onTesselate = onTesselate;
+    g_onGroundFrame = onGroundFrame;
 }
 
-uint32_t TesselateCount()
+uint32_t GroundFrames()
 {
-    return g_tesselates.load(std::memory_order_relaxed);
+    return g_groundFrames.load(std::memory_order_relaxed);
 }
 
 void ForgetGround()
@@ -170,6 +191,21 @@ void SetRange(float scale)
 
 void Install()
 {
+    // N3.dll's ground renderer's frame (the native ground's): once N3 is loaded.
+    static int n3Attempts;
+    if (!g_runFunction && n3Attempts < 600) {
+        ++n3Attempts;
+        if (HMODULE n3 = GetModuleHandleA("N3.dll")) {
+            n3Attempts = 600;
+            // push ebp; mov ebp, esp; push ecx; push ecx | mov eax, [...]; push esi; mov esi, ecx - checked.
+            static const uint8_t kRun[] = {0x55, 0x8B, 0xEC, 0x51, 0x51, 0xA1};
+            auto* run = reinterpret_cast<uint8_t*>(n3) + kRunFunctionRva;
+            if (std::memcmp(run, kRun, sizeof(kRun)) == 0)
+                g_runFunction = reinterpret_cast<RunFunctionFn>(
+                    HookAt(run, 5, nullptr, 0, reinterpret_cast<void*>(&RunFunctionHook), "N3 ground renderer frame"));
+            Log("ground: N3.dll's ground renderer %s", g_runFunction ? "hooked (the native ground)" : "not as expected - no native ground");
+        }
+    }
     static int attempts;
     if (g_setRadius || attempts >= 600)
         return;

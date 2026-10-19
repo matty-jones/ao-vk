@@ -38,7 +38,8 @@ comes in a frame, rvk draws its patches for that pass instead, and skips every g
 
 ## Game side (`proxy/native/ground.cpp`)
 
-- The playfield's ground: in the `Tesselate` hook, a ground whose data (`+0x17C`) is new is read - its size, patch
+- The playfield's ground: in the `Tesselate` and N3 `n3GroundRenderer_t::RunFunction` (each frame) hooks, a ground
+  whose data (`+0x17C`) is new is read - its size, patch
   size, patches' compressed heights and tile codes (`AnarchyGroundData_t` `+0x34/+0x38/+0x40/+0x50/+0x54/+0x58`,
   `Patch_t` `+0x08/+0x10/+0x14/+0x28/+0x2C`), its scale (`+0x198/+0x19C/+0x1A0`), decoded (zlib: stb's).
 - Its tile textures: the game's own loader (`FUN_10036594(data, tile)`: an `RTexture_t`, cached in the data), a few

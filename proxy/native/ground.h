@@ -16,12 +16,13 @@ void SetFar(int texelsPerCell);
 
 // The native ground (proxy rvk_ground.cpp, docs/native-ground-plan.md): told of each playfield's ground the first time
 // the game tessellates it (the AnarchyGround_t and its AnarchyGroundData_t: +0x17C), on the game's thread.
-// And each time it tessellates it (the ground is alive then: what reads the game's ground through it, does it there).
+// And each frame the game updates it (N3's n3GroundRenderer_t::RunFunction - the ground alive then: what reads the
+// game's ground through it, does it there; Tesselate itself runs only when the player crosses into another cell).
 void SetNewGround(void (*onNewGround)(void* ground, void* data));
-void SetOnTesselate(void (*onTesselate)(void* ground, void* data));
-// How many times the game has tessellated a ground (none for a while: it is gone - a loading screen, indoors); and the
+void SetOnGroundFrame(void (*onGroundFrame)(void* ground, void* data));
+// How many frames the game has updated a ground (none for a while: it is gone - a loading screen, indoors); and the
 // ground forgotten, so the next one is read anew (a playfield loaded again may reuse the same memory).
-uint32_t TesselateCount();
+uint32_t GroundFrames();
 void ForgetGround();
 // A tile's texture as the game makes it (FUN_10036594: loaded once, kept by the data): an RTexture_t, or null.
 void* TileTexture(void* data, uint32_t tile);

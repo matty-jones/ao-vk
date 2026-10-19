@@ -202,9 +202,9 @@ void __fastcall SetShadowMapHook(void* ground, void* edx, const void* data, int 
     g_rvk.device->SetNativeGroundLightmap(copy, uint32_t(w), uint32_t(h), shade);
 }
 
-// rnative::ground: the game tessellating its ground (game thread; the ground and its data alive): the tiles' textures
+// rnative::ground: the game's frame of its ground (game thread; the ground and its data alive): the tiles' textures
 // made a few at a time while reading one, then the ground handed to rvk.
-void OnTesselate(void* ground, void* data)
+void OnGroundFrame(void* ground, void* data)
 {
     (void)ground;
     if (!g_reading.active || g_sent || data != g_reading.data || !g_rvk.device)
@@ -232,11 +232,11 @@ void OnTesselate(void* ground, void* data)
 }  // namespace
 
 // Each presented frame (game thread): the hooks in place once their DLLs are loaded; a ground the game no longer
-// tessellates (gone: a loading screen, indoors) dropped.
+// updates (gone: a loading screen, indoors) dropped.
 void GroundFrame()
 {
     rnative::ground::SetNewGround(&OnNewGround);
-    rnative::ground::SetOnTesselate(&OnTesselate);
+    rnative::ground::SetOnGroundFrame(&OnGroundFrame);
     if (!g_shadowHooked && g_shadowAttempts < 6000 && ++g_shadowAttempts % 30 == 1) {
         if (HMODULE gamecode = GetModuleHandleA("Gamecode.dll")) {
             void* old = PatchImport(gamecode, "DisplaySystem.dll", "?SetShadowMap@AnarchyGround_t@@QAEXPBXHHM@Z",
@@ -247,7 +247,7 @@ void GroundFrame()
         }
     }
     static uint32_t lastCount = 0, still = 0;
-    const uint32_t count = rnative::ground::TesselateCount();
+    const uint32_t count = rnative::ground::GroundFrames();
     still = count == lastCount ? still + 1 : 0;
     lastCount = count;
     if (still == 10 && (g_reading.active || g_sent)) {
@@ -256,7 +256,7 @@ void GroundFrame()
         rnative::ground::ForgetGround();
         g_reading = Reading{};
         g_sent = false;
-        RvkLog("native ground: the ground is gone (not tessellated for a while) - dropped");
+        RvkLog("native ground: the ground is gone (not updated for a while) - dropped");
     }
 }
 
