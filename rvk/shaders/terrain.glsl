@@ -115,13 +115,14 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
     m.w = vec3(1.0 - m.side, m.side * across);
     m.hex = clamp(FL.terrain.y, 0.0, 1.0);
     // The native ground's rocks (rvk ground_clutter.cpp; D.terrainAt.y 2): the rock from every side, from above too
-    // (at its own size: top), by the face's own normal - no hexagons (a rock is smaller than one).
+    // (at its own size: top), by the interpolated normal (they are shaded smooth: by each face's own, the lays changed
+    // at its edges and showed its triangles) - no hexagons (a rock is smaller than one).
     m.clutter = floatBitsToUint(D.terrain.y) != 0u && D.terrainAt.y > 1.5 && m.rock;
     m.top = s * posW.xz;
     m.topDx = s * m.px.xz;
     m.topDy = s * m.py.xz;
     if (m.clutter) {
-        vec3 a = pow(abs(nu) + 1e-4, vec3(4.0));
+        vec3 a = pow(abs(nf) + 1e-4, vec3(4.0));
         a /= a.x + a.y + a.z;
         m.w = vec3(a.y, a.z, a.x);
         m.side = 1.0 - a.y;

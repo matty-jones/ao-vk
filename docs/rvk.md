@@ -114,8 +114,8 @@
   it is the lightmap alone that turns). A new hour's lightmap fades in from the last over 8 s (`FL.terrain2.y, z`;
   the game swaps them whole). Rocks (`rvk/ground_clutter.cpp`, `RVK_GroundRocks`, 1): scree at the feet of cliffs
   (a cell under the steepest higher cell within two, by how steep) and a few stones on rough slopes not tiled with
-  grass, from the heights alone (none on flat ground); small faceted meshes (icosahedra, split once for the big ones,
-  lumped and flattened), turned, leaning half with the ground, merged per patch into static meshes in the ground's
+  grass, from the heights alone (none on flat ground); small meshes (icosahedra, split once for the big ones,
+  lumped and flattened; shaded smooth over folds under ~50 degrees, sharp at their edges), turned, leaning half with the ground, merged per patch into static meshes in the ground's
   format (set 0 the cell they fell from: their tint, the cliff's colour) and drawn in the ground's own passes after
   its patches (`m_native.clutter`; `D.terrainAt.y` 2): the rock laid from above and both sides by their faces
   (terrain.glsl `TerrainClutter`), the ground's lightmap where they lie turned to their faces by the lightmap's fit

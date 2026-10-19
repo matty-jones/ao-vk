@@ -2,8 +2,9 @@
 // stones on rough slopes, where rock would have fallen - placed from the playfield's heights alone, so flat ground
 // (meadows, roads, towns) gets none.
 //
-// Each rock is a small faceted mesh (an icosahedron, split once for the bigger ones, its corners pushed in and out and
-// flattened), turned, sized and half buried where it lies. A patch's rocks are one static mesh in the ground's own
+// Each rock is a small mesh (an icosahedron, split once for the bigger ones, its corners pushed in and out and
+// flattened), turned, sized and half buried where it lies, shaded smooth over its gentle folds and sharp at its edges
+// (ShapeNormals). A patch's rocks are one static mesh in the ground's own
 // format, drawn in the ground's own two passes right after its patches (DrawNativeGround): the base pass lays the
 // cliffs' rock on them from every side (terrain.glsl, TerrainClutter: tinted to the colour of the cliff they fell
 // from - set 0 its cell), the lighting
@@ -46,8 +47,52 @@ struct Rng {
     float operator()() { s = s * 1664525u + 1013904223u; return float(s >> 8) / 16777216.0f; }
 };
 
-// A rock's shape: flat triangles (three corners each), unit size, its bottom at about -0.5.
-using Shape = std::vector<std::array<float, 3>>;
+// A rock's shape: triangles (three corners each, a position and a normal), unit size, its bottom at about -0.5.
+struct Corner { std::array<float, 3> p, n; };
+using Shape = std::vector<Corner>;
+
+std::array<float, 3> FaceNormal(const std::array<float, 3>& a, const std::array<float, 3>& b,
+                                const std::array<float, 3>& c)
+{
+    const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+    std::array<float, 3> n = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+    float l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (l < 1e-12f) return {0.0f, 0.0f, 0.0f};
+    // (Outward: away from the rock's middle, the origin.)
+    if (n[0] * (a[0] + b[0] + c[0]) + n[1] * (a[1] + b[1] + c[1]) + n[2] * (a[2] + b[2] + c[2]) < 0.0f) l = -l;
+    for (float& q : n) q /= l;
+    return n;
+}
+
+// Each corner's normal: the faces round it that fold less than ~50 degrees from its own face, by their areas - the
+// lumps shade round, each triangle no longer its own flat facet; a chipped edge and the cut bottom stay sharp.
+Shape ShapeNormals(const std::vector<std::array<float, 3>>& v, const std::vector<std::array<int, 3>>& f)
+{
+    std::vector<std::array<float, 3>> fn(f.size()), area(f.size());
+    std::vector<std::vector<int>> around(v.size());
+    for (size_t i = 0; i < f.size(); ++i) {
+        fn[i] = FaceNormal(v[f[i][0]], v[f[i][1]], v[f[i][2]]);
+        const auto &a = v[f[i][0]], &b = v[f[i][1]], &c = v[f[i][2]];
+        const float e1[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, e2[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+        const float x = e1[1] * e2[2] - e1[2] * e2[1], y = e1[2] * e2[0] - e1[0] * e2[2], z = e1[0] * e2[1] - e1[1] * e2[0];
+        const float ar = 0.5f * std::sqrt(x * x + y * y + z * z);
+        area[i] = {fn[i][0] * ar, fn[i][1] * ar, fn[i][2] * ar};
+        for (int k = 0; k < 3; ++k) around[f[i][k]].push_back(int(i));
+    }
+    Shape s;
+    for (size_t i = 0; i < f.size(); ++i)
+        for (int k = 0; k < 3; ++k) {
+            std::array<float, 3> n = {0.0f, 0.0f, 0.0f};
+            for (int j : around[f[i][k]])
+                if (fn[j][0] * fn[i][0] + fn[j][1] * fn[i][1] + fn[j][2] * fn[i][2] > 0.64f)
+                    for (int q = 0; q < 3; ++q) n[q] += area[j][q];
+            const float l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            if (l > 1e-12f) for (float& q : n) q /= l;
+            else n = fn[i];
+            s.push_back({v[f[i][k]], n});
+        }
+    return s;
+}
 
 Shape MakeShape(uint32_t seed, bool fine)
 {
@@ -104,10 +149,7 @@ Shape MakeShape(uint32_t seed, bool fine)
         p[1] = std::max(p[1] * r * 0.62f, -0.32f);
         p[2] *= r;
     }
-    Shape s;
-    for (const auto& t3 : f)
-        for (int k = 0; k < 3; ++k) s.push_back(v[t3[k]]);
-    return s;
+    return ShapeNormals(v, f);
 }
 
 const std::vector<Shape>& Shapes()
@@ -233,23 +275,20 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
                 for (size_t q = 0; q < shape.size(); q += 3) {
                     float w[3][3];
                     for (int e = 0; e < 3; ++e) {
-                        const auto& o = shape[q + e];
+                        const auto& o = shape[q + e].p;
                         const float lx = o[0] * sx, ly = o[1] * sy + 0.32f * sy - sink, lz = o[2] * sz;
                         w[e][0] = x + ax[0] * lx + up[0] * ly + az[0] * lz;
                         w[e][1] = y0 + ax[1] * lx + up[1] * ly + az[1] * lz;
                         w[e][2] = z + ax[2] * lx + up[2] * ly + az[2] * lz;
                     }
-                    const float e1[3] = {w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]};
-                    const float e2[3] = {w[2][0] - w[0][0], w[2][1] - w[0][1], w[2][2] - w[0][2]};
-                    float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
-                    float nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-                    if (nl < 1e-12f) continue;
-                    // (Outward: away from the rock's middle.)
-                    const float mx = (w[0][0] + w[1][0] + w[2][0]) / 3 - x, my = (w[0][1] + w[1][1] + w[2][1]) / 3 - y0,
-                                mz = (w[0][2] + w[1][2] + w[2][2]) / 3 - z;
-                    if (n[0] * mx + n[1] * my + n[2] * mz < 0.0f) nl = -nl;
-                    for (float& q2 : n) q2 /= nl;
                     for (int e = 0; e < 3; ++e) {
+                        // (The corner's normal through the rock's stretch - the inverse of its sizes - and turn.)
+                        const auto& on = shape[q + e].n;
+                        const float lx = on[0] / sx, ly = on[1] / sy, lz = on[2] / sz;
+                        float n[3];
+                        for (int k = 0; k < 3; ++k) n[k] = ax[k] * lx + up[k] * ly + az[k] * lz;
+                        const float nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                        for (float& q2 : n) q2 /= std::max(nl, 1e-12f);
                         Vertex vx;
                         vx.x = w[e][0]; vx.y = w[e][1]; vx.z = w[e][2];
                         vx.nx = n[0]; vx.ny = n[1]; vx.nz = n[2];
