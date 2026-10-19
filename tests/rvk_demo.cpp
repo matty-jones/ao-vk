@@ -1823,6 +1823,9 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         sun.direction = g_sunDirSet ? Vector{g_sunDir[0], g_sunDir[1], g_sunDir[2]} : Vector{0.55f, -0.7f, 0.45f};
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
+        dev.SetTextureStageState(0, TSS_MAGFILTER, TFG_LINEAR);   // (the game's ground: filtered, mipmapped)
+        dev.SetTextureStageState(0, TSS_MINFILTER, TFN_LINEAR);
+        dev.SetTextureStageState(0, TSS_MIPFILTER, TFP_LINEAR);
         dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
         dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
         dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
