@@ -294,6 +294,20 @@ void __fastcall BuildHorizons(Occ* o, void*, uint8_t* vp)
     const float* world = static_cast<const float*>(orig::RRefFrame_t_GetWorldMatrix(camera));
     float* eye = &Field<float>(o, kEye);
     eye[0] = world[12], eye[1] = world[13], eye[2] = world[14];
+    // The camera right beside heightmap higher than itself - a wall or a building that raised its cells, the raised
+    // cells wider than it, or a cliff's face: no horizons this frame (everything in view drawn). The nearest of those
+    // cells projects above the top of the screen and closed every column behind it - the character on the wall and
+    // all past it vanished as the camera dipped below the wall's top (user, 2026-10-19). (Not the original's.)
+    {
+        const float cellSize = Field<float>(o, kCell), cameraY = world[13];
+        const int32_t cx = Round(eye[0] / cellSize), cz = Round(eye[2] / cellSize);
+        for (int32_t z = cz - 2; z <= cz + 2; ++z)
+            for (int32_t x = cx - 2; x <= cx + 2; ++x) {
+                if (x < 0 || z < 0 || x >= Field<int32_t>(o, kWidth) || z >= Field<int32_t>(o, kDepth)) continue;
+                if (float(Heights(o)[Field<int32_t>(o, kWidth) * z + x]) * Field<float>(o, kHeightScale) > cameraY)
+                    return;
+            }
+    }
     eye[1] = GetHeight(o, nullptr, eye);
     float left, top, right, bottom;
     ViewportRect(vp, nullptr, &left, &top, &right, &bottom);

@@ -89,6 +89,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   default: under the new sky they showed as coarse streaks; 1 to try them).
 
 ### Fixed
+- With the camera just below the top of a wall or building (or beside a cliff face), the character and most of the
+  world could vanish from view; they stay drawn now.
 - Day turned to night all at once: the picture darkened and took on its night colours within a second, the land's
   light switched to the moon's with its shadows at full strength, and the hills' shade and the low sun's warm tint
   went out together. The change from dusk to night now follows the sun as it sinks, over several minutes of game time.
