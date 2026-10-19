@@ -172,7 +172,7 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     float terrainRock2[4];         // ... its mean colour (rgb), its normal map's strength
     float terrainLight[4];         // the native ground's lightmap as a + b.n of its slope (native_ground.cpp
-                                   // FitNativeLight): xyz b turned to the sun's bearing now, w a
+                                   // FitNativeLight): xyz b turned to the sun's bearing now (b when there is none), w a (0: no fit)
     float terrainLight2[4];        // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
     GpuLight lights[kFrameLights];
 };

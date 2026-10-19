@@ -111,7 +111,16 @@
   bearing of the frame's sun (`NativeSunTurn`, `FL.terrainLight`; `RVK_GroundSun`, 1): flat ground as baked, slopes
   following the sun through the hour (the game's ground pass adds the lightmap to its ambient and local lights, so
   it is the lightmap alone that turns). A new hour's lightmap fades in from the last over 8 s (`FL.terrain2.y, z`;
-  the game swaps them whole). Not yet: the tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  the game swaps them whole). Rocks (`rvk/ground_clutter.cpp`, `RVK_GroundRocks`, 1): scree at the feet of cliffs
+  (a cell under the steepest higher cell within two, by how steep) and a few stones on rough slopes not tiled with
+  grass, from the heights alone (none on flat ground); small faceted meshes (icosahedra, split once for the big ones,
+  lumped and flattened), turned, leaning half with the ground, merged per patch into static meshes in the ground's
+  format (set 0 the cell they fell from: their tint, the cliff's colour) and drawn in the ground's own passes after
+  its patches (`m_native.clutter`; `D.terrainAt.y` 2): the rock laid from above and both sides by their faces
+  (terrain.glsl `TerrainClutter`), the ground's lightmap where they lie turned to their faces by the lightmap's fit
+  (`NativeSunTurn`: a + b.n over a + b.y). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
+  the grass. Made 2 patches a frame within 200 units, small ones drawn within 90, dropped past 450. Not yet: the
+  tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):

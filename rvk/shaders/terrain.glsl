@@ -38,6 +38,8 @@ struct TerrainMap {
     vec3 px, py;        // the position's screen derivatives (the normal maps' relief)
     float side;         // how steep (0 .. 1): the cliffs' share
     bool rock;          // the faces are the rock's (else the cell's tile)
+    bool clutter;       // the native ground's rocks (TerrainClutter): rock from above too, at top
+    vec2 top, topDx, topDy;
 };
 
 // The hexagon grid over a lay (st: in repeats of the texture, on the world): the three cells around st, the weights
@@ -103,6 +105,19 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
     across /= across.x + across.y;
     m.w = vec3(1.0 - m.side, m.side * across);
     m.hex = clamp(FL.terrain.y, 0.0, 1.0);
+    // The native ground's rocks (rvk ground_clutter.cpp; D.terrainAt.y 2): the rock from every side, from above too
+    // (at its own size: top), by the face's own normal - no hexagons (a rock is smaller than one).
+    m.clutter = floatBitsToUint(D.terrain.y) != 0u && D.terrainAt.y > 1.5 && m.rock;
+    m.top = s * posW.xz;
+    m.topDx = s * m.px.xz;
+    m.topDy = s * m.py.xz;
+    if (m.clutter) {
+        vec3 a = pow(abs(nu) + 1e-4, vec3(4.0));
+        a /= a.x + a.y + a.z;
+        m.w = vec3(a.y, a.z, a.x);
+        m.side = 1.0 - a.y;
+        m.hex = 0.0;
+    }
     m.hexW[0] = vec3(0.0);
     for (int i = 1; i < 3; ++i) {
         m.hexW[i] = vec3(0.0);
@@ -248,8 +263,20 @@ vec4 TerrainRockTint(TerrainMap m)
 // The base texture as the ground lays it (the base pass's colour; the lighting pass's PBR albedo): settles the weights.
 // image: the base texture's bindless image; the faces' is the rock's albedo, or the same. The rock's contrast is a
 // photo's - harsher than the game's soft ground beside it: a quarter of the way to its own mean.
+// The native ground's rocks: the rock read from above and along x and z by their faces' weights, a quarter of the
+// way to its mean, tinted to the ground's colour where they lie.
+vec4 TerrainClutterBase(TerrainMap m)
+{
+    vec4 c = m.w.x > 0.002 ? TERRAIN_FACE_READ(texImages[TerrainRockImage(0)], m.top, m.topDx, m.topDy) * m.w.x : vec4(0.0);
+    for (int i = 1; i < 3; ++i)
+        if (m.w[i] > 0.002) c += TERRAIN_FACE_READ(texImages[TerrainRockImage(0)], m.uv[i], m.dx[i], m.dy[i]) * m.w[i];
+    c.rgb = mix(FL.terrainRock2.rgb, c.rgb, 0.75);
+    return c * TerrainRockTint(m);
+}
+
 vec4 TerrainBase(uint image, sampler smp, inout TerrainMap m)
 {
+    if (m.clutter) return TerrainClutterBase(m);
     if (TerrainNative()) {
         // The native ground: its cell's tile from above; the faces rock, or the cell's tile laid on them (no
         // hexagons: one cell's tile in each pixel's own).
@@ -291,7 +318,12 @@ vec3 TerrainNormalMap(vec3 n, texture2D top, float topStrength, texture2D face, 
         if (m.w[i] <= 0.002) continue;
         vec2 uvx = m.dx[i], uvy = m.dy[i];
         vec3 t;
-        if (i == 0 && TerrainNativeMaps()) {
+        if (i == 0 && m.clutter) {
+            // (The rocks from above: the rock's own normal map, at its size.)
+            uvx = m.topDx;
+            uvy = m.topDy;
+            t = TERRAIN_FACE_READ(face, m.top, uvx, uvy).xyz * 2.0 - 1.0;
+        } else if (i == 0 && TerrainNativeMaps()) {
             // (The native ground from above: the cell's tile's own normal map, turned as its tile is.)
             const uvec2 c = NativeCell(m.uv[0]);
             const uint img = NativeNormalImage(m.uv[0]);
@@ -304,7 +336,7 @@ vec3 TerrainNormalMap(vec3 n, texture2D top, float topStrength, texture2D face, 
             t = TerrainLay(top, bindlessSamplers[D.sampIdx.w], face, m, i).xyz * 2.0 - 1.0;
         }
         t.z = max(t.z, 0.05);
-        vec2 slope = vec2(-t.x, t.y) / t.z * (i == 0 ? topStrength : faceStrength);
+        vec2 slope = vec2(-t.x, t.y) / t.z * (i == 0 && !m.clutter ? topStrength : faceStrength);
         float worldPerUv = sqrt(max(dot(m.px, m.px), dot(m.py, m.py)) / max(max(dot(uvx, uvx), dot(uvy, uvy)), 1e-12));
         sum += BendNormal(n, m.px, m.py, dot(slope, uvx) * worldPerUv, dot(slope, uvy) * worldPerUv) * m.w[i];
     }
@@ -348,12 +380,14 @@ vec4 NativeLightmapAt(vec2 at)
 // baked it with the sun of its hour (rvk native_ground.cpp FitNativeLight: FL.terrainLight2.xyz b), and with b turned
 // to the sun's bearing now (FL.terrainLight.xyz; its height as baked) the ratio of the two is how much lighter or
 // darker this slope is now - flat ground 1, as baked; a slope that turns towards the sun through the hour brightens,
-// one that turns away darkens. (In the 0..1 of the texels; floored at the palette's darkest, ratio clamped.)
-float NativeSunTurn(vec3 n)
+// one that turns away darkens (by FL.terrainLight2.w, RVK_GroundSun). The rocks on it (TerrainClutter) take the
+// ground's light where they lie, which is the flat ground's, by their faces the same way: a + b.n over a + b.y.
+// (In the 0..1 of the texels; floored at the palette's darkest, the ratio clamped.)
+float NativeSunTurn(vec3 n, bool rocks)
 {
-    if (FL.terrainLight2.w <= 0.0 || dot(n, n) <= 1e-8) return 1.0;
+    if (FL.terrainLight.w <= 0.0 || dot(n, n) <= 1e-8 || (!rocks && FL.terrainLight2.w <= 0.0)) return 1.0;
     n = normalize(n);
-    const float baked = FL.terrainLight.w + dot(FL.terrainLight2.xyz, n);
-    const float now = FL.terrainLight.w + dot(FL.terrainLight.xyz, n);
-    return mix(1.0, clamp(max(now, 0.06) / max(baked, 0.06), 0.4, 2.0), FL.terrainLight2.w);
+    const vec3 b = FL.terrainLight2.xyz, now = mix(b, FL.terrainLight.xyz, FL.terrainLight2.w);
+    const float baked = FL.terrainLight.w + (rocks ? b.y : dot(b, n));
+    return clamp(max(FL.terrainLight.w + dot(now, n), 0.06) / max(baked, 0.06), rocks ? 0.25 : 0.4, 2.0);
 }

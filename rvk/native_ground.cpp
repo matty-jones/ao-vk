@@ -92,6 +92,10 @@ void Device::PollNativeSky()
 void Device::DestroyNativeGround()
 {
     if (m_native.skyPending.valid()) m_native.skyPending.wait();
+    if (m_native.ground && m_native.framesDrawn)
+        Log("native ground: playfield %u - %.1f patches drawn a frame over %u frames, %u rocks made", m_native.ground->id,
+            double(m_native.patchesDrawn) / m_native.framesDrawn, m_native.framesDrawn, m_native.rocksMade);
+    m_native.patchesDrawn = m_native.framesDrawn = m_native.rocksMade = 0;
     // (The lightmap stays: it is the hour's, handed over when it changes - perhaps before this playfield's ground.)
     // (Nor does the fade from the last hour's: across playfields, it would be another place's light.)
     for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means, &m_native.sky, &m_native.lightmapPrev})
@@ -368,17 +372,16 @@ void Device::FillNativeLights(detail::FrameLights* fl)
     std::memset(fl->terrainLight, 0, sizeof(fl->terrainLight));
     std::memset(fl->terrainLight2, 0, sizeof(fl->terrainLight2));
     const float* f = m_native.lightFit;
-    // (fl->sunDir: the way the sun's light travels, as the frame's lights and shadows have it; the moon's at night.)
+    if (f[0] <= 0.0f) return;
+    // The fit as baked (the rocks are shaded by it whatever the setting), and turned to the sun now when there is one
+    // to turn to: fl->sunDir, the way its light travels as the frame's lights and shadows have it - not the moon's.
+    for (int k = 0; k < 3; ++k) fl->terrainLight[k] = fl->terrainLight2[k] = f[k + 1];
+    fl->terrainLight[3] = f[0];
     const float sx = -fl->sunDir[0], sz = -fl->sunDir[2], s = std::sqrt(sx * sx + sz * sz);
-    if (f[0] <= 0.0f || m_native.sun <= 0.0f || s < 0.05f || fl->moon[3] > 0.5f) return;
+    if (m_native.sun <= 0.0f || s < 0.05f || fl->moon[3] > 0.5f) return;
     const float b = std::sqrt(f[1] * f[1] + f[3] * f[3]);
     fl->terrainLight[0] = b * sx / s;
-    fl->terrainLight[1] = f[2];
     fl->terrainLight[2] = b * sz / s;
-    fl->terrainLight[3] = f[0];
-    fl->terrainLight2[0] = f[1];
-    fl->terrainLight2[1] = f[2];
-    fl->terrainLight2[2] = f[3];
     fl->terrainLight2[3] = std::clamp(m_native.sun, 0.0f, 1.0f);
 }
 
@@ -469,6 +472,7 @@ void Device::DrawNativeGround(bool lightPass)
         DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, m_native.indices, m_native.indexCount);
         ++drawn;
     }
+    DrawNativeClutter(vp);
     m_native.drawing = false;
     m_textures[0] = saved;
     if (!lightPass) {

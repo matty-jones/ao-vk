@@ -179,6 +179,7 @@ public:
     void SetNativeGroundOn(bool on);
     void SetNativeGroundAo(float strength);
     void SetNativeGroundSun(float strength);
+    void SetNativeGroundRocks(float density);
     void SetShadowView(bool on);
     void SetAlienMap(bool on);
     void SetContactShadows(float s);

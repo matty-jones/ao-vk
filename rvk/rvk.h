@@ -621,6 +621,7 @@ public:
     void SetNativeGroundOn(bool on) { m_native.on = on; }
     void SetNativeGroundAo(float strength) { m_native.ao = strength; }
     void SetNativeGroundSun(float strength) { m_native.sun = strength; }
+    void SetNativeGroundRocks(float density);
     bool NativeGroundDrawing() const { return m_native.drawing; }
     void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
     void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
@@ -1006,9 +1007,16 @@ private:
     // The native ground (native_ground.cpp): its patches (vertices: XYZ | NORMAL | TEX2, set 0 the cell coordinates,
     // set 1 the playfield's lightmap; a box each), the shared indices, the tile-code texture (each cell's tile's
     // bindless image, its turn), the lightmap (the hour's, through the game's palette).
+    struct NativeClutter {                       // a patch's rocks (ground_clutter.cpp): one static mesh
+        std::shared_ptr<const std::vector<uint8_t>> vertices, indices;
+        uint32_t count = 0;                      // vertices (and indices: one each)
+        bool pebbles = false;                    // the small rocks (drawn nearer)
+    };
     struct NativePatch {
         std::shared_ptr<const std::vector<uint8_t>> vertices;
         float lo[3], hi[3];
+        std::vector<NativeClutter> clutter;      // its rocks, made when the eye is near
+        bool clutterMade = false;
     };
     struct NativeState {
         std::shared_ptr<const NativeGround> ground;
@@ -1025,6 +1033,9 @@ private:
         std::chrono::steady_clock::time_point lightmapSince;   // when this one came
         float lightFit[4] = {};                  // the lightmap as a + b.n of the slope (FitNativeLight): a, b; a = 0 none
         float sun = 1.0f;                        // RVK_GroundSun
+        float rocks = 1.0f;                      // RVK_GroundRocks
+        bool clutter = false;                    // the rocks are drawing (ground_clutter.cpp)
+        uint32_t rocksMade = 0;
         std::vector<uint32_t> lightPixels;       // the lightmap's texels (the grass's light: Device::NativeLightRgb)
         uint32_t lightW = 0, lightH = 0;
         Texture* sky = nullptr;                  // how much of the sky each height sample sees (0..1; RVK_GroundAo)
@@ -1045,6 +1056,8 @@ private:
     void FillNativeLights(detail::FrameLights* fl);
     void MakeNativeCodes();
     void DrawNativeGround(bool lightPass);
+    void MakeNativeClutter(uint32_t patch);
+    void DrawNativeClutter(const d3d::Matrix& viewProj);
     void DestroyNativeGround();
     // The ground's chunks' texture coordinates fitted to the world (terrain.cpp), by TerrainChunkKey: kept across
     // frames; how many were laid from above and how many not (logged).

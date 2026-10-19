@@ -1720,6 +1720,7 @@ float g_groundAo = 0.6f;            // --ground-ao X: RVK_GroundAo
 float g_groundTess = 0.6f;          // --ground-tess X: RVK_GroundTess
 float g_cliffDepth = 0.4f;          // --cliff-depth X: RVK_CliffDepth
 float g_groundSun = 1.0f;           // --ground-sun X: RVK_GroundSun
+float g_groundRocks = 1.0f;         // --ground-rocks X: RVK_GroundRocks
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 template <typename D>
 void RunGroundFile(D& dev, int frames, const std::string& shot)
@@ -1774,6 +1775,7 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     dev.SetNativeGroundLightmap(packed, lw, lh, shade);
     dev.SetNativeGroundAo(g_groundAo);
     dev.SetNativeGroundSun(g_groundSun);
+    dev.SetNativeGroundRocks(g_groundRocks);
     {
         Device::TerrainSettings t;
         t.round = g_groundTess;
@@ -4508,6 +4510,7 @@ int main(int argc, char** argv)
         else if (a == "--ground-tess" && i + 1 < argc) g_groundTess = float(std::atof(argv[++i]));
         else if (a == "--cliff-depth" && i + 1 < argc) g_cliffDepth = float(std::atof(argv[++i]));
         else if (a == "--ground-sun" && i + 1 < argc) g_groundSun = float(std::atof(argv[++i]));
+        else if (a == "--ground-rocks" && i + 1 < argc) g_groundRocks = float(std::atof(argv[++i]));
 
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));

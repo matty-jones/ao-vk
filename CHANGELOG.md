@@ -19,6 +19,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - On that ground, hillsides and cliffs take their light from where the sun is now, so slopes brighten and fall into
   shade as it moves (`RVK_GroundSun`, 1; 0 for the game's light as baked for the hour), and when the game moves to the
   next hour's light the land fades into it over a few seconds instead of changing all at once.
+- Rocks and boulders lie at the feet of cliffs and canyon walls, and stones on rough slopes, in the colour of the
+  rock around them and lit and shadowed like the ground (`RVK_GroundRocks`, 1; 0 for none, up to 2 for twice as
+  many). Meadows, roads and towns are left clear.
 - Distant ground is less blurry: the pictures the game bakes for the land past its detailed ring get twice the
   detail (`RVK_GroundFar`: 16 texels a cell by default; 8 for the game's, 32 for more at a large memory cost).
 - The ground keeps its sharp, detailed texture further out (`RVK_GroundRange`, 1.5x the game's furthest setting by

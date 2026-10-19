@@ -85,7 +85,7 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
                                 // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     vec4 terrainRock2;          // ... its mean colour (rgb), its normal map's strength
     vec4 terrainLight;          // the native ground's lightmap as a + b.n of its slope (rvk native_ground.cpp
-                                // FitNativeLight): xyz b turned to the sun's bearing now, w a
+                                // FitNativeLight): xyz b turned to the sun's bearing now (b when there is none), w a (0: no fit)
     vec4 terrainLight2;         // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
     Light lights[64];
 } FL;

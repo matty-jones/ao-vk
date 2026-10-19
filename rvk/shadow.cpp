@@ -444,7 +444,7 @@ bool Device::IsShadowCaster(uint32_t primitive, uint32_t fvf) const
     // foreground.
     if (m_rs[d3d::RS_ZFUNC] == d3d::CMP_ALWAYS)
         return false;
-    if (IsTerrain(fvf))
+    if (IsTerrain(fvf) && !m_native.clutter)     // (the native ground's rocks cast: ground_clutter.cpp)
         return false;
     if (!m_rs[d3d::RS_ALPHABLENDENABLE])
         return true;

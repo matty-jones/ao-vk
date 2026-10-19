@@ -2592,7 +2592,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     ProfileDrawSection("draw: setup (sky, terrain notes, grass tiles)", since);
     FvfLayout layout = DecodeFvf(fvf);
     // RVK_GrassOn: the terrain's ground heights feed the procedural grass (grass.cpp CaptureTerrain / RenderGrassField).
-    if (m_grassOn && !m_external && vertices && IsTerrain(fvf))
+    if (m_grassOn && !m_external && vertices && IsTerrain(fvf) && !m_native.clutter)   // (not the rocks on it)
         CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount);
     DrawMeshInfo(fvf, layout.stride, vertices, vertexCount, indices, indexCount);
     ProfileDrawSection("draw: setup (mesh info)", since);
@@ -2860,7 +2860,27 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // The ground: base pass textures remembered by chunk; the lighting pass (lightmap + lights, multiplying the base,
     // drawn after all base passes) takes its relief from its chunk's.
     m_drawBumpBase = nullptr;
-    if (terrain && m_textures[0]) {
+    if (terrain && m_native.clutter) {
+        // The native ground's rocks (ground_clutter.cpp): laid with rock from every side, lit by the ground's light
+        // where they lie - the native ground's record, marked (terrainAt.y 2: terrain.glsl TerrainClutter).
+        if (TerrainTexturingOn() && m_native.codes && m_native.ground) {
+            const bool base = !m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE];
+            dt.terrain[0] = 1.0f / m_native.ground->cellX;
+            dt.terrainAt[3] = float(base ? kTerrainBase : kTerrainLight);
+            dt.terrainAt[1] = 2.0f;
+            dt.terrainAt[2] = 0.0f;
+            const uint32_t codes = BindlessImage(m_native.codes) + 1;
+            std::memcpy(&dt.terrain[1], &codes, 4);
+            if (base) {
+                const uint32_t means = m_native.means ? BindlessImage(m_native.means) + 1 : 0u;
+                std::memcpy(&dt.terrainAt[0], &means, 4);
+            } else {
+                const uint32_t sky = m_native.sky && m_native.ao > 0.0f ? BindlessImage(m_native.sky) + 1 : 0u;
+                std::memcpy(&dt.terrain[3], &sky, 4);
+                dt.terrainAt[0] = 0.0f;
+            }
+        }
+    } else if (terrain && m_textures[0]) {
         // (Each pass also carries how its chunk's base texture lies on the world: terrain.glsl lays it on cliffs.)
         const uint64_t chunk = TerrainChunkKey(vertices, vertexCount, layout.stride, indices, indexCount);
         if (!m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE]) {
@@ -3364,7 +3384,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         dt.tess[1] = m_tessShape;
         dt.tess[2] = float(vbOffset / layout.stride);
         m_drawTess = true;
-    } else if (m_native.drawing && m_tessSupported && primitive == d3d::TriangleList &&
+    } else if (m_native.drawing && !m_native.clutter && m_tessSupported && primitive == d3d::TriangleList &&
                (m_terrainSettings.round > 0.0f || (m_terrainSettings.depth > 0.0f && TerrainRockOn()))) {
         // The native ground (ffp.tesc): each edge split by its length and distance, the vertex normals its shape, the
         // rock pushed out of the cliffs - the same in both passes, so the lighting pass's equal depth test still meets
