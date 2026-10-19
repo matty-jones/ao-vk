@@ -176,6 +176,17 @@ uint NativeNormalImage(vec2 cell)
     return b.r | b.g << 8;
 }
 
+// ... and the cell's tile's material map (B, A; 0xFFFF none).
+uint NativeOrmImage(vec2 cell)
+{
+    const uint maps = floatBitsToUint(D.terrain.z) - 1u;
+    const ivec2 size = textureSize(sampler2D(texImages[maps], bindlessSamplers[D.sampIdx.w]), 0);
+    const vec4 t = texelFetch(sampler2D(texImages[maps], bindlessSamplers[D.sampIdx.w]),
+                              clamp(ivec2(floor(cell)), ivec2(0), size - 1), 0);
+    const uvec2 b = uvec2(t.ba * 255.0 + 0.5);
+    return b.x | b.y << 8;
+}
+
 // How much of the sky this point of the native ground sees (rvk native_ground.cpp SkyVisibility: the horizon all round
 // from the heights), as a factor on its light: 1 - strength x the hidden part (FL.terrain2.x, RVK_GroundAo). 1 without.
 float NativeSky(vec3 posW)
@@ -390,4 +401,39 @@ float NativeSunTurn(vec3 n, bool rocks)
     const vec3 b = FL.terrainLight2.xyz, now = mix(b, FL.terrainLight.xyz, FL.terrainLight2.w);
     const float baked = FL.terrainLight.w + (rocks ? b.y : dot(b, n));
     return clamp(max(FL.terrainLight.w + dot(now, n), 0.06) / max(baked, 0.06), rocks ? 0.25 : 0.4, 2.0);
+}
+
+// The native ground's material (occlusion, roughness, metal) laid as its colour is: from above the cell's tile's own
+// map, turned as the tile is; on the faces the rock's (or the cell's tile's, laid on them); the rocks on it the
+// rock's from every side. w: how much of the point has a material at all (a cell whose tile has no map: none there -
+// it is lit as before, without PBR).
+vec3 NativeOrm(TerrainMap m, out float w)
+{
+    vec3 sum = vec3(0.0);
+    w = 0.0;
+    if (!TerrainNativeMaps()) return vec3(1.0, 1.0, 0.0);
+    const uint rockOrm = m.rock ? TerrainRockImage(2) : 0xFFFFu;
+    if (m.w.x > 0.002) {
+        if (m.clutter) {
+            sum += TERRAIN_FACE_READ(texImages[rockOrm], m.top, m.topDx, m.topDy).rgb * m.w.x;
+            w += m.w.x;
+        } else {
+            const uint img = NativeOrmImage(m.uv[0]);
+            if (img != 0xFFFFu) {
+                const uvec2 c = NativeCell(m.uv[0]);
+                sum += textureGrad(sampler2D(texImages[nonuniformEXT(img)], bindlessSamplers[D.sampIdx.w]),
+                                   NativeTurn(fract(m.uv[0]), c.y), NativeTurnStep(m.dx[0], c.y),
+                                   NativeTurnStep(m.dy[0], c.y)).rgb * m.w.x;
+                w += m.w.x;
+            }
+        }
+    }
+    const uint faceOrm = m.rock ? rockOrm : NativeOrmImage(m.uv[0]);
+    if (faceOrm != 0xFFFFu)
+        for (int i = 1; i < 3; ++i)
+            if (m.w[i] > 0.002) {
+                sum += TERRAIN_FACE_READ(texImages[nonuniformEXT(faceOrm)], m.uv[i], m.dx[i], m.dy[i]).rgb * m.w[i];
+                w += m.w[i];
+            }
+    return w > 0.0 ? sum / w : vec3(1.0, 1.0, 0.0);
 }

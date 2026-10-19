@@ -634,8 +634,9 @@ void main()
     vec4 terrainBase = vec4(0.0);
     if (terrainMapped) {
         terrain = TerrainMapAt(vPosW, vSet0, vNormalW.xyz);
-        if (D.terrainAt.w > 1.5 && (C.flags.x & F_BUMPBASE) != 0u)
-            terrainBase = TerrainBase(D.texIdx.z, bindlessSamplers[D.sampIdx.z], terrain);
+        // (The native ground's with material maps: its colour as its base pass drew it - the cells' own tiles.)
+        if (D.terrainAt.w > 1.5 && ((C.flags.x & F_BUMPBASE) != 0u || (TerrainNative() && (D.mat.z & MAT_BASE) != 0u)))
+            terrainBase = TerrainBase(D.texIdx.z, bindlessSamplers[D.sampIdx.x], terrain);
         else if (D.terrainAt.w > 1.5 && terrain.rock)   // (no maps of the base's own: only the rock's relief)
             TerrainSettle(texImages[TerrainRockImage(0)], terrain);
     }
@@ -703,10 +704,16 @@ void main()
         gPbrOn = (D.mat.z & MAT_PBR) != 0u && FL.pbr2.y > 0.5 && (C.flags.x & F_SHADOWCHEAP) == 0u;
         if (gPbrOn) {
             gPbrBase = (D.mat.z & MAT_BASE) != 0u;
-            vec3 orm = gPbrBase && terrainMapped
+            float ormCover = 1.0;
+            vec3 orm = gPbrBase && terrainMapped && TerrainNative()
+                           ? NativeOrm(terrain, ormCover)
+                           : gPbrBase && terrainMapped
                            ? TerrainTexture(texImages[D.mat.x], bindlessSamplers[D.mat.y],
                                             texImages[terrain.rock ? TerrainRockImage(2) : D.mat.x], terrain, vec4(1.0)).rgb
                            : texture(ORMTEX, gPbrBase ? vSet0 : vTex0.xy).rgb;
+            // (A material blended in where it is only partly: none at all - the lighting as without.)
+            orm = mix(vec3(1.0, 1.0, 0.0), orm, ormCover);
+            gPbrOn = ormCover > 0.0;
             gPbrAo = mix(1.0, orm.r, clamp(FL.pbr.w, 0.0, 1.0));
             gPbrRough = clamp(orm.g, 0.03, 1.0);
             gPbrMetal = clamp(orm.b, 0.0, 1.0);

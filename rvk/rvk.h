@@ -1024,7 +1024,9 @@ private:
         std::shared_ptr<const std::vector<uint8_t>> indices;
         uint32_t vertices = 0, indexCount = 0;
         Texture* codes = nullptr;
-        Texture* maps = nullptr;                 // each cell's tile's normal map (its bindless image in R, G; 0xFFFF none)
+        Texture* maps = nullptr;                 // each cell's tile's normal map and material map (their bindless images
+                                                 // in R, G and B, A; 0xFFFF none)
+        Texture* anyOrm = nullptr;               // a tile's material map (the lighting pass's stand-in: PBR on)
         Texture* means = nullptr;                // each cell's tile's mean colour (the cliffs' rock tint, filtered)
         uint64_t mapsSignature = 0;              // the tiles' maps and the settings the two textures were made with
         Texture* lightmap = nullptr;

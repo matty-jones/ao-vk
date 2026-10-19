@@ -22,6 +22,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Rocks and boulders lie at the feet of cliffs and canyon walls, and stones on rough slopes, in the colour of the
   rock around them and lit and shadowed like the ground (`RVK_GroundRocks`, 1; 0 for none, up to 2 for twice as
   many). Meadows, roads and towns are left clear.
+- Texture packs' material maps for ground tiles (shine, wet look, crevices; `RVK_Pbr`) work on the ground drawn by
+  ao-vk too, tile by tile as on the game's own ground.
 - Distant ground is less blurry: the pictures the game bakes for the land past its detailed ring get twice the
   detail (`RVK_GroundFar`: 16 texels a cell by default; 8 for the game's, 32 for more at a large memory cost).
 - The ground keeps its sharp, detailed texture further out (`RVK_GroundRange`, 1.5x the game's furthest setting by

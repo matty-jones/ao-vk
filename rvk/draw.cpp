@@ -2940,6 +2940,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         m_drawOrm = m_drawBumpBase->m_ormMap;
         m_drawOrmBase = true;
     }
+    // The native ground's lighting pass: its cells' tiles' material maps (terrain.glsl NativeOrm, each cell's own from
+    // the maps texture); one of them stands in for the record.
+    if (!m_drawOrm && m_native.drawing && m_drawTerrainLight && m_native.anyOrm && m_native.maps && m_pbr.enabled &&
+        m_pixelLighting) {
+        m_drawOrm = m_native.anyOrm;
+        m_drawOrmBase = true;
+    }
     // Its emissive map: stage 0's, wherever that texture is drawn as the surface (lit or not; not the ground's passes).
     m_drawEmissive = nullptr;
     if (m_pbr.enabled && m_pbr.emissive > 0.0f && m_textures[0] && m_textures[0]->m_emissiveMap && !terrain &&

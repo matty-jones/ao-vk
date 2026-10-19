@@ -1721,6 +1721,7 @@ float g_groundTess = 0.6f;          // --ground-tess X: RVK_GroundTess
 float g_cliffDepth = 0.4f;          // --cliff-depth X: RVK_CliffDepth
 float g_groundSun = 1.0f;           // --ground-sun X: RVK_GroundSun
 float g_groundRocks = 1.0f;         // --ground-rocks X: RVK_GroundRocks
+bool g_tileOrm = false;             // --tile-orm: every other tile a shiny material map (PBR, pixel lighting on)
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 template <typename D>
 void RunGroundFile(D& dev, int frames, const std::string& shot)
@@ -1766,6 +1767,15 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         }
         ground->tiles.push_back(tex);
         p += n;
+    }
+    if (g_tileOrm) {
+        const std::vector<uint32_t> shiny(16, 0xFFFF3000u);   // (occlusion 1, roughness 0.19, metal 0)
+        for (size_t t = 0; t < ground->tiles.size(); t += 2)
+            if (ground->tiles[t]) dev.SetMaterialMaps(ground->tiles[t], dev.CreateTexture(4, 4, shiny.data()), nullptr);
+        dev.SetPixelLighting(true);
+        Device::PbrSettings pbr;
+        pbr.enabled = true;
+        dev.SetPbr(pbr);
     }
     const uint32_t lw = u32(), lh = u32();
     const float shade = f32();
@@ -4511,6 +4521,7 @@ int main(int argc, char** argv)
         else if (a == "--cliff-depth" && i + 1 < argc) g_cliffDepth = float(std::atof(argv[++i]));
         else if (a == "--ground-sun" && i + 1 < argc) g_groundSun = float(std::atof(argv[++i]));
         else if (a == "--ground-rocks" && i + 1 < argc) g_groundRocks = float(std::atof(argv[++i]));
+        else if (a == "--tile-orm") g_tileOrm = true;
 
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));

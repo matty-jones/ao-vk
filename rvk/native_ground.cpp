@@ -101,6 +101,7 @@ void Device::DestroyNativeGround()
     for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means, &m_native.sky, &m_native.lightmapPrev})
         if (*t) { DestroyTexture(*t); *t = nullptr; }
     m_native.lightFit[0] = 0.0f;
+    m_native.anyOrm = nullptr;
     m_native.patches.clear();
     m_native.indices.reset();
     m_native.ground.reset();
@@ -185,31 +186,36 @@ void Device::SetNativeGround(std::shared_ptr<const NativeGround> ground)
         missing);
 }
 
-// What the tile textures are drawn with now: each tile's albedo map (with RVK_Albedo) and normal map (with normal
-// maps on, lit per pixel) - side-loaded maps come in after the ground, and settings change: the per-cell textures are
-// made again when this does.
+// What the tile textures are drawn with now: each tile's albedo map (with RVK_Albedo), normal map (with normal maps
+// on, lit per pixel) and material map (with RVK_Pbr) - side-loaded maps come in after the ground, and settings change:
+// the per-cell textures are made again when this does.
 uint64_t Device::NativeMapsSignature() const
 {
-    uint64_t h = 1469598103934665603ull ^ uint64_t(m_pbr.albedoMaps) << 1 ^ uint64_t(m_normalMaps && m_pixelLighting);
+    uint64_t h = 1469598103934665603ull ^ uint64_t(m_pbr.albedoMaps) << 1 ^ uint64_t(m_normalMaps && m_pixelLighting) ^
+                 uint64_t(m_pbr.enabled && m_pixelLighting) << 2;
     for (Texture* t : m_native.ground->tiles) {
         const uint64_t a = t ? uint64_t(reinterpret_cast<uintptr_t>(t->m_albedoMap)) : 0;
         const uint64_t n = t ? uint64_t(reinterpret_cast<uintptr_t>(t->m_normalMap)) : 0;
+        const uint64_t o = t ? uint64_t(reinterpret_cast<uintptr_t>(t->m_ormMap)) : 0;
         h = (h ^ a) * 1099511628211ull;
         h = (h ^ n) * 1099511628211ull;
+        h = (h ^ o) * 1099511628211ull;
         h = (h ^ uint64_t(t && t->m_image)) * 1099511628211ull;
     }
     return h;
 }
 
 // The per-cell textures: each cell's tile's bindless image - its albedo map if drawn with one - and turn (codes: R, G,
-// B), its normal map's (maps: R, G; 0xFFFF none).
+// B), its normal map's (maps: R, G) and material map's (maps: B, A; 0xFFFF none).
 void Device::MakeNativeCodes()
 {
     const NativeGround& g = *m_native.ground;
     for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means})
         if (*t) { DestroyTexture(*t); *t = nullptr; }
-    std::vector<uint32_t> image(g.tiles.size(), BindlessImage(nullptr)), normal(g.tiles.size(), 0xFFFFu);
+    std::vector<uint32_t> image(g.tiles.size(), BindlessImage(nullptr)), normal(g.tiles.size(), 0xFFFFu),
+        orm(g.tiles.size(), 0xFFFFu);
     bool anyNormal = false;
+    m_native.anyOrm = nullptr;
     for (size_t t = 0; t < g.tiles.size(); ++t) {
         Texture* tex = g.tiles[t];
         if (!tex || !tex->m_image) continue;
@@ -219,8 +225,13 @@ void Device::MakeNativeCodes()
             normal[t] = BindlessImage(tex->m_normalMap) & 0xFFFFu;
             anyNormal = true;
         }
+        if (tex->m_ormMap && m_pbr.enabled && m_pixelLighting) {
+            orm[t] = BindlessImage(tex->m_ormMap) & 0xFFFFu;
+            m_native.anyOrm = tex->m_ormMap;
+        }
     }
-    std::vector<uint32_t> codes(size_t(g.cellsX) * g.cellsZ), maps(anyNormal ? codes.size() : 0), means(codes.size());
+    const bool anyMaps = anyNormal || m_native.anyOrm;
+    std::vector<uint32_t> codes(size_t(g.cellsX) * g.cellsZ), maps(anyMaps ? codes.size() : 0), means(codes.size());
     std::vector<uint32_t> mean(g.tiles.size(), 0xFF808080u);   // (each tile's, from its colour grid)
     for (size_t t = 0; t < g.tiles.size(); ++t) {
         const Texture* tex = g.tiles[t];
@@ -235,13 +246,13 @@ void Device::MakeNativeCodes()
         const uint32_t img = image.empty() ? 0u : image[t];
         codes[k] = 0xFF000000u | (img & 0xFFu) << 16 | ((img >> 8) & 0xFFu) << 8 | turn;
         means[k] = mean.empty() ? 0xFF808080u : mean[t];
-        if (anyNormal) {
-            const uint32_t nm = normal.empty() ? 0xFFFFu : normal[t];
-            maps[k] = 0xFF000000u | (nm & 0xFFu) << 16 | ((nm >> 8) & 0xFFu) << 8;
+        if (anyMaps) {
+            const uint32_t nm = normal.empty() ? 0xFFFFu : normal[t], om = orm.empty() ? 0xFFFFu : orm[t];
+            maps[k] = (om >> 8 & 0xFFu) << 24 | (nm & 0xFFu) << 16 | ((nm >> 8) & 0xFFu) << 8 | (om & 0xFFu);
         }
     }
     m_native.codes = CreateTexture(g.cellsX, g.cellsZ, codes.data());
-    if (anyNormal) m_native.maps = CreateTexture(g.cellsX, g.cellsZ, maps.data());
+    if (anyMaps) m_native.maps = CreateTexture(g.cellsX, g.cellsZ, maps.data());
     m_native.means = CreateTexture(g.cellsX, g.cellsZ, means.data());
     m_native.mapsSignature = NativeMapsSignature();
 }

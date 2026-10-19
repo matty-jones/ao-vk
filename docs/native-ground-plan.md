@@ -48,11 +48,16 @@ comes in a frame, rvk draws its patches for that pass instead, and skips every g
 - While native: the game's full-quality radius at its smallest and its far patches baked at the fewest texels (its
   own work and memory, unseen).
 
-## Not in the first version
+## Since the first version
 
-- Ground grass on native ground (its capture reads one texture a draw); the side-loaded normal / PBR maps of ground
-  tiles (per-pixel lookup of their maps); level of detail (whole patches at full detail, culled by view and fog -
-  ~8k triangles a patch).
+- Ground grass on it; the tiles' side-loaded normal and material maps, per cell; the sky's visibility from the
+  heights (`RVK_GroundAo`); the slopes' light turned with the sun and the hours faded (`RVK_GroundSun`); tessellation
+  near the eye (`RVK_GroundTess`, `RVK_CliffDepth`); rocks at the feet of cliffs (`RVK_GroundRocks`). docs/rvk.md,
+  "Native ground".
+
+## Not yet
+
+- Level of detail (whole patches at full detail, culled by view and fog - ~8k triangles a patch).
 - `GNDA` playfields (the game draws them).
 
 ## Checks
