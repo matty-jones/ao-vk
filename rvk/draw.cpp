@@ -3363,6 +3363,16 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         dt.tess[1] = m_tessShape;
         dt.tess[2] = float(vbOffset / layout.stride);
         m_drawTess = true;
+    } else if (m_native.drawing && m_tessSupported && primitive == d3d::TriangleList &&
+               (m_terrainSettings.round > 0.0f || (m_terrainSettings.depth > 0.0f && TerrainRockOn()))) {
+        // The native ground (ffp.tesc): each edge split by its length and distance, the vertex normals its shape, the
+        // rock pushed out of the cliffs - the same in both passes, so the lighting pass's equal depth test still meets
+        // the base pass's.
+        dt.tess[0] = 16.0f;
+        dt.tess[1] = std::clamp(m_terrainSettings.round, 0.0f, 1.0f);
+        dt.tess[2] = kNativeTessDistance;
+        dt.tess[3] = TerrainRockOn() ? std::clamp(m_terrainSettings.depth, 0.0f, 1.0f) : 0.0f;
+        m_drawTess = true;
     }
     ProfileDrawSection("draw: geometry + casters", since);
     m_drawOverbright2x = Overbright2x(fvf);

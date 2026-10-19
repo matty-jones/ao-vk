@@ -80,6 +80,8 @@ Setting g_settings[] = {
 
     {"RVK_NativeGround", "Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_GroundAo",   "Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none)", "Terrain", Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_GroundTess", "Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_CliffDepth", "Ground drawn by ao-vk: cliffs' rock stands out of their faces up close (units; 0 = flat)", "Terrain", Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundFar",  "Ground past that: texture detail (texels a 4 x 4 cell; 8 = the game's, 32 costs a lot of memory)", "Terrain", Choice, 8, 32, 8, 16, nullptr, 0, nullptr, "8 16 32"},
     {"RVK_GroundRange", "Ground drawn at full quality this many times further out (1 = the game's; above 2 the game stutters as you move)", "Terrain", Float, 1, 2.5f, 0.25f, 1.5f, nullptr, 0},
     {"RVK_CliffTex",   "Cliffs: the ground's texture laid on their faces, not stretched down them", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0},
@@ -361,7 +363,7 @@ Setting* Find(const char* name)
 // so switching it back on restores them). Settings not listed here only tune something these switch off.
 struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
-    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
+    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
@@ -668,12 +670,15 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_GroundFar")) rnative::ground::SetFar(int(V(n) + 0.5f));
     else if (is("RVK_ShadowMem")) d->SetShadowMemory(V(n) != 0.0f ? 1u : 0u);
     else if (is("RVK_HillShade")) d->SetHillShade(V(n) != 0.0f);
-    else if (is("RVK_CliffTex") || is("RVK_CliffRock") || is("RVK_TileHide") || is("RVK_GroundVary")) {
+    else if (is("RVK_CliffTex") || is("RVK_CliffRock") || is("RVK_TileHide") || is("RVK_GroundVary") ||
+             is("RVK_GroundTess") || is("RVK_CliffDepth")) {
         rvk::Device::TerrainSettings t;
         t.cliff = V("RVK_CliffTex");
         t.rock = V("RVK_CliffRock") != 0.0f;
         t.tiling = V("RVK_TileHide");
         t.variation = V("RVK_GroundVary");
+        t.round = V("RVK_GroundTess");
+        t.depth = V("RVK_CliffDepth");
         d->SetTerrain(t);
     }
     else if (is("RVK_Contact")) d->SetContactShadows(V(n));

@@ -1717,6 +1717,8 @@ void RunNativeGroundTest(D& dev, int frames, const std::string& shot)
 // with the ground's state; the native ground draws instead.
 std::string g_groundFile;
 float g_groundAo = 0.6f;            // --ground-ao X: RVK_GroundAo
+float g_groundTess = 0.6f;          // --ground-tess X: RVK_GroundTess
+float g_cliffDepth = 0.4f;          // --cliff-depth X: RVK_CliffDepth
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 template <typename D>
 void RunGroundFile(D& dev, int frames, const std::string& shot)
@@ -1770,6 +1772,12 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     dev.SetNativeGround(ground);
     dev.SetNativeGroundLightmap(packed, lw, lh, shade);
     dev.SetNativeGroundAo(g_groundAo);
+    {
+        Device::TerrainSettings t;
+        t.round = g_groundTess;
+        t.depth = g_cliffDepth;
+        dev.SetTerrain(t);
+    }
     if (g_grassFieldOn) dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true);   // (--grass-field: the grass on it)
     struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
     const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
@@ -4490,6 +4498,8 @@ int main(int argc, char** argv)
         else if (a == "--view-yaw" && i + 1 < argc) g_viewYaw = float(std::atof(argv[++i]));
         else if (a == "--view-pitch" && i + 1 < argc) g_viewPitch = float(std::atof(argv[++i]));
         else if (a == "--ground-ao" && i + 1 < argc) g_groundAo = float(std::atof(argv[++i]));
+        else if (a == "--ground-tess" && i + 1 < argc) g_groundTess = float(std::atof(argv[++i]));
+        else if (a == "--cliff-depth" && i + 1 < argc) g_cliffDepth = float(std::atof(argv[++i]));
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));
         else if (a == "--terrain-maps") g_terrainMaps = true;

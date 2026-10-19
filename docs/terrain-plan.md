@@ -162,16 +162,15 @@ and `m_drawTerrainLight`.
   and replaces HillShade's 16-unit grid.
 - Setting `RVK_TerrRelight`.
 
-## Phase 3: geometry (designed)
+## Phase 3: geometry (built, on the native ground)
 
-- **Tessellation.** Phong tessellation of terrain chunks, reusing `ffp.tesc` / `ffp.tese` (characters only today).
-  - The level depends only on edge endpoint positions and the eye.
-  - The evaluation is `precise`.
-  - Both passes run the same tessellation, so depth EQUAL still holds.
-- **Displacement.** On steep rock only, from the rock material's height channel, at most about 0.3 units. Flat ground
-  where characters walk keeps its height, so feet don't sink. Grass capture and picking keep the original vertices;
-  the difference is small.
-- Setting `RVK_TerrainTess`.
+- **Tessellation** (`RVK_GroundTess`): Phong tessellation of the native ground's patches through `ffp.tesc` /
+  `ffp.tese`. Each edge's level from its ends and the eye alone (no cracks, within a patch or between two); creases
+  not rounded; faded out by 60 units. Both passes alike, so depth EQUAL holds. docs/rvk.md, "Native ground".
+- **Displacement** (`RVK_CliffDepth`): on steep ground only, the rock pushed out of the face by its albedo's
+  brightness (the set has no height map), at most 0.4 units by default. Flat ground keeps its height (feet, grass).
+- The game's own ground (native off) isn't tessellated: its chunks are rebuilt as the camera moves, and their edges
+  don't meet vertex to vertex.
 
 ## Phase 4: ground clutter (designed, its own plan document when started)
 

@@ -96,7 +96,16 @@
   tint is the cells' tiles' mean colours filtered between cells (a means texture: `D.terrainAt.x` on the native base
   pass) - per cell it jumped at each crossing (green wedges where grass tiles met a cliff). The ground grass reads the
   native ground per cell (`NativeGroundRgb`: the cell's tile turned; `NativeLightRgb`: the lightmap's texels, kept on
-  the CPU). Not yet: the tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  the CPU). Tessellated near the eye (`RVK_GroundTess`, 0.6: Phong's shape; `RVK_CliffDepth`, 0.4 units): ffp.tesc
+  splits each edge by its length and distance (about a third of a unit a segment up close, none from 60 units,
+  `kNativeTessDistance`) from its ends alone, so both triangles beside it agree, in this patch and the next, and
+  drops triangles out of view; ffp.tese rounds the ground towards the vertex normals (the heights' own), not across
+  creases (per edge, by how far its ends' normals differ: a cliff's foot and rim keep their shape, Phong overshot them
+  into spikes), fading out by the same distance, and pushes the rock out of steep faces by its albedo's brightness
+  against its mean at a coarse level (`terrain_rock.glsl`: the lays the fragment shader textures with). Both passes
+  tessellate alike (`invariant gl_Position`), so the lighting pass's equal depth test holds; the tessellated draws
+  stay out of the depth pre-pass, and lighting and shadow lookups keep the flat triangles' positions. Not yet: the
+  tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):

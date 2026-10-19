@@ -841,9 +841,11 @@ bool Device::CreatePipelines(std::string* error)
     if (!Check(vkCreateDescriptorSetLayout(m_device, &sl, nullptr, &m_setLayout), "vkCreateDescriptorSetLayout", error))
         return false;
     if (m_bindless) {
+        // (Also the tessellation stages: the native ground's cliffs' rock pushed out of their faces, ffp.tese.)
+        const VkShaderStageFlags stages = m_tessSupported ? vsfstess : vsfs;
         VkDescriptorSetLayoutBinding bb[2] = {
-            {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kMaxBindlessImages, vsfs, nullptr},
-            {1, VK_DESCRIPTOR_TYPE_SAMPLER, kMaxBindlessSamplers, vsfs, nullptr},
+            {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kMaxBindlessImages, stages, nullptr},
+            {1, VK_DESCRIPTOR_TYPE_SAMPLER, kMaxBindlessSamplers, stages, nullptr},
         };
         VkDescriptorBindingFlags bflags[2] = {
             VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT,

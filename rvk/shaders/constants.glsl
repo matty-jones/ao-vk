@@ -11,7 +11,8 @@ struct DrawTransform {
                                 // binding 8; z: the draw's base vertex (gl_VertexIndex - z = its vertex)
     vec4 sway;                  // plants: model y of the base, 1 / model height, tip sway (world units), 1 = on
     uvec4 lightMask;            // frame lights (bits 0-63 of x, y) that reach the draw's bounding box; z: pushers near it
-    vec4 tess;                  // characters' Phong tessellation: level (0 = off), shape (0..1), base vertex (binding 10)
+    vec4 tess;                  // characters' Phong tessellation: level (0 = off), shape (0..1), base vertex (binding 10);
+                                // the native ground's: the most a cell edge, shape, fade distance, cliff rock depth
     uvec4 texIdx;               // bindless (set 1): image slots for stage 0, stage 1, bump base, normal map
     uvec4 sampIdx;              // bindless (set 1): sampler slots for stage 0, stage 1, bump, normal
     uvec4 mat;                  // PBR material: occlusion/roughness/metallic image slot, the maps' sampler slot, MAT_* bits,

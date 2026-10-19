@@ -43,7 +43,9 @@ struct DrawTransform {
     float sway[4];                 // plants: model y of the base, 1 / model height, tip sway (world units), 1 = on
     uint32_t lightMask[4];         // frame lights (bits 0-63 of x, y) that reach the draw's bounding box; z: pushers
                                    // (FrameLights.pushers) near it
-    float tess[4];                 // Phong tessellation (characters): level (0 = off), shape, base vertex of binding 10
+    float tess[4];                 // Phong tessellation (characters): level (0 = off), shape, base vertex of binding 10;
+                                   // the native ground (D.terrain.y set): the most a cell edge, shape, the distance it
+                                   // fades out by, the rock's depth out of the cliffs
     uint32_t texIdx[4];            // bindless (M1): image slots for stage 0, stage 1, bump base, normal map
     uint32_t sampIdx[4];           // bindless (M1): sampler slots for stage 0, stage 1, bump, normal
     uint32_t mat[4];               // PBR material: occlusion/roughness/metallic image slot, the maps' sampler slot,
@@ -59,6 +61,7 @@ struct DrawTransform {
                                    // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); w:
                                    // kTerrainBase / kTerrainLight (0 = not mapped)
 };
+constexpr float kNativeTessDistance = 60.0f;   // world units: the native ground's tessellation gone from here on
 enum : uint32_t { kTerrainBase = 1, kTerrainLight = 2 };   // DrawTransform terrainAt[3]: the ground's base pass; its
                                                            // lighting pass, which reads the base's maps (F_BUMPBASE, MAT_BASE)
 constexpr float kSkySceneryHaze = 2000.0f;     // the sky's scenery's haze: its colour left e^-(distance / this)

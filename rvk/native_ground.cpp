@@ -337,7 +337,9 @@ void Device::DrawNativeGround(bool lightPass)
     for (const NativePatch& p : m_native.patches) {
         bool outside[6] = {true, true, true, true, true, true};
         for (int k = 0; k < 8; ++k) {
-            const float w[3] = {(k & 1) ? p.hi[0] : p.lo[0], (k & 2) ? p.hi[1] : p.lo[1], (k & 4) ? p.hi[2] : p.lo[2]};
+            // (A unit round it: the tessellation's shape and rock move the ground that far at most.)
+            const float w[3] = {(k & 1) ? p.hi[0] + 1.0f : p.lo[0] - 1.0f, (k & 2) ? p.hi[1] + 1.0f : p.lo[1] - 1.0f,
+                                (k & 4) ? p.hi[2] + 1.0f : p.lo[2] - 1.0f};
             float c[4];
             for (int j = 0; j < 4; ++j)
                 c[j] = w[0] * vp.m[0][j] + w[1] * vp.m[1][j] + w[2] * vp.m[2][j] + vp.m[3][j];

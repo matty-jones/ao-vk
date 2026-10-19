@@ -4,8 +4,15 @@
 // smooth normals say, rounding low-polygon silhouettes. D.tess.y: how much (0 = flat); each corner's pull also
 // weighted by how smooth the model is there (t_vSmoothN's length: 0 at hard edges, which stay sharp). Then what the vertex shader
 // computes from the world position: the clip position (with the TAA jitter), the motion vector inputs, fog distance.
+// The native ground (D.terrain.y set): the shape fades out towards D.tess.z (no step where the splitting ends), and
+// its cliffs' rock stands out of them by up to D.tess.w units (terrain_rock.glsl). Both of its passes run this alike:
+// the lighting pass's equal depth test meets the base pass's.
+#extension GL_EXT_nonuniform_qualifier : require
 #include "constants.glsl"
 #include "ffp_varyings.glsl"
+#include "terrain_rock.glsl"
+
+invariant gl_Position;
 
 // Lower-left domain origin (pipeline): counter-clockwise here keeps the patch's winding.
 layout(triangles, equal_spacing, ccw) in;
@@ -32,7 +39,21 @@ void main()
         vec3 n = t_vSmoothN[i] / weight;
         pull += b[i] * weight * (-dot(p - t_vPosW[i], n) * n);   // towards corner i's tangent plane
     }
-    vec3 posW = p + D.tess.y * pull;
+    vec3 posW;
+    if (floatBitsToUint(D.terrain.y) != 0u) {
+        const float fade = 1.0 - smoothstep(0.5 * D.tess.z, D.tess.z, distance(p, C.eyePos.xyz));
+        // A crease (a cliff's foot or rim: its ends' normals far apart) isn't rounded - Phong's shape overshoots there
+        // into lips and spikes; gentle ground is. Per edge, from its ends alone (both triangles beside it agree), blended
+        // inside the triangle: on an edge only that edge's weight counts.
+        vec3 n0 = normalize(t_vSmoothN[0]), n1 = normalize(t_vSmoothN[1]), n2 = normalize(t_vSmoothN[2]);
+        const vec3 e = vec3(b.y * b.z, b.z * b.x, b.x * b.y);   // (edges opposite corners 0, 1, 2)
+        const vec3 we = smoothstep(vec3(0.6), vec3(0.9), vec3(dot(n1, n2), dot(n2, n0), dot(n0, n1)));
+        const float crease = dot(e, we) / max(e.x + e.y + e.z, 1e-12);
+        posW = p + (D.tess.y * fade * crease) * pull;
+        if (fade > 0.0 && D.tess.w > 0.0) posW += TerrainRockRelief(p, vSmoothN, D.tess.w * fade);
+    } else {
+        posW = p + D.tess.y * pull;
+    }
     vec3 delta = posW - p;
     // vPosW (lighting, shadow lookups) stays on the flat triangles: the shadow maps hold the untessellated mesh, and a
     // rounded point pulled inside it would find itself shadowed by its own body. The light barely differs.

@@ -26,9 +26,7 @@ const float kTerrainBase = 1.0, kTerrainLight = 2.0;
 // The draw is a ground chunk whose base texture lies on the world from above (rvk FillTerrainRecord).
 bool TerrainMapped() { return D.terrainAt.w > 0.5; }
 
-// The cliffs' rock (rvk terrain.cpp; RVK_CliffRock): in, and on. Its maps' bindless images (0 albedo, 1 normal, 2 ORM).
-bool TerrainRockOn() { return floatBitsToUint(FL.terrainRock.x) != 0u && FL.terrainRock.w > 0.0; }
-uint TerrainRockImage(int k) { return floatBitsToUint(FL.terrainRock[k]) - 1u; }
+#include "terrain_rock.glsl"
 
 struct TerrainMap {
     vec2 uv[3];         // the game's (from above), a face along x (it faces z: x and the height), along z (faces x)
@@ -41,24 +39,6 @@ struct TerrainMap {
     float side;         // how steep (0 .. 1): the cliffs' share
     bool rock;          // the faces are the rock's (else the cell's tile)
 };
-
-uint TerrainHash(uvec2 p)
-{
-    uint h = p.x * 0x8DA6B343u ^ p.y * 0xD8163841u;
-    h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
-    return h;
-}
-
-// Smooth value noise, 0..1.
-float TerrainNoise(vec2 p)
-{
-    vec2 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    uvec2 c = uvec2(ivec2(i) + 0x4000);
-    float a = float(TerrainHash(c) & 0xFFFFu), b = float(TerrainHash(c + uvec2(1, 0)) & 0xFFFFu);
-    float d = float(TerrainHash(c + uvec2(0, 1)) & 0xFFFFu), e = float(TerrainHash(c + uvec2(1, 1)) & 0xFFFFu);
-    return mix(mix(a, b, f.x), mix(d, e, f.x), f.y) / 65535.0;
-}
 
 // The hexagon grid over a lay (st: in repeats of the texture, on the world): the three cells around st, the weights
 // of their centres (Mikkelsen's TriangleGrid, sharpened) and each cell's offset into the texture (down: this much of a
@@ -101,10 +81,10 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
     m.uv[2] = s * vec2(posW.z, -posW.y);
     m.dx[2] = s * vec2(m.px.z, -m.px.y);
     m.dy[2] = s * vec2(m.py.z, -m.py.y);
-    if (m.rock) {                       // (the strata bend: a slow wave along the cliff, in repeats - gentle enough to
-                                        // leave the derivatives as they are)
-        m.uv[1].y += 0.45 * (TerrainNoise(vec2(posW.x / 70.0, 3.7)) - 0.5) + 0.15 * (TerrainNoise(vec2(posW.x / 19.0, 8.1)) - 0.5);
-        m.uv[2].y += 0.45 * (TerrainNoise(vec2(posW.z / 70.0, 5.3)) - 0.5) + 0.15 * (TerrainNoise(vec2(posW.z / 19.0, 1.9)) - 0.5);
+    if (m.rock) {                       // (the strata bend gently enough to leave the derivatives as they are)
+        const vec4 lays = TerrainRockLays(posW);
+        m.uv[1] = lays.xy;
+        m.uv[2] = lays.zw;
     }
     // How steep: the triangle's own slope (from the position's derivatives), not the interpolated normal - the game's
     // cells are 4 units across, a cliff one or two of them high, and its corners' normals, shared with the flat ground

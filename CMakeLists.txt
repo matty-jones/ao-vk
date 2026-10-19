@@ -43,6 +43,7 @@ foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag 
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/lighting.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/ffp_main.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/terrain.glsl"
+                "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/terrain_rock.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/motion_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/occlusion.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/dof_common.glsl"

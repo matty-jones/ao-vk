@@ -452,7 +452,9 @@ void main()
         vPosW = posW.xyz;
         vNormalW = vec4(normalW, length(normalW));
 #ifndef RVK_LEAF
-        if (D.tess.x > 0.5) {
+        if (D.tess.x > 0.5 && floatBitsToUint(D.terrain.y) != 0u) {
+            vSmoothN = normalize(normalW);       // the native ground: its normals are the heights' own, smooth
+        } else if (D.tess.x > 0.5) {
             // Direction: the averaged normal in the world; length: how smooth the surface is at this corner (the
             // model-space mean of the unit normals here: 1 where they agree, ~0.58 at a box's corner) as a weight.
             int i = (gl_VertexIndex - int(D.tess.z)) * 3;

@@ -13,6 +13,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - On that ground, valleys, cliff faces and the feet of canyon walls are darker where less of the sky reaches them
   (`RVK_GroundAo`, 0.6; 0 for none). Canyon walls no longer show the dark and green triangles of the ground's
   coarse light and tile colours, and the grass grows on it as before.
+- Up close, that ground's hills and the feet and rims of cliffs are rounded instead of made of flat 4 m triangles
+  (`RVK_GroundTess`, 0.6; 0 for the game's shapes), and the rock on cliff faces stands out of them in ledges and
+  cracks (`RVK_CliffDepth`, 0.4; 0 for flat faces).
 - Distant ground is less blurry: the pictures the game bakes for the land past its detailed ring get twice the
   detail (`RVK_GroundFar`: 16 texels a cell by default; 8 for the game's, 32 for more at a large memory cost).
 - The ground keeps its sharp, detailed texture further out (`RVK_GroundRange`, 1.5x the game's furthest setting by
