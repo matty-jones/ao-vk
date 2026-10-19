@@ -156,17 +156,19 @@ void Device::SetNativeGround(std::shared_ptr<const NativeGround> ground)
                 }
             p.vertices = data;
             // Its indices: P x P cells of two triangles (a patch at the playfield's edge has fewer cells, its
-            // vertices still (P + 1)^2, clamped to the edge). Each cell split along the diagonal whose ends are the
-            // nearer in height: where a cliff runs at a slant to the cells, a split fixed one way crossed its foot
-            // and its rim in every other cell - the flat and the steep halves made a row of teeth along it; split so,
-            // the steep halves meet the flat along the cliff. Flat ground is split the one way as before.
+            // vertices still (P + 1)^2, clamped to the edge). Each cell split as NativeCellAcross says: where a cliff
+            // runs at a slant to the cells, a split fixed one way crossed its foot and its rim in every other cell -
+            // the flat and the steep halves made a row of teeth along it; split along the diagonal whose ends are the
+            // nearer in height, the steep halves meet the flat along the cliff. Ground one can stand on keeps the
+            // game's split: split the other way, a hillside's cells lay up to a few units below where the game puts
+            // characters, and they floated.
             auto indices = std::make_shared<std::vector<uint8_t>>(size_t(P) * P * 6 * 2);
             uint16_t* ix = reinterpret_cast<uint16_t*>(indices->data());
             for (uint32_t j = 0; j < P; ++j)
                 for (uint32_t i = 0; i < P; ++i) {
                     const uint16_t a = uint16_t(j * (P + 1) + i), b = uint16_t(a + 1), c = uint16_t(a + P + 1),
                                    d = uint16_t(c + 1);
-                    const bool across = std::fabs(v[a].y - v[d].y) < std::fabs(v[b].y - v[c].y) - 0.01f;
+                    const bool across = NativeCellAcross(v[a].y, v[b].y, v[c].y, v[d].y, std::min(g.cellX, g.cellZ));
                     // (The game's winding: culling is off for the ground anyway.)
                     const uint16_t q[6] = {a, c, across ? d : b, across ? a : b, across ? d : c, across ? b : d};
                     std::memcpy(ix, q, sizeof(q));

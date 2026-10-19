@@ -245,7 +245,9 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
                 const float fx = rng(), fz = rng();
                 const float x = (float(c) + fx) * g.cellX, z = (float(r) + fz) * g.cellZ;
                 const float h00 = H(c, r), h10 = H(c + 1, r), h01 = H(c, r + 1), h11 = H(c + 1, r + 1);
-                const float y0 = (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+                // (On the triangles the ground is drawn with, not between them: a rock on a cell split the other
+                // way floated or sank by up to half its twist.)
+                const float y0 = NativeCellHeight(h00, h10, h01, h11, std::min(g.cellX, g.cellZ), fx, fz);
                 // Sizes: mostly small, now and then a boulder at a cliff's foot.
                 const bool fell = foot > rough;
                 const int tintC = fell ? fromC : c, tintR = fell ? fromR : r;

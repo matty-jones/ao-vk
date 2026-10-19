@@ -222,4 +222,21 @@ int BoxInClip(const float mn[3], const float mx[3], const d3d::Matrix& vp, bool 
 // centre and half extents through the matrix, not its eight corners (the sun cascades' cull, every caster each).
 bool BoxOutsideAffine(const float mn[3], const float mx[3], const d3d::Matrix& vp);
 
+// The native ground's cells (native_ground.cpp): corners a (x, z), b (x + 1, z), c (x, z + 1), d (x + 1, z + 1). Each
+// is split along b - c as the game splits it - what characters stand on - unless it is steep (a diagonal's ends more
+// than a cell apart in height: a cliff, which no one stands on) and the a - d diagonal's ends are the nearer in
+// height: a cliff at a slant to the cells then meets the flat in a straight line, not a row of teeth.
+inline bool NativeCellAcross(float a, float b, float c, float d, float cell)
+{
+    const float ad = a > d ? a - d : d - a, bc = b > c ? b - c : c - b;
+    return (ad > cell || bc > cell) && ad < bc - 0.01f;
+}
+// ... its height at (fx, fz) within it (0..1), on the triangles it is drawn with.
+inline float NativeCellHeight(float a, float b, float c, float d, float cell, float fx, float fz)
+{
+    if (NativeCellAcross(a, b, c, d, cell))
+        return fz > fx ? a + fz * (c - a) + fx * (d - c) : a + fx * (b - a) + fz * (d - b);
+    return fx + fz < 1.0f ? a + fx * (b - a) + fz * (c - a) : d + (1.0f - fx) * (c - d) + (1.0f - fz) * (b - d);
+}
+
 }  // namespace rvk::detail

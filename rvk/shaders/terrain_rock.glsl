@@ -42,7 +42,8 @@ vec3 TerrainRockRelief(vec3 posW, vec3 n, float depth)
 {
     if (!TerrainRockOn() || depth <= 0.0 || dot(n, n) <= 1e-8) return vec3(0.0);
     n = normalize(n);
-    const float side = smoothstep(0.9, 0.6, abs(n.y)) * clamp(FL.terrain.x, 0.0, 1.0);
+    // (From ~45 degrees, all of it by ~60: ground one can stand on keeps its height - characters stand on the game's.)
+    const float side = smoothstep(0.7, 0.5, abs(n.y)) * clamp(FL.terrain.x, 0.0, 1.0);
     if (side <= 0.0) return vec3(0.0);
     const vec4 uv = TerrainRockLays(posW);
     vec2 across = pow(abs(n.zx) + 1e-4, vec2(4.0));

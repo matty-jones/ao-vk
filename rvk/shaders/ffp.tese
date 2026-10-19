@@ -4,8 +4,8 @@
 // smooth normals say, rounding low-polygon silhouettes. D.tess.y: how much (0 = flat); each corner's pull also
 // weighted by how smooth the model is there (t_vSmoothN's length: 0 at hard edges, which stay sharp). Then what the vertex shader
 // computes from the world position: the clip position (with the TAA jitter), the motion vector inputs, fog distance.
-// The native ground (D.terrain.y set): the shape fades out towards D.tess.z (no step where the splitting ends), and
-// its cliffs' rock stands out of them by up to D.tess.w units (terrain_rock.glsl). Both of its passes run this alike:
+// The native ground (D.terrain.y set): only its steep parts rounded, the shape fading out towards D.tess.z (no step
+// where the splitting ends), and its cliffs' rock stands out of them by up to D.tess.w units (terrain_rock.glsl). Both of its passes run this alike:
 // the lighting pass's equal depth test meets the base pass's.
 #extension GL_EXT_nonuniform_qualifier : require
 #include "constants.glsl"
@@ -49,7 +49,18 @@ void main()
         const vec3 e = vec3(b.y * b.z, b.z * b.x, b.x * b.y);   // (edges opposite corners 0, 1, 2)
         const vec3 we = smoothstep(vec3(0.6), vec3(0.9), vec3(dot(n1, n2), dot(n2, n0), dot(n0, n1)));
         const float crease = dot(e, we) / max(e.x + e.y + e.z, 1e-12);
-        posW = p + (D.tess.y * fade * crease) * pull;
+        // Only steep ground is rounded, each corner's pull by its own slope (from ~37 degrees, all of it by ~53): where
+        // one can stand the ground stays the game's flat triangles - characters stand on those, and rounded, a
+        // hillside sank under their feet. (Per corner: an edge's shape still comes from its two ends alone.)
+        vec3 steep = smoothstep(vec3(0.8), vec3(0.6), abs(vec3(n0.y, n1.y, n2.y)));
+        vec3 pullSteep = vec3(0.0);
+        for (int i = 0; i < 3; ++i) {
+            const float weight = length(t_vSmoothN[i]);
+            if (weight <= 0.0) continue;
+            const vec3 n = t_vSmoothN[i] / weight;
+            pullSteep += b[i] * weight * steep[i] * (-dot(p - t_vPosW[i], n) * n);
+        }
+        posW = p + (D.tess.y * fade * crease) * pullSteep;
         if (fade > 0.0 && D.tess.w > 0.0) posW += TerrainRockRelief(p, vSmoothN, D.tess.w * fade);
     } else {
         posW = p + D.tess.y * pull;

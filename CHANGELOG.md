@@ -31,6 +31,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (the ground's triangles); it fades in along a soft, wandering line.
 - The rocks at the feet of cliffs are shaded smooth, round over their lumps with a few sharp edges, instead of showing
   their triangles.
+- On the ground drawn by ao-vk, characters and rocks no longer float above hillsides: ground you can stand on is the
+  game's own shape again (its cells split as the game splits them, not rounded), and only steep cliffs are reshaped.
 - The feet and rims of cliffs that run at a slant are smooth slopes instead of a row of sharp triangular teeth.
 - Texture packs' material maps for ground tiles (shine, wet look, crevices; `RVK_Pbr`) work on the ground drawn by
   ao-vk too, tile by tile as on the game's own ground.

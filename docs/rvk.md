@@ -77,8 +77,10 @@
   lightmaps (their palette indices in our surfaces' CPU copies, the shade from the palette). The lightmap outlives a
   playfield's ground (it is the hour's). rvk
   builds a static patch of (P+1)^2 vertices per 64 cells (the game's format: set 0 the cell coordinates, set 1 the
-  whole playfield's lightmap; `DrawSharedIndexed`, arena-resident; each cell split along its diagonal of least height
-  difference - a split fixed one way made a row of teeth along a cliff at a slant to the cells) and a tile-code texture (each cell's tile's bindless
+  whole playfield's lightmap; `DrawSharedIndexed`, arena-resident; each cell split as the game splits it - what
+  characters stand on - unless steep, a diagonal's ends more than a cell apart in height, and then along its diagonal
+  of least height difference: a split fixed one way made a row of teeth along a cliff at a slant to the cells;
+  `NativeCellAcross`, the rocks placed on the same triangles by `NativeCellHeight`) and a tile-code texture (each cell's tile's bindless
   image and turn). The first ground draw of the game's in a pass draws every patch in view for it with the game's
   state, and every ground draw of the game's is skipped (`NativeGroundReplaces`): the base pass's stand-in texture is
   black, terrain.glsl's native mode reads each pixel's cell's tile (turned, the continuous coordinates' derivatives,
@@ -99,10 +101,11 @@
   native ground per cell (`NativeGroundRgb`: the cell's tile turned; `NativeLightRgb`: the lightmap's texels, kept on
   the CPU). Tessellated near the eye (`RVK_GroundTess`, 0.6: Phong's shape; `RVK_CliffDepth`, 0.4 units): ffp.tesc
   splits each edge by its length and distance (about a third of a unit a segment up close, none from 60 units,
-  `kNativeTessDistance`) from its ends alone, so both triangles beside it agree, in this patch and the next, and
-  drops triangles out of view; ffp.tese rounds the ground towards the vertex normals (the heights' own), not across
+  `kNativeTessDistance`; none where both ends are gentler than ~37 degrees) from its ends alone, so both triangles beside it agree, in this patch and the next, and
+  drops triangles out of view; ffp.tese rounds the steep ground (each corner's pull by its slope, ~37 to ~53 degrees: where one can stand the
+  ground stays the game's triangles, which characters stand on) towards the vertex normals (the heights' own), not across
   creases (per edge, by how far its ends' normals differ: a cliff's foot and rim keep their shape, Phong overshot them
-  into spikes), fading out by the same distance, and pushes the rock out of steep faces by its albedo's brightness
+  into spikes), fading out by the same distance, and pushes the rock out of faces steeper than ~45 degrees by its albedo's brightness
   against its mean at a coarse level (`terrain_rock.glsl`: the lays the fragment shader textures with). Both passes
   tessellate alike (`invariant gl_Position`), so the lighting pass's equal depth test holds; the tessellated draws
   stay out of the depth pre-pass, and lighting and shadow lookups keep the flat triangles' positions. The hour's
