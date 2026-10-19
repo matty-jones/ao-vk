@@ -1,5 +1,10 @@
 # Terrain plan: cliffs, surface, lighting, geometry, clutter
 
+**Status (2026-10-19):** all four phases built - phase 1 on the game's ground and the native ground, phases 2-4 on the
+native ground (docs/native-ground-plan.md), which draws the playfield from its own data. Checked in rvk_demo on
+Stret West Bank's real data; not yet in game. Settings in the options' Terrain section; docs/rvk.md, "Ground
+texturing" and "Native ground".
+
 ## Context
 
 AO's terrain (`AnarchyGround_t`) is what makes the game look most dated. The frame dump
