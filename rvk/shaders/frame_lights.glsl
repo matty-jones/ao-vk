@@ -80,7 +80,7 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
                                 // (0 off: the native ground's tiles')
     vec4 terrain2;              // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y the hour's
                                 // lightmap before this one (its bindless image + 1, the float's bits; 0 none), z how far
-                                // it has faded into this one (0..1); w unused
+                                // it has faded into this one (0..1); w the grain up close (RVK_GroundGrain)
     vec4 terrainRock;           // the cliffs' rock (rvk terrain.cpp; RVK_CliffRock): its albedo, normal and ORM maps'
                                 // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     vec4 terrainRock2;          // ... its mean colour (rgb), its normal map's strength

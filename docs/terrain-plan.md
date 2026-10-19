@@ -112,7 +112,8 @@ and `m_drawTerrainLight`.
 - The cliffs get extra darkening at their feet and in concave parts, using the slope and a cheap height-difference
   term from the existing terrain-sun grid (`rvk/terrain_sun.cpp`).
 
-**5. Detail up close.**
+**5. Detail up close.** Built on the native ground without a new asset (`RVK_GroundGrain`): the cliffs' rock high-passed
+at two small sizes. As designed:
 - A CC0 detail normal and albedo pair (soil grit, small stones) is tiled at about 1-2 units and blended over the
   texture within about 25 units of the camera.
 - It uses the rock detail on steep pixels and the soil detail on flat ones, and fades out before it could shimmer.

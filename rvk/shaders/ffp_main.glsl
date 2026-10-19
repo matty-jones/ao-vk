@@ -806,6 +806,7 @@ void main()
     }
     vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
     if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
+    if (terrainBasePass && TerrainNative()) t0.rgb = TerrainGrain(t0.rgb, terrain, vPosW);
 #ifdef RVK_GLOW
     // The surface's own colour, for the indirect light it reflects: lit draws through the stages under white light,
     // unlit ones as they are (the ground's base pass is its bare texture; its lightmap pass keeps this). A

@@ -459,7 +459,8 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->terrain[2] = std::clamp(m_terrainSettings.variation, 0.0f, 2.0f);
     fl->terrain[3] = m_normalMaps && m_pixelLighting ? m_normalStrength : 0.0f;
     fl->terrain2[0] = std::clamp(m_native.ao, 0.0f, 1.0f);
-    fl->terrain2[1] = fl->terrain2[2] = fl->terrain2[3] = 0.0f;
+    fl->terrain2[1] = fl->terrain2[2] = 0.0f;
+    fl->terrain2[3] = std::clamp(m_terrainSettings.grain, 0.0f, 1.0f);
     FillNativeLights(fl);
     FillTerrainRockLights(fl->terrainRock, fl->terrainRock2);
     fl->dusk[0] = std::clamp(m_afterglow, 0.0f, 2.0f);

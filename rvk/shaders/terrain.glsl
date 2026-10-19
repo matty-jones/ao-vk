@@ -377,6 +377,33 @@ vec3 TerrainVariation(vec3 c, vec3 posW, TerrainMap m)
     return c * clamp(1.0 + 0.26 * k * v.x, 0.5, 1.5);
 }
 
+// Fine grain on the ground up close (FL.terrain2.w, RVK_GroundGrain): a tile's texel is a few centimetres, and at the
+// feet the ground was a soft smear. The rock's fine detail at two small sizes laid across each other (0.9 and 1.37
+// units, turned apart - neither repeats in rows): each read against the same spot three levels coarser, so only its
+// grit is left, not its bands and patches; from above only (the faces have the rock itself), fading out as a repeat
+// shrinks to a few dozen pixels.
+float TerrainGrit(vec2 uv, vec2 dx, vec2 dy)
+{
+    const float lod = max(log2(max(length(dx), length(dy)) * 1024.0), 0.0);
+    const float fine = Luma(TERRAIN_FACE_READ(texImages[TerrainRockImage(0)], uv, dx, dy).rgb);
+    const float coarse = Luma(textureLod(sampler2D(texImages[TerrainRockImage(0)], bindlessSamplers[D.sampIdx.w]), uv,
+                                         lod + 3.0).rgb);
+    return fine / max(coarse, 0.02);
+}
+
+vec3 TerrainGrain(vec3 c, TerrainMap m, vec3 posW)
+{
+    const float k = FL.terrain2.w * m.w.x;
+    if (k <= 0.002 || !TerrainRockOn() || m.clutter) return c;
+    const mat2 turn = mat2(0.8, 0.6, -0.6, 0.8);
+    const vec2 a = posW.xz / 0.9, adx = m.px.xz / 0.9, ady = m.py.xz / 0.9;
+    const float fade = 1.0 - smoothstep(0.012, 0.04, max(length(adx), length(ady)));
+    if (fade <= 0.0) return c;
+    const float g = sqrt(TerrainGrit(a, adx, ady) * TerrainGrit(turn * posW.xz / 1.37, turn * m.px.xz / 1.37,
+                                                                 turn * m.py.xz / 1.37));
+    return c * clamp(1.0 + 0.8 * k * fade * (g - 1.0), 0.75, 1.25);
+}
+
 // The native ground's lightmap at lightmap coordinates at: the hour's (stage 0), faded in from the last hour's
 // (FL.terrain2.y, z: the game swaps them whole, and the land's light jumped).
 vec4 NativeLightmapAt(vec2 at)

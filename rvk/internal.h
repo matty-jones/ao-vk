@@ -167,7 +167,7 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // (0 off: the native ground's tiles')
     float terrain2[4];             // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y the hour's
                                    // lightmap before this one (its bindless image + 1, the float's bits; 0 none), z how
-                                   // far it has faded into this one (0..1); w unused
+                                   // far it has faded into this one (0..1); w the grain up close (RVK_GroundGrain)
     float terrainRock[4];          // the cliffs' rock (terrain.cpp; RVK_CliffRock): its albedo, normal and ORM maps'
                                    // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     float terrainRock2[4];         // ... its mean colour (rgb), its normal map's strength

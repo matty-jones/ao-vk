@@ -22,6 +22,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Rocks and boulders lie at the feet of cliffs and canyon walls, and stones on rough slopes, in the colour of the
   rock around them and lit and shadowed like the ground (`RVK_GroundRocks`, 1; 0 for none, up to 2 for twice as
   many). Meadows, roads and towns are left clear.
+- The ground at your feet has fine grit in it instead of a soft smear of its texture (`RVK_GroundGrain`, 0.6; 0 for
+  none).
 - The feet and rims of cliffs that run at a slant are smooth slopes instead of a row of sharp triangular teeth.
 - Texture packs' material maps for ground tiles (shine, wet look, crevices; `RVK_Pbr`) work on the ground drawn by
   ao-vk too, tile by tile as on the game's own ground.

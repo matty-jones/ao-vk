@@ -124,7 +124,10 @@
   material maps (RVK_Pbr): each cell's in the maps texture's B, A; the lighting pass is marked PBR with one of them
   standing in (`m_native.anyOrm`) and reads each cell's own (terrain.glsl `NativeOrm`, turned as its tile; the rock's
   on faces and rocks), its colour from the cells' tiles; a cell whose tile has none is lit without PBR, as the game's
-  ground draws per tile. Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  ground draws per tile. Grain at the feet (`RVK_GroundGrain`, 0.6; terrain.glsl `TerrainGrain`, base pass): the
+  rock's luminance at 0.9 and 1.37 units, turned apart, each over the same spot three mip levels coarser (a high-pass:
+  the photo's bands and patches at that size made blotches, its grit is left), from above, fading out as a repeat
+  shrinks under ~80 pixels. Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):
