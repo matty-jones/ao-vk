@@ -395,9 +395,9 @@ void main()
         vCutout = 0.35;                          // as a plant's: the soft rim blends (the texture's own edge)
 #else
         // The native ground's pebbles (rvk ground_pebbles.cpp; D.terrainAt.y 3): sunk into the ground over the last
-        // 8 units of their range (D.terrainAt.z), so they grow out of it as the eye comes near rather than appear.
+        // quarter of their range (D.terrainAt.z), so they grow out of it as the eye comes near rather than appear.
         if (D.terrainAt.y > 2.5 && D.terrainAt.z > 0.0) {
-            float sink = 0.6 * smoothstep(D.terrainAt.z - 8.0, D.terrainAt.z, distance(posW.xyz, C.eyePos.xyz));
+            float sink = 0.6 * smoothstep(0.75 * D.terrainAt.z, D.terrainAt.z, distance(posW.xyz, C.eyePos.xyz));
             posW.y -= sink;
             swayPrev.y -= sink;
         }

@@ -637,7 +637,7 @@ void main()
         // (The native ground's with material maps: its colour as its base pass drew it - the cells' own tiles.)
         if (D.terrainAt.w > 1.5 && ((C.flags.x & F_BUMPBASE) != 0u || (TerrainNative() && (D.mat.z & MAT_BASE) != 0u)))
             terrainBase = TerrainBase(D.texIdx.z, bindlessSamplers[D.sampIdx.x], terrain);
-        else if (D.terrainAt.w > 1.5 && terrain.rock)   // (no maps of the base's own: only the rock's relief)
+        else if (D.terrainAt.w > 1.5 && terrain.rock && !terrain.pebble)   // (no maps of the base's own: only the rock's relief)
             TerrainSettle(texImages[TerrainRockImage(0)], terrain);
     }
     // Shadow: lit draws scale the sunlight (per-pixel lighting), others darken their final colour.
@@ -676,7 +676,8 @@ void main()
         // The ground's lighting pass draws the lightmap; its relief comes from the base pass's texture (F_BUMPBASE):
         // that texture's normal map, else its generated normals - laid by terrain.glsl, with the cliffs' rock's on
         // their faces (then a base without a normal map of its own has the flat one, and no relief from above).
-        const bool terrainRelief = terrainMapped && D.terrainAt.w > 1.5 &&
+        // (Not the native ground's pebbles: a few pixels across, a relief there is none to see.)
+        const bool terrainRelief = terrainMapped && D.terrainAt.w > 1.5 && !terrain.pebble &&
                                    ((C.flags.x & F_NORMALMAP) != 0u || terrain.rock || TerrainNativeMaps());
         if (((C.flags.x & (F_NORMALMAP | F_BUMP)) != 0u || terrainRelief) && len2 > 0.0) {
             vec3 unbumped = n;
@@ -796,7 +797,7 @@ void main()
     if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
         const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
         t0 = NativeLightmapAt(at);
-        if (terrain.side > 0.01) {
+        if (terrain.side > 0.01 && !terrain.clutter) {   // (not the rocks on it: they stand on its flat)
             vec4 blur = vec4(0.0);
             for (int j = -1; j <= 1; ++j)
                 for (int i = -1; i <= 1; ++i) blur += NativeLightmapAt(at + vec2(i, j) * 1.5 / lmSize);

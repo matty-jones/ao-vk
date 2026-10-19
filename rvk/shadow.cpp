@@ -555,6 +555,10 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
     c.kind = m_drawVisualKind;
     c.leafKey = m_drawLeaves ? m_drawLeafKey : 0;
     m_casters.push_back(c);
+    // The native ground's pebbles cast as drawn only: remembered, every block walked past went on casting out of view
+    // - shadows where no stones are drawn, and the shadow pass's time and the caster arena's room for them.
+    if (m_native.pebbleDraw)
+        return;
     if (VisualKind(c.kind) == VisualKind::Static) {
         if (m_statelVerified[0] == 0 || m_statelVerified[1] == 0)
             CheckStatelDraw(m_world, vertexCount, indexCount);   // (statels.cpp: is our placement the game's?)

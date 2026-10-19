@@ -63,8 +63,8 @@ struct DrawTransform {
                                    // (0 = not mapped)
 };
 constexpr float kNativeTessDistance = 60.0f;   // world units: the native ground's tessellation gone from here on
-// The native ground's pebbles (ground_pebbles.cpp): drawn within this of the eye, sunk into the ground over its last
-// 8 units (ffp.vert; DrawTransform terrainAt.z).
+// The native ground's pebbles (ground_pebbles.cpp): drawn within this of the eye at most (each size its own range,
+// sunk into the ground over its last quarter: ffp.vert, DrawTransform terrainAt.z).
 constexpr float kPebbleRange = 40.0f;
 enum : uint32_t { kTerrainBase = 1, kTerrainLight = 2 };   // DrawTransform terrainAt[3]: the ground's base pass; its
                                                            // lighting pass, which reads the base's maps (F_BUMPBASE, MAT_BASE)

@@ -1815,7 +1815,10 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     const VtxTerrain standIn[3] = {{0, -1000, 0, 0, 1, 0, 0, 0, 0, 0}, {1, -1000, 0, 0, 1, 0, 1, 0, 1, 0},
                                    {0, -1000, 1, 0, 1, 0, 0, 1, 0, 1}};
     for (int frame = 0; frame < frames; ++frame) {
+        // (The last 300 frames' GPU and CPU times logged - "ground bench:" - once the rocks and pebbles are made.)
+        if (frame == std::max(frames - 301, 0)) dev.ProfileWindow(true, "");
         if (frame == frames - 1) {
+            dev.ProfileWindow(false, "ground bench: ");
             dev.RequestScreenshot(shot);
             dev.RequestFrameDump("ground-frame.txt");
         }

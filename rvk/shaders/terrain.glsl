@@ -129,6 +129,8 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
         m.w = vec3(a.y, a.z, a.x);
         m.side = 1.0 - a.y;
         m.hex = 0.0;
+        // (A pebble, a few pixels across: the rock from the one side it faces most - one read, not three.)
+        if (m.pebble) m.w = m.w.x >= max(m.w.y, m.w.z) ? vec3(1.0, 0.0, 0.0) : m.w.y >= m.w.z ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
     }
     m.hexW[0] = vec3(0.0);
     for (int i = 1; i < 3; ++i) {

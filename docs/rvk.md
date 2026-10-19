@@ -133,11 +133,15 @@
   tiles whose surface type (`NativeGround::types`, tile_type_data) is dirt, gravel or sand by its base tile's look
   (`Texture::m_line`, `m_edge`, `m_grain`, measured at upload: straight joints, grain; green and smooth grey none;
   `randy-vk\terrain\pebbles.tsv` sets a playfield's type by hand), and only on the texels of a tile that are that
-  ground (16 x 16, not green, near the base tile's colour); up to 70 a cell, 12-corner indexed stones, in blocks of
-  8 x 8 cells made on workers within 44 units, dropped past 52, drawn within `kPebbleRange` (40; `D.terrainAt.y` 3,
-  z the range: ffp.vert sinks them 0.6 into the ground over its last 8 units). Coloured as the ground under them
-  with the rock's grain, each its own shade by a hash of set 0 (where it lies, the same at its corners); only those
-  0.15 across and up cast shadows. The tiles'
+  ground (16 x 16, not green, near the base tile's colour), not on trails (a strip of its type at most 5 cells
+  across covering at most 40 of the 81 cells round it); up to 70 a cell, 12-corner indexed stones, in blocks of
+  8 x 8 cells made on workers within 44 units (~2 ms a block), dropped past 52; three sizes in their own pieces,
+  drawn to 16 (grit), 28 and `kPebbleRange` (40) units (`D.terrainAt.y` 3, z the range: ffp.vert sinks them 0.6 into
+  the ground over its last quarter). Coloured as the ground under them with the rock's grain, each its own shade by
+  a hash of set 0 (where it lies, the same at its corners); shaded cheaply (one rock read along the side they face
+  most, no relief, no lightmap blur - the lighting pass was two thirds of their cost); only the bigger ones (0.15
+  across and up) cast, within 24 units, and only as drawn - never remembered by the caster cache, which kept every
+  block walked past casting out of view. The tiles'
   material maps (RVK_Pbr): each cell's in the maps texture's B, A; the lighting pass is marked PBR with one of them
   standing in (`m_native.anyOrm`) and reads each cell's own (terrain.glsl `NativeOrm`, turned as its tile; the rock's
   on faces and rocks), its colour from the cells' tiles; a cell whose tile has none is lit without PBR, as the game's

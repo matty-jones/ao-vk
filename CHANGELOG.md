@@ -24,7 +24,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   many). Meadows, roads and towns are left clear.
 - Small loose stones lie on flat dirt, gravel and sand near you, grey on gravel and the colour of the ground on dirt,
   each its own shade, and grow out of the ground as you walk towards them instead of popping in (`RVK_GroundPebble`,
-  1; 0 for none, up to 2 for twice as many). Grass, roads, slabs and concrete stay clear; which ground gets them can
+  1; 0 for none, up to 2 for twice as many). Grass, roads, trails, slabs and concrete stay clear; which ground gets them can
   be set by hand per playfield in `randy-vk\terrain\pebbles.tsv` (playfield, surface type, how many).
 - The ground at your feet has fine grit in it instead of a soft smear of its texture (`RVK_GroundGrain`, 0.6; 0 for
   none).

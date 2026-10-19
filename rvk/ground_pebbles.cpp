@@ -39,7 +39,12 @@ constexpr float kMake = 44.0f;                 // ... blocks made within this (a
 constexpr float kDrop = 52.0f;                 // ... and dropped beyond this
 constexpr int kMakeAtOnce = 4;                 // blocks made at a time (on workers) at most
 constexpr float kPerCell = 70.0f;              // pebbles a cell at density 1 (the coarsest gravel), RVK_GroundPebble 1
-constexpr float kCasts = 0.15f;                // pebbles this big across and up cast sun shadows
+// Three sizes, each drawn only as far as it shows (and sunk into the ground over the last quarter of that): grit to
+// 16 units, small stones to 28, the bigger ones - which alone cast sun shadows - to kRange. Drawn out to kRange all,
+// the far grit was a pixel or two of the scene's most expensive shading a stone.
+constexpr float kGrit = 0.08f, kCasts = 0.15f;  // across: under kGrit grit, from kCasts the bigger ones
+constexpr float kClassRange[3] = {16.0f, 28.0f, kRange};
+constexpr float kCastRange = 24.0f;            // ... and those cast within this (a block's box)
 
 uint32_t Hash(uint32_t a, uint32_t b, uint32_t c)
 {
@@ -265,24 +270,51 @@ Device::ClutterBuild Device::BuildNativePebbles(std::shared_ptr<const NativeGrou
         return g.heights[size_t(r) * W + c];
     };
     const auto& shapes = PebbleShapes();
-    std::vector<Vertex> verts[2];               // the ones that don't cast, the ones that do
-    std::vector<uint16_t> idx[2];
-    auto flush = [&](int casts) {
-        if (verts[casts].empty()) return;
-        auto data = std::make_shared<std::vector<uint8_t>>(verts[casts].size() * sizeof(Vertex));
-        std::memcpy(data->data(), verts[casts].data(), data->size());
-        auto ix = std::make_shared<std::vector<uint8_t>>(idx[casts].size() * 2);
-        std::memcpy(ix->data(), idx[casts].data(), ix->size());
+    std::vector<Vertex> verts[3];               // grit, small stones, the bigger ones (which cast)
+    std::vector<uint16_t> idx[3];
+    auto flush = [&](int cls) {
+        if (verts[cls].empty()) return;
+        auto data = std::make_shared<std::vector<uint8_t>>(verts[cls].size() * sizeof(Vertex));
+        std::memcpy(data->data(), verts[cls].data(), data->size());
+        auto ix = std::make_shared<std::vector<uint8_t>>(idx[cls].size() * 2);
+        std::memcpy(ix->data(), idx[cls].data(), ix->size());
         NativeClutter piece;
         piece.vertices = data;
         piece.indices = ix;
-        piece.count = uint32_t(verts[casts].size());
-        piece.indexCount = uint32_t(idx[casts].size());
+        piece.count = uint32_t(verts[cls].size());
+        piece.indexCount = uint32_t(idx[cls].size());
         piece.pebbles = true;
-        piece.casts = casts != 0;
+        piece.casts = cls == 2;
+        piece.size = uint8_t(cls);
         out.pieces.push_back(piece);
-        verts[casts].clear();
-        idx[casts].clear();
+        verts[cls].clear();
+        idx[cls].clear();
+    };
+    // A trail (kept clear: walked, maintained): a strip of its own surface type at most 5 cells across - its
+    // narrowest run of that type through the cell, along x, z or a diagonal - that covers at most half the 9 x 9 cells
+    // round it (a strip, wandering or not, not the edge of a wide stretch). A desert's trails and the sandy paths
+    // through Stret West Bank's grass; a broad stretch of the same sand keeps its pebbles.
+    auto typeAt = [&](int c, int r) {
+        c = std::clamp(c, 0, int(g.cellsX) - 1);
+        r = std::clamp(r, 0, int(g.cellsZ) - 1);
+        const uint32_t tile = g.codes[size_t(r) * g.cellsX + c] & 0x3FFFu;
+        return tile < g.types.size() ? uint32_t(g.types[tile]) : 0xFFFFFFFFu;
+    };
+    auto trail = [&](int c, int r) {
+        const uint32_t t = typeAt(c, r);
+        const int dirs[4][2] = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
+        int narrowest = 99;
+        for (const auto& d : dirs) {
+            int run = 1;
+            for (int s = -1; s <= 1; s += 2)
+                for (int k = 1; k <= 5 && typeAt(c + s * k * d[0], r + s * k * d[1]) == t; ++k) ++run;
+            narrowest = std::min(narrowest, run);
+        }
+        if (narrowest > 5) return false;
+        int same = 0;
+        for (int dz = -4; dz <= 4; ++dz)
+            for (int dx = -4; dx <= 4; ++dx) same += typeAt(c + dx, r + dz) == t ? 1 : 0;
+        return same <= 40;
     };
     density = std::clamp(density, 0.0f, 2.0f);
     for (uint32_t j = 0; j < kBlock && bz * kBlock + j < g.cellsZ; ++j)
@@ -290,7 +322,7 @@ Device::ClutterBuild Device::BuildNativePebbles(std::shared_ptr<const NativeGrou
             const int c = int(bx * kBlock + i), r = int(bz * kBlock + j);
             const uint16_t code = g.codes[size_t(r) * g.cellsX + c];
             const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
-            if (tile >= pt.density.size() || pt.density[tile] <= 0.0f) continue;
+            if (tile >= pt.density.size() || pt.density[tile] <= 0.0f || trail(c, r)) continue;
             const float h00 = H(c, r), h10 = H(c + 1, r), h01 = H(c, r + 1), h11 = H(c + 1, r + 1);
             // (Not on slopes: a slope's stones roll off - the rocks' scree is there.)
             const float gx0 = (h10 + h11 - h00 - h01) / (2.0f * g.cellX), gz0 = (h01 + h11 - h00 - h10) / (2.0f * g.cellZ);
@@ -326,14 +358,15 @@ Device::ClutterBuild Device::BuildNativePebbles(std::shared_ptr<const NativeGrou
                 const float az[3] = {ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]};
                 const float x = (float(c) + fx) * g.cellX, z = (float(r) + fz) * g.cellZ;
                 const float lift = 0.3f * sy;   // (most of it out of the ground: its cut bottom just under)
-                const int casts = std::max(sx, sz) * 2.0f >= kCasts ? 1 : 0;
-                if (verts[casts].size() + 12 > 65535) flush(casts);
+                const float across = std::max(sx, sz) * 2.0f;
+                const int cls = across >= kCasts ? 2 : across >= kGrit ? 1 : 0;
+                if (verts[cls].size() + 12 > 65535) flush(cls);
                 const PebbleShape& shape = shapes[std::min(int(shapeAt * 8.0f), 7)];
                 // (Set 0: where it lies in cell coordinates, at the middle of a 1/256 step - the same at all its corners
                 // as the GPU interpolates it: its colour's hash and the ground's colour under it, terrain.glsl.)
                 const float s0u = (std::floor((float(c) + fx) * 256.0f) + 0.5f) / 256.0f;
                 const float s0v = (std::floor((float(r) + fz) * 256.0f) + 0.5f) / 256.0f;
-                const uint16_t first = uint16_t(verts[casts].size());
+                const uint16_t first = uint16_t(verts[cls].size());
                 for (int e = 0; e < 12; ++e) {
                     const auto& o = shape.p[e];
                     const float lx = o[0] * sx, ly = o[1] * sy + lift, lz = o[2] * sz;
@@ -351,15 +384,16 @@ Device::ClutterBuild Device::BuildNativePebbles(std::shared_ptr<const NativeGrou
                     vx.v0 = s0v;
                     vx.u1 = vx.x / g.cellX / float(g.cellsX);
                     vx.v1 = vx.z / g.cellZ / float(g.cellsZ);
-                    verts[casts].push_back(vx);
+                    verts[cls].push_back(vx);
                 }
                 for (const auto& f : kFaces)
-                    for (int e = 0; e < 3; ++e) idx[casts].push_back(uint16_t(first + f[e]));
+                    for (int e = 0; e < 3; ++e) idx[cls].push_back(uint16_t(first + f[e]));
                 ++out.rocks;
             }
         }
     flush(0);
     flush(1);
+    flush(2);
     return out;
 }
 
@@ -452,7 +486,9 @@ void Device::DrawNativePebbles(const d3d::Matrix& vp)
         }
         if (nb.d2 > kRange * kRange || b.pieces.empty() || BoxInClip(b.lo, b.hi, vp, true) < 0) continue;
         for (const NativeClutter& piece : b.pieces) {
-            m_native.pebbleDraw = piece.casts ? 1 : 2;
+            if (nb.d2 > kClassRange[piece.size] * kClassRange[piece.size]) continue;
+            m_native.pebbleDraw = piece.casts && nb.d2 < kCastRange * kCastRange ? 1 : 2;
+            m_native.pebbleRange = kClassRange[piece.size];
             DrawSharedIndexed(d3d::TriangleList, kFvf, piece.vertices, 0, piece.count, piece.indices, piece.indexCount);
         }
     }

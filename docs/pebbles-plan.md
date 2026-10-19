@@ -10,7 +10,9 @@ Changed from the plan after looking at it in rvk_demo: 70 a cell at density 1, n
 stray stones, not gravel); rounder and higher out of the ground (flat ones half sunk were 1 - 3 cm high: invisible);
 coloured as the ground under them with the rock's grain only in their brightness (the rock's own hue made brown stones
 on grey gravel); made within 44 units, dropped past 52 (memory); the fade a sink into the ground (ffp.vert), not a
-shrink. The classifier (tools/ground-data.py --types) matches the table below on 790, and Newland Desert, Tir County
+shrink. After the first in-game look: trails kept clear (by shape: a narrow strip of its type, not by texture - 790's
+footpaths are the same type as its broad sand), three size classes with their own ranges, a cheap shading path, and
+casters not remembered (measured in rvk_demo at 2560 x 1440 on gravel: about 0.2 ms of GPU at density 1). The classifier (tools/ground-data.py --types) matches the table below on 790, and Newland Desert, Tir County
 and the Perpetual Wastelands use the same tile textures.
 
 ## What we know
