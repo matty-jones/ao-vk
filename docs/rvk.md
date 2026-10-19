@@ -77,7 +77,8 @@
   lightmaps (their palette indices in our surfaces' CPU copies, the shade from the palette). The lightmap outlives a
   playfield's ground (it is the hour's). rvk
   builds a static patch of (P+1)^2 vertices per 64 cells (the game's format: set 0 the cell coordinates, set 1 the
-  whole playfield's lightmap; `DrawSharedIndexed`, arena-resident) and a tile-code texture (each cell's tile's bindless
+  whole playfield's lightmap; `DrawSharedIndexed`, arena-resident; each cell split along its diagonal of least height
+  difference - a split fixed one way made a row of teeth along a cliff at a slant to the cells) and a tile-code texture (each cell's tile's bindless
   image and turn). The first ground draw of the game's in a pass draws every patch in view for it with the game's
   state, and every ground draw of the game's is skipped (`NativeGroundReplaces`): the base pass's stand-in texture is
   black, terrain.glsl's native mode reads each pixel's cell's tile (turned, the continuous coordinates' derivatives,

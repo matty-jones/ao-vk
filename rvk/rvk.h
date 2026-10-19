@@ -1013,7 +1013,7 @@ private:
         bool pebbles = false;                    // the small rocks (drawn nearer)
     };
     struct NativePatch {
-        std::shared_ptr<const std::vector<uint8_t>> vertices;
+        std::shared_ptr<const std::vector<uint8_t>> vertices, indices;   // (each cell's diagonal its own)
         float lo[3], hi[3];
         std::vector<NativeClutter> clutter;      // its rocks, made when the eye is near
         bool clutterMade = false;
@@ -1021,8 +1021,7 @@ private:
     struct NativeState {
         std::shared_ptr<const NativeGround> ground;
         std::vector<NativePatch> patches;
-        std::shared_ptr<const std::vector<uint8_t>> indices;
-        uint32_t vertices = 0, indexCount = 0;
+        uint32_t vertices = 0, indexCount = 0;   // a patch's
         Texture* codes = nullptr;
         Texture* maps = nullptr;                 // each cell's tile's normal map and material map (their bindless images
                                                  // in R, G and B, A; 0xFFFF none)
