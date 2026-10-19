@@ -120,7 +120,8 @@
   its patches (`m_native.clutter`; `D.terrainAt.y` 2): the rock laid from above and both sides by their faces
   (terrain.glsl `TerrainClutter`), the ground's lightmap where they lie turned to their faces by the lightmap's fit
   (`NativeSunTurn`: a + b.n over a + b.y). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
-  the grass. Made 2 patches a frame within 200 units, small ones drawn within 90, dropped past 450. The tiles'
+  the grass. Made on worker threads (5-8 ms a patch), 2 patches at a time, within 200 units; small ones drawn within
+  90, dropped past 450. The tiles'
   material maps (RVK_Pbr): each cell's in the maps texture's B, A; the lighting pass is marked PBR with one of them
   standing in (`m_native.anyOrm`) and reads each cell's own (terrain.glsl `NativeOrm`, turned as its tile; the rock's
   on faces and rocks), its colour from the cells' tiles; a cell whose tile has none is lit without PBR, as the game's

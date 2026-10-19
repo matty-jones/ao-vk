@@ -1015,11 +1015,16 @@ private:
         uint32_t count = 0;                      // vertices (and indices: one each)
         bool pebbles = false;                    // the small rocks (drawn nearer)
     };
+    struct ClutterBuild {                        // a patch's rocks as made (on a worker)
+        std::vector<NativeClutter> pieces;
+        uint32_t rocks = 0;
+    };
     struct NativePatch {
         std::shared_ptr<const std::vector<uint8_t>> vertices, indices;   // (each cell's diagonal its own)
         float lo[3], hi[3];
         std::vector<NativeClutter> clutter;      // its rocks, made when the eye is near
         bool clutterMade = false;
+        std::future<ClutterBuild> clutterPending;   // ... being made
     };
     struct NativeState {
         std::shared_ptr<const NativeGround> ground;
@@ -1060,7 +1065,9 @@ private:
     void FillNativeLights(detail::FrameLights* fl);
     void MakeNativeCodes();
     void DrawNativeGround(bool lightPass);
-    void MakeNativeClutter(uint32_t patch);
+    static ClutterBuild BuildNativeClutter(std::shared_ptr<const NativeGround> ground, uint32_t patch, float density,
+                                           std::vector<uint8_t> grassy);
+    std::vector<uint8_t> GrassyTiles() const;
     void DrawNativeClutter(const d3d::Matrix& viewProj);
     void DestroyNativeGround();
     // The ground's chunks' texture coordinates fitted to the world (terrain.cpp), by TerrainChunkKey: kept across

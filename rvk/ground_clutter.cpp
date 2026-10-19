@@ -9,11 +9,12 @@
 // from - set 0 its cell), the lighting
 // pass gives them the ground's light where they lie - its lightmap, turned to their faces by the lightmap's fit
 // (NativeSunTurn) - so they sit in the land's light and shade. They cast sun shadows (the ground itself doesn't).
-// Made a few patches a frame as the camera comes near, dropped when it is far.
+// Made on worker threads, a couple of patches at a time, as the camera comes near; dropped when it is far.
 #include "internal.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -30,7 +31,7 @@ constexpr float kRange = 200.0f;               // world units: rocks drawn withi
 constexpr float kKeep = 450.0f;                // ... and kept made within this
 constexpr float kSmallRange = 90.0f;           // ... the small ones (under kSmall across) within this
 constexpr float kSmall = 0.45f;
-constexpr int kMakePerFrame = 2;               // patches' rocks made a frame at most
+constexpr int kMakeAtOnce = 2;                 // patches' rocks made at a time (on workers) at most
 constexpr uint32_t kMaxRocksPerPatch = 6000;
 
 uint32_t Hash(uint32_t a, uint32_t b, uint32_t c)
@@ -122,14 +123,14 @@ const std::vector<Shape>& Shapes()
 
 }  // namespace
 
-// One patch's rocks (patch i of the ground's): where the land says they fell, made into static meshes of at most 65535
-// vertices each.
-void Device::MakeNativeClutter(uint32_t index)
+// One patch's rocks (patch index of the ground's): where the land says they fell, made into static meshes of at most
+// 65535 vertices each. On a worker thread (5 to 8 ms a patch): it reads the ground's data only - which tiles are grass
+// (grassy, by tile) the render thread worked out from their textures.
+Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGround> ground, uint32_t index,
+                                                float density, std::vector<uint8_t> grassy)
 {
-    NativePatch& p = m_native.patches[index];
-    p.clutterMade = true;
-    p.clutter.clear();
-    const NativeGround& g = *m_native.ground;
+    ClutterBuild out;
+    const NativeGround& g = *ground;
     const uint32_t P = g.patch, pw = (g.cellsX + P - 1) / P;
     const uint32_t px = index % pw, pz = index / pw, W = g.cellsX + 1;
     auto H = [&](int c, int r) {
@@ -144,12 +145,10 @@ void Device::MakeNativeClutter(uint32_t index)
         const float gx = (b + e - a - d) / (2.0f * g.cellX), gz = (d + e - a - b) / (2.0f * g.cellZ);
         return std::sqrt(gx * gx + gz * gz);
     };
-    // A green tile (grass) gets only the cliffs' scree, not stones over its slopes.
+    // A grass tile gets only the cliffs' scree, not stones over its slopes.
     auto green = [&](int c, int r) {
-        const uint16_t code = g.codes[size_t(r) * g.cellsX + c];
-        const uint32_t tile = code & 0x3FFFu;
-        const Texture* t = tile < g.tiles.size() ? g.tiles[tile] : nullptr;
-        return t && t->m_mean[0] >= 0.0f && t->m_mean[1] > t->m_mean[0] * 1.08f && t->m_mean[1] > t->m_mean[2] * 1.08f;
+        const uint32_t tile = g.codes[size_t(r) * g.cellsX + c] & 0x3FFFu;
+        return tile < grassy.size() && grassy[tile];
     };
     const auto& shapes = Shapes();
     std::vector<Vertex> lists[2];                // the big rocks, the small
@@ -162,15 +161,20 @@ void Device::MakeNativeClutter(uint32_t index)
         auto idx = std::make_shared<std::vector<uint8_t>>(verts.size() * 2);
         uint16_t* ix = reinterpret_cast<uint16_t*>(idx->data());
         for (size_t i = 0; i < verts.size(); ++i) ix[i] = uint16_t(i);
-        p.clutter.push_back({data, idx, uint32_t(verts.size()), pebbles != 0});
+        out.pieces.push_back({data, idx, uint32_t(verts.size()), pebbles != 0});
         verts.clear();
     };
-    const float density = std::clamp(m_native.rocks, 0.0f, 2.0f);
+    density = std::clamp(density, 0.0f, 2.0f);
+    // (Every cell's slope and mean height over the patch and two cells round it, once: each cell looks at 24 others.)
+    const int B = int(P) + 4, c0 = int(px * P) - 2, r0 = int(pz * P) - 2;
+    std::vector<float> slopes(size_t(B) * B), means(size_t(B) * B);
+    for (int r = 0; r < B; ++r)
+        for (int c = 0; c < B; ++c) slopes[size_t(r) * B + c] = slope(c0 + c, r0 + r, &means[size_t(r) * B + c]);
     for (uint32_t j = 0; j < P && pz * P + j < g.cellsZ; ++j)
         for (uint32_t i = 0; i < P && px * P + i < g.cellsX; ++i) {
             const int c = int(px * P + i), r = int(pz * P + j);
-            float mean;
-            const float s = slope(c, r, &mean);
+            const size_t at = size_t(r - r0) * B + size_t(c - c0);
+            const float mean = means[at], s = slopes[at];
             // A cliff rising from here: the steepest cell within two whose ground is above this one's - where the
             // rocks came from, and so their colour.
             float cliff = 0.0f;
@@ -178,8 +182,8 @@ void Device::MakeNativeClutter(uint32_t index)
             for (int dz = -2; dz <= 2; ++dz)
                 for (int dx = -2; dx <= 2; ++dx) {
                     if (!dx && !dz) continue;
-                    float m;
-                    const float t = slope(c + dx, r + dz, &m);
+                    const size_t n = at + size_t(ptrdiff_t(dz) * B + dx);
+                    const float m = means[n], t = slopes[n];
                     if (m > mean + 1.0f && t > cliff) {
                         cliff = t;
                         fromC = std::clamp(c + dx, 0, int(g.cellsX) - 1);
@@ -262,7 +266,8 @@ void Device::MakeNativeClutter(uint32_t index)
         }
     flush(0);
     flush(1);
-    m_native.rocksMade += rocks;
+    out.rocks = rocks;
+    return out;
 }
 
 // The rocks of the patches near the eye and in view, for a pass (from DrawNativeGround, the ground's state set);
@@ -271,7 +276,9 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
 {
     if (m_native.rocks <= 0.0f || !TerrainRockOn() || !m_native.ground) return;
     UpdateFrameEye();
-    int made = 0;
+    int pending = 0;
+    for (const NativePatch& p : m_native.patches) pending += p.clutterPending.valid() ? 1 : 0;
+    std::vector<uint8_t> grassy;
     m_native.clutter = true;
     for (uint32_t i = 0; i < m_native.patches.size(); ++i) {
         NativePatch& p = m_native.patches[i];
@@ -282,7 +289,7 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
         }
         if (d2 > kKeep * kKeep) {
             if (p.clutterMade) { p.clutter.clear(); p.clutterMade = false; }
-            continue;
+            continue;                            // (one being made is taken when it comes near again)
         }
         if (d2 > kRange * kRange) continue;
         bool outside[6] = {true, true, true, true, true, true};
@@ -301,9 +308,21 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
         }
         if (outside[0] || outside[1] || outside[2] || outside[3] || outside[4] || outside[5]) continue;
         if (!p.clutterMade) {
-            if (made >= kMakePerFrame) continue;
-            ++made;
-            MakeNativeClutter(i);
+            // (Made on a worker, kMakeAtOnce patches at a time; drawn once in.)
+            if (!p.clutterPending.valid()) {
+                if (pending >= kMakeAtOnce) continue;
+                if (grassy.empty()) grassy = GrassyTiles();
+                p.clutterPending = std::async(std::launch::async, BuildNativeClutter, m_native.ground, i, m_native.rocks,
+                                              grassy);
+            }
+            if (p.clutterPending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+                ++pending;
+                continue;
+            }
+            ClutterBuild built = p.clutterPending.get();
+            p.clutter = std::move(built.pieces);
+            p.clutterMade = true;
+            m_native.rocksMade += built.rocks;
         }
         for (const NativeClutter& piece : p.clutter)
             if (!piece.pebbles || d2 < kSmallRange * kSmallRange)
@@ -312,12 +331,25 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
     m_native.clutter = false;
 }
 
+// Which of the ground's tiles are grass (their mean colour green), by tile.
+std::vector<uint8_t> Device::GrassyTiles() const
+{
+    std::vector<uint8_t> out(m_native.ground->tiles.size(), 0);
+    for (size_t i = 0; i < out.size(); ++i) {
+        const Texture* t = m_native.ground->tiles[i];
+        out[i] = t && t->m_mean[0] >= 0.0f && t->m_mean[1] > t->m_mean[0] * 1.08f && t->m_mean[1] > t->m_mean[2] * 1.08f;
+    }
+    return out;
+}
+
 // RVK_GroundRocks: how many (0 none, 1 as placed, 2 twice); every patch's made again.
 void Device::SetNativeGroundRocks(float density)
 {
     if (density == m_native.rocks) return;
     m_native.rocks = density;
     for (NativePatch& p : m_native.patches) {
+        if (p.clutterPending.valid()) p.clutterPending.wait();   // (made with the old count: dropped)
+        p.clutterPending = {};
         p.clutter.clear();
         p.clutterMade = false;
     }
