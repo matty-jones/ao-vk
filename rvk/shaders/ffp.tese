@@ -14,8 +14,11 @@
 
 invariant gl_Position;
 
-// Lower-left domain origin (pipeline): counter-clockwise here keeps the patch's winding.
-layout(triangles, equal_spacing, ccw) in;
+// Lower-left domain origin (pipeline): counter-clockwise here keeps the patch's winding. Fractional spacing: as a level
+// grows, new points slide out of their neighbours instead of every point jumping at each whole step - the ground's
+// levels (by distance) and the characters' (by closeness) change as the camera moves, and whole steps showed as the
+// shape popping (user, 2026-10-19).
+layout(triangles, fractional_odd_spacing, ccw) in;
 
 #define IN(type, name, loc) layout(location = loc) in type t_##name[];
 #define OUT(type, name, loc) layout(location = loc) out type name;

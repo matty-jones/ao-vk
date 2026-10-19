@@ -91,6 +91,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### Fixed
 - With the camera just below the top of a wall or building (or beside a cliff face), the character and most of the
   world could vanish from view; they stay drawn now.
+- The rounded shapes of the ground and of characters (`RVK_GroundTess`, `RVK_Tess`) change smoothly as the camera moves
+  instead of popping in visible steps.
 - Day turned to night all at once: the picture darkened and took on its night colours within a second, the land's
   light switched to the moon's with its shadows at full strength, and the hills' shade and the low sun's warm tint
   went out together. The change from dusk to night now follows the sun as it sinks, over several minutes of game time.
