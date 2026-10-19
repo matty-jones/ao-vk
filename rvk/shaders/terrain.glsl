@@ -14,6 +14,9 @@
 //   up or down too, its layers were chopped into short dashes, a camouflage pattern - and its layers bend gently up and
 //   down along the cliff instead, as strata do, so its bands don't stack into the same rows up a high wall.
 // - Variation: big lighter and darker patches over the land and up cliffs (FL.terrain.z).
+// - The native ground (rvk native_ground.cpp, D.terrain.y): rvk's own patches, the game's coordinates set 0 the cell
+//   coordinates (world / cell size); each pixel's cell's tile and turn from the tile-code texture, read with the
+//   continuous coordinates' derivatives (no seams in the mip levels between cells), the game's clamped sampler.
 // The base pass and its lighting pass compute the same weights from the same vertices: the relief and highlights stay
 // on the texture they belong to. Derivatives are taken once (TerrainMapAt, in uniform control flow); every read
 // after it is a textureGrad, so the reads may be skipped where their weight is 0.
@@ -130,6 +133,48 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
     return m;
 }
 
+// ---- the native ground: each cell's own tile (docs/native-ground-plan.md)
+
+bool TerrainNative() { return floatBitsToUint(D.terrain.y) != 0u; }
+
+// The cell's tile's bindless image and its turn: the tile-code texture's texel (R, G the image, B the turn).
+uvec2 NativeCell(vec2 cell)
+{
+    const uint codes = floatBitsToUint(D.terrain.y) - 1u;
+    const ivec2 size = textureSize(sampler2D(texImages[codes], bindlessSamplers[D.sampIdx.w]), 0);
+    const vec4 t = texelFetch(sampler2D(texImages[codes], bindlessSamplers[D.sampIdx.w]),
+                              clamp(ivec2(floor(cell)), ivec2(0), size - 1), 0);
+    const uvec4 b = uvec4(t * 255.0 + 0.5);
+    return uvec2(b.r | b.g << 8, b.b);
+}
+
+// Within a cell (a along x, b along z, 0..1) its tile's coordinates as the game lays them, by the turn
+// (docs/ground-format.md): 0 (a, 1 - b), 1 (1 - b, 1 - a), 2 (1 - a, b), 3 (b, a). And a step's.
+vec2 NativeTurn(vec2 f, uint turn)
+{
+    return turn == 0u ? vec2(f.x, 1.0 - f.y) : turn == 1u ? vec2(1.0 - f.y, 1.0 - f.x)
+         : turn == 2u ? vec2(1.0 - f.x, f.y) : f.yx;
+}
+vec2 NativeTurnStep(vec2 d, uint turn)
+{
+    return turn == 0u ? vec2(d.x, -d.y) : turn == 1u ? vec2(-d.y, -d.x) : turn == 2u ? vec2(-d.x, d.y) : d.yx;
+}
+
+// The ground from above: this pixel's cell's tile. smp: the game's (clamped).
+vec4 NativeTop(vec2 cell, vec2 dx, vec2 dy, sampler smp)
+{
+    const uvec2 c = NativeCell(cell);
+    return textureGrad(sampler2D(texImages[nonuniformEXT(c.x)], smp), NativeTurn(fract(cell), c.y),
+                       NativeTurnStep(dx, c.y), NativeTurnStep(dy, c.y));
+}
+
+// The cell's tile's mean colour (its smallest level): what the rock on its cliff is tinted to.
+vec3 NativeMean(vec2 cell)
+{
+    const uvec2 c = NativeCell(cell);
+    return textureLod(sampler2D(texImages[nonuniformEXT(c.x)], bindlessSamplers[D.sampIdx.w]), vec2(0.5), 14.0).rgb;
+}
+
 #define TERRAIN_READ(img, smp, uv, dx, dy) textureGrad(sampler2D(img, smp), uv, dx, dy)
 // The faces read past the tile's 0..1 (world space, offsets): tiled, whatever the draw's own sampler - the game reads
 // each cell's tile clamped, which smears its edge into stripes there. (The normal maps' sampler: tiled, mipmapped,
@@ -141,7 +186,7 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
 // (their weights m.hexW), blended with its plain coordinates by m.hex.
 vec4 TerrainLay(texture2D top, sampler smp, texture2D face, TerrainMap m, int i)
 {
-    if (i == 0) return TERRAIN_READ(top, smp, m.uv[0], m.dx[0], m.dy[0]);
+    if (i == 0) return TERRAIN_READ(top, smp, m.uv[0], m.dx[0], m.dy[0]);   // (the native ground: TerrainBase)
     vec4 c = vec4(0.0);
     if (m.hex < 1.0) c = TERRAIN_FACE_READ(face, m.uv[i], m.dx[i], m.dy[i]) * (1.0 - m.hex);
     if (m.hex > 0.0)
@@ -177,11 +222,14 @@ void TerrainSettle(texture2D face, inout TerrainMap m)
 }
 
 // The rock's colour made the cell's: its tile's mean colour over the rock's (a sand cliff is sand-coloured rock, a dark
-// one dark); 1 without the rock or with the tile's colour not known yet.
+// one dark) - its brightness whole, its hue two thirds (a grass tile on a steep face made it bright green rock: now
+// a mossy hint); 1 without the rock or with the tile's colour not known yet.
 vec4 TerrainRockTint(TerrainMap m)
 {
-    if (!m.rock || D.terrainAt.x < 0.0) return vec4(1.0);
-    return vec4(clamp(D.terrainAt.xyz / max(FL.terrainRock2.rgb, vec3(0.02)), vec3(0.2), vec3(5.0)), 1.0);
+    if (!m.rock || (!TerrainNative() && D.terrainAt.x < 0.0)) return vec4(1.0);
+    const vec3 mean = TerrainNative() ? NativeMean(m.uv[0]) : D.terrainAt.xyz;
+    const vec3 tint = clamp(mean / max(FL.terrainRock2.rgb, vec3(0.02)), vec3(0.2), vec3(5.0));
+    return vec4(mix(vec3(dot(tint, vec3(0.3, 0.59, 0.11))), tint, 0.66), 1.0);
 }
 
 // The base texture as the ground lays it (the base pass's colour; the lighting pass's PBR albedo): settles the weights.
@@ -189,6 +237,28 @@ vec4 TerrainRockTint(TerrainMap m)
 // photo's - harsher than the game's soft ground beside it: a quarter of the way to its own mean.
 vec4 TerrainBase(uint image, sampler smp, inout TerrainMap m)
 {
+    if (TerrainNative()) {
+        // The native ground: its cell's tile from above; the faces rock, or the cell's tile laid on them (no
+        // hexagons: one cell's tile in each pixel's own).
+        const vec4 top = m.w.x > 0.002 ? NativeTop(m.uv[0], m.dx[0], m.dy[0], smp) * m.w.x : vec4(0.0);
+        if (m.w.x >= 0.998) return top;
+        if (m.rock) {
+            TerrainSettle(texImages[TerrainRockImage(0)], m);
+            vec4 faces = vec4(0.0);
+            for (int i = 1; i < 3; ++i)
+                if (m.w[i] > 0.002) faces += TerrainLay(texImages[image], smp, texImages[TerrainRockImage(0)], m, i) * m.w[i];
+            const float side = m.w.y + m.w.z;
+            faces.rgb = mix(FL.terrainRock2.rgb * side, faces.rgb, 0.75);
+            return top + faces * TerrainRockTint(m);
+        }
+        const uvec2 c = NativeCell(m.uv[0]);
+        vec4 faces = vec4(0.0);
+        for (int i = 1; i < 3; ++i)
+            if (m.w[i] > 0.002)
+                faces += textureGrad(sampler2D(texImages[nonuniformEXT(c.x)], bindlessSamplers[D.sampIdx.w]), m.uv[i],
+                                     m.dx[i], m.dy[i]) * m.w[i];
+        return top + faces;
+    }
     const uint faceImage = m.rock ? TerrainRockImage(0) : image;
     TerrainSettle(texImages[faceImage], m);
     if (!m.rock) return TerrainTexture(texImages[image], smp, texImages[faceImage], m, vec4(1.0));

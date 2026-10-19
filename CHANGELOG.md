@@ -6,6 +6,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- The ground is drawn by ao-vk itself (`RVK_NativeGround`, on): every patch of land shows its own textures out to the
+  horizon instead of the game's blurry baked pictures past a short ring, and walking no longer makes the game rebuild
+  the ground (no stutter, less memory). Cliffs, rock, shadows, mist and wet ground work on it as before. Turn it off
+  to get the game's own ground back.
 - Distant ground is less blurry: the pictures the game bakes for the land past its detailed ring get twice the
   detail (`RVK_GroundFar`: 16 texels a cell by default; 8 for the game's, 32 for more at a large memory cost).
 - The ground keeps its sharp, detailed texture further out (`RVK_GroundRange`, 1.5x the game's furthest setting by

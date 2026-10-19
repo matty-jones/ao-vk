@@ -1513,6 +1513,303 @@ void RunTerrainTest(D& dev, int frames, const std::string& shot)
     }
 }
 
+// Native ground test (--native-ground-test): a playfield of 128 x 128 cells of 4 units drawn as the game draws its
+// ground - each cell its own four vertices with its tile's coordinates turned by the cell's code (docs/ground-format.md),
+// a base-pass draw per patch and tile, a lighting pass per patch with that patch's 64 x 64 lightmap through the game's
+// palette - and, with --native-on, the same data handed to rvk's native ground (native_ground.cpp), which draws it
+// itself and skips those draws: the two pictures should match. Four tiles, each a colour with a mark in one corner
+// (a turn shows), a canyon wall across the view.
+bool g_nativeGroundTest = false;
+bool g_nativeOn = false;
+template <typename D>
+void RunNativeGroundTest(D& dev, int frames, const std::string& shot)
+{
+    constexpr uint32_t kCells = 128, kPatch = 64, kTiles = 4, kTex = 64;
+    constexpr float kCell = 4.0f;
+    auto hash = [](uint32_t x, uint32_t y) {
+        uint32_t h = x * 0x8DA6B343u ^ y * 0xD8163841u;
+        h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12;
+        return h;
+    };
+    const uint32_t colours[kTiles] = {0xFFB07840u, 0xFF8C9A5Au, 0xFF9C8C7Cu, 0xFFC8A46Eu};
+    std::vector<Texture*> tiles;
+    for (uint32_t t = 0; t < kTiles; ++t) {
+        std::vector<uint32_t> px(kTex * kTex);
+        for (uint32_t y = 0; y < kTex; ++y)
+            for (uint32_t x = 0; x < kTex; ++x) {
+                uint32_t c = colours[t];
+                if (x < 20 && y < 12) c = 0xFF202020u;                    // the mark: top left, wider than high
+                if ((hash(x, y + 97 * t) & 15u) == 0) c ^= 0x00101010u;   // (some grain)
+                px[size_t(y) * kTex + x] = c;
+            }
+        tiles.push_back(dev.CreateTexture(kTex, kTex, px.data()));
+    }
+    auto height = [](float x, float z) {
+        float t = std::clamp((z - 150.0f) / 12.0f, 0.0f, 1.0f);
+        t = t * t * (3 - 2 * t);
+        return 2.0f * std::sin(x * 0.05f) * std::cos(z * 0.04f) + 40.0f * t;
+    };
+    auto ground = std::make_shared<NativeGround>();
+    ground->id = 1;
+    ground->cellsX = ground->cellsZ = kCells;
+    ground->patch = kPatch;
+    ground->cellX = ground->cellZ = kCell;
+    ground->heights.resize(size_t(kCells + 1) * (kCells + 1));
+    for (uint32_t r = 0; r <= kCells; ++r)
+        for (uint32_t c = 0; c <= kCells; ++c) ground->heights[size_t(r) * (kCells + 1) + c] = height(c * kCell, r * kCell);
+    ground->codes.resize(size_t(kCells) * kCells);
+    for (uint32_t r = 0; r < kCells; ++r)
+        for (uint32_t c = 0; c < kCells; ++c) {
+            const uint32_t h = hash(c, r);
+            ground->codes[size_t(r) * kCells + c] = uint16_t((h % kTiles) | ((h >> 8) & 3u) << 14);
+        }
+    ground->tiles = tiles;
+    // The lightmap: a 4-bit value a cell (packed, the high nibble first), and the palette at a shade of 0.45.
+    auto packed = std::make_shared<std::vector<uint8_t>>(size_t(kCells / 2) * kCells);
+    auto shadeAt = [&](uint32_t c, uint32_t r) { return uint8_t(6 + (hash(c / 3, r / 3) % 10)); };
+    for (uint32_t r = 0; r < kCells; ++r)
+        for (uint32_t c = 0; c < kCells; c += 2)
+            (*packed)[size_t(r) * (kCells / 2) + c / 2] = uint8_t(shadeAt(c, r) << 4 | shadeAt(c + 1, r));
+    const float shade = 0.45f;
+    auto grey = [&](uint32_t i) {
+        const uint32_t g = uint32_t((float(i) / 15.0f * 188.0f + 4.0f) * (1.0f - shade));
+        return 0xFF000000u | g << 16 | g << 8 | g;
+    };
+    // The game's way: per patch, a draw per tile (each cell four vertices, its tile's coordinates turned), and the
+    // patch's lightmap.
+    struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
+    const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
+    struct Chunk { uint32_t tile; std::vector<VtxTerrain> v; std::vector<uint16_t> i; };
+    struct GamePatch { std::vector<Chunk> chunks; Texture* lightmap; };
+    std::vector<GamePatch> patches;
+    auto normalAt = [&](float x, float z, float n[3]) {
+        const float dx = (height(x + kCell, z) - height(x - kCell, z)) / (2 * kCell);
+        const float dz = (height(x, z + kCell) - height(x, z - kCell)) / (2 * kCell);
+        const float l = std::sqrt(dx * dx + dz * dz + 1);
+        n[0] = -dx / l; n[1] = 1 / l; n[2] = -dz / l;
+    };
+    for (uint32_t pz = 0; pz < kCells / kPatch; ++pz)
+        for (uint32_t px = 0; px < kCells / kPatch; ++px) {
+            GamePatch gp;
+            std::vector<uint32_t> lm(kPatch * kPatch);
+            for (uint32_t j = 0; j < kPatch; ++j)
+                for (uint32_t i = 0; i < kPatch; ++i) lm[j * kPatch + i] = grey(shadeAt(px * kPatch + i, pz * kPatch + j));
+            gp.lightmap = dev.CreateTexture(kPatch, kPatch, lm.data());
+            for (uint32_t t = 0; t < kTiles; ++t) {
+                Chunk ch{t, {}, {}};
+                for (uint32_t j = 0; j < kPatch; ++j)
+                    for (uint32_t i = 0; i < kPatch; ++i) {
+                        const uint32_t c = px * kPatch + i, r = pz * kPatch + j;
+                        const uint16_t code = ground->codes[size_t(r) * kCells + c];
+                        if ((code & 0x3FFFu) != t) continue;
+                        const uint32_t turn = code >> 14;
+                        const uint16_t base = uint16_t(ch.v.size());
+                        for (int k = 0; k < 4; ++k) {
+                            const float a = float(k & 1), b = float(k >> 1);   // (along x, along z)
+                            const float uv[4][2] = {{a, 1 - b}, {1 - b, 1 - a}, {1 - a, b}, {b, a}};
+                            const float x = (c + a) * kCell, z = (r + b) * kCell;
+                            VtxTerrain v{x, height(x, z), z, 0, 1, 0, uv[turn][0], uv[turn][1], (i + a) / kPatch, (j + b) / kPatch};
+                            normalAt(x, z, &v.nx);
+                            ch.v.push_back(v);
+                        }
+                        const uint16_t q[6] = {base, uint16_t(base + 2), uint16_t(base + 1), uint16_t(base + 1),
+                                               uint16_t(base + 2), uint16_t(base + 3)};
+                        ch.i.insert(ch.i.end(), q, q + 6);
+                    }
+                if (!ch.v.empty()) gp.chunks.push_back(std::move(ch));
+            }
+            patches.push_back(std::move(gp));
+        }
+    if (g_nativeOn) {
+        dev.SetNativeGround(ground);
+        dev.SetNativeGroundLightmap(packed, kCells, kCells, shade);
+    }
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1) {
+            dev.RequestScreenshot(shot);
+            dev.RequestFrameDump("native-frame.txt");
+        }
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8098B8, 1.0f);
+        const Vector eye{200.0f + g_terrainYaw * 0.0f, height(200.0f, 90.0f) + 14.0f, 90.0f};
+        const float yaw = 1.5708f + g_terrainYaw;
+        dev.SetTransform(View, LookAtLH(eye, {eye.x + std::cos(yaw), eye.y - 0.25f, eye.z + std::sin(yaw)}, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.3f, 600.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_ALPHATESTENABLE, 0);
+        Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+        dev.SetMaterial(mat);
+        Light sun{};
+        sun.type = LIGHT_DIRECTIONAL;
+        sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
+        sun.direction = {0.55f, -0.7f, 0.45f};
+        dev.SetLight(0, sun);
+        dev.LightEnable(0, true);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
+        for (const GamePatch& gp : patches) {                 // base pass: the tiles, unlit, clamped
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+            dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+            dev.SetTextureStageState(0, TSS_ADDRESSU, TADDRESS_CLAMP);
+            dev.SetTextureStageState(0, TSS_ADDRESSV, TADDRESS_CLAMP);
+            for (const Chunk& ch : gp.chunks) {
+                dev.SetTexture(0, tiles[ch.tile]);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfTerrain, ch.v.data(), uint32_t(ch.v.size()), ch.i.data(),
+                                         uint32_t(ch.i.size()));
+            }
+        }
+        for (const GamePatch& gp : patches) {                 // lighting pass: the lightmap + the lights, multiplying
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_AMBIENT, 0xFF515151);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
+            dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
+            dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
+            dev.SetTexture(0, gp.lightmap);
+            dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
+            for (const Chunk& ch : gp.chunks)
+                dev.DrawIndexedPrimitive(TriangleList, kFvfTerrain, ch.v.data(), uint32_t(ch.v.size()), ch.i.data(),
+                                         uint32_t(ch.i.size()));
+        }
+        dev.SetDrawVisual(0, nullptr);
+        dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        dev.SetTextureStageState(0, TSS_ADDRESSU, TADDRESS_WRAP);
+        dev.SetTextureStageState(0, TSS_ADDRESSV, TADDRESS_WRAP);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.EndFrame();
+    }
+}
+
+// A real playfield's ground (--native-ground-file F, from tools/ground-data.py --export): rvk's native ground drawn
+// from it - the game's heights, tiles (their JPEGs, mipmapped) and the hour's lightmap - from --eye X Y Z, looking
+// --view-yaw R (radians from +x towards +z) and --view-pitch R down. The scene issues one stand-in ground draw a pass,
+// with the ground's state; the native ground draws instead.
+std::string g_groundFile;
+float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
+template <typename D>
+void RunGroundFile(D& dev, int frames, const std::string& shot)
+{
+    FILE* f = std::fopen(g_groundFile.c_str(), "rb");
+    if (!f) { std::printf("can't open %s\n", g_groundFile.c_str()); return; }
+    std::vector<uint8_t> d;
+    {
+        std::fseek(f, 0, SEEK_END);
+        d.resize(size_t(std::ftell(f)));
+        std::fseek(f, 0, SEEK_SET);
+        if (std::fread(d.data(), 1, d.size(), f) != d.size()) d.clear();
+        std::fclose(f);
+    }
+    size_t p = 8;
+    auto u32 = [&] { uint32_t v; std::memcpy(&v, d.data() + p, 4); p += 4; return v; };
+    auto f32 = [&] { float v; std::memcpy(&v, d.data() + p, 4); p += 4; return v; };
+    if (d.size() < 32 || std::memcmp(d.data(), "AOGND1", 6) != 0) { std::printf("not a ground file\n"); return; }
+    auto ground = std::make_shared<NativeGround>();
+    ground->id = 790;
+    ground->cellsX = u32();
+    ground->cellsZ = u32();
+    ground->patch = u32();
+    ground->cellX = f32();
+    ground->cellZ = f32();
+    const size_t nh = size_t(ground->cellsX + 1) * (ground->cellsZ + 1), nc = size_t(ground->cellsX) * ground->cellsZ;
+    ground->heights.resize(nh);
+    std::memcpy(ground->heights.data(), d.data() + p, nh * 4);
+    p += nh * 4;
+    ground->codes.resize(nc);
+    std::memcpy(ground->codes.data(), d.data() + p, nc * 2);
+    p += nc * 2;
+    const uint32_t tiles = u32();
+    for (uint32_t t = 0; t < tiles; ++t) {
+        const uint32_t n = u32();
+        maps::Image img;
+        std::string error;
+        Texture* tex = nullptr;
+        if (n && maps::LoadImageFromMemory(d.data() + p, n, &img, &error)) {
+            maps::MipChain chain;
+            maps::MakeAlbedoChain(img, &chain);
+            tex = maps::Upload(dev, chain);
+        }
+        ground->tiles.push_back(tex);
+        p += n;
+    }
+    const uint32_t lw = u32(), lh = u32();
+    const float shade = f32();
+    auto packed = std::make_shared<std::vector<uint8_t>>(d.data() + p, d.data() + p + size_t((lw + 1) / 2) * lh);
+    std::printf("ground: %u x %u cells, %u tiles, lightmap %u x %u\n", ground->cellsX, ground->cellsZ, tiles, lw, lh);
+    dev.SetNativeGround(ground);
+    dev.SetNativeGroundLightmap(packed, lw, lh, shade);
+    struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
+    const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
+    const VtxTerrain standIn[3] = {{0, -1000, 0, 0, 1, 0, 0, 0, 0, 0}, {1, -1000, 0, 0, 1, 0, 1, 0, 1, 0},
+                                   {0, -1000, 1, 0, 1, 0, 0, 1, 0, 1}};
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1) {
+            dev.RequestScreenshot(shot);
+            dev.RequestFrameDump("ground-frame.txt");
+        }
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8098B8, 1.0f);
+        const Vector eye{g_eye[0], g_eye[1], g_eye[2]};
+        const Vector at{eye.x + std::cos(g_viewYaw) * std::cos(g_viewPitch), eye.y - std::sin(g_viewPitch),
+                        eye.z + std::sin(g_viewYaw) * std::cos(g_viewPitch)};
+        dev.SetTransform(View, LookAtLH(eye, at, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.5f, 2000.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_ALPHATESTENABLE, 0);
+        Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+        dev.SetMaterial(mat);
+        Light sun{};
+        sun.type = LIGHT_DIRECTIONAL;
+        sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
+        sun.direction = {0.55f, -0.7f, 0.45f};
+        dev.SetLight(0, sun);
+        dev.LightEnable(0, true);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
+        dev.SetRenderState(RS_LIGHTING, 0);                  // base pass (the game's state for it)
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+        dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ADDRESSU, TADDRESS_CLAMP);
+        dev.SetTextureStageState(0, TSS_ADDRESSV, TADDRESS_CLAMP);
+        dev.SetTexture(0, ground->tiles[0]);
+        dev.DrawPrimitive(TriangleList, kFvfTerrain, standIn, 3);
+        dev.SetRenderState(RS_LIGHTING, 1);                  // lighting pass
+        dev.SetRenderState(RS_AMBIENT, 0xFF515151);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+        dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
+        dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
+        dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
+        dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
+        dev.DrawPrimitive(TriangleList, kFvfTerrain, standIn, 3);
+        dev.SetDrawVisual(0, nullptr);
+        dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.EndFrame();
+    }
+}
+
 // Ground grass benchmark (--grass-bench): a big hilly terrain drawn like AnarchyGround_t - world-space chunks of
 // non-indexed triangles, an unlit base pass with a green texture and a multiplying light pass with a lightmap - under
 // RVK_GrassOn, the camera walking and turning so tiles keep coming into range. Prints the frame time (mean and worst).
@@ -4164,6 +4461,12 @@ int main(int argc, char** argv)
         else if (a == "--grass-field") { g_grassFieldOn = true; hdr = true; }
         else if (a == "--grass-bench") { g_grassFieldOn = g_grassBench = true; hdr = true; }
         else if (a == "--terrain-test") g_terrainTest = true;
+        else if (a == "--native-ground-test") g_nativeGroundTest = true;
+        else if (a == "--native-on") g_nativeOn = true;
+        else if (a == "--native-ground-file" && i + 1 < argc) g_groundFile = argv[++i];
+        else if (a == "--eye" && i + 3 < argc) { for (int k = 0; k < 3; ++k) g_eye[k] = float(std::atof(argv[++i])); }
+        else if (a == "--view-yaw" && i + 1 < argc) g_viewYaw = float(std::atof(argv[++i]));
+        else if (a == "--view-pitch" && i + 1 < argc) g_viewPitch = float(std::atof(argv[++i]));
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));
         else if (a == "--terrain-maps") g_terrainMaps = true;
@@ -4613,6 +4916,10 @@ int main(int argc, char** argv)
         RunGrassBench(dev, frames, shot);
     } else if (g_terrainTest) {
         RunTerrainTest(dev, frames, shot);
+    } else if (g_nativeGroundTest) {
+        RunNativeGroundTest(dev, frames, shot);
+    } else if (!g_groundFile.empty()) {
+        RunGroundFile(dev, frames, shot);
     } else if (g_waterScene) {
         RunWaterScene(dev, frames, shot);
     } else if (shadowTest) {

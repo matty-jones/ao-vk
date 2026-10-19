@@ -51,8 +51,9 @@ struct DrawTransform {
     float leaf[4];                 // a canopy with leaves (leaves.cpp): its crown's centre (model space), radius (0 = none)
     uint32_t leafSet[4];           // ... its leaves in the pool: first, drawn now | falling-leaf slots << 16, all; the
                                    // ground under it (world y, float bits: where its fallen leaves lie)
-    float terrain[4];              // the ground (terrain.cpp, terrain.glsl): x its tile's repeats per world unit; y z w
-                                   // unused
+    float terrain[4];              // the ground (terrain.cpp, terrain.glsl): x its tile's repeats per world unit; y the
+                                   // native ground's tile-code texture's bindless image + 1 (the float's bits; 0 = the
+                                   // game's ground); z w unused
     float terrainAt[4];            // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown); w:
                                    // kTerrainBase / kTerrainLight (0 = not mapped)
 };

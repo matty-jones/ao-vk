@@ -174,6 +174,9 @@ public:
     void SetShadowMemory(uint32_t mode);
     void SetHillShade(bool on);
     void SetTerrain(const Device::TerrainSettings& s);
+    void SetNativeGround(std::shared_ptr<const NativeGround> ground);
+    void SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h, float shade);
+    void SetNativeGroundOn(bool on);
     void SetShadowView(bool on);
     void SetAlienMap(bool on);
     void SetContactShadows(float s);

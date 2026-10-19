@@ -45,10 +45,20 @@ constexpr uint32_t kSetRadiusRva = 0x3255B, kTesselateRva = 0x35348;   // Displa
 constexpr uint32_t kBakeShiftRva = 0x37BDF;                               // CreateHiTexture: shl ecx, <this>
 uint8_t* g_bakeShift;                                                     // (null: not patched - unknown build)
 std::atomic<int> g_farTexels{8};
+constexpr uint32_t kTileTextureRva = 0x36594;                             // FUN_10036594: (data, tile) -> RTexture_t
+constexpr uint32_t kGroundData = 0x17C;                                   // AnarchyGround_t: its AnarchyGroundData_t
+using TileTextureFn = void*(__fastcall*)(void* data, void* edx, uint32_t tile);
+TileTextureFn g_tileTexture;
+void (*g_onNewGround)(void*, void*);
+void (*g_onTesselate)(void*, void*);
+void* g_lastData;
+std::atomic<uint32_t> g_tesselates{0};
+std::atomic<bool> g_native{false};
 constexpr uint32_t kRadius = 0x1A8;                                      // AnarchyGround_t: the full-quality radius
 
 int Scaled(int radius)
 {
+    if (g_native.load(std::memory_order_relaxed)) return 8;   // (rvk draws the ground: the game's at its least)
     return std::clamp(int(std::lround(radius * g_scale.load(std::memory_order_relaxed))), 1, 1000);
 }
 
@@ -73,6 +83,14 @@ void __fastcall SetRadiusHook(uint8_t* ground, void* edx, int radius)
 // restarts its tessellation, as after the game's own slider).
 void __fastcall TesselateHook(uint8_t* ground, void* edx, int x, int z)
 {
+    void* data;
+    std::memcpy(&data, ground + kGroundData, 4);
+    if (data != g_lastData) {                       // (a playfield's ground, new: the native ground reads it)
+        g_lastData = data;
+        if (g_onNewGround && data) g_onNewGround(ground, data);
+    }
+    g_tesselates.fetch_add(1, std::memory_order_relaxed);
+    if (g_onTesselate && data) g_onTesselate(ground, data);
     int current;
     std::memcpy(&current, ground + kRadius, 4);
     int game = g_gameRadius.load(std::memory_order_relaxed);
@@ -95,7 +113,7 @@ void ApplyFar()
 {
     if (!g_bakeShift) return;
     const int texels = g_farTexels.load(std::memory_order_relaxed);
-    const uint8_t shift = texels >= 32 ? 5 : texels >= 16 ? 4 : 3;
+    const uint8_t shift = g_native.load(std::memory_order_relaxed) ? 1 : texels >= 32 ? 5 : texels >= 16 ? 4 : 3;
     if (*g_bakeShift == shift) return;
     DWORD protect;
     if (!VirtualProtect(g_bakeShift, 1, PAGE_EXECUTE_READWRITE, &protect)) return;
@@ -106,6 +124,38 @@ void ApplyFar()
 }
 
 }  // namespace
+
+void SetNewGround(void (*onNewGround)(void* ground, void* data))
+{
+    g_onNewGround = onNewGround;
+}
+
+void SetOnTesselate(void (*onTesselate)(void* ground, void* data))
+{
+    g_onTesselate = onTesselate;
+}
+
+uint32_t TesselateCount()
+{
+    return g_tesselates.load(std::memory_order_relaxed);
+}
+
+void ForgetGround()
+{
+    g_lastData = nullptr;
+}
+
+void* TileTexture(void* data, uint32_t tile)
+{
+    return g_tileTexture && data ? g_tileTexture(data, nullptr, tile) : nullptr;
+}
+
+void SetNative(bool active)
+{
+    if (g_native.exchange(active) == active) return;
+    ApplyFar();
+    Log("ground: %s", active ? "drawn by rvk (the game's own at its least work)" : "the game's own");
+}
 
 void SetFar(int texelsPerCell)
 {
@@ -148,6 +198,11 @@ void Install()
     g_setRadius = reinterpret_cast<SetRadiusFn>(
         HookAt(setRadius, 6, nullptr, 0, reinterpret_cast<void*>(&SetRadiusHook), "DisplaySystem ground radius"));
     Log("ground: DisplaySystem.dll %s", g_setRadius ? "hooked (RVK_GroundRange)" : "radius not hooked");
+    // push ebp; mov ebp, esp; movzx eax, word [ebp+8]; mov edx, [ecx+64h] - the tiles' textures (the native ground).
+    static const uint8_t kTile[] = {0x55, 0x8B, 0xEC, 0x0F, 0xB7, 0x45, 0x08, 0x8B, 0x51, 0x64};
+    auto* tile = reinterpret_cast<uint8_t*>(ds) + kTileTextureRva;
+    if (std::memcmp(tile, kTile, sizeof(kTile)) == 0) g_tileTexture = reinterpret_cast<TileTextureFn>(tile);
+    else Log("ground: the tile loader not as expected - no native ground");
     // mov eax, [edi+40h]; push eax; mov ecx, eax; shl ecx, 3; push ecx - the bake's size (RVK_GroundFar).
     static const uint8_t kBake[] = {0x8B, 0x47, 0x40, 0x50, 0x8B, 0xC8, 0xC1, 0xE1, 0x03, 0x51};
     auto* bake = reinterpret_cast<uint8_t*>(ds) + kBakeShiftRva - 8;

@@ -61,8 +61,9 @@ built only after the previous one has been checked in game.
   surface types and six baked lightmaps through the day, per playfield in rdb.db. The way past what the game's own
   ground renderer allows (its CPU split tree, its baked far patches, the 32-bit address space they fill): draw the
   ground in rvk from that data, on the GPU - every cell its own tile at every distance, no stutter, and the real
-  heights for Phase 2's light and Phase 4's clutter. Its plan: docs/native-ground-plan.md, once the open points in
-  docs/ground-format.md are settled.
+  heights for Phase 2's light and Phase 4's clutter. Its plan: docs/native-ground-plan.md.
+- Done: the native ground (`RVK_NativeGround`; docs/native-ground-plan.md) - checked in rvk_demo on synthetic and real
+  data, not yet in game. Phase 2 (the terrain's light) now builds on its real heights.
 
 ## Phase 0: measure first (a short diagnostic, before writing shaders)
 

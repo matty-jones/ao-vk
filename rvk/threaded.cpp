@@ -983,6 +983,22 @@ void ThreadedDevice::SetTerrain(const Device::TerrainSettings& s)
     Enqueue([this, s](const uint8_t*) { m_device.SetTerrain(s); });
 }
 
+void ThreadedDevice::SetNativeGround(std::shared_ptr<const NativeGround> ground)
+{
+    Enqueue([this, ground](const uint8_t*) { m_device.SetNativeGround(ground); });
+}
+
+void ThreadedDevice::SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h,
+                                             float shade)
+{
+    Enqueue([this, packed, w, h, shade](const uint8_t*) { m_device.SetNativeGroundLightmap(packed, w, h, shade); });
+}
+
+void ThreadedDevice::SetNativeGroundOn(bool on)
+{
+    Enqueue([this, on](const uint8_t*) { m_device.SetNativeGroundOn(on); });
+}
+
 void ThreadedDevice::SetAlienMap(bool on)
 {
     Enqueue([this, on](const uint8_t*) { m_device.SetAlienMap(on); });

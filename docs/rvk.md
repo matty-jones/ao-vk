@@ -64,6 +64,27 @@
   alpha-blended and additive interface draws; an unblended one keeps its texture's alpha as coverage, one multiplying
   the frame is approximated. Hooks are only made with a rate set; the two entries' code is checked (MSVC's exception
   prologue calling GUI.dll's `_EH_prolog`), so another GUI.dll build is left alone (logged).
+- **Native ground** (setting `RVK_NativeGround`, Terrain; on; `rvk/native_ground.cpp`, `proxy/ddraw/rvk_ground.cpp`,
+  docs/native-ground-plan.md, docs/ground-format.md): rvk draws the playfield's ground itself, from the game's own
+  data, instead of the game's `AnarchyGround_t`. The first time the game tessellates a ground (`rnative::ground`'s
+  `Tesselate` hook: its `AnarchyGroundData_t` at +0x17C, new) the proxy decodes its patches' heights and tile codes
+  (zlib, stb's; deltas summed down then across) and, inside later `Tesselate` calls (the ground alive then), has the
+  game make each tile's texture (`FUN_10036594`), 24 a call; then hands it all over (`Device::SetNativeGround`).
+  Gamecode's `AnarchyGround_t::SetShadowMap` (its import patched) hands over the hour's baked lightmap and shade. rvk
+  builds a static patch of (P+1)^2 vertices per 64 cells (the game's format: set 0 the cell coordinates, set 1 the
+  whole playfield's lightmap; `DrawSharedIndexed`, arena-resident) and a tile-code texture (each cell's tile's bindless
+  image and turn). The first ground draw of the game's in a pass draws every patch in view for it with the game's
+  state, and every ground draw of the game's is skipped (`NativeGroundReplaces`): the base pass's stand-in texture is
+  black, terrain.glsl's native mode reads each pixel's cell's tile (turned, the continuous coordinates' derivatives,
+  the game's clamped sampler; `D.terrain.y` the tile-code texture); the lighting pass's texture is the playfield's
+  lightmap through the game's palette. So cliff faces and rock (tinted by each cell's tile's smallest mip level), sun
+  shadows, hill shade, mist, wet ground and fog apply as on the game's ground. While it draws, the game's own ground
+  does the least (`rnative::ground::SetNative`: radius 8, far patches baked at 2 texels a cell). A ground the game
+  stops tessellating for 10 frames (a loading screen, indoors) is dropped and the next read anew. Not yet: ground
+  grass on it (its base pass's texture is a stand-in: the capture waits), side-loaded ground normal / PBR maps, level
+  of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
+  `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):
   DisplaySystem.dll's AnarchyGround_t draws the heightmap as a split tree of triangles; within its full-quality radius
   (+0x1A8: entering a playfield the game sets 8, 44 - the option `DisplayGroundFullQualityRadius`, its slider 7..44 -

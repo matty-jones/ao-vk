@@ -37,6 +37,7 @@ void Device::BeginFrameDump()
     if (!m_dumpFile) return;
     m_dumpDraw = 0;
     m_dumpGroundTextures.clear();
+    m_dumpLightmaps.clear();
     m_dumpedLights.assign(m_lights.size(), {});
     m_dumpedLightValid.assign(m_lights.size(), false);
     const auto& v = m_view.m;
@@ -155,12 +156,35 @@ void Device::DumpGroundTextures(const std::string& path)
     std::fclose(file);
 }
 
+// The ground's lightmaps drawn this frame (<dump>-lightmaps.bin, little endian): "RVKLM1\0\0", u32 count; each: f32
+// u[4], v[4] (its coordinates set 1 = x, y, z, 1 times these), u32 width, height, then width x height RGB bytes.
+void Device::DumpLightmaps(const std::string& path)
+{
+    if (m_dumpLightmaps.empty()) return;
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (!file) return;
+    std::fwrite("RVKLM1\0\0", 1, 8, file);
+    const uint32_t count = uint32_t(m_dumpLightmaps.size());
+    std::fwrite(&count, 4, 1, file);
+    for (const DumpedLightmap& l : m_dumpLightmaps) {
+        std::fwrite(l.u, 4, 4, file);
+        std::fwrite(l.v, 4, 4, file);
+        const uint32_t wh[2] = {l.texture->m_thumbW, l.texture->m_thumbH};
+        std::fwrite(wh, 4, 2, file);
+        std::fwrite(l.texture->m_thumb.data(), 1, l.texture->m_thumb.size(), file);
+    }
+    std::fclose(file);
+    std::fprintf(m_dumpFile, "# lightmaps: %u in %s\n", count, path.c_str());
+}
+
 void Device::EndFrameDump()
 {
     if (!m_dumpFile) return;
     {
         const size_t dot = m_dumpOpenPath.rfind('.');
-        DumpGroundTextures((dot != std::string::npos ? m_dumpOpenPath.substr(0, dot) : m_dumpOpenPath) + "-ground.bmp");
+        const std::string base = dot != std::string::npos ? m_dumpOpenPath.substr(0, dot) : m_dumpOpenPath;
+        DumpGroundTextures(base + "-ground.bmp");
+        DumpLightmaps(base + "-lightmaps.bin");
     }
     std::fprintf(m_dumpFile, "# %s\n", GpuMemoryReport().c_str());
     std::fprintf(m_dumpFile, "# end: %u draws; %zu casters this frame, %zu remembered (%u drawn out of view last frame);"
@@ -333,10 +357,39 @@ static void Mul(const d3d::Matrix& m, const float in[4], float out[4])
 // with the fit's error, and its normals' range. A texture laid from above has b = 0 and a tiny error; a and c are its
 // repeats per world unit.
 void Device::DumpTerrainMapping(FILE* f, const void* vertices, uint32_t vertexCount, const FvfLayout& layout,
-                                const uint16_t* indices, uint32_t indexCount) const
+                                const uint16_t* indices, uint32_t indexCount)
 {
     TerrainFit fit = FitTerrain(vertices, vertexCount, layout, indices, indexCount);
     if (!fit.vertices) return;
+    // (docs/ground-format.md's open points: a base pass's first two cells as drawn - its tile's RDB id, each corner's
+    // world position and coordinates - against the playfield's tile codes; a lighting pass's lightmap, its texels and
+    // how it lies on the world, against the baked lightmaps: <dump>-lightmaps.bin.)
+    const Texture* tex = m_textures[0];
+    if (!m_rs[d3d::RS_LIGHTING] && layout.offset[4] >= 0) {
+        std::fprintf(f, "  C: rdb %u", tex ? tex->m_rdbId : 0u);
+        const uint8_t* v = static_cast<const uint8_t*>(vertices);
+        const uint32_t count = std::min(indices ? indexCount : vertexCount, 12u);
+        for (uint32_t k = 0; k < count; ++k) {
+            const uint32_t i = indices ? indices[k] : k;
+            if (i >= vertexCount) break;
+            float pos[3], uv[2];
+            std::memcpy(pos, v + size_t(i) * layout.stride + layout.offset[0], 12);
+            std::memcpy(uv, v + size_t(i) * layout.stride + layout.offset[4], 8);
+            std::fprintf(f, "%s(%.2f %.2f %.2f | %.3f %.3f)", k % 6 == 0 ? " | " : " ", pos[0], pos[1], pos[2], uv[0], uv[1]);
+        }
+        std::fprintf(f, "\n");
+    } else if (m_rs[d3d::RS_LIGHTING] && tex && tex->m_thumbValid && tex->m_thumbW == tex->Width() &&
+               m_dumpLightmaps.size() < 512) {
+        bool seen = false;
+        for (const DumpedLightmap& l : m_dumpLightmaps) seen = seen || l.texture == tex;
+        if (!seen) {
+            DumpedLightmap l;
+            l.texture = tex;
+            std::memcpy(l.u, fit.coef[2], sizeof(l.u));
+            std::memcpy(l.v, fit.coef[3], sizeof(l.v));
+            m_dumpLightmaps.push_back(l);
+        }
+    }
     std::fprintf(f, "  T: %s: %u triangles at %.5f repeats per unit, %.0f%% a tile turned or flipped; as one plane (%u "
                  "vertices):", fit.tiled ? "tiled" : "NOT tiled", fit.triangles, fit.cellScale, 100.0f * fit.cellShare,
                  fit.vertices);

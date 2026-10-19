@@ -272,6 +272,7 @@ void RvkState::Present()
     SmokeFrame();
     TimeFrame();
     StatelFrame();
+    GroundFrame();
     // Hotkeys (Ctrl+Shift+...). Those for options change the setting (saved, shown in the settings window). None
     // while the console is open (it takes the keyboard).
     bool chord = !ConsoleOpen() && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000);

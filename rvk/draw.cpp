@@ -2283,6 +2283,9 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
 {
     if (!m_inFrame || !vertexCount)
         return;
+    // The game's ground, drawn by rvk from the playfield's data instead (native_ground.cpp): its own draws skipped.
+    if (m_native.ground && NativeGroundReplaces(fvf))
+        return;
     m_drawObject = nullptr;                      // (found below for a static mesh)
     struct ObjectScope {                         // ... and none once the draw is done (DrawWorldBox, FrameLightMask
         Device* d;                               // read it: outside a draw they must work from the matrix)
@@ -2860,9 +2863,15 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         if (!m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE]) {
             m_terrainBases[chunk] = m_textures[0];
             if (vertices && (m_tss[0][d3d::TSS_TEXCOORDINDEX] & 0xFFFFu) == 0 &&   // (stage 0 reads set 0 as it is)
-                m_tss[0][d3d::TSS_TEXTURETRANSFORMFLAGS] == 0)
+                m_tss[0][d3d::TSS_TEXTURETRANSFORMFLAGS] == 0) {
                 FillTerrainRecord(dt, TerrainFitFor(chunk, vertices, vertexCount, layout, indices, indexCount),
                                   kTerrainBase, m_textures[0]);
+                // (The native ground's base pass: each cell's tile from the tile-code texture - terrain.glsl.)
+                if (m_native.drawing && m_native.codes && dt.terrainAt[3] > 0.0f) {
+                    const uint32_t codes = BindlessImage(m_native.codes) + 1;
+                    std::memcpy(&dt.terrain[1], &codes, 4);
+                }
+            }
         } else if (m_rs[d3d::RS_LIGHTING] && IsMultiplyPass()) {
             auto it = m_terrainBases.find(chunk);
             if (it != m_terrainBases.end() &&

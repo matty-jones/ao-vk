@@ -1,5 +1,6 @@
 // Direct3D 7 fixed-function pixel processing: two texture stages, specular add, fog, alpha test.
 #extension GL_KHR_shader_subgroup_quad : require
+#extension GL_EXT_nonuniform_qualifier : require
 #include "constants.glsl"
 
 // tex0 / tex1 / bumpBase / normalMap are bindless now (TEX0 / TEX1 / BUMPTEX / NORMALTEX in constants.glsl).

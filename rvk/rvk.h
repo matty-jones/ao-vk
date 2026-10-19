@@ -37,6 +37,19 @@ enum class VisualKind : uint32_t {
 };
 
 class Device;
+class Texture;
+
+// A playfield's ground, for rvk to draw itself (native_ground.cpp, docs/native-ground-plan.md): read from the game's
+// AnarchyGroundData_t (proxy rvk_ground.cpp; the format: docs/ground-format.md).
+struct NativeGround {
+    uint32_t id = 0;                       // (for the log)
+    uint32_t cellsX = 0, cellsZ = 0;       // cells across (world x) and down (world z)
+    uint32_t patch = 64;                   // cells a patch side (drawn a patch at a time)
+    float cellX = 4.0f, cellZ = 4.0f;      // world units a cell
+    std::vector<float> heights;            // (cellsX + 1) x (cellsZ + 1) world heights, rows along +z
+    std::vector<uint16_t> codes;           // cellsX x cellsZ: the cell's tile (low 14 bits) and turn (top 2)
+    std::vector<Texture*> tiles;           // each tile's texture (null: none)
+};
 
 // How a ground chunk's base texture lies on the world (terrain.cpp FitTerrain). The game gives each 4 x 4 unit cell of
 // its near ground its own copy of the tile (coordinates 0..1 over the cell, turned or flipped one of eight ways - its
@@ -597,6 +610,13 @@ public:
     // in its colour (RVK_GroundVary); rock on the faces instead of the ground's tile (RVK_CliffRock).
     struct TerrainSettings { float cliff = 1.0f, tiling = 1.0f, variation = 1.0f; bool rock = true; };
     void SetTerrain(const TerrainSettings& s) { m_terrainSettings = s; m_frameLightsDirty = true; }
+    // The ground drawn by rvk from the playfield's data instead of the game's (native_ground.cpp, RVK_NativeGround): its
+    // data (null: the game's own), the baked lightmap of the hour as the game hands it over (4-bit texels, two to a
+    // byte, the high nibble first; (w + 1) / 2 bytes a row) with its shade, and on / off.
+    void SetNativeGround(std::shared_ptr<const NativeGround> ground);
+    void SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h, float shade);
+    void SetNativeGroundOn(bool on) { m_native.on = on; }
+    bool NativeGroundDrawing() const { return m_native.drawing; }
     void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
     void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
     // The game's own sun sprites (its glow, VisualSunRays_t), shown or not.
@@ -978,6 +998,28 @@ private:
     // The ground's base pass textures this frame, by chunk (TerrainChunkKey): its lighting pass, drawn later with the
     // lightmap, takes its relief from them. And the sampler they're read with (repeat, mipmapped).
     std::unordered_map<uint64_t, Texture*> m_terrainBases;
+    // The native ground (native_ground.cpp): its patches (vertices: XYZ | NORMAL | TEX2, set 0 the cell coordinates,
+    // set 1 the playfield's lightmap; a box each), the shared indices, the tile-code texture (each cell's tile's
+    // bindless image, its turn), the lightmap (the hour's, through the game's palette).
+    struct NativePatch {
+        std::shared_ptr<const std::vector<uint8_t>> vertices;
+        float lo[3], hi[3];
+    };
+    struct NativeState {
+        std::shared_ptr<const NativeGround> ground;
+        std::vector<NativePatch> patches;
+        std::shared_ptr<const std::vector<uint8_t>> indices;
+        uint32_t vertices = 0, indexCount = 0;
+        Texture* codes = nullptr;
+        Texture* lightmap = nullptr;
+        Texture* lightmapGrey = nullptr;         // (none handed over yet: a mid grey)
+        bool on = true, drawing = false;
+        uint64_t drawnBase = ~0ull, drawnLight = ~0ull;   // the frames each pass was last drawn
+        uint32_t patchesDrawn = 0, framesDrawn = 0;
+    } m_native;
+    bool NativeGroundReplaces(uint32_t fvf);
+    void DrawNativeGround(bool lightPass);
+    void DestroyNativeGround();
     // The ground's chunks' texture coordinates fitted to the world (terrain.cpp), by TerrainChunkKey: kept across
     // frames; how many were laid from above and how many not (logged).
     std::unordered_map<uint64_t, TerrainFit> m_terrainFits;
@@ -3181,13 +3223,16 @@ private:
     std::vector<d3d::Light> m_dumpedLights;
     std::vector<const Texture*> m_dumpGroundTextures;   // the ground's base textures drawn (the dump's -ground.bmp)
     void DumpGroundTextures(const std::string& path);
+    struct DumpedLightmap { const Texture* texture; float u[4], v[4]; };   // (the dump's -lightmaps.bin)
+    std::vector<DumpedLightmap> m_dumpLightmaps;
+    void DumpLightmaps(const std::string& path);
     std::vector<bool> m_dumpedLightValid;
     void BeginFrameDump();
     void EndFrameDump();
     void DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount, const uint16_t* indices,
                   uint32_t indexCount);
     void DumpTerrainMapping(FILE* f, const void* vertices, uint32_t vertexCount, const detail::FvfLayout& layout,
-                            const uint16_t* indices, uint32_t indexCount) const;
+                            const uint16_t* indices, uint32_t indexCount);
     VkBuffer m_readback = VK_NULL_HANDLE;
     VmaAllocation_T* m_readbackAllocation = nullptr;
     void* m_readbackData = nullptr;

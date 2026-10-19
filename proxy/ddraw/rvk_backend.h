@@ -34,6 +34,8 @@ void WeatherFrame();                              // each presented frame (rvk_w
 void SmokeFrame();                                // each presented frame (rvk_smoke.cpp)
 void TimeFrame();                                 // each presented frame (rvk_time.cpp: RVK_TimeOfDay)
 void StatelFrame();                               // each presented frame (rvk_statels.cpp: the playfield's pack)
+void GroundFrame();                               // each presented frame (rvk_ground.cpp: the native ground)
+void SetNativeGroundSetting(bool on);             // RVK_NativeGround (rvk_ground.cpp)
 // The free camera (rvk_freecam.cpp, Ctrl+Shift+C): toggled; each presented frame; the native scene's camera.
 void FreeCamToggle(HWND window);
 void FreeCamFrame(rvk::ThreadedDevice* device, HWND window);
