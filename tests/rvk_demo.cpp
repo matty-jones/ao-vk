@@ -1719,6 +1719,7 @@ std::string g_groundFile;
 float g_groundAo = 0.6f;            // --ground-ao X: RVK_GroundAo
 float g_groundTess = 0.6f;          // --ground-tess X: RVK_GroundTess
 float g_cliffDepth = 0.4f;          // --cliff-depth X: RVK_CliffDepth
+float g_groundSun = 1.0f;           // --ground-sun X: RVK_GroundSun
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 template <typename D>
 void RunGroundFile(D& dev, int frames, const std::string& shot)
@@ -1772,6 +1773,7 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     dev.SetNativeGround(ground);
     dev.SetNativeGroundLightmap(packed, lw, lh, shade);
     dev.SetNativeGroundAo(g_groundAo);
+    dev.SetNativeGroundSun(g_groundSun);
     {
         Device::TerrainSettings t;
         t.round = g_groundTess;
@@ -1806,7 +1808,7 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         Light sun{};
         sun.type = LIGHT_DIRECTIONAL;
         sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
-        sun.direction = {0.55f, -0.7f, 0.45f};
+        sun.direction = g_sunDirSet ? Vector{g_sunDir[0], g_sunDir[1], g_sunDir[2]} : Vector{0.55f, -0.7f, 0.45f};
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
@@ -1831,7 +1833,12 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
         dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
+        // (The game lights its ground's lighting pass without the sun - the lightmap has it - only the ambient and
+        // the local lights: the sun's light kept out by a black diffuse here, still the frame's sun.)
+        const Material lightMat{{0, 0, 0, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+        dev.SetMaterial(lightMat);
         dev.DrawPrimitive(TriangleList, kFvfTerrain, standIn, 3);
+        dev.SetMaterial(mat);
         dev.SetDrawVisual(0, nullptr);
         dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
         dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
@@ -4500,6 +4507,8 @@ int main(int argc, char** argv)
         else if (a == "--ground-ao" && i + 1 < argc) g_groundAo = float(std::atof(argv[++i]));
         else if (a == "--ground-tess" && i + 1 < argc) g_groundTess = float(std::atof(argv[++i]));
         else if (a == "--cliff-depth" && i + 1 < argc) g_cliffDepth = float(std::atof(argv[++i]));
+        else if (a == "--ground-sun" && i + 1 < argc) g_groundSun = float(std::atof(argv[++i]));
+
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));
         else if (a == "--terrain-maps") g_terrainMaps = true;

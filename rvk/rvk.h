@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <string>
 #include <atomic>
+#include <chrono>
 #include <future>
 #include <algorithm>
 #include <functional>
@@ -619,6 +620,7 @@ public:
     void SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h, float shade);
     void SetNativeGroundOn(bool on) { m_native.on = on; }
     void SetNativeGroundAo(float strength) { m_native.ao = strength; }
+    void SetNativeGroundSun(float strength) { m_native.sun = strength; }
     bool NativeGroundDrawing() const { return m_native.drawing; }
     void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
     void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
@@ -1019,6 +1021,10 @@ private:
         uint64_t mapsSignature = 0;              // the tiles' maps and the settings the two textures were made with
         Texture* lightmap = nullptr;
         Texture* lightmapGrey = nullptr;         // (none handed over yet: a mid grey)
+        Texture* lightmapPrev = nullptr;         // the hour's lightmap before (faded out over kLightmapFade seconds)
+        std::chrono::steady_clock::time_point lightmapSince;   // when this one came
+        float lightFit[4] = {};                  // the lightmap as a + b.n of the slope (FitNativeLight): a, b; a = 0 none
+        float sun = 1.0f;                        // RVK_GroundSun
         std::vector<uint32_t> lightPixels;       // the lightmap's texels (the grass's light: Device::NativeLightRgb)
         uint32_t lightW = 0, lightH = 0;
         Texture* sky = nullptr;                  // how much of the sky each height sample sees (0..1; RVK_GroundAo)
@@ -1035,6 +1041,8 @@ private:
     bool NativeGroundRgb(float u, float v, uint8_t rgb[3]) const;
     bool NativeLightRgb(float u, float v, uint8_t rgb[3]) const;
     void PollNativeSky();
+    void FitNativeLight();
+    void FillNativeLights(detail::FrameLights* fl);
     void MakeNativeCodes();
     void DrawNativeGround(bool lightPass);
     void DestroyNativeGround();

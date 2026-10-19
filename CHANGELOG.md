@@ -16,6 +16,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Up close, that ground's hills and the feet and rims of cliffs are rounded instead of made of flat 4 m triangles
   (`RVK_GroundTess`, 0.6; 0 for the game's shapes), and the rock on cliff faces stands out of them in ledges and
   cracks (`RVK_CliffDepth`, 0.4; 0 for flat faces).
+- On that ground, hillsides and cliffs take their light from where the sun is now, so slopes brighten and fall into
+  shade as it moves (`RVK_GroundSun`, 1; 0 for the game's light as baked for the hour), and when the game moves to the
+  next hour's light the land fades into it over a few seconds instead of changing all at once.
 - Distant ground is less blurry: the pictures the game bakes for the land past its detailed ring get twice the
   detail (`RVK_GroundFar`: 16 texels a cell by default; 8 for the game's, 32 for more at a large memory cost).
 - The ground keeps its sharp, detailed texture further out (`RVK_GroundRange`, 1.5x the game's furthest setting by

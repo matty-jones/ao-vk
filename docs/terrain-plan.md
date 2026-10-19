@@ -155,12 +155,11 @@ and `m_drawTerrainLight`.
 - The lightmap pass multiplies its ambient by the sky visibility: canyon feet, valleys and crevices darken properly.
 - Setting `RVK_TerrainAo`.
 
-**3. Live sun.**
-- Using Phase 0's palette finding, split the lightmap into sun and sky shares (the `docs/twilight-plan.md` idea):
-  `sky · skyVis · tint + sun · max(N·L, 0) · bakedShadow · cascades · horizonShadow`.
-- The sun follows the live direction and the normal-mapped relief. The horizon shadow comes from the same height field
-  and replaces HillShade's 16-unit grid.
-- Setting `RVK_TerrRelight`.
+**3. Live sun.** Built on the native ground, more modestly than designed: the game's lightmap holds its sun and
+sky together, and a plane in the slope's normal explains each hour's map well (docs/rvk.md, "Native ground"), so
+instead of splitting it the map's sun term is turned to where the sun stands now (`RVK_GroundSun`) - flat ground as
+baked, slopes following the sun - and the game's whole-hour swaps of the map fade over 8 s. The sky visibility came
+from the heights themselves (`RVK_GroundAo`; points 1 and 2 not needed for the native ground).
 
 ## Phase 3: geometry (built, on the native ground)
 

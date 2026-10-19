@@ -190,7 +190,7 @@ Device::~Device()
     if (m_blueNoise) DestroyTextureNow(m_blueNoise);
     if (m_flatNormal) DestroyTextureNow(m_flatNormal);
     if (m_rock.pending.valid()) m_rock.pending.wait();   // (the cliffs' rock: a decode still running finishes first)
-    for (Texture* t : {m_rock.albedo, m_rock.normal, m_rock.orm, m_native.codes, m_native.maps, m_native.means, m_native.lightmap, m_native.lightmapGrey, m_native.sky})
+    for (Texture* t : {m_rock.albedo, m_rock.normal, m_rock.orm, m_native.codes, m_native.maps, m_native.means, m_native.lightmap, m_native.lightmapGrey, m_native.lightmapPrev, m_native.sky})
         if (t) DestroyTextureNow(t);
     for (auto& [key, sampler] : m_samplers) vkDestroySampler(m_device, sampler, nullptr);
     for (VkPipeline p : m_pipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);

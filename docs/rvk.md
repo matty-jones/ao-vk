@@ -104,8 +104,14 @@
   into spikes), fading out by the same distance, and pushes the rock out of steep faces by its albedo's brightness
   against its mean at a coarse level (`terrain_rock.glsl`: the lays the fragment shader textures with). Both passes
   tessellate alike (`invariant gl_Position`), so the lighting pass's equal depth test holds; the tessellated draws
-  stay out of the depth pre-pass, and lighting and shadow lookups keep the flat triangles' positions. Not yet: the
-  tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  stay out of the depth pre-pass, and lighting and shadow lookups keep the flat triangles' positions. The hour's
+  lightmap is fitted as a + b.n of the slope (`FitNativeLight`, least squares over the cells not in a baked shadow:
+  84-92 % of Stret West Bank's maps' variance; b's bearing the baked sun's, -129 degrees for 6 p.m. where the game's
+  directional light stood at -114), and the lighting pass scales it by (a + b'.n) / (a + b.n) with b' b turned to the
+  bearing of the frame's sun (`NativeSunTurn`, `FL.terrainLight`; `RVK_GroundSun`, 1): flat ground as baked, slopes
+  following the sun through the hour (the game's ground pass adds the lightmap to its ambient and local lights, so
+  it is the lightmap alone that turns). A new hour's lightmap fades in from the last over 8 s (`FL.terrain2.y, z`;
+  the game swaps them whole). Not yet: the tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):

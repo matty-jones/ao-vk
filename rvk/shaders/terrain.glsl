@@ -333,3 +333,27 @@ vec3 TerrainVariation(vec3 c, vec3 posW, TerrainMap m)
     c = mix(vec3(l), c, clamp(1.0 + 0.35 * k * v.y, 0.0, 2.0));
     return c * clamp(1.0 + 0.26 * k * v.x, 0.5, 1.5);
 }
+
+// The native ground's lightmap at lightmap coordinates at: the hour's (stage 0), faded in from the last hour's
+// (FL.terrain2.y, z: the game swaps them whole, and the land's light jumped).
+vec4 NativeLightmapAt(vec2 at)
+{
+    const vec4 now = textureLod(TEX0, at, 0.0);
+    const uint prev = floatBitsToUint(FL.terrain2.y);
+    if (prev == 0u) return now;
+    return mix(textureLod(sampler2D(texImages[prev - 1u], bindlessSamplers[D.sampIdx.x]), at, 0.0), now, FL.terrain2.z);
+}
+
+// The native ground's slopes lit from where the sun stands now: the lightmap is a + b.n of the slope n as the game
+// baked it with the sun of its hour (rvk native_ground.cpp FitNativeLight: FL.terrainLight2.xyz b), and with b turned
+// to the sun's bearing now (FL.terrainLight.xyz; its height as baked) the ratio of the two is how much lighter or
+// darker this slope is now - flat ground 1, as baked; a slope that turns towards the sun through the hour brightens,
+// one that turns away darkens. (In the 0..1 of the texels; floored at the palette's darkest, ratio clamped.)
+float NativeSunTurn(vec3 n)
+{
+    if (FL.terrainLight2.w <= 0.0 || dot(n, n) <= 1e-8) return 1.0;
+    n = normalize(n);
+    const float baked = FL.terrainLight.w + dot(FL.terrainLight2.xyz, n);
+    const float now = FL.terrainLight.w + dot(FL.terrainLight.xyz, n);
+    return mix(1.0, clamp(max(now, 0.06) / max(baked, 0.06), 0.4, 2.0), FL.terrainLight2.w);
+}

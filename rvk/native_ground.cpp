@@ -93,8 +93,10 @@ void Device::DestroyNativeGround()
 {
     if (m_native.skyPending.valid()) m_native.skyPending.wait();
     // (The lightmap stays: it is the hour's, handed over when it changes - perhaps before this playfield's ground.)
-    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means, &m_native.sky})
+    // (Nor does the fade from the last hour's: across playfields, it would be another place's light.)
+    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means, &m_native.sky, &m_native.lightmapPrev})
         if (*t) { DestroyTexture(*t); *t = nullptr; }
+    m_native.lightFit[0] = 0.0f;
     m_native.patches.clear();
     m_native.indices.reset();
     m_native.ground.reset();
@@ -165,6 +167,7 @@ void Device::SetNativeGround(std::shared_ptr<const NativeGround> ground)
         }
     m_native.ground = ground;
     MakeNativeCodes();
+    FitNativeLight();
     m_native.skyPending = std::async(std::launch::async, SkyVisibility, ground);
     if (!m_native.lightmapGrey) {
         const uint32_t grey = PaletteGrey(15, 0.5f);
@@ -243,11 +246,21 @@ void Device::MakeNativeCodes()
 void Device::SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h,
                                      float shade)
 {
+    // The last hour's lightmap fades into this one (the game swaps them whole: the land's light jumped).
+    if (m_native.lightmapPrev) {
+        DestroyTexture(m_native.lightmapPrev);
+        m_native.lightmapPrev = nullptr;
+    }
     if (m_native.lightmap) {
         m_lightmapsUploaded.push_back(m_native.lightmap);   // (the grass's light taken from it: again)
-        DestroyTexture(m_native.lightmap);
+        if (m_native.ground && m_native.lightW == w && m_native.lightH == h)
+            m_native.lightmapPrev = m_native.lightmap;
+        else
+            DestroyTexture(m_native.lightmap);
         m_native.lightmap = nullptr;
     }
+    m_native.lightmapSince = std::chrono::steady_clock::now();
+    m_native.lightFit[0] = 0.0f;
     m_native.lightPixels.clear();
     m_native.lightW = m_native.lightH = 0;
     const uint32_t rowBytes = (w + 1) / 2;
@@ -266,6 +279,107 @@ void Device::SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>>
     m_native.lightW = w;
     m_native.lightH = h;
     Log("native ground: the hour's lightmap, %u x %u, shade %.2f", w, h, shade);
+    FitNativeLight();
+}
+
+// The hour's lightmap as a + b.n of the ground's slope (n the heights' normal at the cell's centre; texels 0..1): the
+// game bakes it with the sun where it stood at that hour, and a plane in the normal explains it well (Stret West Bank's
+// six: 84 to 92 % of the lit cells' variance). Least squares over the lit cells - those far under the plane (the baked
+// shadows of trees, buildings and hills) are left out and the plane fitted again. b's bearing is the baked sun's; the
+// light pass turns it to the sun's now (NativeSunTurn). a = 0: no fit (no ground, no lightmap, or the night's flat one).
+void Device::FitNativeLight()
+{
+    m_native.lightFit[0] = 0.0f;
+    if (!m_native.ground || m_native.lightPixels.empty()) return;
+    const NativeGround& g = *m_native.ground;
+    const uint32_t w = std::min(m_native.lightW, g.cellsX), h = std::min(m_native.lightH, g.cellsZ);
+    if (w < 8 || h < 8) return;
+    const uint32_t W = g.cellsX + 1;
+    std::vector<float> n(size_t(w) * h * 3), v(size_t(w) * h);
+    for (uint32_t r = 0; r < h; ++r)
+        for (uint32_t c = 0; c < w; ++c) {
+            auto H = [&](int cc, int rr) {
+                cc = std::clamp(cc, 0, int(g.cellsX));
+                rr = std::clamp(rr, 0, int(g.cellsZ));
+                return g.heights[size_t(rr) * W + cc];
+            };
+            // (The cell's centre: its four corners' differences.)
+            const float dx = (H(c + 1, r) + H(c + 1, r + 1) - H(c, r) - H(c, r + 1)) / (2.0f * g.cellX);
+            const float dz = (H(c, r + 1) + H(c + 1, r + 1) - H(c, r) - H(c + 1, r)) / (2.0f * g.cellZ);
+            const float len = std::sqrt(dx * dx + dz * dz + 1.0f);
+            const size_t i = size_t(r) * w + c;
+            n[i * 3] = -dx / len;
+            n[i * 3 + 1] = 1.0f / len;
+            n[i * 3 + 2] = -dz / len;
+            v[i] = float((m_native.lightPixels[size_t(r) * m_native.lightW + c] >> 8) & 0xFFu) / 255.0f;
+        }
+    std::vector<uint8_t> lit(v.size(), 1);
+    double coef[4] = {};
+    for (int round = 0; round < 4; ++round) {
+        double A[4][5] = {};
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (!lit[i]) continue;
+            const double x[4] = {1.0, n[i * 3], n[i * 3 + 1], n[i * 3 + 2]};
+            for (int a = 0; a < 4; ++a) {
+                for (int b = 0; b < 4; ++b) A[a][b] += x[a] * x[b];
+                A[a][4] += x[a] * v[i];
+            }
+        }
+        // (Gaussian elimination with partial pivoting: 4 x 4.)
+        for (int k = 0; k < 4; ++k) {
+            int pivot = k;
+            for (int r = k + 1; r < 4; ++r)
+                if (std::fabs(A[r][k]) > std::fabs(A[pivot][k])) pivot = r;
+            if (std::fabs(A[pivot][k]) < 1e-9) return;
+            for (int c = 0; c < 5; ++c) std::swap(A[k][c], A[pivot][c]);
+            for (int r = 0; r < 4; ++r) {
+                if (r == k) continue;
+                const double f = A[r][k] / A[k][k];
+                for (int c = k; c < 5; ++c) A[r][c] -= f * A[k][c];
+            }
+        }
+        for (int k = 0; k < 4; ++k) coef[k] = A[k][4] / A[k][k];
+        // (A tenth of the 4-bit scale's step under the plane: in a baked shadow.)
+        for (size_t i = 0; i < v.size(); ++i) {
+            const double fit = coef[0] + coef[1] * n[i * 3] + coef[2] * n[i * 3 + 1] + coef[3] * n[i * 3 + 2];
+            lit[i] = v[i] - fit > -0.06;
+        }
+    }
+    const double b = std::sqrt(coef[1] * coef[1] + coef[3] * coef[3]);
+    if (b < 0.02) {
+        Log("native ground: the hour's lightmap is the same on every slope (night) - not turned with the sun");
+        return;
+    }
+    for (int k = 0; k < 4; ++k) m_native.lightFit[k] = float(coef[k]);
+    Log("native ground: the hour's lightmap = %.2f + (%.2f %.2f %.2f).n - the sun it was baked with at bearing %.0f",
+        coef[0], coef[1], coef[2], coef[3], std::atan2(coef[3], coef[1]) * 57.29578);
+}
+
+// The frame block's part (draw.cpp): the last hour's lightmap and how far it has faded, and the lightmap's fit with
+// its sun turned to the bearing of the sun now (the baked height of the sun kept: flat ground stays as baked).
+void Device::FillNativeLights(detail::FrameLights* fl)
+{
+    constexpr float kLightmapFade = 8.0f;        // seconds
+    const float since = std::chrono::duration<float>(std::chrono::steady_clock::now() - m_native.lightmapSince).count();
+    const float fade = m_native.lightmapPrev ? std::clamp(since / kLightmapFade, 0.0f, 1.0f) : 1.0f;
+    const uint32_t prev = m_native.lightmapPrev && fade < 1.0f ? BindlessImage(m_native.lightmapPrev) + 1 : 0u;
+    std::memcpy(&fl->terrain2[1], &prev, 4);
+    fl->terrain2[2] = fade;
+    std::memset(fl->terrainLight, 0, sizeof(fl->terrainLight));
+    std::memset(fl->terrainLight2, 0, sizeof(fl->terrainLight2));
+    const float* f = m_native.lightFit;
+    // (fl->sunDir: the way the sun's light travels, as the frame's lights and shadows have it; the moon's at night.)
+    const float sx = -fl->sunDir[0], sz = -fl->sunDir[2], s = std::sqrt(sx * sx + sz * sz);
+    if (f[0] <= 0.0f || m_native.sun <= 0.0f || s < 0.05f || fl->moon[3] > 0.5f) return;
+    const float b = std::sqrt(f[1] * f[1] + f[3] * f[3]);
+    fl->terrainLight[0] = b * sx / s;
+    fl->terrainLight[1] = f[2];
+    fl->terrainLight[2] = b * sz / s;
+    fl->terrainLight[3] = f[0];
+    fl->terrainLight2[0] = f[1];
+    fl->terrainLight2[1] = f[2];
+    fl->terrainLight2[2] = f[3];
+    fl->terrainLight2[3] = std::clamp(m_native.sun, 0.0f, 1.0f);
 }
 
 bool Device::NativeGroundRgb(float u, float v, uint8_t rgb[3]) const

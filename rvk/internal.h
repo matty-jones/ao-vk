@@ -165,10 +165,15 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float terrain[4];              // the ground's texturing (terrain.glsl): cliffs (RVK_CliffTex), the faces' repeats
                                    // hidden (RVK_TileHide), large-scale variation (RVK_GroundVary), normal maps' strength
                                    // (0 off: the native ground's tiles')
-    float terrain2[4];             // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y z w unused
+    float terrain2[4];             // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y the hour's
+                                   // lightmap before this one (its bindless image + 1, the float's bits; 0 none), z how
+                                   // far it has faded into this one (0..1); w unused
     float terrainRock[4];          // the cliffs' rock (terrain.cpp; RVK_CliffRock): its albedo, normal and ORM maps'
                                    // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     float terrainRock2[4];         // ... its mean colour (rgb), its normal map's strength
+    float terrainLight[4];         // the native ground's lightmap as a + b.n of its slope (native_ground.cpp
+                                   // FitNativeLight): xyz b turned to the sun's bearing now, w a
+    float terrainLight2[4];        // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
     GpuLight lights[kFrameLights];
 };
 

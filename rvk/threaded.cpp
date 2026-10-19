@@ -1004,6 +1004,11 @@ void ThreadedDevice::SetNativeGroundAo(float strength)
     Enqueue([this, strength](const uint8_t*) { m_device.SetNativeGroundAo(strength); });
 }
 
+void ThreadedDevice::SetNativeGroundSun(float strength)
+{
+    Enqueue([this, strength](const uint8_t*) { m_device.SetNativeGroundSun(strength); });
+}
+
 void ThreadedDevice::SetAlienMap(bool on)
 {
     Enqueue([this, on](const uint8_t*) { m_device.SetAlienMap(on); });

@@ -788,13 +788,14 @@ void main()
     // turned the cells' light into hard triangles where the face crosses from a dark cell to a lit one.
     if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
         const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
-        t0 = texture(TEX0, at);
+        t0 = NativeLightmapAt(at);
         if (terrain.side > 0.01) {
             vec4 blur = vec4(0.0);
             for (int j = -1; j <= 1; ++j)
-                for (int i = -1; i <= 1; ++i) blur += textureLod(TEX0, at + vec2(i, j) * 1.5 / lmSize, 0.0);
+                for (int i = -1; i <= 1; ++i) blur += NativeLightmapAt(at + vec2(i, j) * 1.5 / lmSize);
             t0 = mix(t0, blur / 9.0, terrain.side);
         }
+        t0.rgb *= NativeSunTurn(vNormalW.xyz);
     }
     vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
     if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);

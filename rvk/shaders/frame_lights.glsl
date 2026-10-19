@@ -78,9 +78,14 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 terrain;               // the ground's texturing (terrain.glsl): cliffs (RVK_CliffTex), the faces' repeats
                                 // hidden (RVK_TileHide), large-scale variation (RVK_GroundVary), normal maps' strength
                                 // (0 off: the native ground's tiles')
-    vec4 terrain2;              // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y z w unused
+    vec4 terrain2;              // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y the hour's
+                                // lightmap before this one (its bindless image + 1, the float's bits; 0 none), z how far
+                                // it has faded into this one (0..1); w unused
     vec4 terrainRock;           // the cliffs' rock (rvk terrain.cpp; RVK_CliffRock): its albedo, normal and ORM maps'
                                 // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     vec4 terrainRock2;          // ... its mean colour (rgb), its normal map's strength
+    vec4 terrainLight;          // the native ground's lightmap as a + b.n of its slope (rvk native_ground.cpp
+                                // FitNativeLight): xyz b turned to the sun's bearing now, w a
+    vec4 terrainLight2;         // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
     Light lights[64];
 } FL;

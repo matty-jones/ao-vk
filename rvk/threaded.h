@@ -178,6 +178,7 @@ public:
     void SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h, float shade);
     void SetNativeGroundOn(bool on);
     void SetNativeGroundAo(float strength);
+    void SetNativeGroundSun(float strength);
     void SetShadowView(bool on);
     void SetAlienMap(bool on);
     void SetContactShadows(float s);
