@@ -140,7 +140,7 @@
   the ground over its last quarter). Coloured as the ground under them with the rock's grain, each its own shade by
   a hash of set 0 (where it lies, the same at its corners); shaded cheaply (one rock read along the side they face
   most, no relief, no lightmap blur - the lighting pass was two thirds of their cost); only the bigger ones (0.15
-  across and up) cast, within 24 units, and only as drawn - never remembered by the caster cache, which kept every
+  across and up) cast, within 24 units - less as the sun sinks, none under ~12 degrees - and only as drawn - never remembered by the caster cache, which kept every
   block walked past casting out of view. The tiles'
   material maps (RVK_Pbr): each cell's in the maps texture's B, A; the lighting pass is marked PBR with one of them
   standing in (`m_native.anyOrm`) and reads each cell's own (terrain.glsl `NativeOrm`, turned as its tile; the rock's

@@ -44,7 +44,9 @@ constexpr float kPerCell = 70.0f;              // pebbles a cell at density 1 (t
 // the far grit was a pixel or two of the scene's most expensive shading a stone.
 constexpr float kGrit = 0.08f, kCasts = 0.15f;  // across: under kGrit grit, from kCasts the bigger ones
 constexpr float kClassRange[3] = {16.0f, 28.0f, kRange};
-constexpr float kCastRange = 24.0f;            // ... and those cast within this (a block's box)
+constexpr float kCastRange = 24.0f;            // ... and those cast within this (a block's box) - less as the sun sinks:
+                                               // none under ~12 degrees (a low sun's shadow of a stone a hand across
+                                               // was a sharp black streak of several units; a real one soon fades)
 
 uint32_t Hash(uint32_t a, uint32_t b, uint32_t c)
 {
@@ -467,6 +469,8 @@ void Device::DrawNativePebbles(const d3d::Matrix& vp)
             if (d2 <= kMake * kMake) close.push_back({d2, key});
         }
     std::sort(close.begin(), close.end(), [](const Near& a, const Near& b) { return a.d2 < b.d2; });
+    // (The sun's height: sin 12 degrees none of them cast, from sin 25 out to kCastRange.)
+    const float castRange = kCastRange * Smooth(0.21f, 0.42f, -m_frameSunDir[1]);
     m_native.clutter = true;
     for (const Near& nb : close) {
         PebbleBlock& b = m_native.pebbleBlocks[nb.key];
@@ -487,7 +491,7 @@ void Device::DrawNativePebbles(const d3d::Matrix& vp)
         if (nb.d2 > kRange * kRange || b.pieces.empty() || BoxInClip(b.lo, b.hi, vp, true) < 0) continue;
         for (const NativeClutter& piece : b.pieces) {
             if (nb.d2 > kClassRange[piece.size] * kClassRange[piece.size]) continue;
-            m_native.pebbleDraw = piece.casts && nb.d2 < kCastRange * kCastRange ? 1 : 2;
+            m_native.pebbleDraw = piece.casts && nb.d2 < castRange * castRange ? 1 : 2;
             m_native.pebbleRange = kClassRange[piece.size];
             DrawSharedIndexed(d3d::TriangleList, kFvf, piece.vertices, 0, piece.count, piece.indices, piece.indexCount);
         }
