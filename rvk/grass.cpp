@@ -242,6 +242,9 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
     if (layout.offset[uvSet] < 0)
         return;
     Texture* tex = m_textures[0];
+    // (The native ground: its colour from each cell's own tile, its light from the whole lightmap's texels - its draw's
+    // texture is a stand-in or too big for the thumbnail.)
+    const bool native = m_native.drawing;
     if (lightPass) {
         // The light pass's global ambient (D3D: RS_AMBIENT x the material's ambient), which the grass adds to the
         // lightmap as the ground does - it carries much of the time of day.
@@ -260,10 +263,10 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
         // with lamps about (another area's, hundreds of units off) the ground's pass went without it one frame and had
         // it the next. The user liked the grass without it - with it, bright in a storm (2026-10-18).
         std::memset(m_terrainSun, 0, sizeof(m_terrainSun));
-        if (!tex || !tex->m_thumbValid)
+        if (native ? m_native.lightPixels.empty() : (!tex || !tex->m_thumbValid))
             return;                              // no lightmap to read (an unsupported format): the shader's fallback
-        tex->m_lightmap = true;
-    } else if (m_grassTex && (!tex || !tex->m_thumbValid || tex->Width() * tex->Height() <= 32u * 32u)) {
+        if (!native) tex->m_lightmap = true;
+    } else if (m_grassTex && !native && (!tex || !tex->m_thumbValid || tex->Width() * tex->Height() <= 32u * 32u)) {
         // The base pass without a texture we can read: the game draws ground whose texture is still loading (walking
         // into an area) untextured or with a stand-in, and classifying that would take all of it as grass, of one
         // colour - for good, a cell only ever takes a finer triangle. Wait for the texture. A ground texture of 32 x 32
@@ -335,7 +338,7 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
     }
     const float gridX0 = float(gx0) * kGrassTileSize, gridZ0 = float(gz0) * kGrassTileSize;
     const float gridX1 = float(gx1 + 1) * kGrassTileSize, gridZ1 = float(gz1 + 1) * kGrassTileSize;
-    const bool filter = basePass && m_grassTex && tex;
+    const bool filter = basePass && m_grassTex && (tex || native);
     const uint8_t* src = static_cast<const uint8_t*>(vertices);
     const size_t stride = layout.stride, posOff = size_t(layout.offset[0]), uvOff = size_t(layout.offset[uvSet]);
     const uint32_t count = indices ? indexCount : vertexCount;
@@ -394,7 +397,8 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                         uvs = true;
                         const float uvArea = 0.5f * std::fabs((ub[0] - ua[0]) * (uc[1] - ua[1]) -
                                                               (uc[0] - ua[0]) * (ub[1] - ua[1]));
-                        const float texels = uvArea * float(tex->Width()) * float(tex->Height());
+                        const float texels = native ? uvArea * 65536.0f   // (a cell's tile: 256 x 256)
+                                                    : uvArea * float(tex->Width()) * float(tex->Height());
                         if (texels > 1e-6f)
                             rank = std::max(rank, TriangleRank(area / texels * 64.0f));
                     }
@@ -436,7 +440,8 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                         ranks[idx] = rank;
                         if (lightPass) {
                             uint8_t l[3] = {0, 0, 0};
-                            tex->TexelRgbBilinear(u, v, l);   // (readable: checked above)
+                            if (native) NativeLightRgb(u, v, l);
+                            else tex->TexelRgbBilinear(u, v, l);   // (readable: checked above)
                             const uint32_t light = uint32_t(l[0]) << 16 | uint32_t(l[1]) << 8 | l[2] | 0xFF000000u;
                             const uint32_t old = tile->light[idx];
                             tile->light[idx] = light;
@@ -449,7 +454,7 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                         uint8_t rgb[3] = {0x3C, 0x6A, 0x2A};      // a default grass green (no filter, or no texel read)
                         bool have = false;
                         if (filter)
-                            have = tex->TexelRgbAt(u, v, rgb);
+                            have = native ? NativeGroundRgb(u, v, rgb) : tex->TexelRgbAt(u, v, rgb);
                         const bool grass = !filter || (have && GreenRgb(rgb));
                         const uint32_t colour = uint32_t(rgb[0]) << 16 | uint32_t(rgb[1]) << 8 | rgb[2] |
                                                 (grass ? 1u << 24 : 0u);
@@ -478,7 +483,7 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                     ++tile->version;
                     tile->lastChange = m_frameNumber;
                 }
-                if (!lightPass && filter) {      // which base textures it holds (a re-upload recaptures the ground)
+                if (!lightPass && filter && !native) {   // which base textures it holds (a re-upload recaptures the ground)
                     bool known = false;
                     for (const void* p : tile->bases)
                         known = known || p == tex;

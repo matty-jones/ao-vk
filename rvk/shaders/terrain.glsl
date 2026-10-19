@@ -193,9 +193,17 @@ float NativeSky(vec3 posW)
     return 1.0 - FL.terrain2.x * (1.0 - v);
 }
 
-// The cell's tile's mean colour (its smallest level): what the rock on its cliff is tinted to.
+// The cells' tiles' mean colours filtered between cells at this point: what the rock on a cliff is tinted to - per
+// cell, a cliff not quite upright crossed cells corner to corner and the tint jumped at each (grass tiles: green
+// wedges up the face). From the means' texture (D.terrainAt.x on the native base pass), else the cell's tile's
+// smallest level.
 vec3 NativeMean(vec2 cell)
 {
+    const uint means = floatBitsToUint(D.terrainAt.x);
+    if (means != 0u && means < 65537u) {
+        const vec2 size = vec2(textureSize(sampler2D(texImages[means - 1u], bindlessSamplers[D.sampIdx.w]), 0));
+        return textureLod(sampler2D(texImages[means - 1u], bindlessSamplers[D.sampIdx.w]), cell / size, 0.0).rgb;
+    }
     const uvec2 c = NativeCell(cell);
     return textureLod(sampler2D(texImages[nonuniformEXT(c.x)], bindlessSamplers[D.sampIdx.w]), vec2(0.5), 14.0).rgb;
 }

@@ -55,7 +55,8 @@ struct DrawTransform {
                                    // native ground's tile-code texture's bindless image + 1 (the float's bits; 0 = the
                                    // game's ground); z its normal maps' (lighting pass; 0 = none); w its sky visibility's
                                    // (lighting pass; 0 = none)
-    float terrainAt[4];            // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown); w:
+    float terrainAt[4];            // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown) - the
+                                   // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); w:
                                    // kTerrainBase / kTerrainLight (0 = not mapped)
 };
 enum : uint32_t { kTerrainBase = 1, kTerrainLight = 2 };   // DrawTransform terrainAt[3]: the ground's base pass; its

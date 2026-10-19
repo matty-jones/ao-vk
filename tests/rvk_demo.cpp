@@ -1770,6 +1770,7 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     dev.SetNativeGround(ground);
     dev.SetNativeGroundLightmap(packed, lw, lh, shade);
     dev.SetNativeGroundAo(g_groundAo);
+    if (g_grassFieldOn) dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true);   // (--grass-field: the grass on it)
     struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
     const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
     const VtxTerrain standIn[3] = {{0, -1000, 0, 0, 1, 0, 0, 0, 0, 0}, {1, -1000, 0, 0, 1, 0, 1, 0, 1, 0},

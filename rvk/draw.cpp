@@ -2871,7 +2871,9 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                 // (The native ground's base pass: each cell's tile from the tile-code texture - terrain.glsl.)
                 if (m_native.drawing && m_native.codes && dt.terrainAt[3] > 0.0f) {
                     const uint32_t codes = BindlessImage(m_native.codes) + 1;
+                    const uint32_t means = m_native.means ? BindlessImage(m_native.means) + 1 : 0u;
                     std::memcpy(&dt.terrain[1], &codes, 4);
+                    std::memcpy(&dt.terrainAt[0], &means, 4);   // (the native ground: the tiles' mean colours)
                 }
             }
         } else if (m_rs[d3d::RS_LIGHTING] && IsMultiplyPass()) {

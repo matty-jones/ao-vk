@@ -90,8 +90,13 @@
   reads each cell's tile's own, turned) come with them, made again when a tile's maps or the settings change
   (`NativeMapsSignature`). The sky's visibility over the land (`RVK_GroundAo`, 0.6): a worker thread scans the horizon
   from every height sample, 12 directions to 64 cells, once a playfield (under a second); the lighting pass's lightmap
-  is darkened by the hidden part (`D.terrain.w`, `FL.terrain2.x`) - cliff faces, valleys, the feet of walls. Not yet:
-  ground grass on it (its base pass's texture is a stand-in: the capture waits), the tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  is darkened by the hidden part (`D.terrain.w`, `FL.terrain2.x`) - cliff faces, valleys, the feet of walls. The
+  lightmap is read at the pixel's own cell (world x, z), blurred over the cells round it on cliffs by their steepness
+  (one texel a cell up a 40-unit face drew hard triangles where it crossed from a dark cell to a lit one); the rock's
+  tint is the cells' tiles' mean colours filtered between cells (a means texture: `D.terrainAt.x` on the native base
+  pass) - per cell it jumped at each crossing (green wedges where grass tiles met a cliff). The ground grass reads the
+  native ground per cell (`NativeGroundRgb`: the cell's tile turned; `NativeLightRgb`: the lightmap's texels, kept on
+  the CPU). Not yet: the tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):

@@ -781,6 +781,21 @@ void main()
     // (The ground's base pass: its texture as terrain.glsl lays it.)
     const bool terrainBasePass = terrainMapped && D.terrainAt.w < 1.5;
     vec4 t0 = terrainBasePass ? TerrainBase(D.texIdx.x, bindlessSamplers[D.sampIdx.x], terrain) : Sample(0u);
+    // The native ground's lightmap read where the pixel is (its cell from world x, z), not where its triangle's corners
+    // say: a cliff's cells are split corner to corner and each half spread the light its own way - dark wedges up the
+    // face. Read so, a cliff's light runs evenly down it, as the baked texel says.
+    // On a cliff, blurred over the cells round it (by its steepness): one texel a cell stretched up a face of 40 units
+    // turned the cells' light into hard triangles where the face crosses from a dark cell to a lit one.
+    if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
+        const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
+        t0 = texture(TEX0, at);
+        if (terrain.side > 0.01) {
+            vec4 blur = vec4(0.0);
+            for (int j = -1; j <= 1; ++j)
+                for (int i = -1; i <= 1; ++i) blur += textureLod(TEX0, at + vec2(i, j) * 1.5 / lmSize, 0.0);
+            t0 = mix(t0, blur / 9.0, terrain.side);
+        }
+    }
     vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
     if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
 #ifdef RVK_GLOW

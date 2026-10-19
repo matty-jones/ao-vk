@@ -93,7 +93,7 @@ void Device::DestroyNativeGround()
 {
     if (m_native.skyPending.valid()) m_native.skyPending.wait();
     // (The lightmap stays: it is the hour's, handed over when it changes - perhaps before this playfield's ground.)
-    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.sky})
+    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means, &m_native.sky})
         if (*t) { DestroyTexture(*t); *t = nullptr; }
     m_native.patches.clear();
     m_native.indices.reset();
@@ -199,7 +199,7 @@ uint64_t Device::NativeMapsSignature() const
 void Device::MakeNativeCodes()
 {
     const NativeGround& g = *m_native.ground;
-    for (Texture** t : {&m_native.codes, &m_native.maps})
+    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means})
         if (*t) { DestroyTexture(*t); *t = nullptr; }
     std::vector<uint32_t> image(g.tiles.size(), BindlessImage(nullptr)), normal(g.tiles.size(), 0xFFFFu);
     bool anyNormal = false;
@@ -213,13 +213,21 @@ void Device::MakeNativeCodes()
             anyNormal = true;
         }
     }
-    std::vector<uint32_t> codes(size_t(g.cellsX) * g.cellsZ), maps(anyNormal ? codes.size() : 0);
+    std::vector<uint32_t> codes(size_t(g.cellsX) * g.cellsZ), maps(anyNormal ? codes.size() : 0), means(codes.size());
+    std::vector<uint32_t> mean(g.tiles.size(), 0xFF808080u);   // (each tile's, from its colour grid)
+    for (size_t t = 0; t < g.tiles.size(); ++t) {
+        const Texture* tex = g.tiles[t];
+        if (!tex || tex->m_mean[0] < 0.0f) continue;
+        auto byte = [](float v) { return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
+        mean[t] = 0xFF000000u | byte(tex->m_mean[0]) << 16 | byte(tex->m_mean[1]) << 8 | byte(tex->m_mean[2]);
+    }
     for (size_t k = 0; k < codes.size(); ++k) {
         const uint16_t code = g.codes[k];
         const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
         const uint32_t t = tile < image.size() ? tile : 0;
         const uint32_t img = image.empty() ? 0u : image[t];
         codes[k] = 0xFF000000u | (img & 0xFFu) << 16 | ((img >> 8) & 0xFFu) << 8 | turn;
+        means[k] = mean.empty() ? 0xFF808080u : mean[t];
         if (anyNormal) {
             const uint32_t nm = normal.empty() ? 0xFFFFu : normal[t];
             maps[k] = 0xFF000000u | (nm & 0xFFu) << 16 | ((nm >> 8) & 0xFFu) << 8;
@@ -227,6 +235,7 @@ void Device::MakeNativeCodes()
     }
     m_native.codes = CreateTexture(g.cellsX, g.cellsZ, codes.data());
     if (anyNormal) m_native.maps = CreateTexture(g.cellsX, g.cellsZ, maps.data());
+    m_native.means = CreateTexture(g.cellsX, g.cellsZ, means.data());
     m_native.mapsSignature = NativeMapsSignature();
 }
 
@@ -235,9 +244,12 @@ void Device::SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>>
                                      float shade)
 {
     if (m_native.lightmap) {
+        m_lightmapsUploaded.push_back(m_native.lightmap);   // (the grass's light taken from it: again)
         DestroyTexture(m_native.lightmap);
         m_native.lightmap = nullptr;
     }
+    m_native.lightPixels.clear();
+    m_native.lightW = m_native.lightH = 0;
     const uint32_t rowBytes = (w + 1) / 2;
     if (!packed || !w || !h || packed->size() < size_t(rowBytes) * h)
         return;
@@ -250,7 +262,42 @@ void Device::SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>>
             px[size_t(y) * w + x] = palette[(x & 1) ? (b & 15u) : (b >> 4)];
         }
     m_native.lightmap = CreateTexture(w, h, px.data());
+    m_native.lightPixels = std::move(px);
+    m_native.lightW = w;
+    m_native.lightH = h;
     Log("native ground: the hour's lightmap, %u x %u, shade %.2f", w, h, shade);
+}
+
+bool Device::NativeGroundRgb(float u, float v, uint8_t rgb[3]) const
+{
+    if (!m_native.ground) return false;
+    const NativeGround& g = *m_native.ground;
+    const int c = std::clamp(int(std::floor(u)), 0, int(g.cellsX) - 1), r = std::clamp(int(std::floor(v)), 0, int(g.cellsZ) - 1);
+    const uint16_t code = g.codes[size_t(r) * g.cellsX + c];
+    const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
+    if (tile >= g.tiles.size() || !g.tiles[tile]) return false;
+    const float a = std::clamp(u - float(c), 0.0f, 1.0f), b = std::clamp(v - float(r), 0.0f, 1.0f);
+    const float tu[4] = {a, 1.0f - b, 1.0f - a, b}, tv[4] = {1.0f - b, 1.0f - a, b, a};   // (terrain.glsl NativeTurn)
+    return g.tiles[tile]->TexelRgbAt(tu[turn], tv[turn], rgb);
+}
+
+bool Device::NativeLightRgb(float u, float v, uint8_t rgb[3]) const
+{
+    if (m_native.lightPixels.empty()) return false;
+    const float x = std::clamp(u * float(m_native.lightW) - 0.5f, 0.0f, float(m_native.lightW - 1));
+    const float y = std::clamp(v * float(m_native.lightH) - 0.5f, 0.0f, float(m_native.lightH - 1));
+    const uint32_t x0 = uint32_t(x), y0 = uint32_t(y);
+    const uint32_t x1 = std::min(x0 + 1, m_native.lightW - 1), y1 = std::min(y0 + 1, m_native.lightH - 1);
+    const float fx = x - float(x0), fy = y - float(y0);
+    auto at = [&](uint32_t px, uint32_t py, int ch) {
+        return float((m_native.lightPixels[size_t(py) * m_native.lightW + px] >> (16 - 8 * ch)) & 0xFFu);
+    };
+    for (int ch = 0; ch < 3; ++ch) {
+        const float top = at(x0, y0, ch) + (at(x1, y0, ch) - at(x0, y0, ch)) * fx;
+        const float bottom = at(x0, y1, ch) + (at(x1, y1, ch) - at(x0, y1, ch)) * fx;
+        rgb[ch] = uint8_t(std::clamp(top + (bottom - top) * fy + 0.5f, 0.0f, 255.0f));
+    }
+    return true;
 }
 
 // A draw of the game's: is it its ground, replaced (drawn by this first, for its pass, once a frame)? Skipped then.

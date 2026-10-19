@@ -1013,9 +1013,12 @@ private:
         uint32_t vertices = 0, indexCount = 0;
         Texture* codes = nullptr;
         Texture* maps = nullptr;                 // each cell's tile's normal map (its bindless image in R, G; 0xFFFF none)
+        Texture* means = nullptr;                // each cell's tile's mean colour (the cliffs' rock tint, filtered)
         uint64_t mapsSignature = 0;              // the tiles' maps and the settings the two textures were made with
         Texture* lightmap = nullptr;
         Texture* lightmapGrey = nullptr;         // (none handed over yet: a mid grey)
+        std::vector<uint32_t> lightPixels;       // the lightmap's texels (the grass's light: Device::NativeLightRgb)
+        uint32_t lightW = 0, lightH = 0;
         Texture* sky = nullptr;                  // how much of the sky each height sample sees (0..1; RVK_GroundAo)
         std::future<std::shared_ptr<std::vector<uint32_t>>> skyPending;
         float ao = 0.6f;                         // RVK_GroundAo
@@ -1025,6 +1028,10 @@ private:
     } m_native;
     bool NativeGroundReplaces(uint32_t fvf);
     uint64_t NativeMapsSignature() const;
+    // The native ground for the grass's capture (grass.cpp): the colour of the ground at cell coordinates (u, v) - its
+    // cell's tile, turned - and its light at lightmap coordinates.
+    bool NativeGroundRgb(float u, float v, uint8_t rgb[3]) const;
+    bool NativeLightRgb(float u, float v, uint8_t rgb[3]) const;
     void PollNativeSky();
     void MakeNativeCodes();
     void DrawNativeGround(bool lightPass);
