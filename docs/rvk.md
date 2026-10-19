@@ -64,6 +64,27 @@
   alpha-blended and additive interface draws; an unblended one keeps its texture's alpha as coverage, one multiplying
   the frame is approximated. Hooks are only made with a rate set; the two entries' code is checked (MSVC's exception
   prologue calling GUI.dll's `_EH_prolog`), so another GUI.dll build is left alone (logged).
+- **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):
+  DisplaySystem.dll's AnarchyGround_t draws the heightmap as a split tree of triangles; within its full-quality radius
+  (+0x1A8: entering a playfield the game sets 8, 44 - the option `DisplayGroundFullQualityRadius`, its slider 7..44 -
+  then 150, the one it draws with) the leaves are drawn with each 4 x 4 cell's own tile
+  (64 texels a unit), beyond it each 256-unit patch is one baked texture of 8 texels a cell (`CreateHiTexture`: 512 x
+  512, 2 texels a unit - the blurry land past the near ring). The radius also lifts the split thresholds
+  (`FUN_1003216f`: (i x quality / 100)^2.25 + radius^2). `rnative::ground` (proxy/native/ground.cpp) wraps
+  `SetHQRadius` (+0x3255B) to scale the game's value, and `Tesselate` (+0x35348, called on the live ground as the
+  camera moves) to take up a changed scale - no pointer to the ground is kept; both entries' bytes checked. The
+  ground's vertex buffers are made as needed (`FUN_10034658`), so the cost is the ring's area: about 120 full-quality
+  ground draws a pass and 24k vertices at the game's own, the square of the scale times that - and the game's own
+  rebuilding of the ground as the camera moves. At x4 (600) that was 100-230 ms frames moving and ~900 MB less address
+  space in the 32-bit process; x2 had occasional 50-60 ms ones. Hence 2.5 at most.
+  **Far ground** (setting `RVK_GroundFar`, Terrain; 8 = the game's, 16 the default, or 32): past the radius,
+  `CreateHiTexture` bakes each patch of n cells into one texture of n x 8 texels a side (`mov ecx, eax; shl ecx, 3`,
+  DisplaySystem.dll+0x37BDF; capped at the device's largest texture, 8192), each cell's tile shrunk to 8 x 8. The
+  setting writes that shift's count (bytes around it checked): 16 texels a cell makes a 64-cell patch 1024 x 1024.
+  Each baked patch costs its texture and the CPU copy rvk keeps of a texture the game locked: 0.5 MB each at 8, 2 MB
+  at 16, 8 MB at 32 - in the 32-bit address space the log's `address space` line shows. Patches baked after a change
+  take it. Decompiles:
+  `re/lod_ds.c`, `re/ds_tess.c`, `re/ds_ground_hq.c`, `re/ds_hitex.c`, `re/n3_lod.c`, `re/fq_N3.dll.c`.
 - **Detail range** (setting `RVK_DetailRange`, General; 1 = the game's own, 2 the default): N3.dll shows a
   playfield's placed objects zone by zone. When the game's camera moves onto another tile, each loaded zone gets a
   ring by how far its middle is from the camera (radii of the view distance x 0.5 x 0.10, 0.15, 0.30, 0.40, 0.55,
@@ -92,6 +113,35 @@
   clouds' gaps (`RVK_DuskRays`, `volume.frag`). With the sun near the horizon the log gets a `dusk:` line every ~2 s
   (and `time:` with the hour while `RVK_TimeOfDay` / `RVK_TimeSpeed` run the clock). The demo's `--sun-sweep A B N`
   renders a dusk and `tools/sun-sweep.py` makes a contact sheet and flags jumps between shots.
+- **Ground texturing** (`rvk/terrain.cpp`, `shaders/terrain.glsl`; settings `RVK_CliffTex`, `RVK_TileHide`,
+  `RVK_GroundVary`, Terrain; docs/terrain-plan.md): the game lays its ground texture from above, so down a cliff it
+  stretches into streaks. Its near ground gives each 4 x 4 unit cell its own four vertices and its own copy of a tile
+  (0..1 over the cell, turned or flipped one of eight ways, read clamped); its far ground is one plane, a map of the
+  zone. Each chunk's triangles' mappings are solved once (`FitTerrain`; kept by `TerrainChunkKey`): a chunk whose
+  triangles are nine in ten the same number of repeats per unit of a turned or flipped tile, at most 64 units a
+  repeat, is "tiled" (the log counts them), and its draw record carries that scale (`DrawTransform::terrain`). The
+  shader keeps the game's coordinates and sampler on flat ground - its tiles are placed by hand (transitions, edges,
+  patches of another ground in a tile), so nothing there is moved. Where a triangle is steep (its own slope, from the
+  position's derivatives - a cliff is one or two cells high and its corners' normals are far flatter; from ~32
+  degrees, all of it past ~57) the face gets its own lay along x or z and down, in world space, one lay down the whole
+  cliff: rock (`RVK_CliffRock`; Poly Haven's "Cliff Side", CC0, embedded from `rvk/assets/terrain` - albedo, normal
+  map, ORM - decoded off the render thread and uploaded inside a frame once in, 24 units a repeat) tinted to the cell's
+  tile's mean colour (`Texture::m_mean`, from the grass's colour grid) over the rock's own, its contrast softened a
+  quarter towards its mean; or without it the cell's own tile at the tile's scale. Faces read tiled (the normal maps'
+  sampler - clamped, the game's way, smears the tile's edge into stripes) through a hexagon grid with an offset per cell
+  weighted by the texture's brightness (Mikkelsen's hex-tiling), so a cliff isn't one picture in rows; the rock's
+  offsets are only sideways (offset up or down too, its layers were chopped into dashes) and its layers bend in a slow
+  wave along the cliff, so they run on across it without stacking into the same rows. Which way a face lies (the lay
+  along x or z) follows the interpolated normal, smooth across triangles; how steep it is, the triangle's own. The ground's lighting pass is laid too wherever
+  the rock is on, for the rock's relief (its normal map on the faces; a base without one of its own gets none from
+  above). The colour varies in patches over the land, laid like the texture (from above on flat ground, on the face where it is
+  steep - from above only, they ran down cliffs in streaks).
+  Both of the ground's passes lay it the same way: the lighting pass reads the base texture's normal and PBR maps
+  through the same lays and weights (`TerrainNormalMap`, `TerrainTexture`). Not covered: the generated bump maps
+  (`RVK_BumpOn`) still read the game's coordinates. The frame dump prints each chunk's fit (its `T:` line) and lists
+  the ground textures drawn, their colour grids in `<dump>-ground.bmp`. `rvk_demo --terrain-test` draws a canyon wall
+  laid out as the game's cells (`--terrain-off` without, `--terrain-maps` with a normal map and PBR material,
+  `--terrain-yaw R` turned).
 - **Ground grass** (setting `RVK_GrassOn`, Plants; **off** by default): our own grass over the game's terrain, an
   addition on top of its dated foliage cards (grass.cpp, grass.vert / grass.frag).
   - *Ground*: the terrain's own draws are captured (`Device::CaptureTerrain`, from `Draw`) into world-aligned 8-unit

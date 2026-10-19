@@ -173,6 +173,7 @@ public:
     void SetGoldenHour(float s);
     void SetShadowMemory(uint32_t mode);
     void SetHillShade(bool on);
+    void SetTerrain(const Device::TerrainSettings& s);
     void SetShadowView(bool on);
     void SetAlienMap(bool on);
     void SetContactShadows(float s);

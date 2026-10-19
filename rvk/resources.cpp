@@ -521,6 +521,12 @@ void Device::UpdateTexture(Texture* t, uint32_t level, uint32_t x, uint32_t y, u
                                               t->m_thumbW, t->m_thumbH);
             if (!t->m_thumbValid)
                 std::vector<uint8_t>().swap(t->m_thumb);
+            // (Its mean colour, from that grid: the cliffs' rock is tinted to a ground cell's tile - terrain.cpp.)
+            for (int c = 0; c < 3; ++c) {
+                double sum = 0.0;
+                for (size_t i = c; t->m_thumbValid && i < t->m_thumb.size(); i += 3) sum += t->m_thumb[i];
+                t->m_mean[c] = t->m_thumbValid ? float(sum / (255.0 * double(t->m_thumb.size() / 3))) : -1.0f;
+            }
             // A ground texture with a new picture (a stand-in replaced as the area loads): the grass classified
             // from it is stale.
             if (t->m_groundBase && m_grassOn && t->m_thumbValid && before != t->m_thumb)

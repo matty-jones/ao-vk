@@ -978,6 +978,11 @@ void ThreadedDevice::SetHillShade(bool on)
     Enqueue([this, on](const uint8_t*) { m_device.SetHillShade(on); });
 }
 
+void ThreadedDevice::SetTerrain(const Device::TerrainSettings& s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetTerrain(s); });
+}
+
 void ThreadedDevice::SetAlienMap(bool on)
 {
     Enqueue([this, on](const uint8_t*) { m_device.SetAlienMap(on); });

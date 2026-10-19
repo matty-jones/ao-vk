@@ -454,6 +454,11 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
         for (auto& r : fl->skyRing) r[3] = 0.0f;
         fl->skyUp[3] = 0.0f;
     }
+    fl->terrain[0] = std::clamp(m_terrainSettings.cliff, 0.0f, 1.0f);
+    fl->terrain[1] = std::clamp(m_terrainSettings.tiling, 0.0f, 1.0f);
+    fl->terrain[2] = std::clamp(m_terrainSettings.variation, 0.0f, 2.0f);
+    fl->terrain[3] = 0.0f;
+    FillTerrainRockLights(fl->terrainRock, fl->terrainRock2);
     fl->dusk[0] = std::clamp(m_afterglow, 0.0f, 2.0f);
     fl->dusk[1] = m_hdr ? m_blueGrade : 0.0f;
     // (The sun on the world camera's screen, NDC - the sunset rays fan from it: volume.frag. Behind the camera: far off.)
@@ -2850,14 +2855,24 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // drawn after all base passes) takes its relief from its chunk's.
     m_drawBumpBase = nullptr;
     if (terrain && m_textures[0]) {
+        // (Each pass also carries how its chunk's base texture lies on the world: terrain.glsl lays it on cliffs.)
+        const uint64_t chunk = TerrainChunkKey(vertices, vertexCount, layout.stride, indices, indexCount);
         if (!m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE]) {
-            m_terrainBases[TerrainChunkKey(vertices, vertexCount, layout.stride, indices, indexCount)] = m_textures[0];
+            m_terrainBases[chunk] = m_textures[0];
+            if (vertices && (m_tss[0][d3d::TSS_TEXCOORDINDEX] & 0xFFFFu) == 0 &&   // (stage 0 reads set 0 as it is)
+                m_tss[0][d3d::TSS_TEXTURETRANSFORMFLAGS] == 0)
+                FillTerrainRecord(dt, TerrainFitFor(chunk, vertices, vertexCount, layout, indices, indexCount),
+                                  kTerrainBase, m_textures[0]);
         } else if (m_rs[d3d::RS_LIGHTING] && IsMultiplyPass()) {
-            auto it = m_terrainBases.find(TerrainChunkKey(vertices, vertexCount, layout.stride, indices, indexCount));
+            auto it = m_terrainBases.find(chunk);
             if (it != m_terrainBases.end() &&
                 (m_bump > 0.0f || (m_normalMaps && m_pixelLighting && it->second->m_normalMap) ||
                  (m_pbr.enabled && m_pixelLighting && it->second->m_ormMap)))
                 m_drawBumpBase = it->second;
+            // (Laid too where the base has no maps of its own but the cliffs have rock: its relief.)
+            if (vertices && it != m_terrainBases.end() && (m_drawBumpBase || TerrainRockOn()))
+                FillTerrainRecord(dt, TerrainFitFor(chunk, vertices, vertexCount, layout, indices, indexCount),
+                                  kTerrainLight, it->second);
         }
     }
     uint32_t carrier = m_external ? 0 : CarriedLight(fvf, m_drawGpu ? nullptr : vertices, vertexCount, layout.stride);

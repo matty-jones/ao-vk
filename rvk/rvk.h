@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <string>
 #include <atomic>
+#include <future>
 #include <algorithm>
 #include <functional>
 #include <unordered_map>
@@ -36,6 +37,25 @@ enum class VisualKind : uint32_t {
 };
 
 class Device;
+
+// How a ground chunk's base texture lies on the world (terrain.cpp FitTerrain). The game gives each 4 x 4 unit cell of
+// its near ground its own copy of the tile (coordinates 0..1 over the cell, turned or flipped one of eight ways - its
+// own vertices), laid from above; its far ground is one plane, a map of the zone. So each triangle's own mapping is
+// solved (its three vertices: set 0 from world x, z - every triangle of a heightmap stands over a square of the grid,
+// steep or not): the repeats per world unit, and how many triangles are that many repeats of the tile turned or
+// flipped. And, for the frame dump, the whole chunk fitted as one plane (least squares).
+struct TerrainFit {
+    float coef[4][4] = {};         // the plane: u0, v0, u1, v1 = x, y, z, 1 times these
+    float rms[4] = {};             // ... its error (texture units)
+    float normalY[2] = {};         // the normals' lowest and highest y (normalised)
+    float normalLength[2] = {};    // ... their shortest and longest
+    uint32_t vertices = 0;         // how many went into the plane's fit (0: none, or all in a line)
+    float cellScale = 0.0f;        // the triangles' repeats per world unit (their median)
+    float cellShare = 0.0f;        // ... the share of triangles laid from above at that, turned or flipped
+    uint32_t triangles = 0;        // how many triangles were solved
+    bool tiled = false;            // nine in ten are, at most 64 units a repeat (a tile, not the far map): the faces
+                                   // of cliffs and the hexagons can be laid at its scale
+};
 
 // Diagnostics. Default: stderr, flushed per line. SetLogSink redirects (e.g. into the game's log file).
 void Log(const char* fmt, ...);
@@ -89,6 +109,8 @@ private:
     std::vector<uint8_t> m_thumb;
     uint32_t m_thumbW = 0, m_thumbH = 0;
     bool m_thumbValid = false;
+    float m_mean[3] = {-1.0f, -1.0f, -1.0f};   // its mean colour (0..1; from the grid above, -1 until then): the cliffs'
+                                               // rock tinted to a ground cell's tile (terrain.cpp)
     // Not fully opaque: the mean alpha (0..255) on a grid of up to 64 x 64 cells over level 0, for the leaves
     // (leaves.cpp: where a canopy card is leaf and where it is hole). Empty until a full level-0 upload.
     std::vector<uint8_t> m_alphaMask;
@@ -570,6 +592,11 @@ public:
     // the shadow items' counts anew - finding a blinking shadow)
     void SetShadowMemory(uint32_t mode) { m_shadowMemory = mode; m_cacheTraceLines = 0; m_memoryTraceFrames = 240; }
     void SetHillShade(bool on) { m_hillShade = on; }
+    // The ground's own texturing (terrain.cpp, terrain.glsl), each 0..1: its texture laid on the faces of cliffs
+    // instead of stretched down them (RVK_CliffTex), the faces' repeats hidden (RVK_TileHide), large-scale variation
+    // in its colour (RVK_GroundVary); rock on the faces instead of the ground's tile (RVK_CliffRock).
+    struct TerrainSettings { float cliff = 1.0f, tiling = 1.0f, variation = 1.0f; bool rock = true; };
+    void SetTerrain(const TerrainSettings& s) { m_terrainSettings = s; m_frameLightsDirty = true; }
     void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
     void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
     // The game's own sun sprites (its glow, VisualSunRays_t), shown or not.
@@ -951,6 +978,32 @@ private:
     // The ground's base pass textures this frame, by chunk (TerrainChunkKey): its lighting pass, drawn later with the
     // lightmap, takes its relief from them. And the sampler they're read with (repeat, mipmapped).
     std::unordered_map<uint64_t, Texture*> m_terrainBases;
+    // The ground's chunks' texture coordinates fitted to the world (terrain.cpp), by TerrainChunkKey: kept across
+    // frames; how many were laid from above and how many not (logged).
+    std::unordered_map<uint64_t, TerrainFit> m_terrainFits;
+    uint32_t m_terrainFitsAbove = 0, m_terrainFitsOther = 0;
+    const TerrainFit& TerrainFitFor(uint64_t key, const void* vertices, uint32_t vertexCount,
+                                    const detail::FvfLayout& layout, const uint16_t* indices, uint32_t indexCount);
+    void FillTerrainRecord(detail::DrawTransform& dt, const TerrainFit& fit, uint32_t pass, const Texture* base) const;
+    // The cliffs' rock (terrain.cpp; embedded): decoded on a worker thread once wanted, uploaded at a frame's start when
+    // it is in. Its maps, and its mean colour (the tint to a cell's tile divides by it).
+    struct RockMaps;
+    struct TerrainRock {
+        Texture* albedo = nullptr;
+        Texture* normal = nullptr;
+        Texture* orm = nullptr;
+        float mean[3] = {0.5f, 0.5f, 0.5f};
+        bool started = false;
+        std::future<std::shared_ptr<RockMaps>> pending;
+    } m_rock;
+    static std::shared_ptr<RockMaps> DecodeRock();
+    void PollTerrainRock();
+    void FillTerrainRockLights(float rock[4], float rock2[4]);
+    bool TerrainRockOn() const { return m_terrainSettings.rock && m_terrainSettings.cliff > 0.0f && m_rock.albedo; }
+    bool TerrainTexturingOn() const
+    {
+        return m_terrainSettings.cliff > 0.0f || m_terrainSettings.tiling > 0.0f || m_terrainSettings.variation > 0.0f;
+    }
     Texture* m_drawBumpBase = nullptr;           // the current draw's (Draw)
     Texture* m_drawOrm = nullptr;                // the current draw's PBR material map (Draw)
     bool m_drawOrmBase = false;                  // ... from the ground's base texture
@@ -1341,6 +1394,7 @@ private:
     uint32_t m_shadowMemory = 1;                 // RVK_ShadowMem: remembered casters drawn into the sun's shadows
     uint32_t m_memoryTraceFrames = 0;            // (frames left of the counts' trace)
     bool m_hillShade = true;                     // RVK_HillShade: the terrain's shade from a low sun (terrain_sun.cpp)
+    TerrainSettings m_terrainSettings;           // RVK_Terrain*: the ground's own texturing (terrain.cpp)
     bool m_shadowViewDebug = false;              // RVK_ShadowView: the sun shadow map's say painted on the scene
     // The next draws only cast (native mesh.cpp: static meshes the game culled, within the shadows' reach): recorded as
     // sun shadow casters, not drawn (Draw). How many this frame (logged).
@@ -3125,11 +3179,15 @@ private:
     uint32_t m_dumpDraw = 0;
     uint32_t m_frameDraw = 0;                    // draws so far this frame (Draw calls)
     std::vector<d3d::Light> m_dumpedLights;
+    std::vector<const Texture*> m_dumpGroundTextures;   // the ground's base textures drawn (the dump's -ground.bmp)
+    void DumpGroundTextures(const std::string& path);
     std::vector<bool> m_dumpedLightValid;
     void BeginFrameDump();
     void EndFrameDump();
     void DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount, const uint16_t* indices,
                   uint32_t indexCount);
+    void DumpTerrainMapping(FILE* f, const void* vertices, uint32_t vertexCount, const detail::FvfLayout& layout,
+                            const uint16_t* indices, uint32_t indexCount) const;
     VkBuffer m_readback = VK_NULL_HANDLE;
     VmaAllocation_T* m_readbackAllocation = nullptr;
     void* m_readbackData = nullptr;

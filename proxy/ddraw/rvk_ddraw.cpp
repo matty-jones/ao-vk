@@ -2,6 +2,7 @@
 #include "rvk_backend.h"
 #include "rvk_settings.h"
 #include "native/gui.h"
+#include "native/ground.h"
 #include "native/rings.h"
 #include "native/scene.h"
 
@@ -262,6 +263,7 @@ void RvkState::Present()
     rnative::gui::Install();       // GUI.dll's interface drawing, once it is loaded: where the interface begins (the
                                    // floating text goes just before it) and RVK_UiRate's layer
     rnative::rings::Install();     // N3.dll's statel rings, once it is loaded (RVK_DetailRange)
+    rnative::ground::Install();    // DisplaySystem.dll's ground, once it is loaded (RVK_GroundRange)
     Frame();                  // a present without any rendering still shows a frame
     device->EndFrame();
     PollMaterialMaps();       // material maps decoded in the background, uploaded between frames

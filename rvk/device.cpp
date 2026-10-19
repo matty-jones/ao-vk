@@ -189,6 +189,9 @@ Device::~Device()
     if (m_blackTexture) DestroyTextureNow(m_blackTexture);
     if (m_blueNoise) DestroyTextureNow(m_blueNoise);
     if (m_flatNormal) DestroyTextureNow(m_flatNormal);
+    if (m_rock.pending.valid()) m_rock.pending.wait();   // (the cliffs' rock: a decode still running finishes first)
+    for (Texture* t : {m_rock.albedo, m_rock.normal, m_rock.orm})
+        if (t) DestroyTextureNow(t);
     for (auto& [key, sampler] : m_samplers) vkDestroySampler(m_device, sampler, nullptr);
     for (VkPipeline p : m_pipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_pipelinesHdr) if (p) vkDestroyPipeline(m_device, p, nullptr);
@@ -1703,6 +1706,9 @@ void Device::BeginFrame()
     BeginRenderingOn(m_target);
     if (!m_dumpPath.empty())
         BeginFrameDump();
+    // (The cliffs' rock uploaded once decoded: inside the frame - its several MB of uploads may need the ring flushed,
+    // which waits on frame work only an open frame submits.)
+    PollTerrainRock();
 }
 
 void Device::EndFrame()

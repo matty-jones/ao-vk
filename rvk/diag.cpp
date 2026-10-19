@@ -36,6 +36,7 @@ void Device::BeginFrameDump()
     m_dumpPath.clear();
     if (!m_dumpFile) return;
     m_dumpDraw = 0;
+    m_dumpGroundTextures.clear();
     m_dumpedLights.assign(m_lights.size(), {});
     m_dumpedLightValid.assign(m_lights.size(), false);
     const auto& v = m_view.m;
@@ -108,9 +109,59 @@ std::string Device::GpuMemoryReport() const
     return out;
 }
 
+// The ground's base textures drawn this frame, in the order first drawn: listed in the dump, their colour grids side by
+// side in <dump>-ground.bmp (12 a row, each 16 x 16 shown 4 times as big, in the listed order from the top left).
+void Device::DumpGroundTextures(const std::string& path)
+{
+    const std::vector<const Texture*>& ts = m_dumpGroundTextures;
+    for (size_t k = 0; k < ts.size(); ++k)
+        std::fprintf(m_dumpFile, "# ground texture %zu: [%p] %ux%u\n", k, static_cast<const void*>(ts[k]),
+                     ts[k]->Width(), ts[k]->Height());
+    if (ts.empty()) return;
+    constexpr int kTile = 64, kGap = 4, kPerRow = 12;
+    const int rows = int((ts.size() + kPerRow - 1) / kPerRow);
+    const int w = kPerRow * (kTile + kGap), h = rows * (kTile + kGap);
+    std::vector<uint8_t> px(size_t(w) * h * 3, 40);
+    for (size_t k = 0; k < ts.size(); ++k) {
+        const Texture* t = ts[k];
+        const int ox = int(k % kPerRow) * (kTile + kGap), oy = int(k / kPerRow) * (kTile + kGap);
+        for (int y = 0; y < kTile; ++y)
+            for (int x = 0; x < kTile; ++x) {
+                const uint32_t tx = uint32_t(x) * t->m_thumbW / kTile, ty = uint32_t(y) * t->m_thumbH / kTile;
+                const uint8_t* c = t->m_thumb.data() + (size_t(ty) * t->m_thumbW + tx) * 3;
+                uint8_t* o = px.data() + (size_t(oy + y) * w + ox + x) * 3;
+                o[0] = c[2]; o[1] = c[1]; o[2] = c[0];   // (BMP: blue, green, red)
+            }
+    }
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (!file) return;
+    const uint32_t rowBytes = (uint32_t(w) * 3 + 3) & ~3u, imageSize = rowBytes * uint32_t(h);
+    uint8_t header[54] = {'B', 'M'};
+    auto put32 = [&](int at, uint32_t v) { std::memcpy(header + at, &v, 4); };
+    put32(2, 54 + imageSize);
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, uint32_t(w));
+    put32(22, uint32_t(h));
+    header[26] = 1;
+    header[28] = 24;
+    put32(34, imageSize);
+    std::fwrite(header, 1, 54, file);
+    std::vector<uint8_t> row(rowBytes, 0);
+    for (int y = h - 1; y >= 0; --y) {           // (BMP rows bottom-up)
+        std::memcpy(row.data(), px.data() + size_t(y) * w * 3, size_t(w) * 3);
+        std::fwrite(row.data(), 1, rowBytes, file);
+    }
+    std::fclose(file);
+}
+
 void Device::EndFrameDump()
 {
     if (!m_dumpFile) return;
+    {
+        const size_t dot = m_dumpOpenPath.rfind('.');
+        DumpGroundTextures((dot != std::string::npos ? m_dumpOpenPath.substr(0, dot) : m_dumpOpenPath) + "-ground.bmp");
+    }
     std::fprintf(m_dumpFile, "# %s\n", GpuMemoryReport().c_str());
     std::fprintf(m_dumpFile, "# end: %u draws; %zu casters this frame, %zu remembered (%u drawn out of view last frame);"
                              " forgotten since start: %u in view but not drawn, %u far away\n",
@@ -278,6 +329,25 @@ static void Mul(const d3d::Matrix& m, const float in[4], float out[4])
         out[c] = in[0] * m.m[0][c] + in[1] * m.m[1][c] + in[2] * m.m[2][c] + in[3] * m.m[3][c];
 }
 
+// How a ground chunk's texture coordinates follow the world (terrain.cpp FitTerrain): each set as a x + b y + c z + d
+// with the fit's error, and its normals' range. A texture laid from above has b = 0 and a tiny error; a and c are its
+// repeats per world unit.
+void Device::DumpTerrainMapping(FILE* f, const void* vertices, uint32_t vertexCount, const FvfLayout& layout,
+                                const uint16_t* indices, uint32_t indexCount) const
+{
+    TerrainFit fit = FitTerrain(vertices, vertexCount, layout, indices, indexCount);
+    if (!fit.vertices) return;
+    std::fprintf(f, "  T: %s: %u triangles at %.5f repeats per unit, %.0f%% a tile turned or flipped; as one plane (%u "
+                 "vertices):", fit.tiled ? "tiled" : "NOT tiled", fit.triangles, fit.cellScale, 100.0f * fit.cellShare,
+                 fit.vertices);
+    const char* names[4] = {"u0", "v0", "u1", "v1"};
+    for (int j = 0; j < 4; ++j)
+        std::fprintf(f, " %s = %.5f x %+.5f y %+.5f z %+.3f (rms %.4f)%s", names[j], fit.coef[j][0], fit.coef[j][1],
+                     fit.coef[j][2], fit.coef[j][3], fit.rms[j], j == 3 ? "" : ";");
+    std::fprintf(f, " | normals length %.3f-%.3f, y %.2f-%.2f\n", fit.normalLength[0], fit.normalLength[1],
+                 fit.normalY[0], fit.normalY[1]);
+}
+
 void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount, const uint16_t* indices,
                       uint32_t indexCount)
 {
@@ -418,6 +488,13 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
     if (minX <= maxX) std::fprintf(f, " | rect %.0f,%.0f-%.0f,%.0f", minX, minY, maxX, maxY);
     else std::fprintf(f, " | offscreen");
     std::fprintf(f, "\n");
+    if (vertices && IsTerrain(fvf)) {
+        DumpTerrainMapping(f, vertices, vertexCount, layout, indices, indexCount);
+        const Texture* t = m_textures[0];
+        if (!lit && t && t->m_thumbValid &&
+            std::find(m_dumpGroundTextures.begin(), m_dumpGroundTextures.end(), t) == m_dumpGroundTextures.end())
+            m_dumpGroundTextures.push_back(t);
+    }
     // Geometry of draws with the vertex count asked for (RANDYVK_DUMP_VERTS): world-space positions, normals
     // (through the world matrix, not normalised), texture coordinates of set 0; then the indices.
     if (!vertices)

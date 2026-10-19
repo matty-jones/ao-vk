@@ -1340,6 +1340,179 @@ bool WriteSandPack(const char* path, const std::vector<SandBox>& boxes)
     return true;
 }
 
+// Terrain texturing test (--terrain-test): a canyon drawn like AnarchyGround_t - world-space chunks of 4 x 4 unit cells,
+// each with its own four vertices and its own copy of the tile laid from above (0..1 over the cell, turned or flipped
+// one of eight ways, as the game lays its near ground), an unlit base pass and a multiplying light pass with a
+// lightmap - seen from the canyon floor towards a wall 30 units high. The wall's texture streaks without the
+// terrain texturing (rvk terrain.glsl; --terrain-off), the floor's repeats show; a frame dump (terrain-frame.txt) has
+// each chunk's fit (its T line).
+bool g_terrainTest = false;
+bool g_terrainOff = false;          // --terrain-off: RVK_CliffTex, RVK_TileHide, RVK_GroundVary all 0
+float g_terrainYaw = 0.0f;          // --terrain-yaw R: the camera turned (radians; 0 looks along +z at the wall)
+float g_terrainVary = 1.0f;         // --terrain-vary X: RVK_GroundVary (0 .. 2)
+bool g_terrainMaps = false;         // --terrain-maps: the tile gets a normal map (from its brightness: pits sunk) and a
+                                    // PBR material, per-pixel lighting - the light pass's relief laid like the texture
+template <typename D>
+void RunTerrainTest(D& dev, int frames, const std::string& shot)
+{
+    // The tile: sandstone with grains, a few dark pits and pale flecks - features that show a stretch and a repeat.
+    constexpr int kTex = 256;
+    std::vector<uint32_t> tile(kTex * kTex);
+    auto hash = [](uint32_t x, uint32_t y) {
+        uint32_t h = x * 0x8DA6B343u ^ y * 0xD8163841u;
+        h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12;
+        return float(h & 0xFFFFu) / 65535.0f;
+    };
+    auto smooth = [&](float x, float y, int period) {   // tileable value noise
+        int x0 = int(std::floor(x)), y0 = int(std::floor(y));
+        float fx = x - x0, fy = y - y0;
+        fx = fx * fx * (3 - 2 * fx);
+        fy = fy * fy * (3 - 2 * fy);
+        auto h = [&](int a, int b) { return hash(uint32_t((a % period + period) % period), uint32_t((b % period + period) % period)); };
+        float a = h(x0, y0) + (h(x0 + 1, y0) - h(x0, y0)) * fx, b = h(x0, y0 + 1) + (h(x0 + 1, y0 + 1) - h(x0, y0 + 1)) * fx;
+        return a + (b - a) * fy;
+    };
+    for (int y = 0; y < kTex; ++y)
+        for (int x = 0; x < kTex; ++x) {
+            float n = 0.5f * smooth(x / 32.0f, y / 32.0f, 8) + 0.3f * smooth(x / 8.0f, y / 8.0f, 32) +
+                      0.2f * hash(uint32_t(x), uint32_t(y));
+            float pit = smooth(x / 16.0f + 3.1f, y / 16.0f + 7.7f, 16);
+            float k = 0.75f + 0.45f * n - (pit > 0.78f ? 0.45f : 0.0f) + (hash(uint32_t(x) / 3, uint32_t(y) / 3) > 0.985f ? 0.3f : 0.0f);
+            auto ch = [&](float c) { return uint32_t(std::clamp(c * k, 0.0f, 255.0f)); };
+            tile[size_t(y) * kTex + x] = 0xFF000000u | ch(196) << 16 | ch(124) << 8 | ch(78);
+        }
+    Texture* ground = dev.CreateTexture(kTex, kTex, tile.data());
+    if (g_terrainMaps) {
+        auto heightAt = [&](int x, int y) {
+            uint32_t p = tile[size_t((y + kTex) % kTex) * kTex + (x + kTex) % kTex];
+            return float((p >> 16 & 0xFF) + (p >> 8 & 0xFF) + (p & 0xFF)) / (3.0f * 255.0f);
+        };
+        std::vector<uint32_t> normalPixels(kTex * kTex), ormPixels(kTex * kTex, 0xFFFFD000u);   // rough, not metal
+        for (int y = 0; y < kTex; ++y)
+            for (int x = 0; x < kTex; ++x) {
+                float dx = (heightAt(x + 1, y) - heightAt(x - 1, y)) * 4.0f, dy = (heightAt(x, y + 1) - heightAt(x, y - 1)) * 4.0f;
+                float n[3] = {-dx, dy, 1.0f}, l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);   // (OpenGL: +y up)
+                auto ch = [&](float c) { return uint32_t(std::clamp((c / l * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f)); };
+                normalPixels[size_t(y) * kTex + x] = 0xFF000000u | ch(n[0]) << 16 | ch(n[1]) << 8 | ch(n[2]);
+            }
+        dev.SetNormalMap(ground, dev.CreateTexture(kTex, kTex, normalPixels.data()));
+        dev.SetMaterialMaps(ground, dev.CreateTexture(kTex, kTex, ormPixels.data()), nullptr);
+        dev.SetPixelLighting(true);
+        dev.SetNormalMaps(true, 1.0f);
+    }
+    std::vector<uint32_t> lightmapPixels(64 * 64, 0xFFC8C8C8u);
+    Texture* lightmap = dev.CreateTexture(64, 64, lightmapPixels.data());
+    struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
+    const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
+    // The canyon: a floor with low swells, a wall rising 30 units over ~5 along z = 40, a plateau above it.
+    auto height = [](float x, float z) {
+        float t = std::clamp((z - 40.0f) / 5.0f, 0.0f, 1.0f);
+        t = t * t * (3 - 2 * t);
+        return 1.2f * std::sin(x * 0.11f) * std::cos(z * 0.09f) + 30.0f * t + 1.5f * std::sin(x * 0.31f) * t;
+    };
+    auto normal = [&](float x, float z, float out[3]) {
+        float dx = height(x + 0.25f, z) - height(x - 0.25f, z), dz = height(x, z + 0.25f) - height(x, z - 0.25f);
+        float n[3] = {-dx, 0.5f, -dz}, l = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        for (int i = 0; i < 3; ++i) out[i] = n[i] / l;
+    };
+    constexpr int kChunks = 6, kChunkCells = 8;
+    constexpr float kChunk = 32.0f, kCell = kChunk / kChunkCells, kOriginX = -kChunk * kChunks / 2, kOriginZ = -64.0f;
+    std::vector<std::vector<VtxTerrain>> chunks;
+    std::vector<uint16_t> cellIndices;
+    for (int k = 0; k < kChunkCells * kChunkCells; ++k) {
+        const uint16_t q[6] = {uint16_t(4 * k), uint16_t(4 * k + 1), uint16_t(4 * k + 2), uint16_t(4 * k + 2),
+                               uint16_t(4 * k + 1), uint16_t(4 * k + 3)};
+        cellIndices.insert(cellIndices.end(), q, q + 6);
+    }
+    for (int cz = 0; cz < kChunks; ++cz)
+        for (int cx = 0; cx < kChunks; ++cx) {
+            std::vector<VtxTerrain> v;
+            for (int j = 0; j < kChunkCells; ++j)
+                for (int i = 0; i < kChunkCells; ++i) {
+                    const uint32_t turn = uint32_t(hash(uint32_t(cx * kChunkCells + i), uint32_t(cz * kChunkCells + j)) * 8.0f) & 7u;
+                    auto vert = [&](int a, int b) {
+                        float x = kOriginX + cx * kChunk + (i + a) * kCell, z = kOriginZ + cz * kChunk + (j + b) * kCell;
+                        float u = float(a), w = float(b);              // the cell's own copy of the tile ...
+                        if (turn & 1u) std::swap(u, w);                // ... turned or flipped
+                        if (turn & 2u) u = 1.0f - u;
+                        if (turn & 4u) w = 1.0f - w;
+                        VtxTerrain t{x, height(x, z), z, 0, 1, 0, u, w, float(i + a) / kChunkCells, float(j + b) / kChunkCells};
+                        normal(x, z, &t.nx);
+                        return t;
+                    };
+                    VtxTerrain q[4] = {vert(0, 0), vert(0, 1), vert(1, 0), vert(1, 1)};
+                    v.insert(v.end(), q, q + 4);
+                }
+            chunks.push_back(std::move(v));
+        }
+    if (g_terrainOff || g_terrainVary != 1.0f) {
+        Device::TerrainSettings ts;
+        ts.variation = g_terrainVary;
+        if (g_terrainOff) ts.cliff = ts.tiling = ts.variation = 0.0f;
+        dev.SetTerrain(ts);
+    }
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1) {
+            dev.RequestScreenshot(shot);
+            dev.RequestFrameDump("terrain-frame.txt");
+        }
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8098B8, 1.0f);
+        const Vector eye{-6.0f, height(-6.0f, 0.0f) + 4.0f, 0.0f};
+        const float yaw = 1.5708f + g_terrainYaw;   // (+z)
+        dev.SetTransform(View, LookAtLH(eye, {eye.x + std::cos(yaw), eye.y + 0.25f, eye.z + std::sin(yaw)}, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.3f, 400.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_ALPHATESTENABLE, 0);
+        Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+        dev.SetMaterial(mat);
+        Light sun{};
+        sun.type = LIGHT_DIRECTIONAL;
+        sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
+        sun.direction = {0.55f, -0.7f, 0.45f};
+        dev.SetLight(0, sun);
+        dev.LightEnable(0, true);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        for (const auto& c : chunks) {
+            dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
+            dev.SetRenderState(RS_LIGHTING, 0);      // base pass: the ground's own texture, unlit
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+            dev.SetTexture(0, ground);
+            dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+            dev.SetTextureStageState(0, TSS_ADDRESSU, TADDRESS_CLAMP);   // (each cell's tile clamped, as the game)
+            dev.SetTextureStageState(0, TSS_ADDRESSV, TADDRESS_CLAMP);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfTerrain, c.data(), uint32_t(c.size()), cellIndices.data(),
+                                     uint32_t(cellIndices.size()));
+            dev.SetTextureStageState(0, TSS_ADDRESSU, TADDRESS_WRAP);
+            dev.SetTextureStageState(0, TSS_ADDRESSV, TADDRESS_WRAP);
+            dev.SetRenderState(RS_LIGHTING, 1);      // light pass: lightmap + ambient multiplying it
+            dev.SetRenderState(RS_AMBIENT, 0xFF515151);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
+            dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
+            dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
+            dev.SetTexture(0, lightmap);
+            dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfTerrain, c.data(), uint32_t(c.size()), cellIndices.data(),
+                                     uint32_t(cellIndices.size()));
+            dev.SetDrawVisual(0, nullptr);
+        }
+        dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+        dev.EndFrame();
+    }
+}
+
 // Ground grass benchmark (--grass-bench): a big hilly terrain drawn like AnarchyGround_t - world-space chunks of
 // non-indexed triangles, an unlit base pass with a green texture and a multiplying light pass with a lightmap - under
 // RVK_GrassOn, the camera walking and turning so tiles keep coming into range. Prints the frame time (mean and worst).
@@ -3990,6 +4163,11 @@ int main(int argc, char** argv)
         else if (a == "--grass-flip") g_grassFlip = true;
         else if (a == "--grass-field") { g_grassFieldOn = true; hdr = true; }
         else if (a == "--grass-bench") { g_grassFieldOn = g_grassBench = true; hdr = true; }
+        else if (a == "--terrain-test") g_terrainTest = true;
+        else if (a == "--terrain-off") g_terrainOff = true;
+        else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));
+        else if (a == "--terrain-maps") g_terrainMaps = true;
+        else if (a == "--terrain-vary" && i + 1 < argc) g_terrainVary = float(std::atof(argv[++i]));
         else if (a == "--leaf-tree" && i + 1 < argc) g_leafTrees = argv[++i];
         else if (a == "--leaf-off") g_leafSettings.on = false;
         else if (a == "--leaf-art" && i + 1 < argc) g_leafArt = argv[++i];
@@ -4433,6 +4611,8 @@ int main(int argc, char** argv)
         RunLeafScene(dev, frames, shot, dump);
     } else if (g_grassBench) {
         RunGrassBench(dev, frames, shot);
+    } else if (g_terrainTest) {
+        RunTerrainTest(dev, frames, shot);
     } else if (g_waterScene) {
         RunWaterScene(dev, frames, shot);
     } else if (shadowTest) {

@@ -6,6 +6,17 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- Distant ground is less blurry: the pictures the game bakes for the land past its detailed ring get twice the
+  detail (`RVK_GroundFar`: 16 texels a cell by default; 8 for the game's, 32 for more at a large memory cost).
+- The ground keeps its sharp, detailed texture further out (`RVK_GroundRange`, 1.5x the game's furthest setting by
+  default, up to 2.5 - beyond 2 the game stutters as you move; 1 for the game's own). Past the game's limit the land turned into a blurry baked picture a
+  short way from you.
+- Cliffs and canyon walls show layered rock instead of long vertical streaks: steep faces get a rock texture in the
+  colour of the ground around them, with its own relief (`RVK_CliffRock`), instead of the ground's texture stretched
+  down them (`RVK_CliffTex`; with `RVK_CliffRock` off, the ground's own texture at its true size), without the same
+  picture repeating in rows (`RVK_TileHide`). Large areas, cliffs included, get soft lighter and darker patches
+  instead of one flat colour (`RVK_GroundVary`, 0 to 2). All three are on by default and are in the new
+  Terrain section of the options; flat ground keeps the game's own tile layout.
 - You see further: the game's view distance x1.5 (`RVK_ViewRange`, 1 for the game's own, up to 3), and distant land
   and mountains are kept and fogged by their true distance. Before, the game cut them off along a flat plane in front
   of the camera, so far mountains popped in and out as you turned.

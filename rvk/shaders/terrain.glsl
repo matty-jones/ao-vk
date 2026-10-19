@@ -1,0 +1,240 @@
+// The ground's own texturing (rvk terrain.cpp), on both of its passes - the base (its texture) and the lighting pass
+// (the lightmap, with the base texture's normal and material maps, F_BUMPBASE / MAT_BASE, and the cliffs' rock relief):
+// - Cliffs: the game lays the ground's texture from above (each 4 x 4 cell its own copy of the tile, turned or flipped),
+//   so down a steep face it stretches into streaks. Where the ground is steep the face gets its own lay instead, along
+//   x or z with the height, in world space - one lay down the whole cliff, no seams between its cells - blended by the
+//   slope (FL.terrain.x): rock (FL.terrainRock: a photo of a layered cliff, tinted to the cell's tile's mean colour,
+//   D.terrainAt.xyz, so a sand cliff is sand-coloured rock), or without it the cell's own tile at its repeats per unit
+//   (D.terrain.x, rvk FitTerrain). Flat ground keeps the game's coordinates and so its layout: its tiles are placed by
+//   hand - transitions, edges, patches of another ground in the middle of a tile - and turned per cell against
+//   repeats already.
+// - Repeats: the faces are read through a grid of hexagons laid on the world, each with its own offset into the
+//   texture, blended by their weights and the texture's brightness (Mikkelsen, "Practical Real-Time Hex-Tiling",
+//   2022), so a cliff isn't one picture repeated in rows (FL.terrain.y). The rock's offsets are only sideways - offset
+//   up or down too, its layers were chopped into short dashes, a camouflage pattern - and its layers bend gently up and
+//   down along the cliff instead, as strata do, so its bands don't stack into the same rows up a high wall.
+// - Variation: big lighter and darker patches over the land and up cliffs (FL.terrain.z).
+// The base pass and its lighting pass compute the same weights from the same vertices: the relief and highlights stay
+// on the texture they belong to. Derivatives are taken once (TerrainMapAt, in uniform control flow); every read
+// after it is a textureGrad, so the reads may be skipped where their weight is 0.
+
+const float kTerrainBase = 1.0, kTerrainLight = 2.0;
+
+// The draw is a ground chunk whose base texture lies on the world from above (rvk FillTerrainRecord).
+bool TerrainMapped() { return D.terrainAt.w > 0.5; }
+
+// The cliffs' rock (rvk terrain.cpp; RVK_CliffRock): in, and on. Its maps' bindless images (0 albedo, 1 normal, 2 ORM).
+bool TerrainRockOn() { return floatBitsToUint(FL.terrainRock.x) != 0u && FL.terrainRock.w > 0.0; }
+uint TerrainRockImage(int k) { return floatBitsToUint(FL.terrainRock[k]) - 1u; }
+
+struct TerrainMap {
+    vec2 uv[3];         // the game's (from above), a face along x (it faces z: x and the height), along z (faces x)
+    vec2 dx[3], dy[3];  // ... their screen derivatives
+    vec3 w;             // ... their weights
+    vec2 hexOff[9];     // each face's three hexagons' offsets into the texture (3 i + cell; none from above)
+    vec3 hexW[3];       // ... their weights (TerrainSettle adds the texture's brightness)
+    float hex;          // how much of the hexagons (0: the faces' coordinates as they are)
+    vec3 px, py;        // the position's screen derivatives (the normal maps' relief)
+    float side;         // how steep (0 .. 1): the cliffs' share
+    bool rock;          // the faces are the rock's (else the cell's tile)
+};
+
+uint TerrainHash(uvec2 p)
+{
+    uint h = p.x * 0x8DA6B343u ^ p.y * 0xD8163841u;
+    h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
+    return h;
+}
+
+// Smooth value noise, 0..1.
+float TerrainNoise(vec2 p)
+{
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    uvec2 c = uvec2(ivec2(i) + 0x4000);
+    float a = float(TerrainHash(c) & 0xFFFFu), b = float(TerrainHash(c + uvec2(1, 0)) & 0xFFFFu);
+    float d = float(TerrainHash(c + uvec2(0, 1)) & 0xFFFFu), e = float(TerrainHash(c + uvec2(1, 1)) & 0xFFFFu);
+    return mix(mix(a, b, f.x), mix(d, e, f.x), f.y) / 65535.0;
+}
+
+// The hexagon grid over a lay (st: in repeats of the texture, on the world): the three cells around st, the weights
+// of their centres (Mikkelsen's TriangleGrid, sharpened) and each cell's offset into the texture (down: this much of a
+// repeat at most). A cell is about two thirds of the texture across; each lay has its own grid (seed).
+void TerrainHexGrid(vec2 st, uint seed, float down, out vec3 w, out vec2 off0, out vec2 off1, out vec2 off2)
+{
+    st *= 2.0 * sqrt(3.0) * 0.45;
+    vec2 skewed = vec2(st.x - 0.57735027 * st.y, 1.15470054 * st.y);
+    ivec2 base = ivec2(floor(skewed));
+    vec3 t = vec3(fract(skewed), 0.0);
+    t.z = 1.0 - t.x - t.y;
+    float s = step(0.0, -t.z), s2 = 2.0 * s - 1.0;
+    w = pow(vec3(-t.z * s2, s - t.y * s2, s - t.x * s2), vec3(7.0));
+    w /= w.x + w.y + w.z;
+    ivec2 is = ivec2(s);
+    uint h0 = TerrainHash(uvec2(base + is + 0x4000) + seed);
+    uint h1 = TerrainHash(uvec2(base + ivec2(is.x, 1 - is.y) + 0x4000) + seed);
+    uint h2 = TerrainHash(uvec2(base + ivec2(1 - is.x, is.y) + 0x4000) + seed);
+    const vec2 scale = vec2(1.0, down) / 65536.0;
+    off0 = vec2(float(h0 & 0xFFFFu), float(h0 >> 16)) * scale;
+    off1 = vec2(float(h1 & 0xFFFFu), float(h1 >> 16)) * scale;
+    off2 = vec2(float(h2 & 0xFFFFu), float(h2 >> 16)) * scale;
+}
+
+// Where and how the ground's texture lies at this pixel. uv: the game's coordinates; n: the interpolated normal.
+TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
+{
+    TerrainMap m;
+    m.px = dFdx(posW);
+    m.py = dFdy(posW);
+    m.uv[0] = uv;
+    m.dx[0] = dFdx(uv);
+    m.dy[0] = dFdy(uv);
+    // The faces: along x or z, and down - in world space, the rock's size or the tile's repeats per unit.
+    m.rock = TerrainRockOn();
+    const float s = m.rock ? 1.0 / FL.terrainRock.w : D.terrain.x;
+    m.uv[1] = s * vec2(posW.x, -posW.y);
+    m.dx[1] = s * vec2(m.px.x, -m.px.y);
+    m.dy[1] = s * vec2(m.py.x, -m.py.y);
+    m.uv[2] = s * vec2(posW.z, -posW.y);
+    m.dx[2] = s * vec2(m.px.z, -m.px.y);
+    m.dy[2] = s * vec2(m.py.z, -m.py.y);
+    if (m.rock) {                       // (the strata bend: a slow wave along the cliff, in repeats - gentle enough to
+                                        // leave the derivatives as they are)
+        m.uv[1].y += 0.45 * (TerrainNoise(vec2(posW.x / 70.0, 3.7)) - 0.5) + 0.15 * (TerrainNoise(vec2(posW.x / 19.0, 8.1)) - 0.5);
+        m.uv[2].y += 0.45 * (TerrainNoise(vec2(posW.z / 70.0, 5.3)) - 0.5) + 0.15 * (TerrainNoise(vec2(posW.z / 19.0, 1.9)) - 0.5);
+    }
+    // How steep: the triangle's own slope (from the position's derivatives), not the interpolated normal - the game's
+    // cells are 4 units across, a cliff one or two of them high, and its corners' normals, shared with the flat ground
+    // round it, make the face look far less steep than it is; the stretch is the triangle's.
+    vec3 face = cross(m.px, m.py);
+    float len = length(face);
+    vec3 nu = len > 1e-12 ? face / len : vec3(0.0, 1.0, 0.0);
+    // Steeper than ~32 degrees starts the faces (the texture from above already a fifth longer down the slope); past
+    // ~57 they have it all.
+    m.side = smoothstep(0.85, 0.55, abs(nu.y)) * clamp(FL.terrain.x, 0.0, 1.0);
+    // Which way it faces (the lay along x or along z): the interpolated normal, smooth from one triangle to the next -
+    // each triangle's own made the lays change at its edges, seams across a wall at an angle. (Its own where the
+    // interpolated one has no length.)
+    vec3 nf = dot(n, n) > 0.0 ? normalize(n) : nu;
+    vec2 across = pow(abs(nf.zx) + 1e-4, vec2(4.0));
+    across /= across.x + across.y;
+    m.w = vec3(1.0 - m.side, m.side * across);
+    m.hex = clamp(FL.terrain.y, 0.0, 1.0);
+    m.hexW[0] = vec3(0.0);
+    for (int i = 1; i < 3; ++i) {
+        m.hexW[i] = vec3(0.0);
+        if (m.hex > 0.0 && m.w[i] > 0.002)
+            TerrainHexGrid(m.uv[i], uint(i) * 0x9E3779B9u, m.rock ? 0.0 : 1.0, m.hexW[i], m.hexOff[3 * i],
+                           m.hexOff[3 * i + 1], m.hexOff[3 * i + 2]);
+    }
+    return m;
+}
+
+#define TERRAIN_READ(img, smp, uv, dx, dy) textureGrad(sampler2D(img, smp), uv, dx, dy)
+// The faces read past the tile's 0..1 (world space, offsets): tiled, whatever the draw's own sampler - the game reads
+// each cell's tile clamped, which smears its edge into stripes there. (The normal maps' sampler: tiled, mipmapped,
+// anisotropic; every draw has it.) The game's coordinates from above keep the draw's: tiled, a transition tile's
+// filtering would bleed its far edge along the cell's borders.
+#define TERRAIN_FACE_READ(img, uv, dx, dy) textureGrad(sampler2D(img, bindlessSamplers[D.sampIdx.w]), uv, dx, dy)
+
+// One lay: from above, the game's coordinates as they are (top, read with smp); a face (face) through its hexagons
+// (their weights m.hexW), blended with its plain coordinates by m.hex.
+vec4 TerrainLay(texture2D top, sampler smp, texture2D face, TerrainMap m, int i)
+{
+    if (i == 0) return TERRAIN_READ(top, smp, m.uv[0], m.dx[0], m.dy[0]);
+    vec4 c = vec4(0.0);
+    if (m.hex < 1.0) c = TERRAIN_FACE_READ(face, m.uv[i], m.dx[i], m.dy[i]) * (1.0 - m.hex);
+    if (m.hex > 0.0)
+        for (int k = 0; k < 3; ++k)
+            if (m.hexW[i][k] > 0.002)
+                c += TERRAIN_FACE_READ(face, m.uv[i] + m.hexOff[3 * i + k], m.dx[i], m.dy[i]) * (m.hexW[i][k] * m.hex);
+    return c;
+}
+
+// All the lays blended, the faces' part times faceScale, with the weights already settled (TerrainSettle).
+vec4 TerrainTexture(texture2D top, sampler smp, texture2D face, TerrainMap m, vec4 faceScale)
+{
+    vec4 c = m.w.x > 0.002 ? TerrainLay(top, smp, face, m, 0) * m.w.x : vec4(0.0);
+    for (int i = 1; i < 3; ++i)
+        if (m.w[i] > 0.002) c += TerrainLay(top, smp, face, m, i) * (faceScale * m.w[i]);
+    return c;
+}
+
+// The faces' hexagons' weights take their texture's brightness in (the brighter cell wins where they meet - a clean
+// seam rather than a blur); every map read after it uses the same. face: the faces' colour (the rock's albedo or the
+// cell's tile) - both passes settle them from the same texture.
+void TerrainSettle(texture2D face, inout TerrainMap m)
+{
+    if (m.hex <= 0.0) return;
+    for (int i = 1; i < 3; ++i) {
+        if (m.w[i] <= 0.002) continue;
+        vec3 lum;
+        for (int k = 0; k < 3; ++k)
+            lum[k] = Luma(TERRAIN_FACE_READ(face, m.uv[i] + m.hexOff[3 * i + k], m.dx[i], m.dy[i]).rgb);
+        vec3 w = mix(vec3(1.0), lum, 0.6) * m.hexW[i];
+        m.hexW[i] = w / max(w.x + w.y + w.z, 1e-6);
+    }
+}
+
+// The rock's colour made the cell's: its tile's mean colour over the rock's (a sand cliff is sand-coloured rock, a dark
+// one dark); 1 without the rock or with the tile's colour not known yet.
+vec4 TerrainRockTint(TerrainMap m)
+{
+    if (!m.rock || D.terrainAt.x < 0.0) return vec4(1.0);
+    return vec4(clamp(D.terrainAt.xyz / max(FL.terrainRock2.rgb, vec3(0.02)), vec3(0.2), vec3(5.0)), 1.0);
+}
+
+// The base texture as the ground lays it (the base pass's colour; the lighting pass's PBR albedo): settles the weights.
+// image: the base texture's bindless image; the faces' is the rock's albedo, or the same. The rock's contrast is a
+// photo's - harsher than the game's soft ground beside it: a quarter of the way to its own mean.
+vec4 TerrainBase(uint image, sampler smp, inout TerrainMap m)
+{
+    const uint faceImage = m.rock ? TerrainRockImage(0) : image;
+    TerrainSettle(texImages[faceImage], m);
+    if (!m.rock) return TerrainTexture(texImages[image], smp, texImages[faceImage], m, vec4(1.0));
+    vec4 top = m.w.x > 0.002 ? TerrainLay(texImages[image], smp, texImages[faceImage], m, 0) * m.w.x : vec4(0.0);
+    vec4 faces = TerrainTexture(texImages[image], smp, texImages[faceImage], m, vec4(1.0)) - top;
+    const float side = m.w.y + m.w.z;
+    if (side > 0.002) faces.rgb = mix(FL.terrainRock2.rgb * side, faces.rgb, 0.75);
+    return top + faces * TerrainRockTint(m);
+}
+
+// The relief of normal maps laid like the texture: from above the base's (top, strength), on the faces the rock's
+// (or the base's), each lay's relief through its own coordinates' derivatives (as NormalMapNormal), blended.
+vec3 TerrainNormalMap(vec3 n, texture2D top, float topStrength, texture2D face, float faceStrength, TerrainMap m)
+{
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 3; ++i) {
+        if (m.w[i] <= 0.002) continue;
+        vec3 t = TerrainLay(top, bindlessSamplers[D.sampIdx.w], face, m, i).xyz * 2.0 - 1.0;
+        t.z = max(t.z, 0.05);
+        vec2 slope = vec2(-t.x, t.y) / t.z * (i == 0 ? topStrength : faceStrength);
+        vec2 uvx = m.dx[i], uvy = m.dy[i];
+        float worldPerUv = sqrt(max(dot(m.px, m.px), dot(m.py, m.py)) / max(max(dot(uvx, uvx), dot(uvy, uvy)), 1e-12));
+        sum += BendNormal(n, m.px, m.py, dot(slope, uvx) * worldPerUv, dot(slope, uvy) * worldPerUv) * m.w[i];
+    }
+    float len2 = dot(sum, sum);
+    return len2 > 0.0 ? sum * (length(n) * inversesqrt(len2)) : n;
+}
+
+// Large-scale variation in the ground's colour: patches a few tens to hundreds of units across, a little lighter or
+// darker, more or less saturated (x FL.terrain.z). Laid as the texture is: from above on flat ground, on the face
+// along x or z and down where it is steep (m.w) - from above only, a cliff took the same value all the way down and
+// the patches ran down it in streaks.
+vec3 TerrainPatches(vec2 p)    // tone, saturation (-0.5 .. 0.5)
+{
+    float big = TerrainNoise(p / 190.0 + 31.7) - 0.5, mid = TerrainNoise(p / 47.0 - 11.3) - 0.5;
+    return vec3(0.65 * big + 0.35 * mid, TerrainNoise(p / 113.0 + 77.1) - 0.5, 0.0);
+}
+
+vec3 TerrainVariation(vec3 c, vec3 posW, TerrainMap m)
+{
+    float k = FL.terrain.z;
+    if (k <= 0.0) return c;
+    vec3 v = TerrainPatches(posW.xz) * m.w.x;
+    if (m.w.y > 0.002) v += TerrainPatches(vec2(posW.x, -posW.y)) * m.w.y;
+    if (m.w.z > 0.002) v += TerrainPatches(vec2(posW.z, -posW.y)) * m.w.z;
+    float l = Luma(c);
+    c = mix(vec3(l), c, clamp(1.0 + 0.35 * k * v.y, 0.0, 2.0));
+    return c * clamp(1.0 + 0.26 * k * v.x, 0.5, 1.5);
+}

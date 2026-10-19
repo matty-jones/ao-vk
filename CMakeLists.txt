@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")   # static CRT: no extra runtime DLL next to the game
 
 # Native Randy: our implementations of randy31_orig's code (proxy/native, docs/native.md), shared with the tests.
-add_library(randy_native STATIC proxy/native/stb_image.cpp proxy/native/hook.cpp proxy/native/crash.cpp proxy/native/gui.cpp proxy/native/rings.cpp proxy/native/native.cpp proxy/native/cat_skin.cpp proxy/native/cat_anim.cpp proxy/native/scene.cpp proxy/native/popin.cpp
+add_library(randy_native STATIC proxy/native/stb_image.cpp proxy/native/hook.cpp proxy/native/crash.cpp proxy/native/gui.cpp proxy/native/rings.cpp proxy/native/ground.cpp proxy/native/native.cpp proxy/native/cat_skin.cpp proxy/native/cat_anim.cpp proxy/native/scene.cpp proxy/native/popin.cpp
             proxy/native/vc10.cpp proxy/native/orig_api.gen.cpp proxy/native/cat_render.cpp proxy/native/cat_mesh.cpp
             proxy/native/cat_query.cpp proxy/native/device.cpp proxy/native/state_blob.cpp proxy/native/dynamic_vb.cpp proxy/native/randy.cpp proxy/native/surface.cpp proxy/native/resource.cpp proxy/native/serialize.cpp proxy/native/texture.cpp proxy/native/material.cpp proxy/native/viewport.cpp proxy/native/refframe.cpp proxy/native/visual.cpp proxy/native/camera.cpp proxy/native/mesh.cpp proxy/native/mesh_data.cpp proxy/native/occluder.cpp proxy/native/cat_life.cpp proxy/native/cat_pick.cpp proxy/native/cat_data.cpp proxy/native/cat_anim_data.cpp proxy/native/bvolume.cpp proxy/native/dxerror.cpp proxy/native/devices.cpp proxy/native/randy_init.cpp proxy/native/debugger.cpp proxy/native/gone_trap.cpp proxy/native/keyframe.cpp proxy/native/sprite.cpp proxy/native/shadowlands.cpp proxy/native/color.cpp proxy/native/pixfmt.cpp proxy/native/lbitmap.cpp proxy/native/helpers.cpp proxy/native/texture_stream.cpp proxy/native/faf.cpp proxy/native/rshadow.cpp proxy/native/connector.cpp proxy/native/cat_status.cpp
             proxy/native/rgrid.cpp proxy/native/timer.cpp proxy/native/funcom.cpp proxy/native/findobject.cpp proxy/native/d3dx.cpp)
@@ -42,6 +42,7 @@ foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag 
         DEPENDS "${src}" "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/constants.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/lighting.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/ffp_main.glsl"
+                "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/terrain.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/motion_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/occlusion.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/dof_common.glsl"
@@ -90,8 +91,24 @@ foreach(entry "leaf.vert|ffp.vert|RVK_LEAF" "leaf_shadow.vert|shadow.vert|RVK_LE
     list(APPEND RVK_SHADER_INCS "${out}")
 endforeach()
 
-add_library(rvk STATIC rvk/vk.cpp rvk/vma.cpp rvk/device.cpp rvk/resources.cpp rvk/draw.cpp rvk/objects.cpp rvk/diag.cpp rvk/shadow.cpp rvk/pointshadow.cpp rvk/hdr.cpp rvk/particles.cpp rvk/grading.cpp rvk/profile.cpp rvk/skin.cpp rvk/skin_gpu.cpp rvk/static_gpu.cpp rvk/prepass.cpp rvk/threaded.cpp rvk/interface.cpp rvk/grass.cpp rvk/leaves.cpp rvk/water.cpp rvk/rain.cpp rvk/smoke.cpp rvk/clouds.cpp rvk/meshids.cpp rvk/statels.cpp rvk/night.cpp rvk/sky.cpp rvk/atmosphere.cpp rvk/mist.cpp rvk/sun.cpp rvk/terrain_sun.cpp rvk/wind.cpp rvk/sand_map.cpp ${RVK_SHADER_INCS})
-target_include_directories(rvk PUBLIC rvk PRIVATE "${RVK_SHADER_OUT}")
+# The cliffs' rock (rvk terrain.cpp, rvk/assets/terrain): JPEGs embedded as byte arrays.
+set(RVK_ASSET_INCS)
+foreach(entry "cliff_side_diff_1k.jpg|kRockAlbedo" "cliff_side_nor_gl_1k.jpg|kRockNormal" "cliff_side_arm_1k.jpg|kRockOrm")
+    string(REPLACE "|" ";" asset "${entry}")
+    list(GET asset 0 file)
+    list(GET asset 1 name)
+    set(src "${CMAKE_CURRENT_SOURCE_DIR}/rvk/assets/terrain/${file}")
+    set(out "${RVK_SHADER_OUT}/${file}.inc")
+    add_custom_command(OUTPUT "${out}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RVK_SHADER_OUT}"
+        COMMAND ${CMAKE_COMMAND} -DIN=${src} -DOUT=${out} -DNAME=${name} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake"
+        DEPENDS "${src}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake"
+        COMMENT "embed ${file}")
+    list(APPEND RVK_ASSET_INCS "${out}")
+endforeach()
+
+add_library(rvk STATIC rvk/vk.cpp rvk/vma.cpp rvk/device.cpp rvk/resources.cpp rvk/draw.cpp rvk/objects.cpp rvk/diag.cpp rvk/shadow.cpp rvk/pointshadow.cpp rvk/hdr.cpp rvk/particles.cpp rvk/grading.cpp rvk/profile.cpp rvk/skin.cpp rvk/skin_gpu.cpp rvk/static_gpu.cpp rvk/prepass.cpp rvk/threaded.cpp rvk/interface.cpp rvk/grass.cpp rvk/leaves.cpp rvk/water.cpp rvk/rain.cpp rvk/smoke.cpp rvk/clouds.cpp rvk/meshids.cpp rvk/statels.cpp rvk/night.cpp rvk/sky.cpp rvk/atmosphere.cpp rvk/mist.cpp rvk/sun.cpp rvk/terrain_sun.cpp rvk/terrain.cpp rvk/wind.cpp rvk/sand_map.cpp ${RVK_SHADER_INCS} ${RVK_ASSET_INCS})
+target_include_directories(rvk PUBLIC rvk PRIVATE "${RVK_SHADER_OUT}" third_party)   # (stb: terrain.cpp decodes the embedded rock)
 # Vulkan headers and VMA come from the SDK; /imsvc keeps their warnings quiet.
 target_compile_options(rvk PUBLIC "/imsvc${VULKAN_SDK_DIR}/include")
 target_compile_options(rvk PRIVATE /W3)

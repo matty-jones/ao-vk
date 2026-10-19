@@ -5,6 +5,7 @@
 #include "native/mesh.h"
 #include "native/camera.h"
 #include "native/occluder.h"
+#include "native/ground.h"
 #include "native/rings.h"
 
 #include <windows.h>
@@ -76,6 +77,13 @@ Setting g_settings[] = {
     {"RVK_PbrGlow", "Emissive map brightness", "Materials", Float, 0, 8, 0.25f, 1.75f, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 9, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9"},
     {"RVK_Albedo", "Enhanced textures", "Materials",     Bool,  0, 1, 1, 1, nullptr, 0},
+
+    {"RVK_GroundFar",  "Ground past that: texture detail (texels a 4 x 4 cell; 8 = the game's, 32 costs a lot of memory)", "Terrain", Choice, 8, 32, 8, 16, nullptr, 0, nullptr, "8 16 32"},
+    {"RVK_GroundRange", "Ground drawn at full quality this many times further out (1 = the game's; above 2 the game stutters as you move)", "Terrain", Float, 1, 2.5f, 0.25f, 1.5f, nullptr, 0},
+    {"RVK_CliffTex",   "Cliffs: the ground's texture laid on their faces, not stretched down them", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0},
+    {"RVK_CliffRock",  "Cliffs: rock laid on their faces, in the colour of the ground", "Terrain",       Bool,  0, 1, 1, 1, nullptr, 0, "RVK_CliffTex"},
+    {"RVK_TileHide",   "Cliffs: the same tile not repeated in rows down their faces", "Terrain",       Float, 0, 1, 0.1f, 1, nullptr, 0},
+    {"RVK_GroundVary", "Large patches of lighter and darker ground over the land", "Terrain",          Float, 0, 2, 0.1f, 1, nullptr, 0},
 
     {"RVK_SwayOn",     "Plants sway in the wind",                                  "Plants",           Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Sway",       "Sway strength",                                            "Plants",           Float, 0.25f, 3, 0.25f, 1, nullptr, 0, "RVK_SwayOn"},
@@ -351,7 +359,7 @@ Setting* Find(const char* name)
 // so switching it back on restores them). Settings not listed here only tune something these switch off.
 struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
-    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
+    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
@@ -652,8 +660,18 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_AlienMap")) d->SetAlienMap(V(n) != 0.0f);
     else if (is("RVK_Occlusion")) rnative::occluder::SetHorizonCulling(V(n) != 0.0f);
     else if (is("RVK_DetailRange")) rnative::rings::SetScale(V(n));
+    else if (is("RVK_GroundRange")) rnative::ground::SetRange(V(n));
+    else if (is("RVK_GroundFar")) rnative::ground::SetFar(int(V(n) + 0.5f));
     else if (is("RVK_ShadowMem")) d->SetShadowMemory(V(n) != 0.0f ? 1u : 0u);
     else if (is("RVK_HillShade")) d->SetHillShade(V(n) != 0.0f);
+    else if (is("RVK_CliffTex") || is("RVK_CliffRock") || is("RVK_TileHide") || is("RVK_GroundVary")) {
+        rvk::Device::TerrainSettings t;
+        t.cliff = V("RVK_CliffTex");
+        t.rock = V("RVK_CliffRock") != 0.0f;
+        t.tiling = V("RVK_TileHide");
+        t.variation = V("RVK_GroundVary");
+        d->SetTerrain(t);
+    }
     else if (is("RVK_Contact")) d->SetContactShadows(V(n));
     else if (is("RVK_Ao") || is("RVK_AoRadius")) d->SetAo(V("RVK_Ao"), V("RVK_AoRadius"));
     else if (is("RVK_Gi") || is("RVK_GiRadius")) d->SetGi(V("RVK_Gi"), V("RVK_GiRadius"));

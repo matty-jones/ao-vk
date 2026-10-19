@@ -475,6 +475,8 @@ vec3 NormalMapNormal(vec3 n, vec3 posW, vec2 uv)
     return BendNormal(n, px, py, dot(slope, uvx) * worldPerUv, dot(slope, uvy) * worldPerUv);
 }
 
+#include "terrain.glsl"
+
 // Things' shadows fading out as the light nears the horizon (rvk draw.cpp folds it into FL.shadowParams.y: full from
 // ~10 degrees up, none at ~3) - for the uses of the visibility that don't go through that strength.
 float CasterFade()
@@ -623,6 +625,19 @@ void main()
         if (q0 && q1 && q2 && q3) return;
     }
 #endif
+    // The ground laid on its cliffs and its repeats hidden (terrain.glsl): where its texture lies here, taken while
+    // the derivatives are good; on the lighting pass, the base texture as the base pass drew it (its PBR albedo, and
+    // the hexagons' weights its maps are read with).
+    TerrainMap terrain;
+    const bool terrainMapped = TerrainMapped();
+    vec4 terrainBase = vec4(0.0);
+    if (terrainMapped) {
+        terrain = TerrainMapAt(vPosW, vSet0, vNormalW.xyz);
+        if (D.terrainAt.w > 1.5 && (C.flags.x & F_BUMPBASE) != 0u)
+            terrainBase = TerrainBase(D.texIdx.z, bindlessSamplers[D.sampIdx.z], terrain);
+        else if (D.terrainAt.w > 1.5 && terrain.rock)   // (no maps of the base's own: only the rock's relief)
+            TerrainSettle(texImages[TerrainRockImage(0)], terrain);
+    }
     // Shadow: lit draws scale the sunlight (per-pixel lighting), others darken their final colour.
     float shade = 1.0, localScale = 1.0, texShade = 1.0, flatShade = 1.0;
     if ((C.flags.x & (F_SHADOW | F_SHADOWCOMP | F_SHADOWTEX)) != 0u) {
@@ -657,11 +672,18 @@ void main()
         float len2 = dot(n, n);
         n = len2 > 0.0 ? n * (vNormalW.w * inversesqrt(len2)) : vec3(0.0);
         // The ground's lighting pass draws the lightmap; its relief comes from the base pass's texture (F_BUMPBASE):
-        // that texture's normal map, else its generated normals.
-        if ((C.flags.x & (F_NORMALMAP | F_BUMP)) != 0u && len2 > 0.0) {
+        // that texture's normal map, else its generated normals - laid by terrain.glsl, with the cliffs' rock's on
+        // their faces (then a base without a normal map of its own has the flat one, and no relief from above).
+        const bool terrainRelief = terrainMapped && D.terrainAt.w > 1.5 && ((C.flags.x & F_NORMALMAP) != 0u || terrain.rock);
+        if (((C.flags.x & (F_NORMALMAP | F_BUMP)) != 0u || terrainRelief) && len2 > 0.0) {
             vec3 unbumped = n;
-            bool base = (C.flags.x & F_BUMPBASE) != 0u;
-            if ((C.flags.x & F_NORMALMAP) != 0u)
+            bool base = (C.flags.x & F_BUMPBASE) != 0u || terrainRelief;
+            if (terrainRelief) {
+                const float top = (C.flags.x & F_NORMALMAP) != 0u ? C.misc.w : 0.0;
+                const uint face = terrain.rock ? TerrainRockImage(1) : D.texIdx.w;
+                n = TerrainNormalMap(n, texImages[D.texIdx.w], top, texImages[face], terrain.rock ? FL.terrainRock2.w : top,
+                                     terrain);
+            } else if ((C.flags.x & F_NORMALMAP) != 0u)
                 n = NormalMapNormal(n, vPosW, base ? vSet0 : vTex0.xy);
             else
                 n = base ? BumpNormal(texImages[D.texIdx.z], bindlessSamplers[D.sampIdx.z], n, vPosW, vSet0)
@@ -679,11 +701,15 @@ void main()
         gPbrOn = (D.mat.z & MAT_PBR) != 0u && FL.pbr2.y > 0.5 && (C.flags.x & F_SHADOWCHEAP) == 0u;
         if (gPbrOn) {
             gPbrBase = (D.mat.z & MAT_BASE) != 0u;
-            vec3 orm = texture(ORMTEX, gPbrBase ? vSet0 : vTex0.xy).rgb;
+            vec3 orm = gPbrBase && terrainMapped
+                           ? TerrainTexture(texImages[D.mat.x], bindlessSamplers[D.mat.y],
+                                            texImages[terrain.rock ? TerrainRockImage(2) : D.mat.x], terrain, vec4(1.0)).rgb
+                           : texture(ORMTEX, gPbrBase ? vSet0 : vTex0.xy).rgb;
             gPbrAo = mix(1.0, orm.r, clamp(FL.pbr.w, 0.0, 1.0));
             gPbrRough = clamp(orm.g, 0.03, 1.0);
             gPbrMetal = clamp(orm.b, 0.0, 1.0);
-            gPbrAlbedo = gPbrBase ? texture(BUMPTEX, vSet0).rgb : Sample(0u).rgb * clamp(vDiffuse.rgb, 0.0, 1.0);
+            gPbrAlbedo = gPbrBase ? (terrainMapped ? TerrainVariation(terrainBase.rgb, vPosW, terrain) : texture(BUMPTEX, vSet0).rgb)
+                                  : Sample(0u).rgb * clamp(vDiffuse.rgb, 0.0, 1.0);
             gPbrNormal = len2 > 0.0 ? normalize(n) : vec3(0.0, 1.0, 0.0);
             // Specular anti-aliasing: how much the normal turns across the pixel widens the highlight (Kaplanyan /
             // Tokuyoshi), so small bright highlights don't sparkle on curved or bumpy surfaces in the distance.
@@ -750,7 +776,11 @@ void main()
             gSpecular = clamp(vec4(litSpec + localSpec, vSpecular.a), 0.0, 1.0);
         }
     }
-    vec4 t0 = Sample(0u), t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
+    // (The ground's base pass: its texture as terrain.glsl lays it.)
+    const bool terrainBasePass = terrainMapped && D.terrainAt.w < 1.5;
+    vec4 t0 = terrainBasePass ? TerrainBase(D.texIdx.x, bindlessSamplers[D.sampIdx.x], terrain) : Sample(0u);
+    vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
+    if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
 #ifdef RVK_GLOW
     // The surface's own colour, for the indirect light it reflects: lit draws through the stages under white light,
     // unlit ones as they are (the ground's base pass is its bare texture; its lightmap pass keeps this). A

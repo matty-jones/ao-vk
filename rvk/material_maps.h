@@ -35,6 +35,21 @@ inline bool LoadImage(const std::string& path, Image* out, std::string* error)
     return true;
 }
 
+// The same from bytes in memory (a PNG or JPEG embedded in the DLL: rvk terrain.cpp's rock).
+inline bool LoadImageFromMemory(const uint8_t* data, size_t size, Image* out, std::string* error)
+{
+    int n = 0;
+    stbi_uc* px = stbi_load_from_memory(data, int(size), &out->w, &out->h, &n, 4);
+    if (!px) {
+        *error = std::string("can't decode an embedded image (") + stbi_failure_reason() + ")";
+        return false;
+    }
+    out->channels = n;
+    out->rgba.assign(px, px + size_t(out->w) * out->h * 4);
+    stbi_image_free(px);
+    return true;
+}
+
 inline uint32_t LevelCount(int w, int h)
 {
     uint32_t levels = 1;
@@ -90,11 +105,8 @@ struct NormalSpread {
 
 // Normal maps: each level averages the decoded normals of the level above and renormalises them, so distant
 // surfaces don't flatten or tilt; the averaged lengths go to `spread`.
-inline bool DecodeNormalMap(const std::string& path, MipChain* out, NormalSpread* spread, std::string* error)
+inline void MakeNormalChain(const Image& img, MipChain* out, NormalSpread* spread)
 {
-    Image img;
-    if (!LoadImage(path, &img, error))
-        return false;
     int w = img.w, h = img.h;
     std::vector<float> nrm(size_t(w) * h * 3);
     for (size_t i = 0; i < size_t(w) * h; ++i)
@@ -127,6 +139,14 @@ inline bool DecodeNormalMap(const std::string& path, MipChain* out, NormalSpread
         w = nw;
         h = nh;
     }
+}
+
+inline bool DecodeNormalMap(const std::string& path, MipChain* out, NormalSpread* spread, std::string* error)
+{
+    Image img;
+    if (!LoadImage(path, &img, error))
+        return false;
+    MakeNormalChain(img, out, spread);
     return true;
 }
 
@@ -221,11 +241,8 @@ inline bool DecodeOrmMap(const std::string& packed, const std::string parts[3], 
 // texels as they are, and where a level's texel has no alpha at all it keeps the plain average colour: a game
 // texture's alpha isn't always coverage (bank_frontplate.png: a glow mask, alpha 0 over the opaque body), so the
 // colour under alpha 0 can be drawn and must not turn black.
-inline bool DecodeAlbedoMap(const std::string& path, MipChain* out, std::string* error)
+inline void MakeAlbedoChain(const Image& img, MipChain* out)
 {
-    Image img;
-    if (!LoadImage(path, &img, error))
-        return false;
     int w = img.w, h = img.h;
     std::vector<float> px(size_t(w) * h * 4), plain(size_t(w) * h * 3);   // px: premultiplied colour + alpha
     std::vector<uint32_t> level8(size_t(w) * h);
@@ -258,6 +275,14 @@ inline bool DecodeAlbedoMap(const std::string& path, MipChain* out, std::string*
         }
         out->levels.push_back(std::move(level8));
     }
+}
+
+inline bool DecodeAlbedoMap(const std::string& path, MipChain* out, std::string* error)
+{
+    Image img;
+    if (!LoadImage(path, &img, error))
+        return false;
+    MakeAlbedoChain(img, out);
     return true;
 }
 

@@ -51,7 +51,13 @@ struct DrawTransform {
     float leaf[4];                 // a canopy with leaves (leaves.cpp): its crown's centre (model space), radius (0 = none)
     uint32_t leafSet[4];           // ... its leaves in the pool: first, drawn now | falling-leaf slots << 16, all; the
                                    // ground under it (world y, float bits: where its fallen leaves lie)
+    float terrain[4];              // the ground (terrain.cpp, terrain.glsl): x its tile's repeats per world unit; y z w
+                                   // unused
+    float terrainAt[4];            // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown); w:
+                                   // kTerrainBase / kTerrainLight (0 = not mapped)
 };
+enum : uint32_t { kTerrainBase = 1, kTerrainLight = 2 };   // DrawTransform terrainAt[3]: the ground's base pass; its
+                                                           // lighting pass, which reads the base's maps (F_BUMPBASE, MAT_BASE)
 constexpr float kSkySceneryHaze = 2000.0f;     // the sky's scenery's haze: its colour left e^-(distance / this)
 enum : uint32_t { kMatPbr = 1, kMatBase = 2, kMatAlbedo = 4, kMatEmissive = 8, kMatPicked = 16, kMatSky = 32, kMatCloudSheet = 64 };   // DrawTransform
                                                  // mat[2]: has an ORM map; it is the ground base's; stage 0 draws an
@@ -150,6 +156,11 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float skyUp[4];                // our sky over the land (overhead and 35 degrees up), w 1 when known
     float dusk[4];                 // x: RVK_Afterglow (the clouds' sunset colours), y the blue hour's grade, z w the sun on
                                    // the world camera's screen (NDC; 1e3 behind it)
+    float terrain[4];              // the ground's texturing (terrain.glsl): cliffs (RVK_CliffTex), the faces' repeats
+                                   // hidden (RVK_TileHide), large-scale variation (RVK_GroundVary), w unused
+    float terrainRock[4];          // the cliffs' rock (terrain.cpp; RVK_CliffRock): its albedo, normal and ORM maps'
+                                   // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
+    float terrainRock2[4];         // ... its mean colour (rgb), its normal map's strength
     GpuLight lights[kFrameLights];
 };
 
@@ -160,6 +171,10 @@ struct FvfLayout {
     VkFormat format[6] = {};
 };
 FvfLayout DecodeFvf(uint32_t fvf);
+
+// A ground chunk's texture coordinates fitted to the world (terrain.cpp; TerrainFit in rvk.h).
+TerrainFit FitTerrain(const void* vertices, uint32_t vertexCount, const FvfLayout& layout, const uint16_t* indices,
+                      uint32_t indexCount);
 
 // Vulkan format and view swizzle for a texture format.
 struct FormatInfo {
