@@ -82,6 +82,7 @@ Setting g_settings[] = {
     {"RVK_GroundAo",   "Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none)", "Terrain", Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundSun",  "Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundRocks", "Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_GroundPebble", "Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundGrain", "Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundBlend", "Ground drawn by ao-vk: neighbouring ground textures blend into each other along a ragged edge instead of meeting in a hard straight line (0 = hard edges)", "Terrain", Float, 0, 1, 0.1f, 1.0f, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundTess", "Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
@@ -367,7 +368,7 @@ Setting* Find(const char* name)
 // so switching it back on restores them). Settings not listed here only tune something these switch off.
 struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
-    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
+    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_GroundPebble", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
@@ -673,6 +674,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_GroundAo")) { if (g_rvk.device) g_rvk.device->SetNativeGroundAo(V(n)); }
     else if (is("RVK_GroundSun")) { if (g_rvk.device) g_rvk.device->SetNativeGroundSun(V(n)); }
     else if (is("RVK_GroundRocks")) { if (g_rvk.device) g_rvk.device->SetNativeGroundRocks(V(n)); }
+    else if (is("RVK_GroundPebble")) { if (g_rvk.device) g_rvk.device->SetNativeGroundPebbles(V(n)); }
     else if (is("RVK_GroundFar")) rnative::ground::SetFar(int(V(n) + 0.5f));
     else if (is("RVK_ShadowMem")) d->SetShadowMemory(V(n) != 0.0f ? 1u : 0u);
     else if (is("RVK_HillShade")) d->SetHillShade(V(n) != 0.0f);
@@ -1056,6 +1058,8 @@ void LoadLuts(rvk::ThreadedDevice* device)
         device->SetColorLut(i, size[i], size[i] ? data[i].data() : nullptr);
     // The static meshes' ids (ao-assets: python -m aoassets mesh-ids), from the same folder.
     device->LoadMeshIds((dir + "randy-vk\\mesh-ids.bin").c_str());   // (with the material maps: ao-assets writes it there)
+    // Which ground gets pebbles, by hand (RVK_GroundPebble; optional): read when a playfield's ground is classified.
+    device->SetPebbleTablePath((dir + "randy-vk\\terrain\\pebbles.tsv").c_str());
 }
 
 const char* IniPath()

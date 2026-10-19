@@ -127,7 +127,15 @@
   turned to the sun's bearing, undersides a little darker by the sky; in a baked shadow, a texel well under the fit,
   only the sky's shading, for the ground's slopes none). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
   the grass. Made on worker threads (5-8 ms a patch), 2 patches at a time, within 200 units; small ones drawn within
-  90, dropped past 450. The tiles'
+  90, dropped past 450. Pebbles (`rvk/ground_pebbles.cpp`, `RVK_GroundPebble`, 1; docs/pebbles-plan.md): on the
+  tiles whose surface type (`NativeGround::types`, tile_type_data) is dirt, gravel or sand by its base tile's look
+  (`Texture::m_line`, `m_edge`, `m_grain`, measured at upload: straight joints, grain; green and smooth grey none;
+  `randy-vk\terrain\pebbles.tsv` sets a playfield's type by hand), and only on the texels of a tile that are that
+  ground (16 x 16, not green, near the base tile's colour); up to 70 a cell, 12-corner indexed stones, in blocks of
+  8 x 8 cells made on workers within 44 units, dropped past 52, drawn within `kPebbleRange` (40; `D.terrainAt.y` 3,
+  z the range: ffp.vert sinks them 0.6 into the ground over its last 8 units). Coloured as the ground under them
+  with the rock's grain, each its own shade by a hash of set 0 (where it lies, the same at its corners); only those
+  0.15 across and up cast shadows. The tiles'
   material maps (RVK_Pbr): each cell's in the maps texture's B, A; the lighting pass is marked PBR with one of them
   standing in (`m_native.anyOrm`) and reads each cell's own (terrain.glsl `NativeOrm`, turned as its tile; the rock's
   on faces and rocks), its colour from the cells' tiles; a cell whose tile has none is lit without PBR, as the game's

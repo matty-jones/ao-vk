@@ -2,6 +2,7 @@
 #include "internal.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <utility>
@@ -368,6 +369,53 @@ static bool PixelsThumbnail(Format fmt, const void* data, uint32_t width, uint32
     return true;
 }
 
+// How a ground tile looks up close (Texture::m_line, m_edge, m_grain; the native ground's pebbles): its brightness on a
+// 64 x 64 grid - how much its rows' and columns' means stray (straight joints and edges run whole rows) - and the step
+// two texels apart on a 32 x 32 grid of its own. False for a format it can't read.
+static bool PixelsLook(Format fmt, const void* data, uint32_t width, uint32_t height, uint32_t pitch, float* line,
+                       float* edge, float* grain)
+{
+    const uint8_t* base = static_cast<const uint8_t*>(data);
+    auto luma = [&](uint32_t x, uint32_t y, float* l) {
+        uint8_t c[3];
+        if (!TexelRgb(fmt, base, pitch, std::min(x, width - 1), std::min(y, height - 1), c)) return false;
+        *l = 0.3f * c[0] + 0.59f * c[1] + 0.11f * c[2];
+        return true;
+    };
+    constexpr int N = 64;
+    float rows[N] = {}, cols[N] = {};
+    double sum = 0.0, sum2 = 0.0;
+    for (int j = 0; j < N; ++j)
+        for (int i = 0; i < N; ++i) {
+            float l;
+            if (!luma(uint32_t((4 * i + 2) * width / 256), uint32_t((4 * j + 2) * height / 256), &l)) return false;
+            rows[j] += l / N;
+            cols[i] += l / N;
+            sum += l;
+            sum2 += double(l) * l;
+        }
+    const double mean = sum / (N * N), spread = std::sqrt(std::max(sum2 / (N * N) - mean * mean, 1.0));
+    auto stray = [&](const float* m) {
+        double s2 = 0.0;
+        for (int k = 0; k < N; ++k) s2 += (m[k] - mean) * (m[k] - mean);
+        return std::sqrt(s2 / N);
+    };
+    float step = 0.0f;
+    for (int k = 1; k < N; ++k) step = std::max({step, std::fabs(rows[k] - rows[k - 1]), std::fabs(cols[k] - cols[k - 1])});
+    *line = float(std::max(stray(rows), stray(cols)) / spread);
+    *edge = float(step / spread);
+    double g = 0.0;
+    for (int j = 0; j < 32; ++j)
+        for (int i = 0; i < 32; ++i) {
+            const uint32_t x = (8 * i + 2) * width / 256, y = (8 * j + 2) * height / 256, two = std::max(width / 128, 1u);
+            float a, b, c;
+            if (!luma(x, y, &a) || !luma(x + two, y, &b) || !luma(x, y + two, &c)) return false;
+            g += 0.5 * (std::fabs(a - b) + std::fabs(a - c));
+        }
+    *grain = float(g / (32 * 32));
+    return true;
+}
+
 // One texel's alpha (0..255), for the leaves' alpha mask below; false for a format it can't read.
 // Whether every texel is black (an alpha-only format reads black; false for a format it can't read): with no alpha,
 // the PF map's tiles in AI missions (RVK_AlienMap).
@@ -527,6 +575,11 @@ void Device::UpdateTexture(Texture* t, uint32_t level, uint32_t x, uint32_t y, u
                 for (size_t i = c; t->m_thumbValid && i < t->m_thumb.size(); i += 3) sum += t->m_thumb[i];
                 t->m_mean[c] = t->m_thumbValid ? float(sum / (255.0 * double(t->m_thumb.size() / 3))) : -1.0f;
             }
+            // How it looks up close (the native ground's pebbles): square textures of 128 texels or more.
+            t->m_line = t->m_edge = t->m_grain = -1.0f;
+            if (t->m_thumbValid && t->m_width == t->m_height && t->m_width >= 128 &&
+                !PixelsLook(t->m_format, data, t->m_width, t->m_height, pitch, &t->m_line, &t->m_edge, &t->m_grain))
+                t->m_line = t->m_edge = t->m_grain = -1.0f;
             // A ground texture with a new picture (a stand-in replaced as the area loads): the grass classified
             // from it is stale.
             if (t->m_groundBase && m_grassOn && t->m_thumbValid && before != t->m_thumb)

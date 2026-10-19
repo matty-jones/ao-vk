@@ -444,8 +444,8 @@ bool Device::IsShadowCaster(uint32_t primitive, uint32_t fvf) const
     // foreground.
     if (m_rs[d3d::RS_ZFUNC] == d3d::CMP_ALWAYS)
         return false;
-    if (IsTerrain(fvf) && !m_native.clutter)     // (the native ground's rocks cast: ground_clutter.cpp)
-        return false;
+    if (IsTerrain(fvf) && (!m_native.clutter || m_native.pebbleDraw == 2))   // (the native ground's rocks cast, and
+        return false;                                                       // its bigger pebbles: ground_clutter.cpp)
     if (!m_rs[d3d::RS_ALPHABLENDENABLE])
         return true;
     bool alphaBlend = m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_SRCALPHA && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_INVSRCALPHA;

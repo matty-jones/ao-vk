@@ -95,7 +95,10 @@ void Device::DestroyNativeGround()
     if (m_native.ground && m_native.framesDrawn)
         Log("native ground: playfield %u - %.1f patches drawn a frame over %u frames, %u rocks made", m_native.ground->id,
             double(m_native.patchesDrawn) / m_native.framesDrawn, m_native.framesDrawn, m_native.rocksMade);
-    m_native.patchesDrawn = m_native.framesDrawn = m_native.rocksMade = 0;
+    if (m_native.ground && m_native.pebblesMade)
+        Log("native ground: playfield %u - %u pebbles made", m_native.ground->id, m_native.pebblesMade);
+    m_native.patchesDrawn = m_native.framesDrawn = m_native.rocksMade = m_native.pebblesMade = 0;
+    DropNativePebbles(true);
     // (The lightmap stays: it is the hour's, handed over when it changes - perhaps before this playfield's ground.)
     // (Nor does the fade from the last hour's: across playfields, it would be another place's light.)
     for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.means, &m_native.sky, &m_native.lightmapPrev})
@@ -491,6 +494,7 @@ void Device::DrawNativeGround(bool lightPass)
         ++drawn;
     }
     DrawNativeClutter(vp);
+    DrawNativePebbles(vp);
     m_native.drawing = false;
     m_textures[0] = saved;
     if (!lightPass) {

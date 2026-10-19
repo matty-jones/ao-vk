@@ -58,10 +58,14 @@ struct DrawTransform {
                                    // game's ground); z its normal maps' (lighting pass; 0 = none); w its sky visibility's
                                    // (lighting pass; 0 = none)
     float terrainAt[4];            // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown) - the
-                                   // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); w:
-                                   // kTerrainBase / kTerrainLight (0 = not mapped)
+                                   // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); its
+                                   // rocks: y 2, its pebbles: y 3 and z kPebbleRange; w: kTerrainBase / kTerrainLight
+                                   // (0 = not mapped)
 };
 constexpr float kNativeTessDistance = 60.0f;   // world units: the native ground's tessellation gone from here on
+// The native ground's pebbles (ground_pebbles.cpp): drawn within this of the eye, sunk into the ground over its last
+// 8 units (ffp.vert; DrawTransform terrainAt.z).
+constexpr float kPebbleRange = 40.0f;
 enum : uint32_t { kTerrainBase = 1, kTerrainLight = 2 };   // DrawTransform terrainAt[3]: the ground's base pass; its
                                                            // lighting pass, which reads the base's maps (F_BUMPBASE, MAT_BASE)
 constexpr float kSkySceneryHaze = 2000.0f;     // the sky's scenery's haze: its colour left e^-(distance / this)

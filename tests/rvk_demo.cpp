@@ -1721,6 +1721,7 @@ float g_groundTess = 0.6f;          // --ground-tess X: RVK_GroundTess
 float g_cliffDepth = 0.4f;          // --cliff-depth X: RVK_CliffDepth
 float g_groundSun = 1.0f;           // --ground-sun X: RVK_GroundSun
 float g_groundRocks = 1.0f;         // --ground-rocks X: RVK_GroundRocks
+float g_groundPebbles = 1.0f;       // --ground-pebbles X: RVK_GroundPebble
 float g_groundGrain = 0.6f;         // --ground-grain X: RVK_GroundGrain
 float g_groundBlend = 1.0f;         // --ground-blend X: RVK_GroundBlend
 bool g_tileOrm = false;             // --tile-orm: every other tile a shiny material map (PBR, pixel lighting on)
@@ -1741,7 +1742,10 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     size_t p = 8;
     auto u32 = [&] { uint32_t v; std::memcpy(&v, d.data() + p, 4); p += 4; return v; };
     auto f32 = [&] { float v; std::memcpy(&v, d.data() + p, 4); p += 4; return v; };
-    if (d.size() < 32 || std::memcmp(d.data(), "AOGND1", 6) != 0) { std::printf("not a ground file\n"); return; }
+    if (d.size() < 32 || (std::memcmp(d.data(), "AOGND1", 6) != 0 && std::memcmp(d.data(), "AOGND2", 6) != 0)) {
+        std::printf("not a ground file\n");
+        return;
+    }
     auto ground = std::make_shared<NativeGround>();
     ground->id = 790;
     ground->cellsX = u32();
@@ -1782,12 +1786,21 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     const uint32_t lw = u32(), lh = u32();
     const float shade = f32();
     auto packed = std::make_shared<std::vector<uint8_t>>(d.data() + p, d.data() + p + size_t((lw + 1) / 2) * lh);
+    p += size_t((lw + 1) / 2) * lh;
+    if (d[5] == '2' && p + 4 <= d.size()) {     // (AOGND2: the tiles' surface types - the pebbles)
+        const uint32_t n = u32();
+        if (p + size_t(n) * 2 <= d.size()) {
+            ground->types.resize(n);
+            std::memcpy(ground->types.data(), d.data() + p, size_t(n) * 2);
+        }
+    }
     std::printf("ground: %u x %u cells, %u tiles, lightmap %u x %u\n", ground->cellsX, ground->cellsZ, tiles, lw, lh);
     dev.SetNativeGround(ground);
     dev.SetNativeGroundLightmap(packed, lw, lh, shade);
     dev.SetNativeGroundAo(g_groundAo);
     dev.SetNativeGroundSun(g_groundSun);
     dev.SetNativeGroundRocks(g_groundRocks);
+    dev.SetNativeGroundPebbles(g_groundPebbles);
     {
         Device::TerrainSettings t;
         t.round = g_groundTess;
@@ -4528,6 +4541,7 @@ int main(int argc, char** argv)
         else if (a == "--cliff-depth" && i + 1 < argc) g_cliffDepth = float(std::atof(argv[++i]));
         else if (a == "--ground-sun" && i + 1 < argc) g_groundSun = float(std::atof(argv[++i]));
         else if (a == "--ground-rocks" && i + 1 < argc) g_groundRocks = float(std::atof(argv[++i]));
+        else if (a == "--ground-pebbles" && i + 1 < argc) g_groundPebbles = float(std::atof(argv[++i]));
         else if (a == "--tile-orm") g_tileOrm = true;
         else if (a == "--ground-grain" && i + 1 < argc) g_groundGrain = float(std::atof(argv[++i]));
         else if (a == "--ground-blend" && i + 1 < argc) g_groundBlend = float(std::atof(argv[++i]));

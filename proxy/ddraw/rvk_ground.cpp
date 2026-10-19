@@ -6,7 +6,8 @@
 // AnarchyGroundData_t (docs/ground-format.md; re/ds_ground_format.c): +0x31 16-bit heights somewhere, +0x34 / +0x38
 // samples across / down, +0x40 cells a patch side, +0x50 / +0x54 patches across / down, +0x58 the patches (0x54 bytes
 // each: +0x08 16-bit heights, +0x0C cells a side, +0x10 / +0x14 the heights' zlib size / bytes, +0x28 / +0x2C the
-// tile codes'), +0x60 the tile codes' mask, +0x64..+0x68 the tiles' textures (a vector). AnarchyGround_t +0x198 /
+// tile codes'), +0x60 the tile codes' mask, +0x64..+0x68 the tiles' textures (a vector), +0xD8..+0xDC their surface
+// types (a vector of u16). AnarchyGround_t +0x198 /
 // +0x19C world units a cell, +0x1A0 a height unit (SetScale; byte heights are x 256).
 #include "rvk_backend.h"
 #include "rvk_settings.h"
@@ -157,6 +158,17 @@ void OnNewGround(void* ground, void* data)
         RvkLog("native ground: the ground has no tiles (%zu) - the game's", tiles);
         return;
     }
+    // Each tile's surface type (+0xD8 / +0xDC: tile_type_data, a vector of u16; with it the codes' mask is 0x3FFF):
+    // which ground gets pebbles (rvk ground_pebbles.cpp). None without.
+    if (Readable(d, 0xE0) && At<uint32_t>(d, 0x60) == 0x3FFFu) {
+        const uint8_t* tb = At<const uint8_t*>(d, 0xD8);
+        const uint8_t* te = At<const uint8_t*>(d, 0xDC);
+        if (tb && te > tb && size_t(te - tb) == tiles * 2 && Readable(tb, tiles * 2)) {
+            g->types.resize(tiles);
+            std::memcpy(g->types.data(), tb, tiles * 2);
+        }
+    }
+    if (g->types.empty()) RvkLog("native ground: the tiles' surface types aren't there - no pebbles");
     g->id = uint32_t(reinterpret_cast<uintptr_t>(data));
     g_reading.data = data;
     g_reading.ground = g;

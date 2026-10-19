@@ -50,6 +50,7 @@ struct NativeGround {
     std::vector<float> heights;            // (cellsX + 1) x (cellsZ + 1) world heights, rows along +z
     std::vector<uint16_t> codes;           // cellsX x cellsZ: the cell's tile (low 14 bits) and turn (top 2)
     std::vector<Texture*> tiles;           // each tile's texture (null: none)
+    std::vector<uint16_t> types;           // each tile's surface type (tile_type_data; empty: not known - no pebbles)
 };
 
 // How a ground chunk's base texture lies on the world (terrain.cpp FitTerrain). The game gives each 4 x 4 unit cell of
@@ -125,6 +126,11 @@ private:
     bool m_thumbValid = false;
     float m_mean[3] = {-1.0f, -1.0f, -1.0f};   // its mean colour (0..1; from the grid above, -1 until then): the cliffs'
                                                // rock tinted to a ground cell's tile (terrain.cpp)
+    // How it looks up close, for the native ground's pebbles (ground_pebbles.cpp; square, 128 texels or more, else -1):
+    // line - how far its rows' or columns' mean brightness strays (a flagstone's joints, a slab's edge: 0.3 and up; a
+    // natural ground under 0.25), edge - the biggest step between neighbouring rows' or columns' means (both over its
+    // spread of brightness); grain - the mean brightness step two texels apart (0..255: smooth dirt 9, gravel 30).
+    float m_line = -1.0f, m_edge = -1.0f, m_grain = -1.0f;
     // Not fully opaque: the mean alpha (0..255) on a grid of up to 64 x 64 cells over level 0, for the leaves
     // (leaves.cpp: where a canopy card is leaf and where it is hole). Empty until a full level-0 upload.
     std::vector<uint8_t> m_alphaMask;
@@ -625,6 +631,10 @@ public:
     void SetNativeGroundAo(float strength) { m_native.ao = strength; }
     void SetNativeGroundSun(float strength) { m_native.sun = strength; }
     void SetNativeGroundRocks(float density);
+    // RVK_GroundPebble: pebbles on flat dirt, gravel and sand near the eye (ground_pebbles.cpp; 0 none, 1, 2 twice as
+    // many); and the hand table of which surface types get them (randy-vk\terrain\pebbles.tsv; null none).
+    void SetNativeGroundPebbles(float density);
+    void SetPebbleTablePath(const char* path);
     bool NativeGroundDrawing() const { return m_native.drawing; }
     void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
     void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
@@ -1012,8 +1022,10 @@ private:
     // bindless image, its turn), the lightmap (the hour's, through the game's palette).
     struct NativeClutter {                       // a patch's rocks (ground_clutter.cpp): one static mesh
         std::shared_ptr<const std::vector<uint8_t>> vertices, indices;
-        uint32_t count = 0;                      // vertices (and indices: one each)
-        bool pebbles = false;                    // the small rocks (drawn nearer)
+        uint32_t count = 0;                      // vertices (and indices: one each, unless indexCount)
+        uint32_t indexCount = 0;                 // (the pebbles: their own indices)
+        bool pebbles = false;                    // the small rocks (drawn nearer); the pebbles' blocks
+        bool casts = true;                       // (the pebbles: only the bigger ones cast sun shadows)
     };
     struct ClutterBuild {                        // a patch's rocks as made (on a worker)
         std::vector<NativeClutter> pieces;
@@ -1025,6 +1037,18 @@ private:
         std::vector<NativeClutter> clutter;      // its rocks, made when the eye is near
         bool clutterMade = false;
         std::future<ClutterBuild> clutterPending;   // ... being made
+    };
+    // The pebbles (ground_pebbles.cpp): which tiles get them - per tile how many (0..2: 1 the coarsest gravel's), their
+    // size x, and where in it (16 x 16 texels, 1 its ground, 0 grass or another ground's).
+    struct PebbleTable {
+        std::vector<float> density, size;
+        std::vector<uint8_t> mask;
+    };
+    struct PebbleBlock {                         // a block of 8 x 8 cells' pebbles, made when the eye is near
+        std::vector<NativeClutter> pieces;
+        std::future<ClutterBuild> pending;
+        float lo[3], hi[3];
+        bool made = false;
     };
     struct NativeState {
         std::shared_ptr<const NativeGround> ground;
@@ -1045,6 +1069,12 @@ private:
         float rocks = 1.0f;                      // RVK_GroundRocks
         bool clutter = false;                    // the rocks are drawing (ground_clutter.cpp)
         uint32_t rocksMade = 0;
+        float pebbles = 1.0f;                    // RVK_GroundPebble
+        std::shared_ptr<const PebbleTable> pebbleTable;   // (made once a playfield, its tiles uploaded)
+        uint32_t pebbleTries = 0;
+        std::unordered_map<uint32_t, PebbleBlock> pebbleBlocks;   // by block (z x blocks across + x)
+        uint32_t pebblesMade = 0;
+        int pebbleDraw = 0;                      // the pebbles are drawing: 1 those that cast, 2 those that don't
         std::vector<uint32_t> lightPixels;       // the lightmap's texels (the grass's light: Device::NativeLightRgb)
         uint32_t lightW = 0, lightH = 0;
         Texture* sky = nullptr;                  // how much of the sky each height sample sees (0..1; RVK_GroundAo)
@@ -1069,6 +1099,12 @@ private:
                                            std::vector<uint8_t> grassy);
     std::vector<uint8_t> GrassyTiles() const;
     void DrawNativeClutter(const d3d::Matrix& viewProj);
+    std::shared_ptr<const PebbleTable> MakePebbleTable();
+    static ClutterBuild BuildNativePebbles(std::shared_ptr<const NativeGround> ground, uint32_t bx, uint32_t bz,
+                                           float density, std::shared_ptr<const PebbleTable> table);
+    void DrawNativePebbles(const d3d::Matrix& viewProj);
+    void DropNativePebbles(bool table);
+    std::string m_pebbleTablePath;               // randy-vk\terrain\pebbles.tsv (SetPebbleTablePath)
     void DestroyNativeGround();
     // The ground's chunks' texture coordinates fitted to the world (terrain.cpp), by TerrainChunkKey: kept across
     // frames; how many were laid from above and how many not (logged).

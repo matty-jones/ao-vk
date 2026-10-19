@@ -5,9 +5,12 @@ the tiles in their textures' mean colours, and the six baked lightmaps. Research
 Usage: tools/ground-data.py <playfield id> <out dir>        e.g. 790 build/ground   -> heights_790.png, tiles_790.png,
                                                                                         lightmaps_790.png
        tools/ground-data.py <playfield id> --export <file> [--map M] [--shade S]
-           the ground as rvk_demo --native-ground-file reads it: "AOGND1\0\0", u32 cells across, down, patch,
+           the ground as rvk_demo --native-ground-file reads it: "AOGND2\0\0", u32 cells across, down, patch,
            f32 cell x, z; f32 heights[(across + 1) x (down + 1)]; u16 codes[across x down]; u32 tiles; per tile u32
-           bytes + its JPEG (rdb_1010006); u32 lightmap w, h, f32 shade, its packed bytes (map M of the six, 3)
+           bytes + its JPEG (rdb_1010006); u32 lightmap w, h, f32 shade, its packed bytes (map M of the six, 3);
+           u32 n, u16 each tile's surface type[n] (tile_type_data; AOGND1 ends before it)
+       tools/ground-data.py <playfield id> --types
+           each surface type's base tile and how the pebbles (rvk ground_pebbles.cpp) take it: its look and verdict
 """
 import io
 import pathlib
@@ -79,7 +82,8 @@ def load(db, pf):
                 hp = (a & 0xFF).astype(np.float32)
             heights[pz * P:pz * P + P + 1, px * P:px * P + P + 1] = hp * hscale
             tiles[pz * P:pz * P + P, px * P:px * P + P] = np.frombuffer(zlib.decompress(tm[i]), "<u2").reshape(P, P)
-    return dict(size=(w, h), cell=cell, hscale=hscale, P=P, tex=tex, heights=heights, tiles=tiles)
+    types = np.frombuffer(array(21)[0], "<u2") if 21 in fields else np.zeros(0, np.uint16)   # tile_type_data
+    return dict(size=(w, h), cell=cell, hscale=hscale, P=P, tex=tex, heights=heights, tiles=tiles, types=types)
 
 
 def lightmaps(db, pf):
@@ -102,7 +106,7 @@ def export(pf, path, map_index, shade):
     g = load(db, pf)
     H, T = g["heights"], g["tiles"]
     rows, cols = T.shape
-    out = bytearray(b"AOGND1\0\0")
+    out = bytearray(b"AOGND2\0\0")
     out += struct.pack("<IIIff", cols, rows, g["P"], g["cell"], g["cell"])
     out += H.astype("<f4").tobytes()
     out += T.astype("<u2").tobytes()
@@ -115,11 +119,74 @@ def export(pf, path, map_index, shade):
     m = maps[map_index] if maps else np.zeros((rows, cols), np.uint8)
     packed = ((m[:, 0::2] << 4) | m[:, 1::2]).astype(np.uint8)
     out += struct.pack("<IIf", m.shape[1], m.shape[0], shade) + packed.tobytes()
+    out += struct.pack("<I", len(g["types"])) + g["types"].astype("<u2").tobytes()
     pathlib.Path(path).write_bytes(out)
     print(f"-> {path}: {cols} x {rows} cells, {len(g['tex'])} tiles, lightmap {map_index} ({len(out) / 1e6:.1f} MB)")
 
 
+def look(rgb):
+    """A tile's look as rvk measures it at upload (resources.cpp PixelsLook): line, edge (its rows' and columns' mean
+    brightness on a 64 x 64 grid against its spread), grain (the brightness step two texels apart, 32 x 32 grid)."""
+    L = rgb.astype(np.float32) @ np.array([0.3, 0.59, 0.11], np.float32)
+    n = L.shape[0]
+    s = L[2 * n // 256::4 * n // 256, 2 * n // 256::4 * n // 256][:64, :64]
+    spread = max(s.std(), 1.0)
+    rows, cols = s.mean(1), s.mean(0)
+    line = max(rows.std(), cols.std()) / spread
+    edge = max(np.abs(np.diff(rows)).max(), np.abs(np.diff(cols)).max()) / spread
+    two = max(n // 128, 1)
+    a = L[2 * n // 256::8 * n // 256, 2 * n // 256::8 * n // 256][:32, :32]
+    b = L[2 * n // 256::8 * n // 256, 2 * n // 256 + two::8 * n // 256][:32, :32]
+    c = L[2 * n // 256 + two::8 * n // 256, 2 * n // 256::8 * n // 256][:32, :32]
+    grain = 0.5 * (np.abs(a - b).mean() + np.abs(a - c).mean())
+    return line, edge, grain
+
+
+def verdict(mean, line, edge, grain):
+    """How many pebbles a ground gets from its base tile's look (rvk ground_pebbles.cpp MakePebbleTable): density 0..1."""
+    r, g, b = mean
+    hi, lo = max(mean), min(mean)
+    lum, sat = 0.3 * r + 0.59 * g + 0.11 * b, (hi - lo) / max(hi, 1)
+    if g > r * 1.08 and g > b * 1.08:
+        return "grass", 0.0
+    if line > 0.3 or edge > 1.2:
+        return "slabs", 0.0
+    if sat < 0.12 and (grain < 15 or (sat < 0.08 and lum > 150)):
+        return "smooth grey", 0.0
+    if grain > 50:
+        return "straw", 0.3
+    if sat > 0.4 and lum > 128 and grain < 32:
+        return "sand", 0.25
+    d = min(max(0.2 + (grain - 8) / 30, 0.2), 1.0) * (1.0 if sat < 0.2 else 0.7)
+    return ("gravel" if sat < 0.2 and grain > 25 else "dirt"), d
+
+
+def surface_types(pf):
+    db = connect()
+    g = load(db, pf)
+    ty, T = g["types"], g["tiles"] & 0x3FFF
+    w, h = g["size"]
+    used = np.bincount(T[:h, :w].ravel(), minlength=len(g["tex"]))
+    print(f"playfield {pf}: {len(g['tex'])} tiles, {int(ty.max()) + 1 if len(ty) else 0} surface types")
+    for t in range(int(ty.max()) + 1 if len(ty) else 0):
+        of = np.where(ty == t)[0]
+        if not len(of):
+            continue
+        base = t if t < len(ty) and ty[t] == t else int(of[np.argmax(used[of])])
+        row = db.execute("select data from rdb_1010006 where id=?", (g["tex"][base],)).fetchone()
+        rgb = np.asarray(Image.open(io.BytesIO(row[0][24:])).convert("RGB"))
+        thumb = rgb[rgb.shape[0] // 32::rgb.shape[0] // 16, rgb.shape[1] // 32::rgb.shape[1] // 16].reshape(-1, 3)
+        mean = thumb.mean(0)
+        line, edge, grain = look(rgb)
+        what, d = verdict(mean, line, edge, grain)
+        print(f"  type {t:2d}: tile {base:3d}, {len(of):3d} tiles, {int(used[of].sum()):7d} cells, colour "
+              f"{mean.astype(int)}, line {line:.2f} edge {edge:.2f} grain {grain:5.1f} -> {what} {d:.2f}")
+
+
 def main():
+    if len(sys.argv) > 2 and sys.argv[2] == "--types":
+        surface_types(int(sys.argv[1]))
+        return
     if len(sys.argv) > 2 and sys.argv[2] == "--export":
         args = sys.argv[3:]
         opt = lambda k, d: type(d)(args[args.index(k) + 1]) if k in args else d

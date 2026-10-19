@@ -180,6 +180,8 @@ public:
     void SetNativeGroundAo(float strength);
     void SetNativeGroundSun(float strength);
     void SetNativeGroundRocks(float density);
+    void SetNativeGroundPebbles(float density);
+    void SetPebbleTablePath(const char* path);
     void SetShadowView(bool on);
     void SetAlienMap(bool on);
     void SetContactShadows(float s);

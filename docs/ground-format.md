@@ -61,7 +61,7 @@ order (the same names `AnarchyGroundData_t::Archive` writes):
 | 10 | `tilemap_compressed_data` | per patch: zlib, P x P u16 tile codes |
 | 11 | `buildingmap_compressed_data` | per patch, optional: zlib, (2P)^2 bits |
 | 20 | `texture` | per patch: an `RTexture_t` (`GroundTextureCreator_t`: flags, width, height, pixelformat, bitmap), after the fields |
-| 21 | `tile_type_data` | u16 per tile: its surface type (790: 0..23) |
+| 21 | `tile_type_data` | u16 per tile: its surface type (790: 0..23); in memory `AnarchyGroundData_t` +0xD8..+0xDC (read for the pebbles: docs/pebbles-plan.md) |
 
 **Patches.** P, the cells a patch side, is the lowest of (map_width - 1)'s and (map_height - 1)'s trailing zero bits,
 at most 6: P = 64 for 790 (12 x 16 patches). Patches are row-major, x first. Patch (px, pz) covers samples

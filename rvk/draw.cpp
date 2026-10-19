@@ -2873,8 +2873,9 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             const bool base = !m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE];
             dt.terrain[0] = 1.0f / m_native.ground->cellX;
             dt.terrainAt[3] = float(base ? kTerrainBase : kTerrainLight);
-            dt.terrainAt[1] = 2.0f;
-            dt.terrainAt[2] = 0.0f;
+            // (The pebbles 3, and the range they sink into the ground over the end of: ground_pebbles.cpp, ffp.vert.)
+            dt.terrainAt[1] = m_native.pebbleDraw ? 3.0f : 2.0f;
+            dt.terrainAt[2] = m_native.pebbleDraw ? kPebbleRange : 0.0f;
             const uint32_t codes = BindlessImage(m_native.codes) + 1;
             std::memcpy(&dt.terrain[1], &codes, 4);
             if (base) {

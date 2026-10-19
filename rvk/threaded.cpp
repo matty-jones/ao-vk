@@ -1014,6 +1014,16 @@ void ThreadedDevice::SetNativeGroundRocks(float density)
     Enqueue([this, density](const uint8_t*) { m_device.SetNativeGroundRocks(density); });
 }
 
+void ThreadedDevice::SetNativeGroundPebbles(float density)
+{
+    Enqueue([this, density](const uint8_t*) { m_device.SetNativeGroundPebbles(density); });
+}
+
+void ThreadedDevice::SetPebbleTablePath(const char* path)
+{
+    Enqueue([this, p = std::string(path ? path : "")](const uint8_t*) { m_device.SetPebbleTablePath(p.c_str()); });
+}
+
 void ThreadedDevice::SetAlienMap(bool on)
 {
     Enqueue([this, on](const uint8_t*) { m_device.SetAlienMap(on); });

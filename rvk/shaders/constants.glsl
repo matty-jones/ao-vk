@@ -25,7 +25,8 @@ struct DrawTransform {
                                 // the game's ground); z its normal maps' (lighting pass; 0 = none); w its sky
                                 // visibility's (lighting pass; 0 = none)
     vec4 terrainAt;             // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown) - the
-                                // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); w:
+                                // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); its
+                                // rocks: y 2, its pebbles: y 3 and z the range they sink over the end of; w:
                                 // kTerrainBase / kTerrainLight (0 = not mapped)
 };
 const uint MAT_PBR = 1u, MAT_BASE = 2u, MAT_ALBEDO = 4u, MAT_EMISSIVE = 8u, MAT_PICKED = 16u, MAT_SKY = 32u, MAT_CLOUDSHEET = 64u;   // D.mat.z: the draw has an

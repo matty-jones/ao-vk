@@ -39,6 +39,7 @@ struct TerrainMap {
     float side;         // how steep (0 .. 1): the cliffs' share
     bool rock;          // the faces are the rock's (else the cell's tile)
     bool clutter;       // the native ground's rocks (TerrainClutter): rock from above too, at top
+    bool pebble;        // ... its pebbles (D.terrainAt.y 3): each its own shade of the ground's colour
     vec2 top, topDx, topDy;
 };
 
@@ -118,6 +119,7 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
     // (at its own size: top), by the interpolated normal (they are shaded smooth: by each face's own, the lays changed
     // at its edges and showed its triangles) - no hexagons (a rock is smaller than one).
     m.clutter = floatBitsToUint(D.terrain.y) != 0u && D.terrainAt.y > 1.5 && m.rock;
+    m.pebble = m.clutter && D.terrainAt.y > 2.5;
     m.top = s * posW.xz;
     m.topDx = s * m.px.xz;
     m.topDy = s * m.py.xz;
@@ -353,7 +355,15 @@ vec4 TerrainClutterBase(TerrainMap m)
     for (int i = 1; i < 3; ++i)
         if (m.w[i] > 0.002) c += TERRAIN_FACE_READ(texImages[TerrainRockImage(0)], m.uv[i], m.dx[i], m.dy[i]) * m.w[i];
     c.rgb = mix(FL.terrainRock2.rgb, c.rgb, 0.75);
-    return c * TerrainRockTint(m);
+    if (!m.pebble) return c * TerrainRockTint(m);
+    // A pebble (rvk ground_pebbles.cpp): the ground's colour under it with the rock's grain in its brightness (not the
+    // rock's own hue: brown stones on grey gravel). Set 0 is where it lies, the same at all its corners (the middle of
+    // a 1/256 of a cell): its hash makes each stone lighter or darker, and nearer the ground's hue or a plain grey.
+    const uint h = TerrainHash(uvec2(floor(m.uv[0] * 256.0)) + uvec2(0x51u, 0x2Fu));
+    const float v = float(h & 0xFFFFu) / 65535.0, w = float(h >> 16) / 65535.0;
+    const vec3 mean = NativeMean(m.uv[0]);
+    const float grain = clamp(Luma(c.rgb) / max(Luma(FL.terrainRock2.rgb), 0.02), 0.5, 1.6);
+    return vec4(mix(vec3(Luma(mean)), mean, 0.4 + 0.6 * w) * grain * (0.8 + 0.7 * v), c.a);
 }
 
 vec4 TerrainBase(uint image, sampler smp, inout TerrainMap m)

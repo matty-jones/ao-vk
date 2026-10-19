@@ -5,7 +5,13 @@ The native ground (docs/native-ground-plan.md) has rocks where the heights say r
 flat. This adds small loose stones on the flat ground that is dirt, gravel or sand, near the eye, so the ground at
 your feet has real stones lying on it. Grass, roads, concrete and towns stay clear.
 
-**Status (2026-10-19):** planned. Built on `main` after the terrain work (6449fd9). Work on a new branch `pebbles`.
+**Status (2026-10-19):** first version on branch `pebbles` (rvk/ground_pebbles.cpp), staged for the game to check.
+Changed from the plan after looking at it in rvk_demo: 70 a cell at density 1, not 10 - 40 (16 a cell read as a few
+stray stones, not gravel); rounder and higher out of the ground (flat ones half sunk were 1 - 3 cm high: invisible);
+coloured as the ground under them with the rock's grain only in their brightness (the rock's own hue made brown stones
+on grey gravel); made within 44 units, dropped past 52 (memory); the fade a sink into the ground (ffp.vert), not a
+shrink. The classifier (tools/ground-data.py --types) matches the table below on 790, and Newland Desert, Tir County
+and the Perpetual Wastelands use the same tile textures.
 
 ## What we know
 
