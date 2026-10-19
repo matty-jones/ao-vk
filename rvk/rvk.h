@@ -1025,7 +1025,6 @@ private:
         uint32_t count = 0;                      // vertices (and indices: one each, unless indexCount)
         uint32_t indexCount = 0;                 // (the pebbles: their own indices)
         bool pebbles = false;                    // the small rocks (drawn nearer); the pebbles' blocks
-        bool casts = true;                       // (the pebbles: only the bigger ones cast sun shadows)
         uint8_t size = 0;                        // (the pebbles: grit 0, small 1, bigger 2 - each its own range)
     };
     struct ClutterBuild {                        // a patch's rocks as made (on a worker)
@@ -1075,7 +1074,7 @@ private:
         uint32_t pebbleTries = 0;
         std::unordered_map<uint32_t, PebbleBlock> pebbleBlocks;   // by block (z x blocks across + x)
         uint32_t pebblesMade = 0;
-        int pebbleDraw = 0;                      // the pebbles are drawing: 1 those that cast, 2 those that don't
+        bool pebbleDraw = false;                 // the pebbles are drawing (they cast no sun shadows: ground_pebbles.cpp)
         float pebbleRange = 0.0f;                // ... the range of their size (sunk over its last quarter)
         std::vector<uint32_t> lightPixels;       // the lightmap's texels (the grass's light: Device::NativeLightRgb)
         uint32_t lightW = 0, lightH = 0;
