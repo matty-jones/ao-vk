@@ -128,7 +128,11 @@
   ground draws per tile. Grain at the feet (`RVK_GroundGrain`, 0.6; terrain.glsl `TerrainGrain`, base pass): the
   rock's luminance at 0.9 and 1.37 units, turned apart, each over the same spot three mip levels coarser (a high-pass:
   the photo's bands and patches at that size made blotches, its grit is left), from above, fading out as a repeat
-  shrinks under ~80 pixels. Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  shrinks under ~80 pixels. Tiles blended across cells' edges (`RVK_GroundBlend`, 1; terrain.glsl `NativeTop`, base
+  pass): the 2 x 2 cells about the nearest corner over a band of 0.3 of a cell each side of an edge, wandered by noise,
+  each neighbour's tile mirrored about the shared edge, weighted with its brightness; only edges whose tiles' colours
+  there disagree (`NativeEdgeOff`: a road's slabs, the game's transition tiles keep their edges). The lighting pass's
+  normal and material maps keep each cell's own. Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):

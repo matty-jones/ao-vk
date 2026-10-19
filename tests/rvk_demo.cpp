@@ -1722,6 +1722,7 @@ float g_cliffDepth = 0.4f;          // --cliff-depth X: RVK_CliffDepth
 float g_groundSun = 1.0f;           // --ground-sun X: RVK_GroundSun
 float g_groundRocks = 1.0f;         // --ground-rocks X: RVK_GroundRocks
 float g_groundGrain = 0.6f;         // --ground-grain X: RVK_GroundGrain
+float g_groundBlend = 1.0f;         // --ground-blend X: RVK_GroundBlend
 bool g_tileOrm = false;             // --tile-orm: every other tile a shiny material map (PBR, pixel lighting on)
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 template <typename D>
@@ -1792,6 +1793,7 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         t.round = g_groundTess;
         t.depth = g_cliffDepth;
         t.grain = g_groundGrain;
+        t.blend = g_groundBlend;
         dev.SetTerrain(t);
     }
     if (g_grassFieldOn) dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true);   // (--grass-field: the grass on it)
@@ -4528,6 +4530,7 @@ int main(int argc, char** argv)
         else if (a == "--ground-rocks" && i + 1 < argc) g_groundRocks = float(std::atof(argv[++i]));
         else if (a == "--tile-orm") g_tileOrm = true;
         else if (a == "--ground-grain" && i + 1 < argc) g_groundGrain = float(std::atof(argv[++i]));
+        else if (a == "--ground-blend" && i + 1 < argc) g_groundBlend = float(std::atof(argv[++i]));
 
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));

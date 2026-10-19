@@ -87,5 +87,6 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 terrainLight;          // the native ground's lightmap as a + b.n of its slope (rvk native_ground.cpp
                                 // FitNativeLight): xyz b turned to the sun's bearing now (b when there is none), w a (0: no fit)
     vec4 terrainLight2;         // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
+    vec4 terrain3;              // ... x: the native ground's tiles blended across their cells' edges (RVK_GroundBlend)
     Light lights[64];
 } FL;

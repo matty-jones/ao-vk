@@ -24,6 +24,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   many). Meadows, roads and towns are left clear.
 - The ground at your feet has fine grit in it instead of a soft smear of its texture (`RVK_GroundGrain`, 0.6; 0 for
   none).
+- Different ground textures side by side (gravel beside dirt, where the game has no transition tile) blend into each
+  other along a ragged edge instead of meeting in a hard straight line along the ground's grid (`RVK_GroundBlend`, 1;
+  0 for the hard edges). Roads and the game's own transitions stay as they are.
 - The feet and rims of cliffs that run at a slant are smooth slopes instead of a row of sharp triangular teeth.
 - Texture packs' material maps for ground tiles (shine, wet look, crevices; `RVK_Pbr`) work on the ground drawn by
   ao-vk too, tile by tile as on the game's own ground.

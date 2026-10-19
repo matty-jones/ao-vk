@@ -610,9 +610,9 @@ public:
     // instead of stretched down them (RVK_CliffTex), the faces' repeats hidden (RVK_TileHide), large-scale variation
     // in its colour (RVK_GroundVary); rock on the faces instead of the ground's tile (RVK_CliffRock).
     // round: the native ground's tessellation (Phong's shape, 0 off); depth: its cliffs' rock displaced out of the faces
-    // (world units at most); grain: its fine grit up close.
+    // (world units at most); grain: its fine grit up close; blend: its cells' tiles blended across their edges.
     struct TerrainSettings {
-        float cliff = 1.0f, tiling = 1.0f, variation = 1.0f, round = 0.6f, depth = 0.4f, grain = 0.6f;
+        float cliff = 1.0f, tiling = 1.0f, variation = 1.0f, round = 0.6f, depth = 0.4f, grain = 0.6f, blend = 1.0f;
         bool rock = true;
     };
     void SetTerrain(const TerrainSettings& s) { m_terrainSettings = s; m_frameLightsDirty = true; }

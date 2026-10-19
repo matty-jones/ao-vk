@@ -156,11 +156,72 @@ vec2 NativeTurnStep(vec2 d, uint turn)
 }
 
 // The ground from above: this pixel's cell's tile. smp: the game's (clamped).
+// Where two cells' tiles differ (gravel beside dirt, with no transition tile between them) the game's edge is a hard
+// straight line along the grid. With FL.terrain3.x (RVK_GroundBlend) the tiles of the cells around the nearest corner
+// blend over a band about each edge (0.3 of a cell each side at 1), the edge wandering with noise, each
+// neighbour's tile read mirrored about the shared edge (any tile meets itself there: no seam, whatever its layout) and
+// the weights taking each tile's brightness in, so the brighter one's stones break into the other rather than a smear.
+// Only edges whose two tiles disagree there blend (NativeEdgeOff): tiles laid to carry on across an edge - a road's
+// slabs, a transition into the grass beside it - keep the game's edge, which no one sees. The band and weights are
+// functions of the 2 x 2 cells and the world position alone, the same on both sides of an edge: no seam along it.
+vec3 NativeEdgeColour(uvec2 n, vec2 f, sampler smp)
+{
+    const float lod = max(float(textureQueryLevels(sampler2D(texImages[nonuniformEXT(n.x)], smp))) - 3.0, 0.0);
+    return textureLod(sampler2D(texImages[nonuniformEXT(n.x)], smp), NativeTurn(f, n.y), lod).rgb;
+}
+// How much two neighbouring cells' tiles disagree along their shared edge (a below b along x or, along z, alongZ):
+// their colours there, each averaged over about a quarter of the tile in from it. 0 the same.
+float NativeEdgeOff(uvec2 a, uvec2 b, bool alongZ, sampler smp)
+{
+    if (a == b) return 0.0;
+    const vec3 ca = NativeEdgeColour(a, alongZ ? vec2(0.5, 1.0) : vec2(1.0, 0.5), smp);
+    const vec3 cb = NativeEdgeColour(b, alongZ ? vec2(0.5, 0.0) : vec2(0.0, 0.5), smp);
+    return smoothstep(0.05, 0.15, length(ca - cb));
+}
+
 vec4 NativeTop(vec2 cell, vec2 dx, vec2 dy, sampler smp)
 {
     const uvec2 c = NativeCell(cell);
-    return textureGrad(sampler2D(texImages[nonuniformEXT(c.x)], smp), NativeTurn(fract(cell), c.y),
-                       NativeTurnStep(dx, c.y), NativeTurnStep(dy, c.y));
+    const vec4 own = textureGrad(sampler2D(texImages[nonuniformEXT(c.x)], smp), NativeTurn(fract(cell), c.y),
+                                 NativeTurnStep(dx, c.y), NativeTurnStep(dy, c.y));
+    const float blend = 0.3 * clamp(FL.terrain3.x, 0.0, 1.0);
+    if (blend <= 0.0) return own;
+    // The 2 x 2 cells about the nearest corner: t 0.5 on the edge between base and base + 1, wandered by noise (at most
+    // 0.16; band + it stays inside 0..1, so the weights are whole one cell's well before t wraps at a cell's middle).
+    const vec2 q = cell - 0.5, base = floor(q);
+    vec2 t = q - base;
+    if (all(greaterThan(abs(t - 0.5), vec2(blend + 0.16)))) return own;
+    uvec2 n[4];
+    for (int k = 0; k < 4; ++k) n[k] = NativeCell(base + vec2(k & 1, k >> 1) + 0.5);
+    // Each direction's band: its two edges' disagreement, the larger.
+    const vec2 band = blend * vec2(max(NativeEdgeOff(n[0], n[1], false, smp), NativeEdgeOff(n[2], n[3], false, smp)),
+                                   max(NativeEdgeOff(n[0], n[2], true, smp), NativeEdgeOff(n[1], n[3], true, smp)));
+    if (max(band.x, band.y) <= 0.0) return own;
+    t += 0.22 * (vec2(TerrainNoise(cell * 0.9 + vec2(3.1, 7.7)), TerrainNoise(cell * 0.9 + vec2(11.3, 5.9))) - 0.5)
+       + 0.1 * (vec2(TerrainNoise(cell * 3.1 + vec2(1.7, 9.2)), TerrainNoise(cell * 3.1 + vec2(6.4, 2.3))) - 0.5);
+    const vec2 w1 = smoothstep(0.5 - max(band, 1e-4), 0.5 + max(band, 1e-4), t), w0 = 1.0 - w1;
+    if (max(min(w0.x, w1.x), min(w0.y, w1.y)) <= 0.002) return own;
+    const ivec2 mine = ivec2(floor(cell)) - ivec2(base);
+    vec4 col[4];
+    float w[4], top = -1.0;
+    for (int k = 0; k < 4; ++k) {
+        const ivec2 o = ivec2(k & 1, k >> 1);
+        w[k] = (o.x == 1 ? w1.x : w0.x) * (o.y == 1 ? w1.y : w0.y);
+        col[k] = own;
+        if (o == mine || w[k] <= 0.002 || n[k] == c) continue;
+        const vec2 f = 1.0 - abs(1.0 - abs(cell - base - vec2(o)));   // (mirrored into the cell about its edge)
+        col[k] = textureGrad(sampler2D(texImages[nonuniformEXT(n[k].x)], smp), NativeTurn(f, n[k].y),
+                             NativeTurnStep(dx, n[k].y), NativeTurnStep(dy, n[k].y));
+    }
+    for (int k = 0; k < 4; ++k) top = max(top, w[k] + 0.6 * Luma(col[k].rgb));
+    vec4 sum = vec4(0.0);
+    float total = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        const float h = max(w[k] + 0.6 * Luma(col[k].rgb) - top + 0.25, 0.0) * step(0.002, w[k]);
+        sum += col[k] * h;
+        total += h;
+    }
+    return total > 0.0 ? sum / total : own;
 }
 
 // The lighting pass: the cells' tiles' normal maps (D.terrain.z: their texture's bindless image + 1; R, G each cell's
