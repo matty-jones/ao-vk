@@ -182,7 +182,7 @@ from the heights themselves (`RVK_GroundAo`; points 1 and 2 not needed for the n
 - Rocks and scree where the heights say rock fell - the feet of cliffs, rough slopes not tiled with grass - as
   procedural meshes, shaded smooth with sharp edges, (no assets), merged per patch and drawn in the native ground's own passes: its rock
   texture, its light, the cliff's colour; casting sun shadows (`RVK_GroundRocks`; docs/rvk.md, "Native ground").
-- Not done: pebbles and debris on flat dirt (the tiles' surface types, `tile_type_data`, would say where), pushing
+- Not done: pebbles and debris on flat dirt (planned: docs/pebbles-plan.md), pushing
   them aside like the grass.
 
 ## Files (Phase 1)
