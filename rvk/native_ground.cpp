@@ -469,6 +469,7 @@ void Device::DrawNativeGround(bool lightPass)
     Texture* saved = m_textures[0];
     m_textures[0] = lightPass ? (m_native.lightmap ? m_native.lightmap : m_native.lightmapGrey) : m_blackTexture;
     m_native.drawing = true;
+    UpdateFrameEye();
     // In view: a patch's box against the camera's clip planes (all eight corners outside one: left out).
     const d3d::Matrix vp = MulMatrix(m_view, m_proj);
     uint32_t drawn = 0;
@@ -490,6 +491,15 @@ void Device::DrawNativeGround(bool lightPass)
         }
         if (outside[0] || outside[1] || outside[2] || outside[3] || outside[4] || outside[5])
             continue;
+        // Tessellated only within kNativeTessDistance (its box): beyond it ffp.tesc splits nothing and ffp.tese moves
+        // nothing, the very same triangles - but through the tessellation stages every one of the ground's triangles
+        // to the horizon cost the base pass ~2.5 ms at 2560 x 1440 (rvk_demo, Newland Desert). Both passes choose alike.
+        float d2 = 0.0f;
+        for (int k = 0; k < 3; ++k) {
+            const float d = std::max({p.lo[k] - m_frameEye[k], m_frameEye[k] - p.hi[k], 0.0f});
+            d2 += d * d;
+        }
+        m_native.tessPatch = d2 < kNativeTessDistance * kNativeTessDistance;
         DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, p.indices, m_native.indexCount);
         ++drawn;
     }

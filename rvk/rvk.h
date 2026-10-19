@@ -1068,6 +1068,7 @@ private:
         float sun = 1.0f;                        // RVK_GroundSun
         float rocks = 1.0f;                      // RVK_GroundRocks
         bool clutter = false;                    // the rocks are drawing (ground_clutter.cpp)
+        bool tessPatch = false;                  // the patch drawing is near enough to be tessellated (DrawNativeGround)
         uint32_t rocksMade = 0;
         float pebbles = 1.0f;                    // RVK_GroundPebble
         std::shared_ptr<const PebbleTable> pebbleTable;   // (made once a playfield, its tiles uploaded)
