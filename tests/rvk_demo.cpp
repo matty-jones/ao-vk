@@ -1543,6 +1543,25 @@ void RunNativeGroundTest(D& dev, int frames, const std::string& shot)
                 px[size_t(y) * kTex + x] = c;
             }
         tiles.push_back(dev.CreateTexture(kTex, kTex, px.data()));
+        if (g_terrainMaps) {                 // (--terrain-maps: a normal map from its brightness: the mark sunk)
+            std::vector<uint32_t> nm(kTex * kTex);
+            auto lum = [&](int x, int y) {
+                const uint32_t c = px[size_t((y + kTex) % kTex) * kTex + (x + kTex) % kTex];
+                return float((c >> 16 & 0xFF) + (c >> 8 & 0xFF) + (c & 0xFF)) / 765.0f;
+            };
+            for (int y = 0; y < int(kTex); ++y)
+                for (int x = 0; x < int(kTex); ++x) {
+                    const float dx = (lum(x + 1, y) - lum(x - 1, y)) * 3.0f, dy = (lum(x, y + 1) - lum(x, y - 1)) * 3.0f;
+                    const float l = std::sqrt(dx * dx + dy * dy + 1.0f);
+                    auto ch = [&](float v) { return uint32_t(std::clamp((v / l * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f)); };
+                    nm[size_t(y) * kTex + x] = 0xFF000000u | ch(-dx) << 16 | ch(dy) << 8 | ch(1.0f);
+                }
+            dev.SetNormalMap(tiles.back(), dev.CreateTexture(kTex, kTex, nm.data()));
+        }
+    }
+    if (g_terrainMaps) {
+        dev.SetPixelLighting(true);
+        dev.SetNormalMaps(true, 1.0f);
     }
     auto height = [](float x, float z) {
         float t = std::clamp((z - 150.0f) / 12.0f, 0.0f, 1.0f);
@@ -1697,6 +1716,7 @@ void RunNativeGroundTest(D& dev, int frames, const std::string& shot)
 // --view-yaw R (radians from +x towards +z) and --view-pitch R down. The scene issues one stand-in ground draw a pass,
 // with the ground's state; the native ground draws instead.
 std::string g_groundFile;
+float g_groundAo = 0.6f;            // --ground-ao X: RVK_GroundAo
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 template <typename D>
 void RunGroundFile(D& dev, int frames, const std::string& shot)
@@ -1749,6 +1769,7 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     std::printf("ground: %u x %u cells, %u tiles, lightmap %u x %u\n", ground->cellsX, ground->cellsZ, tiles, lw, lh);
     dev.SetNativeGround(ground);
     dev.SetNativeGroundLightmap(packed, lw, lh, shade);
+    dev.SetNativeGroundAo(g_groundAo);
     struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
     const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
     const VtxTerrain standIn[3] = {{0, -1000, 0, 0, 1, 0, 0, 0, 0, 0}, {1, -1000, 0, 0, 1, 0, 1, 0, 1, 0},
@@ -4467,6 +4488,7 @@ int main(int argc, char** argv)
         else if (a == "--eye" && i + 3 < argc) { for (int k = 0; k < 3; ++k) g_eye[k] = float(std::atof(argv[++i])); }
         else if (a == "--view-yaw" && i + 1 < argc) g_viewYaw = float(std::atof(argv[++i]));
         else if (a == "--view-pitch" && i + 1 < argc) g_viewPitch = float(std::atof(argv[++i]));
+        else if (a == "--ground-ao" && i + 1 < argc) g_groundAo = float(std::atof(argv[++i]));
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));
         else if (a == "--terrain-maps") g_terrainMaps = true;

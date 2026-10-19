@@ -616,6 +616,7 @@ public:
     void SetNativeGround(std::shared_ptr<const NativeGround> ground);
     void SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h, float shade);
     void SetNativeGroundOn(bool on) { m_native.on = on; }
+    void SetNativeGroundAo(float strength) { m_native.ao = strength; }
     bool NativeGroundDrawing() const { return m_native.drawing; }
     void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
     void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
@@ -1011,13 +1012,21 @@ private:
         std::shared_ptr<const std::vector<uint8_t>> indices;
         uint32_t vertices = 0, indexCount = 0;
         Texture* codes = nullptr;
+        Texture* maps = nullptr;                 // each cell's tile's normal map (its bindless image in R, G; 0xFFFF none)
+        uint64_t mapsSignature = 0;              // the tiles' maps and the settings the two textures were made with
         Texture* lightmap = nullptr;
         Texture* lightmapGrey = nullptr;         // (none handed over yet: a mid grey)
+        Texture* sky = nullptr;                  // how much of the sky each height sample sees (0..1; RVK_GroundAo)
+        std::future<std::shared_ptr<std::vector<uint32_t>>> skyPending;
+        float ao = 0.6f;                         // RVK_GroundAo
         bool on = true, drawing = false;
         uint64_t drawnBase = ~0ull, drawnLight = ~0ull;   // the frames each pass was last drawn
         uint32_t patchesDrawn = 0, framesDrawn = 0;
     } m_native;
     bool NativeGroundReplaces(uint32_t fvf);
+    uint64_t NativeMapsSignature() const;
+    void PollNativeSky();
+    void MakeNativeCodes();
     void DrawNativeGround(bool lightPass);
     void DestroyNativeGround();
     // The ground's chunks' texture coordinates fitted to the world (terrain.cpp), by TerrainChunkKey: kept across

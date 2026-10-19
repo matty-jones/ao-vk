@@ -10,6 +10,7 @@
 #include "internal.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -34,9 +35,64 @@ uint32_t PaletteGrey(uint32_t i, float shade)
 
 }  // namespace
 
+// How much of the sky each height sample sees, from the heights alone: the horizon in 12 directions out to 64 cells
+// (256 units), each direction's share 1 - sin(its horizon's elevation). A canyon's foot sees little of it, a ridge all.
+// On a worker thread (about a third of a second for a zone of 800,000 samples); the result as texels (grey, 0..255).
+static std::shared_ptr<std::vector<uint32_t>> SkyVisibility(std::shared_ptr<const NativeGround> g)
+{
+    const int W = int(g->cellsX) + 1, H = int(g->cellsZ) + 1;
+    auto out = std::make_shared<std::vector<uint32_t>>(size_t(W) * H);
+    // Each direction's steps: their offsets in samples and 1 / their distance (made once - the samples' loop only
+    // reads, subtracts, multiplies).
+    constexpr int kDirs = 12, kSteps = 12;
+    static const int steps[kSteps] = {1, 2, 3, 4, 6, 8, 11, 16, 22, 32, 45, 64};
+    int ox[kDirs][kSteps], oz[kDirs][kSteps];
+    float inv[kDirs][kSteps];
+    const float cell = 0.5f * (g->cellX + g->cellZ);
+    for (int k = 0; k < kDirs; ++k) {
+        const float a = float(k) * 6.2831853f / float(kDirs) + 0.13f;
+        for (int i = 0; i < kSteps; ++i) {
+            ox[k][i] = int(std::lround(std::cos(a) * steps[i]));
+            oz[k][i] = int(std::lround(std::sin(a) * steps[i]));
+            inv[k][i] = 1.0f / (std::sqrt(float(ox[k][i] * ox[k][i] + oz[k][i] * oz[k][i])) * cell);
+        }
+    }
+    const float* h = g->heights.data();
+    for (int r = 0; r < H; ++r)
+        for (int c = 0; c < W; ++c) {
+            const float h0 = h[size_t(r) * W + c];
+            float vis = 0.0f;
+            for (int k = 0; k < kDirs; ++k) {
+                float best = 0.0f;                          // tangent of the horizon's elevation
+                for (int i = 0; i < kSteps; ++i) {
+                    const int x = c + ox[k][i], z = r + oz[k][i];
+                    if (unsigned(x) >= unsigned(W) || unsigned(z) >= unsigned(H)) break;
+                    best = std::max(best, (h[size_t(z) * W + x] - h0) * inv[k][i]);
+                }
+                vis += 1.0f - best / std::sqrt(1.0f + best * best);
+            }
+            const uint32_t v = uint32_t(std::clamp(vis / float(kDirs), 0.0f, 1.0f) * 255.0f + 0.5f);
+            (*out)[size_t(r) * W + c] = 0xFF000000u | v << 16 | v << 8 | v;
+        }
+    return out;
+}
+
+// Once a frame (the native ground's first draw): the sky's visibility in once its worker is done.
+void Device::PollNativeSky()
+{
+    if (!m_native.skyPending.valid() ||
+        m_native.skyPending.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    auto px = m_native.skyPending.get();
+    if (!px || !m_native.ground) return;
+    m_native.sky = CreateTexture(m_native.ground->cellsX + 1, m_native.ground->cellsZ + 1, px->data());
+    Log("native ground: the sky's visibility over the land made (RVK_GroundAo)");
+}
+
 void Device::DestroyNativeGround()
 {
-    for (Texture** t : {&m_native.codes, &m_native.lightmap})
+    if (m_native.skyPending.valid()) m_native.skyPending.wait();
+    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.lightmap, &m_native.sky})
         if (*t) { DestroyTexture(*t); *t = nullptr; }
     m_native.patches.clear();
     m_native.indices.reset();
@@ -106,30 +162,71 @@ void Device::SetNativeGround(std::shared_ptr<const NativeGround> ground)
             p.vertices = data;
             m_native.patches.push_back(std::move(p));
         }
-    // The tile codes: each cell's tile's bindless image (R, G) and its turn (B) - read by the base pass per pixel.
-    std::vector<uint32_t> codes(size_t(g.cellsX) * g.cellsZ);
-    uint32_t missing = 0;
-    std::vector<uint32_t> image(g.tiles.size(), BindlessImage(nullptr));
-    for (size_t t = 0; t < g.tiles.size(); ++t) {
-        if (g.tiles[t] && g.tiles[t]->m_image) image[t] = BindlessImage(g.tiles[t]);
-        else ++missing;
-    }
-    for (size_t k = 0; k < codes.size(); ++k) {
-        const uint16_t code = g.codes[k];
-        const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
-        const uint32_t img = tile < image.size() ? image[tile] : image.empty() ? 0u : image[0];
-        codes[k] = 0xFF000000u | (img & 0xFFu) << 16 | ((img >> 8) & 0xFFu) << 8 | turn;
-    }
-    m_native.codes = CreateTexture(g.cellsX, g.cellsZ, codes.data());
+    m_native.ground = ground;
+    MakeNativeCodes();
+    m_native.skyPending = std::async(std::launch::async, SkyVisibility, ground);
     if (!m_native.lightmapGrey) {
         const uint32_t grey = PaletteGrey(15, 0.5f);
         m_native.lightmapGrey = CreateTexture(1, 1, &grey);
     }
-    m_native.ground = ground;
     m_native.drawnBase = m_native.drawnLight = ~0ull;
+    uint32_t missing = 0;
+    for (Texture* t : g.tiles) missing += !t || !t->m_image;
     Log("native ground: playfield %u, %u x %u cells of %.1f x %.1f, %zu patches of %u, %zu tiles (%u without a "
         "texture) - drawn by rvk", g.id, g.cellsX, g.cellsZ, g.cellX, g.cellZ, m_native.patches.size(), P, g.tiles.size(),
         missing);
+}
+
+// What the tile textures are drawn with now: each tile's albedo map (with RVK_Albedo) and normal map (with normal
+// maps on, lit per pixel) - side-loaded maps come in after the ground, and settings change: the per-cell textures are
+// made again when this does.
+uint64_t Device::NativeMapsSignature() const
+{
+    uint64_t h = 1469598103934665603ull ^ uint64_t(m_pbr.albedoMaps) << 1 ^ uint64_t(m_normalMaps && m_pixelLighting);
+    for (Texture* t : m_native.ground->tiles) {
+        const uint64_t a = t ? uint64_t(reinterpret_cast<uintptr_t>(t->m_albedoMap)) : 0;
+        const uint64_t n = t ? uint64_t(reinterpret_cast<uintptr_t>(t->m_normalMap)) : 0;
+        h = (h ^ a) * 1099511628211ull;
+        h = (h ^ n) * 1099511628211ull;
+        h = (h ^ uint64_t(t && t->m_image)) * 1099511628211ull;
+    }
+    return h;
+}
+
+// The per-cell textures: each cell's tile's bindless image - its albedo map if drawn with one - and turn (codes: R, G,
+// B), its normal map's (maps: R, G; 0xFFFF none).
+void Device::MakeNativeCodes()
+{
+    const NativeGround& g = *m_native.ground;
+    for (Texture** t : {&m_native.codes, &m_native.maps})
+        if (*t) { DestroyTexture(*t); *t = nullptr; }
+    std::vector<uint32_t> image(g.tiles.size(), BindlessImage(nullptr)), normal(g.tiles.size(), 0xFFFFu);
+    bool anyNormal = false;
+    for (size_t t = 0; t < g.tiles.size(); ++t) {
+        Texture* tex = g.tiles[t];
+        if (!tex || !tex->m_image) continue;
+        Texture* drawn = tex->m_albedoMap && m_pbr.albedoMaps ? tex->m_albedoMap : tex;
+        image[t] = BindlessImage(drawn);
+        if (tex->m_normalMap && m_normalMaps && m_pixelLighting) {
+            normal[t] = BindlessImage(tex->m_normalMap) & 0xFFFFu;
+            anyNormal = true;
+        }
+    }
+    std::vector<uint32_t> codes(size_t(g.cellsX) * g.cellsZ), maps(anyNormal ? codes.size() : 0);
+    for (size_t k = 0; k < codes.size(); ++k) {
+        const uint16_t code = g.codes[k];
+        const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
+        const uint32_t t = tile < image.size() ? tile : 0;
+        const uint32_t img = image.empty() ? 0u : image[t];
+        codes[k] = 0xFF000000u | (img & 0xFFu) << 16 | ((img >> 8) & 0xFFu) << 8 | turn;
+        if (anyNormal) {
+            const uint32_t nm = normal.empty() ? 0xFFFFu : normal[t];
+            maps[k] = 0xFF000000u | (nm & 0xFFu) << 16 | ((nm >> 8) & 0xFFu) << 8;
+        }
+    }
+    m_native.codes = CreateTexture(g.cellsX, g.cellsZ, codes.data());
+    if (anyNormal) m_native.maps = CreateTexture(g.cellsX, g.cellsZ, maps.data());
+    m_native.mapsSignature = NativeMapsSignature();
 }
 
 // The hour's baked lightmap, as the game hands it to its ground: unpacked through the game's palette, a texel a cell.
@@ -164,6 +261,11 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
         return false;
     const bool base = !m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE];
     const bool light = m_rs[d3d::RS_LIGHTING] && IsMultiplyPass();
+    if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber &&
+        NativeMapsSignature() != m_native.mapsSignature)
+        MakeNativeCodes();                       // (the tiles' maps or the settings changed: once a frame at most)
+    if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber)
+        PollNativeSky();
     if (base && m_native.drawnBase != m_frameNumber) {
         m_native.drawnBase = m_frameNumber;
         DrawNativeGround(false);

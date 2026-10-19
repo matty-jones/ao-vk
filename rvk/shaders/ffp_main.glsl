@@ -675,12 +675,13 @@ void main()
         // The ground's lighting pass draws the lightmap; its relief comes from the base pass's texture (F_BUMPBASE):
         // that texture's normal map, else its generated normals - laid by terrain.glsl, with the cliffs' rock's on
         // their faces (then a base without a normal map of its own has the flat one, and no relief from above).
-        const bool terrainRelief = terrainMapped && D.terrainAt.w > 1.5 && ((C.flags.x & F_NORMALMAP) != 0u || terrain.rock);
+        const bool terrainRelief = terrainMapped && D.terrainAt.w > 1.5 &&
+                                   ((C.flags.x & F_NORMALMAP) != 0u || terrain.rock || TerrainNativeMaps());
         if (((C.flags.x & (F_NORMALMAP | F_BUMP)) != 0u || terrainRelief) && len2 > 0.0) {
             vec3 unbumped = n;
             bool base = (C.flags.x & F_BUMPBASE) != 0u || terrainRelief;
             if (terrainRelief) {
-                const float top = (C.flags.x & F_NORMALMAP) != 0u ? C.misc.w : 0.0;
+                const float top = (C.flags.x & F_NORMALMAP) != 0u ? C.misc.w : TerrainNativeMaps() ? FL.terrain.w : 0.0;
                 const uint face = terrain.rock ? TerrainRockImage(1) : D.texIdx.w;
                 n = TerrainNormalMap(n, texImages[D.texIdx.w], top, texImages[face], terrain.rock ? FL.terrainRock2.w : top,
                                      terrain);
@@ -798,6 +799,7 @@ void main()
     }
 #endif
     t0.rgb *= texShade * gLightmapRelief;
+    if (terrainMapped && D.terrainAt.w > 1.5) t0.rgb *= NativeSky(vPosW);   // (the native ground's lightmap: less sky, darker)
     vec4 current = Cascade(t0, t1, 1.0);
     // A low sun's light (rvk sky.cpp, RVK_DawnLight): the ground's lightmap holds the sun's and the sky's light
     // together - warm where the sun reaches, cool where the ground faces away or lies in shade. (The ground's light

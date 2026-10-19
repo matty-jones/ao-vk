@@ -53,7 +53,8 @@ struct DrawTransform {
                                    // ground under it (world y, float bits: where its fallen leaves lie)
     float terrain[4];              // the ground (terrain.cpp, terrain.glsl): x its tile's repeats per world unit; y the
                                    // native ground's tile-code texture's bindless image + 1 (the float's bits; 0 = the
-                                   // game's ground); z w unused
+                                   // game's ground); z its normal maps' (lighting pass; 0 = none); w its sky visibility's
+                                   // (lighting pass; 0 = none)
     float terrainAt[4];            // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown); w:
                                    // kTerrainBase / kTerrainLight (0 = not mapped)
 };
@@ -158,7 +159,9 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float dusk[4];                 // x: RVK_Afterglow (the clouds' sunset colours), y the blue hour's grade, z w the sun on
                                    // the world camera's screen (NDC; 1e3 behind it)
     float terrain[4];              // the ground's texturing (terrain.glsl): cliffs (RVK_CliffTex), the faces' repeats
-                                   // hidden (RVK_TileHide), large-scale variation (RVK_GroundVary), w unused
+                                   // hidden (RVK_TileHide), large-scale variation (RVK_GroundVary), normal maps' strength
+                                   // (0 off: the native ground's tiles')
+    float terrain2[4];             // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y z w unused
     float terrainRock[4];          // the cliffs' rock (terrain.cpp; RVK_CliffRock): its albedo, normal and ORM maps'
                                    // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     float terrainRock2[4];         // ... its mean colour (rgb), its normal map's strength

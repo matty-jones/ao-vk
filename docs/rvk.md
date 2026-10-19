@@ -80,9 +80,13 @@
   lightmap through the game's palette. So cliff faces and rock (tinted by each cell's tile's smallest mip level), sun
   shadows, hill shade, mist, wet ground and fog apply as on the game's ground. While it draws, the game's own ground
   does the least (`rnative::ground::SetNative`: radius 8, far patches baked at 2 texels a cell). A ground the game
-  stops tessellating for 10 frames (a loading screen, indoors) is dropped and the next read anew. Not yet: ground
-  grass on it (its base pass's texture is a stand-in: the capture waits), side-loaded ground normal / PBR maps, level
-  of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  stops tessellating for 10 frames (a loading screen, indoors) is dropped and the next read anew. The tiles' side-loaded
+  albedo maps (in the tile-code texture) and normal maps (a second per-cell texture, `D.terrain.z`: the lighting pass
+  reads each cell's tile's own, turned) come with them, made again when a tile's maps or the settings change
+  (`NativeMapsSignature`). The sky's visibility over the land (`RVK_GroundAo`, 0.6): a worker thread scans the horizon
+  from every height sample, 12 directions to 64 cells, once a playfield (under a second); the lighting pass's lightmap
+  is darkened by the hidden part (`D.terrain.w`, `FL.terrain2.x`) - cliff faces, valleys, the feet of walls. Not yet:
+  ground grass on it (its base pass's texture is a stand-in: the capture waits), the tiles' PBR maps, level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):

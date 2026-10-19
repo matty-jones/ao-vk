@@ -76,7 +76,9 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 dusk;                  // x: RVK_Afterglow (cloud_light.glsl DuskVivid), y the blue hour's grade (tonemap.frag
                                 // Grade; rvk sky.cpp), z w the sun on the world camera's screen (NDC; 1e3 behind it)
     vec4 terrain;               // the ground's texturing (terrain.glsl): cliffs (RVK_CliffTex), the faces' repeats
-                                // hidden (RVK_TileHide), large-scale variation (RVK_GroundVary), w unused
+                                // hidden (RVK_TileHide), large-scale variation (RVK_GroundVary), normal maps' strength
+                                // (0 off: the native ground's tiles')
+    vec4 terrain2;              // ... x: the native ground's sky visibility's strength (RVK_GroundAo); y z w unused
     vec4 terrainRock;           // the cliffs' rock (rvk terrain.cpp; RVK_CliffRock): its albedo, normal and ORM maps'
                                 // bindless images + 1 (the floats' bits; 0 = none), world units a repeat
     vec4 terrainRock2;          // ... its mean colour (rgb), its normal map's strength

@@ -21,7 +21,8 @@ struct DrawTransform {
                                 // ground under it (world y, float bits: where its fallen leaves lie)
     vec4 terrain;               // the ground (rvk terrain.cpp, terrain.glsl): x its tile's repeats per world unit; y
                                 // the native ground's tile-code texture's bindless image + 1 (the float's bits; 0 =
-                                // the game's ground); z w unused
+                                // the game's ground); z its normal maps' (lighting pass; 0 = none); w its sky
+                                // visibility's (lighting pass; 0 = none)
     vec4 terrainAt;             // ... xyz: its tile's mean colour (the cliffs' rock is tinted to it; -1 unknown); w:
                                 // kTerrainBase / kTerrainLight (0 = not mapped)
 };

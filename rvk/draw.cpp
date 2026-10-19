@@ -457,7 +457,9 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->terrain[0] = std::clamp(m_terrainSettings.cliff, 0.0f, 1.0f);
     fl->terrain[1] = std::clamp(m_terrainSettings.tiling, 0.0f, 1.0f);
     fl->terrain[2] = std::clamp(m_terrainSettings.variation, 0.0f, 2.0f);
-    fl->terrain[3] = 0.0f;
+    fl->terrain[3] = m_normalMaps && m_pixelLighting ? m_normalStrength : 0.0f;
+    fl->terrain2[0] = std::clamp(m_native.ao, 0.0f, 1.0f);
+    fl->terrain2[1] = fl->terrain2[2] = fl->terrain2[3] = 0.0f;
     FillTerrainRockLights(fl->terrainRock, fl->terrainRock2);
     fl->dusk[0] = std::clamp(m_afterglow, 0.0f, 2.0f);
     fl->dusk[1] = m_hdr ? m_blueGrade : 0.0f;
@@ -2878,10 +2880,20 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                 (m_bump > 0.0f || (m_normalMaps && m_pixelLighting && it->second->m_normalMap) ||
                  (m_pbr.enabled && m_pixelLighting && it->second->m_ormMap)))
                 m_drawBumpBase = it->second;
-            // (Laid too where the base has no maps of its own but the cliffs have rock: its relief.)
-            if (vertices && it != m_terrainBases.end() && (m_drawBumpBase || TerrainRockOn()))
+            // (Laid too where the base has no maps of its own but the cliffs have rock - its relief - and on the
+            // native ground: each cell's tile's normal map.)
+            if (vertices && it != m_terrainBases.end() && (m_drawBumpBase || TerrainRockOn() || m_native.drawing)) {
                 FillTerrainRecord(dt, TerrainFitFor(chunk, vertices, vertexCount, layout, indices, indexCount),
                                   kTerrainLight, it->second);
+                if (m_native.drawing && m_native.codes && dt.terrainAt[3] > 0.0f) {
+                    const uint32_t codes = BindlessImage(m_native.codes) + 1;
+                    const uint32_t maps = m_native.maps ? BindlessImage(m_native.maps) + 1 : 0u;
+                    const uint32_t sky = m_native.sky && m_native.ao > 0.0f ? BindlessImage(m_native.sky) + 1 : 0u;
+                    std::memcpy(&dt.terrain[1], &codes, 4);
+                    std::memcpy(&dt.terrain[2], &maps, 4);
+                    std::memcpy(&dt.terrain[3], &sky, 4);
+                }
+            }
         }
     }
     uint32_t carrier = m_external ? 0 : CarriedLight(fvf, m_drawGpu ? nullptr : vertices, vertexCount, layout.stride);

@@ -168,6 +168,31 @@ vec4 NativeTop(vec2 cell, vec2 dx, vec2 dy, sampler smp)
                        NativeTurnStep(dx, c.y), NativeTurnStep(dy, c.y));
 }
 
+// The lighting pass: the cells' tiles' normal maps (D.terrain.z: their texture's bindless image + 1; R, G each cell's
+// tile's normal map's image, 0xFFFF none).
+bool TerrainNativeMaps() { return TerrainNative() && floatBitsToUint(D.terrain.z) != 0u; }
+uint NativeNormalImage(vec2 cell)
+{
+    const uint maps = floatBitsToUint(D.terrain.z) - 1u;
+    const ivec2 size = textureSize(sampler2D(texImages[maps], bindlessSamplers[D.sampIdx.w]), 0);
+    const vec4 t = texelFetch(sampler2D(texImages[maps], bindlessSamplers[D.sampIdx.w]),
+                              clamp(ivec2(floor(cell)), ivec2(0), size - 1), 0);
+    const uvec2 b = uvec2(t.rg * 255.0 + 0.5);
+    return b.r | b.g << 8;
+}
+
+// How much of the sky this point of the native ground sees (rvk native_ground.cpp SkyVisibility: the horizon all round
+// from the heights), as a factor on its light: 1 - strength x the hidden part (FL.terrain2.x, RVK_GroundAo). 1 without.
+float NativeSky(vec3 posW)
+{
+    const uint sky = floatBitsToUint(D.terrain.w);
+    if (!TerrainNative() || sky == 0u || FL.terrain2.x <= 0.0) return 1.0;
+    const ivec2 size = textureSize(sampler2D(texImages[sky - 1u], bindlessSamplers[D.sampIdx.w]), 0);
+    const vec2 cell = posW.xz / vec2(1.0 / max(D.terrain.x, 1e-6));   // (D.terrain.x: a cell's repeats a unit)
+    const float v = textureLod(sampler2D(texImages[sky - 1u], bindlessSamplers[D.sampIdx.w]), (cell + 0.5) / vec2(size), 0.0).r;
+    return 1.0 - FL.terrain2.x * (1.0 - v);
+}
+
 // The cell's tile's mean colour (its smallest level): what the rock on its cliff is tinted to.
 vec3 NativeMean(vec2 cell)
 {
@@ -276,10 +301,22 @@ vec3 TerrainNormalMap(vec3 n, texture2D top, float topStrength, texture2D face, 
     vec3 sum = vec3(0.0);
     for (int i = 0; i < 3; ++i) {
         if (m.w[i] <= 0.002) continue;
-        vec3 t = TerrainLay(top, bindlessSamplers[D.sampIdx.w], face, m, i).xyz * 2.0 - 1.0;
+        vec2 uvx = m.dx[i], uvy = m.dy[i];
+        vec3 t;
+        if (i == 0 && TerrainNativeMaps()) {
+            // (The native ground from above: the cell's tile's own normal map, turned as its tile is.)
+            const uvec2 c = NativeCell(m.uv[0]);
+            const uint img = NativeNormalImage(m.uv[0]);
+            if (img == 0xFFFFu) { sum += n * m.w[0]; continue; }
+            uvx = NativeTurnStep(m.dx[0], c.y);
+            uvy = NativeTurnStep(m.dy[0], c.y);
+            t = textureGrad(sampler2D(texImages[nonuniformEXT(img)], bindlessSamplers[D.sampIdx.w]),
+                            NativeTurn(fract(m.uv[0]), c.y), uvx, uvy).xyz * 2.0 - 1.0;
+        } else {
+            t = TerrainLay(top, bindlessSamplers[D.sampIdx.w], face, m, i).xyz * 2.0 - 1.0;
+        }
         t.z = max(t.z, 0.05);
         vec2 slope = vec2(-t.x, t.y) / t.z * (i == 0 ? topStrength : faceStrength);
-        vec2 uvx = m.dx[i], uvy = m.dy[i];
         float worldPerUv = sqrt(max(dot(m.px, m.px), dot(m.py, m.py)) / max(max(dot(uvx, uvx), dot(uvy, uvy)), 1e-12));
         sum += BendNormal(n, m.px, m.py, dot(slope, uvx) * worldPerUv, dot(slope, uvy) * worldPerUv) * m.w[i];
     }
