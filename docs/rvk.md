@@ -122,7 +122,10 @@
   format (set 0 the cell they fell from: their tint, the cliff's colour) and drawn in the ground's own passes after
   its patches (`m_native.clutter`; `D.terrainAt.y` 2): the rock laid from above and both sides by their faces
   (terrain.glsl `TerrainClutter`), the ground's lightmap where they lie turned to their faces by the lightmap's fit
-  (`NativeSunTurn`: a + b.n over a + b.y). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
+  (`NativeSunTurn`: the flat ground's a + b.y, b's height not below 0 - the ground's slopes all face up, so the fit
+  only knows a + b.y, and one hour's b.y of -0.25 lit the rocks' undersides three times their tops - their sides by b
+  turned to the sun's bearing, undersides a little darker by the sky; in a baked shadow, a texel well under the fit,
+  only the sky's shading, for the ground's slopes none). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
   the grass. Made on worker threads (5-8 ms a patch), 2 patches at a time, within 200 units; small ones drawn within
   90, dropped past 450. The tiles'
   material maps (RVK_Pbr): each cell's in the maps texture's B, A; the lighting pass is marked PBR with one of them

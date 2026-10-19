@@ -492,13 +492,28 @@ vec4 NativeLightmapAt(vec2 at)
 // one that turns away darkens (by FL.terrainLight2.w, RVK_GroundSun). The rocks on it (TerrainClutter) take the
 // ground's light where they lie, which is the flat ground's, by their faces the same way: a + b.n over a + b.y.
 // (In the 0..1 of the texels; floored at the palette's darkest, the ratio clamped.)
-float NativeSunTurn(vec3 n, bool rocks)
+// The rocks: the ground's slopes all face more or less up, so the fit can't tell its a from b's height (b.y) - only
+// their sum, the flat ground's light, is sure; one hour's came out a 0.46 + b.y -0.25, and a rock's undersides
+// (a - b.y) lit three times brighter than its top. So a rock keeps the flat ground's light, b's height not below 0,
+// and its sides lit by b's bearing; its undersides a little darker by the sky.
+// Only as far as the sun reached the texel (lit: its value, as the fit read it): in a baked shadow - a cliff's, a
+// building's - what is left is the sky's light, which comes from no one side.
+float NativeSunTurn(vec3 n, bool rocks, float lit)
 {
     if (FL.terrainLight.w <= 0.0 || dot(n, n) <= 1e-8 || (!rocks && FL.terrainLight2.w <= 0.0)) return 1.0;
     n = normalize(n);
     const vec3 b = FL.terrainLight2.xyz, now = mix(b, FL.terrainLight.xyz, FL.terrainLight2.w);
     const float baked = FL.terrainLight.w + (rocks ? b.y : dot(b, n));
-    return clamp(max(FL.terrainLight.w + dot(now, n), 0.06) / max(baked, 0.06), rocks ? 0.25 : 0.4, 2.0);
+    const float sky = rocks ? clamp(0.8 + 0.25 * n.y, 0.55, 1.05) : 1.0;
+    float turned;
+    if (rocks) {
+        const float up = max(b.y, 0.0);
+        turned = clamp(max((baked - up + up * n.y) * sky + dot(now.xz, n.xz), 0.06) / max(baked, 0.06), 0.3, 2.0);
+    } else {
+        turned = clamp(max(FL.terrainLight.w + dot(now, n), 0.06) / max(baked, 0.06), 0.4, 2.0);
+    }
+    const float sun = smoothstep(0.55, 0.85, lit / max(baked, 0.06));
+    return mix(sky, turned, sun);
 }
 
 // The native ground's material (occlusion, roughness, metal) laid as its colour is: from above the cell's tile's own

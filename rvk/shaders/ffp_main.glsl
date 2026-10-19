@@ -802,7 +802,7 @@ void main()
                 for (int i = -1; i <= 1; ++i) blur += NativeLightmapAt(at + vec2(i, j) * 1.5 / lmSize);
             t0 = mix(t0, blur / 9.0, terrain.side);
         }
-        t0.rgb *= NativeSunTurn(vNormalW.xyz, terrain.clutter);
+        t0.rgb *= NativeSunTurn(vNormalW.xyz, terrain.clutter, t0.g);
     }
     vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
     if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
