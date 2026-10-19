@@ -101,6 +101,15 @@ TerrainMap TerrainMapAt(vec3 posW, vec2 uv, vec3 n)
     // each triangle's own made the lays change at its edges, seams across a wall at an angle. (Its own where the
     // interpolated one has no length.)
     vec3 nf = dot(n, n) > 0.0 ? normalize(n) : nu;
+    // The native ground: how steep from the interpolated normal too - each triangle's own switched to the rock at its
+    // edges, a row of straight-edged teeth along a cliff's rim. Its normals come from the heights over two cells, a
+    // one-cell cliff's corners read less steep than its face: the rock starts a little earlier (~23 degrees, all of it
+    // by ~45), and the line where it starts wanders with noise (a metre or two across) rather than following the grid.
+    if (floatBitsToUint(D.terrain.y) != 0u && D.terrainAt.y < 1.5) {   // (TerrainNative; not its rocks)
+        const float wander = 0.09 * (TerrainNoise(posW.xz * 0.35 + vec2(4.3, 1.9)) - 0.5)
+                           + 0.05 * (TerrainNoise(posW.xz * 1.3 + vec2(8.7, 2.6)) - 0.5);
+        m.side = smoothstep(0.92, 0.7, abs(nf.y) + wander) * clamp(FL.terrain.x, 0.0, 1.0);
+    }
     vec2 across = pow(abs(nf.zx) + 1e-4, vec2(4.0));
     across /= across.x + across.y;
     m.w = vec3(1.0 - m.side, m.side * across);

@@ -132,7 +132,9 @@
   pass): the 2 x 2 cells about the nearest corner over a band of 0.3 of a cell each side of an edge, wandered by noise,
   each neighbour's tile mirrored about the shared edge, weighted with its brightness; only edges whose tiles' colours
   there disagree (`NativeEdgeOff`: a road's slabs, the game's transition tiles keep their edges). The lighting pass's
-  normal and material maps keep each cell's own. Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  normal and material maps keep each cell's own. Its cliffs' share (terrain.glsl `TerrainMapAt`) from the interpolated normal
+  (the game's ground: each triangle's own, which on the native ground cut the rock off at the triangles' edges under
+  a rim), starting earlier (~23 to ~45 degrees) and wandered by noise. Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):
