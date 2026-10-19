@@ -127,6 +127,7 @@ const std::array<PebbleShape, 8>& PebbleShapes()
 struct Verdict {
     float density = 0.0f, size = 1.0f;
     const char* what = "none";
+    bool sand = false;                         // loose sand (the ripples, terrain.glsl)
 };
 }  // namespace
 
@@ -155,16 +156,18 @@ std::shared_ptr<const Device::PebbleTable> Device::MakePebbleTable()
             if (g.types[i] == t && (base[t] < 0 || used[i] > most)) { base[t] = int(i); most = used[i]; }
     }
     // The hand table: randy-vk\terrain\pebbles.tsv - playfield (or *), type, density (0 none .. 1 gravel's), and an
-    // optional size; '#' starts a comment.
-    struct Override { uint32_t playfield; bool any; uint32_t type; float density, size; };
+    // optional size and sand (1: loose sand, rippled; 0 not); '#' starts a comment.
+    struct Override { uint32_t playfield; bool any; uint32_t type; float density, size, sand; };
     std::vector<Override> overrides;
     if (!m_pebbleTablePath.empty())
         if (FILE* f = std::fopen(m_pebbleTablePath.c_str(), "r")) {
             char line[256];
             while (std::fgets(line, sizeof(line), f)) {
                 char pf[32] = {};
-                Override o{0, false, 0, 0.0f, 1.0f};
-                if (line[0] == '#' || std::sscanf(line, "%31s %u %f %f", pf, &o.type, &o.density, &o.size) < 3) continue;
+                Override o{0, false, 0, 0.0f, 1.0f, -1.0f};
+                if (line[0] == '#' ||
+                    std::sscanf(line, "%31s %u %f %f %f", pf, &o.type, &o.density, &o.size, &o.sand) < 3)
+                    continue;
                 o.any = std::strcmp(pf, "*") == 0;
                 o.playfield = o.any ? 0 : uint32_t(std::strtoul(pf, nullptr, 10));
                 overrides.push_back(o);
@@ -183,7 +186,13 @@ std::shared_ptr<const Device::PebbleTable> Device::MakePebbleTable()
         if (t->m_line > 0.3f || t->m_edge > 1.2f) { v.what = "slabs"; return v; }
         if (sat < 0.12f && (t->m_grain < 15.0f || (sat < 0.08f && lum > 150.0f))) { v.what = "smooth grey"; return v; }
         if (t->m_grain > 50.0f) { v.density = 0.3f; v.what = "straw"; return v; }
-        if (sat > 0.4f && lum > 128.0f && t->m_grain < 32.0f) { v.density = 0.25f; v.size = 0.6f; v.what = "sand"; return v; }
+        // Sand: warm, saturated, bright, fine - the orange dune sand. The deserts' pale ground (Newland Desert's paths,
+        // the Wastelands' flats) is packed hard, not loose: it gets no ripples and keeps the dirt's pebbles.
+        if (r >= g && g >= b && t->m_grain < 32.0f && sat > 0.4f && lum > 128.0f) {
+            // (Few stones lie on loose sand: the wind buries them. 0.25 strewed a dune field with them.)
+            v.density = 0.05f; v.size = 0.6f; v.what = "sand"; v.sand = true;
+            return v;
+        }
         v.density = std::clamp(0.2f + (t->m_grain - 8.0f) / 30.0f, 0.2f, 1.0f) * (sat < 0.2f ? 1.0f : 0.7f);
         v.what = sat < 0.2f && t->m_grain > 25.0f ? "gravel" : "dirt";
         return v;
@@ -199,15 +208,18 @@ std::shared_ptr<const Device::PebbleTable> Device::MakePebbleTable()
             if ((o.any || o.playfield == m_skyPlayfield) && o.type == t) {
                 verdicts[t].density = std::clamp(o.density, 0.0f, 2.0f);
                 verdicts[t].size = std::clamp(o.size, 0.2f, 3.0f);
+                if (o.sand >= 0.0f) verdicts[t].sand = o.sand > 0.5f;
                 verdicts[t].what = "by hand";
             }
         char one[64];
-        std::snprintf(one, sizeof(one), "%s%u %s %.2f", t ? ", " : "", t, verdicts[t].what, verdicts[t].density);
+        std::snprintf(one, sizeof(one), "%s%u %s %.2f%s", t ? ", " : "", t, verdicts[t].what, verdicts[t].density,
+                      verdicts[t].sand && verdicts[t].what != std::string("sand") ? " sand" : "");
         said += one;
     }
     Log("native ground: pebbles by surface type (playfield %u) - %s", m_skyPlayfield, said.c_str());
     table->density.assign(n, 0.0f);
     table->size.assign(n, 1.0f);
+    table->sand.assign(n, 0.0f);
     table->mask.assign(n * 256, 0);
     uint32_t kept = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -215,7 +227,7 @@ std::shared_ptr<const Device::PebbleTable> Device::MakePebbleTable()
         const Verdict& v = verdicts[type];
         const Texture* tex = g.tiles[i];
         const Texture* bt = g.tiles[size_t(base[type])];
-        if (v.density <= 0.0f || !tex || !bt || !tex->m_thumbValid || tex->m_thumbW != 16 || tex->m_thumbH != 16 ||
+        if ((v.density <= 0.0f && !v.sand) || !tex || !bt || !tex->m_thumbValid || tex->m_thumbW != 16 || tex->m_thumbH != 16 ||
             bt->m_thumbW != 16 || bt->m_thumbH != 16)
             continue;
         // A tile of this ground with slabs in it (a plate set in gravel), or - type 0, the catch-all of roads and decals
@@ -248,6 +260,11 @@ std::shared_ptr<const Device::PebbleTable> Device::MakePebbleTable()
                                           (s[2] - mean[2]) * (s[2] - mean[2]));
                 table->mask[i * 256 + size_t(y) * 16 + x] = !green && d <= unlike;
             }
+        if (v.sand) {
+            uint32_t of = 0;
+            for (int k = 0; k < 256; ++k) of += table->mask[i * 256 + size_t(k)];
+            table->sand[i] = float(of) / 256.0f;
+        }
         table->density[i] = v.density;
         table->size[i] = v.size;
         ++kept;
@@ -397,16 +414,22 @@ Device::ClutterBuild Device::BuildNativePebbles(std::shared_ptr<const NativeGrou
     return out;
 }
 
+// The table of which tiles get pebbles and which are sand, made once the playfield's tiles are in (tried every 30 calls
+// till then). Also wanted without pebbles: the cells' sand (MakeNativeCodes) comes from it.
+bool Device::EnsurePebbleTable()
+{
+    if (m_native.pebbleTable) return true;
+    if (!m_native.ground || m_native.ground->types.empty() || m_native.pebbleTries++ % 30) return false;
+    m_native.pebbleTable = MakePebbleTable();
+    return m_native.pebbleTable != nullptr;
+}
+
 // The pebbles of the blocks near the eye and in view, for a pass (from DrawNativeGround, after the rocks); blocks made
 // as the eye comes near, dropped behind it.
 void Device::DrawNativePebbles(const d3d::Matrix& vp)
 {
     if (m_native.pebbles <= 0.0f || !TerrainRockOn() || !m_native.ground || m_native.ground->types.empty()) return;
-    if (!m_native.pebbleTable) {
-        if (m_native.pebbleTries++ % 30) return;   // (a tile not uploaded yet: try again in a while)
-        m_native.pebbleTable = MakePebbleTable();
-        if (!m_native.pebbleTable) return;
-    }
+    if (!EnsurePebbleTable()) return;
     UpdateFrameEye();
     const NativeGround& g = *m_native.ground;
     const float bw = float(kBlock) * g.cellX, bh = float(kBlock) * g.cellZ;

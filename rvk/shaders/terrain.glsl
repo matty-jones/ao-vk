@@ -289,6 +289,16 @@ vec3 NativeMean(vec2 cell)
     return textureLod(sampler2D(texImages[nonuniformEXT(c.x)], bindlessSamplers[D.sampIdx.w]), vec2(0.5), 14.0).rgb;
 }
 
+// How much of the native ground at this point is loose sand (0..1: rvk ground_pebbles.cpp's verdict of its cell's tile,
+// the means' alpha), filtered between cells so it fades over a cell's edge. 0 off the native ground or without it.
+float NativeSand(vec2 cell)
+{
+    const uint means = floatBitsToUint(D.terrainAt.x);
+    if (!TerrainNative() || means == 0u || means >= 65537u) return 0.0;
+    const vec2 size = vec2(textureSize(sampler2D(texImages[means - 1u], bindlessSamplers[D.sampIdx.w]), 0));
+    return textureLod(sampler2D(texImages[means - 1u], bindlessSamplers[D.sampIdx.w]), cell / size, 0.0).a;
+}
+
 #define TERRAIN_READ(img, smp, uv, dx, dy) textureGrad(sampler2D(img, smp), uv, dx, dy)
 // The faces read past the tile's 0..1 (world space, offsets): tiled, whatever the draw's own sampler - the game reads
 // each cell's tile clamped, which smears its edge into stripes there. (The normal maps' sampler: tiled, mipmapped,
@@ -368,7 +378,9 @@ vec4 TerrainClutterBase(TerrainMap m)
     // twice white, which the lighting pass doubled again - they glowed in the bloom and shimmered as the TAA jittered
     // them; scaled down, not clipped, to keep their hue.)
     const float grain = clamp(Luma(c.rgb) / max(Luma(FL.terrainRock2.rgb), 0.02), 0.7, 1.3);
-    vec3 stone = mix(vec3(Luma(mean)), mean, 0.4 + 0.6 * w) * grain * (0.75 + 0.5 * v);
+    // On loose sand the few stones keep the sand's own hue: grey and white ones read as gravel strewn over the dunes.
+    const float hue = mix(0.4 + 0.6 * w, 1.0, NativeSand(m.uv[0]));
+    vec3 stone = mix(vec3(Luma(mean)), mean, hue) * grain * (0.75 + 0.5 * v);
     stone *= min(1.0, 0.92 / max(max(stone.r, stone.g), max(stone.b, 1e-4)));
     return vec4(stone, c.a);
 }
@@ -481,7 +493,8 @@ float TerrainGrit(vec2 uv, vec2 dx, vec2 dy)
 
 vec3 TerrainGrain(vec3 c, TerrainMap m, vec3 posW)
 {
-    const float k = FL.terrain2.w * m.w.x;
+    // (Not on loose sand: its ripples are its detail - parallax.glsl.)
+    const float k = FL.terrain2.w * m.w.x * (1.0 - NativeSand(m.uv[0]) * clamp(FL.sand.x, 0.0, 1.0));
     if (k <= 0.002 || !TerrainRockOn() || m.clutter) return c;
     const mat2 turn = mat2(0.8, 0.6, -0.6, 0.8);
     const vec2 a = posW.xz / 0.9, adx = m.px.xz / 0.9, ady = m.py.xz / 0.9;
@@ -548,6 +561,24 @@ float NativeRockLight(vec3 n, float lit, float vis)
     return (1.0 - k) * sky + k * sun;
 }
 
+// The native ground's loose sand (NativeSand) lit by the sun now on its dunes' own slopes (FL.sand.y, RVK_DuneLight):
+// the game's bake has a large flat share of sky in it, so a dune's lee was barely darker than its sunny face at noon -
+// the dunes a smooth felt. Here, as for the rocks, part of the light where the bake says the sun reached (kSandSun) is
+// the sun's, by the slope's Lambert against the flat ground's (flat sand stays as baked); the lee falls towards the
+// sky's level, a little cooler (the blue sky lights it). A factor on the lightmap; n the smooth (interpolated) normal.
+vec3 NativeSandLight(vec3 n, float lit)
+{
+    const float kSandSun = 0.75;
+    if (dot(n, n) <= 1e-8 || dot(FL.sunDir.xyz, FL.sunDir.xyz) <= 0.0) return vec3(1.0);
+    n = normalize(n);
+    const vec3 S = -normalize(FL.sunDir.xyz);
+    if (S.y <= 0.02) return vec3(1.0);
+    const float k = kSandSun * NativeSunShare(n, true, lit) * smoothstep(0.02, 0.12, S.y);   // (gone as the sun sets)
+    const float sun = clamp(dot(n, S) / max(S.y, 0.25), 0.0, 1.6);
+    const float f = (1.0 - k) + k * sun;
+    return f * mix(vec3(1.0), vec3(0.92, 0.97, 1.1), clamp(1.0 - f, 0.0, 1.0) * 0.8);
+}
+
 // The native ground's material (occlusion, roughness, metal) laid as its colour is: from above the cell's tile's own
 // map, turned as the tile is; on the faces the rock's (or the cell's tile's, laid on them); the rocks on it the
 // rock's from every side. w: how much of the point has a material at all (a cell whose tile has no map: none there -
@@ -582,3 +613,5 @@ vec3 NativeOrm(TerrainMap m, out float w)
             }
     return w > 0.0 ? sum / w : vec3(1.0, 1.0, 0.0);
 }
+
+#include "parallax.glsl"

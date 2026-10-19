@@ -415,15 +415,7 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     // (The moon's shadows come in with its light: at full strength from the first frame they switched on at dusk.)
     fl->shadowParams[1] = m_shadowValid && m_shadowIsMoon ? 0.8f * m_shadowStrength * std::min(2.0f * m_moonFade, 1.0f)
                                                           : m_shadowStrength;
-    // Fading out as the light nears the horizon (full from ~10 degrees up, none at the ~3 degrees where the map stops):
-    // that low, the shadows of things on a ridge lie hundreds of metres down the slopes facing the light, in the far
-    // cascade's coarse texels - dark blocks on the mountains, switching off at once at the cut (user, 2026-10-13).
-    if (m_shadowValid) {
-        const float* d = m_shadowSunDir;
-        const float up = -d[1] / std::max(std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]), 1e-6f);
-        const float t = std::clamp((up - 0.05f) / (0.17f - 0.05f), 0.0f, 1.0f);
-        fl->shadowParams[1] *= t * t * (3.0f - 2.0f * t);
-    }
+    // (Unfaded: as the light nears the horizon they fade out by distance from the eye - frame_lights.glsl ShadowStrength.)
     fl->shadowParams[2] = m_shadowValid ? float(m_cascadeCount) : 0.0f;   // (none: no map - the terrain's shade alone)
     fl->shadowParams[3] = PointShadowStrength();
     // The sun the shadow map was drawn with (shadows lag a frame), or without shadows this frame's.
@@ -462,7 +454,18 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->terrain2[1] = fl->terrain2[2] = 0.0f;
     fl->terrain2[3] = std::clamp(m_terrainSettings.grain, 0.0f, 1.0f);
     fl->terrain3[0] = std::clamp(m_terrainSettings.blend, 0.0f, 1.0f);
-    fl->terrain3[1] = fl->terrain3[2] = fl->terrain3[3] = 0.0f;
+    fl->terrain3[1] = m_normalMaps && m_pixelLighting ? 0.04f * std::clamp(m_terrainSettings.parallax, 0.0f, 2.0f) : 0.0f;
+    fl->terrain3[2] = std::clamp(m_terrainSettings.parallaxSteps, 0.25f, 4.0f);
+    fl->terrain3[3] = m_native.anyHeight && fl->terrain3[1] > 0.0f ? 1.0f : 0.0f;
+    fl->sand[0] = std::clamp(m_terrainSettings.ripple, 0.0f, 1.0f);
+    fl->sand[1] = std::clamp(m_terrainSettings.dune, 0.0f, 1.0f);
+    fl->sand[2] = std::clamp(m_terrainSettings.glint, 0.0f, 1.0f);
+    fl->sand[3] = SandWindBearing();
+    fl->sand2[0] = std::clamp(m_terrainSettings.smooth, 0.0f, 1.0f);
+    SandPrintLights(&fl->sand2[1]);
+    DesertAir(fl->desert);
+    fl->desert[2] = m_aoProjValid ? m_aoProj.m[0][0] : 0.0f;
+    fl->desert[3] = m_aoProjValid ? m_aoProj.m[1][1] : 0.0f;
     FillNativeLights(fl);
     FillTerrainRockLights(fl->terrainRock, fl->terrainRock2);
     fl->dusk[0] = std::clamp(m_afterglow, 0.0f, 2.0f);
@@ -1031,7 +1034,7 @@ uint32_t Device::PusherMask(float margin) const
 
 void Device::PushCandidateDraw(uint32_t fvf)
 {
-    if (m_grassPush <= 0.0f || !m_drawMesh || m_drawMeshStatic || m_target != m_scene || m_drawIsLabel ||
+    if ((m_grassPush <= 0.0f && !SandPrintsOn()) || !m_drawMesh || m_drawMeshStatic || m_target != m_scene || m_drawIsLabel ||
         !m_rs[d3d::RS_LIGHTING] || !m_rs[d3d::RS_ZWRITEENABLE] || IsTerrain(fvf) || m_pushNew.size() >= 4096)
         return;
     float c[3], e[3];
@@ -1081,7 +1084,7 @@ void Device::UpdatePushTrail()
             if (t.head && !claimed[i] && d < best && std::fabs(t.y - c.y) < 1.5f) { best = d; nearest = i; }
         }
         if (nearest == heads) {
-            m_pushTrail.push_back({x, c.y, z, now, now, x, z, true});
+            m_pushTrail.push_back({x, c.y, z, now, now, x, z, true, x, z});
             continue;
         }
         claimed[nearest] = true;
@@ -1089,6 +1092,20 @@ void Device::UpdatePushTrail()
         if (std::sqrt(best) > 0.01f)
             h.born = now;                        // moving: the plants it touches rustle
         h.x = x; h.y = c.y; h.z = z; h.time = now;
+        // Its footprints (sand_prints.cpp): a step on from the last, beside its way, left and right by turns. (Only its
+        // body's centre is known, not its feet - a print a step, under where it was; a jump far away starts afresh.)
+        if (SandPrintsOn()) {
+            constexpr float kStep = 0.7f, kApart = 0.11f;
+            const float px = x - h.printX, pz = z - h.printZ, d = std::sqrt(px * px + pz * pz);
+            if (d > 4.0f) {
+                h.printX = x; h.printZ = z;
+            } else if (d >= kStep) {
+                const float ux = px / d, uz = pz / d;
+                m_printsNew.push_back({x - uz * kApart * h.printSide, z + ux * kApart * h.printSide, ux, uz});
+                h.printX = x; h.printZ = z;
+                h.printSide = -h.printSide;
+            }
+        }
         float dx = x - h.dropX, dz = z - h.dropZ;
         if (dx * dx + dz * dz >= kSpacing * kSpacing) {
             m_pushTrail.push_back({x, c.y, z, now, now, x, z, false});
@@ -2902,6 +2919,11 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                     const uint32_t means = m_native.means ? BindlessImage(m_native.means) + 1 : 0u;
                     std::memcpy(&dt.terrain[1], &codes, 4);
                     std::memcpy(&dt.terrainAt[0], &means, 4);   // (the native ground: the tiles' mean colours)
+                    // (Its tiles' heights, when one has any: the parallax, marched alike in both passes.)
+                    if (m_native.anyHeight && m_native.maps) {
+                        const uint32_t maps = BindlessImage(m_native.maps) + 1;
+                        std::memcpy(&dt.terrain[2], &maps, 4);
+                    }
                 }
             }
         } else if (m_rs[d3d::RS_LIGHTING] && IsMultiplyPass()) {
@@ -2919,9 +2941,11 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                     const uint32_t codes = BindlessImage(m_native.codes) + 1;
                     const uint32_t maps = m_native.maps ? BindlessImage(m_native.maps) + 1 : 0u;
                     const uint32_t sky = m_native.sky && m_native.ao > 0.0f ? BindlessImage(m_native.sky) + 1 : 0u;
+                    const uint32_t means = m_native.means ? BindlessImage(m_native.means) + 1 : 0u;
                     std::memcpy(&dt.terrain[1], &codes, 4);
                     std::memcpy(&dt.terrain[2], &maps, 4);
                     std::memcpy(&dt.terrain[3], &sky, 4);
+                    if (means) std::memcpy(&dt.terrainAt[0], &means, 4);   // (the means and the cells' sand)
                 }
             }
         }
@@ -3529,6 +3553,10 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_textures[0] && texStage0 == m_textures[0]->m_albedoMap) dt.mat[2] |= kMatAlbedo;   // (debug view 7)
     if (m_pickHighlight && m_textures[0] == m_pickHighlight)
         dt.mat[2] |= kMatPicked;                 // (texture picking: flashes)
+    // A height in its normal map's alpha (_h.png): drawn with parallax, where the normal map is the surface's own.
+    if (normalMap && normalMap->m_alphaHeight && m_textures[0] && normalMap == m_textures[0]->m_normalMap &&
+        m_terrainSettings.parallax > 0.0f)
+        dt.mat[2] |= kMatHeight;
     if (VisualKind(m_drawVisualKind) == VisualKind::Sky || (m_drawMesh && m_drawMesh->skyScenery))
         dt.mat[2] |= kMatSky;                    // (the sky and its scenery: kept inside the far plane, ffp.vert)
     if (m_drawIsCloudPuff && CloudSheetsOn())

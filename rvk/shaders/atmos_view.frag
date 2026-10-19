@@ -17,6 +17,7 @@ layout(push_constant) uniform Push {
     vec4 zone;          // rgb: the zone's hue (unit luma); w how much of it (RVK_SkyZone)
     vec4 weather;       // rgb: the overcast's hue (unit luma); w how much (0 clear .. 1 a storm's sky)
     vec4 night;         // rgb: the night sky's floor (airglow, starlight); w the halo round the sun (its Mie lobe, x)
+    vec4 dust;          // rgb: a desert's dust (unit luma); w how much (RVK_DesertAir: 0 none)
 } P;
 layout(location = 0) out vec4 outColor;
 
@@ -78,6 +79,12 @@ void main()
     // The zone's colour, a hint: its hue at the same brightness - more low in the sky than overhead.
     float horizon = 1.0 - smoothstep(0.0, 0.6, abs(d.y));
     c = mix(c, l * P.zone.rgb, P.zone.w * mix(0.35, 1.0, horizon));
+    // A desert's dust (RVK_DesertAir): the lowest sky paler, brighter and warmer, the fine dust the day's heat lifts -
+    // a band fading out by ~17 degrees up, most of it in the lowest few; overhead stays blue.
+    if (P.dust.w > 0.0) {
+        float y = max(d.y, 0.0), band = (1.0 - smoothstep(0.0, 0.3, y)) * (0.6 + 0.4 * (1.0 - smoothstep(0.0, 0.08, y)));
+        c = mix(c, dot(c, kLuma) * 1.45 * P.dust.rgb, 0.7 * P.dust.w * band);
+    }
     // The night's floor - the sky never quite black - and weather: an overcast's grey, a storm's darker, its hue.
     c += P.night.rgb;
     l = dot(c, kLuma);

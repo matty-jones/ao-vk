@@ -67,6 +67,11 @@ vec4 gDiffuse, gSpecular;
 vec3 gLocalDiffuse = vec3(0.0), gLocalSpecular = vec3(0.0);
 float gLocalFraction = 0.0;                     // how much of the final colour the local lights gave (outLocal)
 float gLightmapRelief = 1.0;                    // F_BUMPBASE: the ground's relief in its baked sunlight (stage 0)
+// Parallax (parallax.glsl): stage 0's coordinates where the eye's ray meets a side-loaded height (MAT_HEIGHT), read with
+// the pixel's own derivatives; and how much of the sun reaches that point past the relief (meshes and the ground).
+bool gParallax = false;
+vec2 gUv0 = vec2(0.0), gUv0Dx = vec2(0.0), gUv0Dy = vec2(0.0);
+float gParallaxSun = 1.0;
 float gSunShare = 0.0;                          // how much of the colour is direct sunlight (contact shadows)
 // PBR material (D.mat.z & MAT_PBR, lit per pixel): its maps at this pixel, and the specular light the surface reflects,
 // added after the texture stages (unclamped in the HDR scene).
@@ -124,6 +129,7 @@ vec4 Sample(uint stage)
     }
     bool bound = (C.flags.x & (stage == 0u ? F_TEX0 : F_TEX1)) != 0u;
     if (!bound) return vec4(0.0, 0.0, 0.0, 1.0);
+    if (stage == 0u && gParallax) return textureGrad(TEX0, gUv0, gUv0Dx, gUv0Dy);
     return stage == 0u ? texture(TEX0, tc.xy) : texture(TEX1, tc.xy);
 }
 
@@ -264,11 +270,24 @@ float TerrainSun(vec3 posW)
 
 float gCasterVisibility = 1.0, gCloudVisibility = 1.0;   // SunVisibility's two parts: things' shadows, the clouds'
 float gTerrainVisibility = 1.0;                         // ... and the terrain's shade from a low sun (TerrainSun)
+float gGroundAway = 1.0;                                // ... and the native ground's own, turned from the sun (0)
+
+// The native ground's own shade, turned from the sun (gGroundAway: 1 facing it .. 0 turned away), falling off over a
+// few degrees round that line - with or without a shadow map: under ~3 degrees there is none, and the slopes turned
+// away were only tinted, grey sand as bright as the lit (the user's rvk-frame-161624). Gone as the sun sets below the
+// horizon (by then the hour's light has no sun in it), and by the moon's light.
+float GroundAway(vec3 n)
+{
+    if (floatBitsToUint(D.terrain.y) == 0u || FL.moon.w > 0.5 || dot(n, n) <= 0.0) return 1.0;
+    const vec3 L = -normalize(FL.sunDir.xyz + vec3(0.0, -1e-6, 0.0));
+    return mix(1.0, smoothstep(-0.06, 0.06, dot(normalize(n), L)), smoothstep(-0.08, -0.02, L.y));
+}
 
 float SunVisibility(vec3 posW, vec3 n)
 {
     gCloudVisibility = CloudShadow(posW);
     gTerrainVisibility = FL.moon.w > 0.5 ? 1.0 : TerrainSun(posW);
+    gGroundAway = GroundAway(n);
     if (FL.shadowParams.x <= 0.5) {              // (no shadow map: the terrain's shade alone)
         gCasterVisibility = 1.0;
         return gCloudVisibility;
@@ -287,9 +306,13 @@ float SunVisibility(vec3 posW, vec3 n)
 
 // The terrain's shade from a low sun at the shadows' own strength (FL.terrainSun2.z: theirs fade out low, it doesn't -
 // under the mountains the ground is wholly in shade, not lit between the trees' faded shadows - user, 2026-10-13).
+// The ground turned from the sun takes the shadows' unfaded strength too: as the sun nears the horizon - when most of
+// a dune field turns from it - theirs fades out (draw.cpp), and at 4 degrees up the lee slopes were lit again (the
+// user's rvk-frame-155738).
 float TerrainShade()
 {
-    return 1.0 - (1.0 - gTerrainVisibility) * FL.terrainSun2.z;
+    return min(1.0 - (1.0 - gTerrainVisibility) * FL.terrainSun2.z,
+               1.0 - (1.0 - gGroundAway) * max(FL.shadowParams.y, FL.terrainSun2.z));
 }
 
 // A cloud's shadow takes the sunlight, not the sky's: where a shadow darkens all of a surface's light (the ground's
@@ -313,12 +336,20 @@ float FlatShade()
     // share of the land's light gone, so the shadows of things with it; and the sky's share halved, a storm's sky far
     // dimmer than the clear one the lightmap holds - rvk Device::StormSkyLight: a quarter of the light left.)
     float o = FL.rainNear.y;
-    return min(1.0 - (1.0 - gCasterVisibility) * FL.shadowParams.y * (1.0 - o), mix(TerrainShade(), 1.0, o)) *
+    return min(1.0 - (1.0 - gCasterVisibility) * ShadowStrength(length(vPosW - C.eyePos.xyz)) * (1.0 - o),
+               mix(TerrainShade(), 1.0, o)) *
            (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o)) * (1.0 - 0.5 * o);
 }
 
 int gShadowCascade = -1;                         // the cascade SunVisibilityCasters read (RVK_ShadowView)
 
+float SunVisibilityMap(vec3 posW, vec3 n, float nl);
+
+// The native ground faced away from the sun is in its own shade (gGroundAway, taken with the terrain's shade in
+// TerrainShade), and the map's shadows are drawn there too, not left to the lightmap - the hour's bake is a 4-unit
+// cell's, and a low sun's shadows (a rock's, a character's) stopped dead at the line where the smooth ground turned
+// from the sun, lit sand inside them past it (the user's rvk-frame-154711, rvk-frame-155057, 19 h). It falls off over
+// a few degrees round that line.
 float SunVisibilityCasters(vec3 posW, vec3 n)
 {
     vec3 L = -FL.sunDir.xyz;
@@ -326,8 +357,17 @@ float SunVisibilityCasters(vec3 posW, vec3 n)
     if (dot(n, n) > 0.0) {
         n = normalize(n);
         nl = dot(n, L);
-        if (nl <= 0.0) return 1.0;                        // faces away: the light equation / lightmap handles it
+        if (floatBitsToUint(D.terrain.y) != 0u) {
+            if (gGroundAway <= 0.0) return 1.0;      // (SunVisibility: GroundAway)
+            nl = max(nl, 0.0);
+        } else if (nl <= 0.0)
+            return 1.0;                                    // faces away: the light equation handles it
     }
+    return SunVisibilityMap(posW, n, nl);
+}
+
+float SunVisibilityMap(vec3 posW, vec3 n, float nl)
+{
     int count = int(FL.shadowParams.z);
     for (int c = 0; c < count; ++c) {
         float edge;
@@ -465,24 +505,24 @@ vec3 WetReflection(vec3 R, int level)
 // +X along +u, +Y up in the image = against D3D's v). A normal (x, y, z) is the height slope (-x/z, y/z) per world
 // unit along u and down-v; scaled by the world size of a uv unit it bends the normal exactly like the generated
 // normals above, so it needs no tangents. C.misc.w = strength.
-vec3 NormalMapNormal(vec3 n, vec3 posW, vec2 uv)
+vec3 NormalMapNormalGrad(vec3 n, vec3 posW, vec2 uv, vec2 uvx, vec2 uvy)
 {
-    vec3 t = texture(NORMALTEX, uv).xyz * 2.0 - 1.0;
+    vec3 t = textureGrad(NORMALTEX, uv, uvx, uvy).xyz * 2.0 - 1.0;
     t.z = max(t.z, 0.05);
     vec2 slope = vec2(-t.x, t.y) / t.z * C.misc.w;     // height per world unit along u, v
-    vec2 uvx = dFdx(uv), uvy = dFdy(uv);
     vec3 px = dFdx(posW), py = dFdy(posW);
     float worldPerUv = sqrt(max(dot(px, px), dot(py, py)) / max(max(dot(uvx, uvx), dot(uvy, uvy)), 1e-12));
     return BendNormal(n, px, py, dot(slope, uvx) * worldPerUv, dot(slope, uvy) * worldPerUv);
 }
+vec3 NormalMapNormal(vec3 n, vec3 posW, vec2 uv) { return NormalMapNormalGrad(n, posW, uv, dFdx(uv), dFdy(uv)); }
 
 #include "terrain.glsl"
 
-// Things' shadows fading out as the light nears the horizon (rvk draw.cpp folds it into FL.shadowParams.y: full from
-// ~10 degrees up, none at ~3) - for the uses of the visibility that don't go through that strength.
+// Things' shadows fading out as the light nears the horizon, as their strength does (ShadowStrength, by distance) -
+// for the uses of the visibility that don't go through that strength.
 float CasterFade()
 {
-    return smoothstep(0.05, 0.17, -normalize(FL.sunDir.xyz + vec3(0.0, 1e-6, 0.0)).y);
+    return FL.shadowParams.y > 0.0 ? ShadowStrength(length(vPosW - C.eyePos.xyz)) / FL.shadowParams.y : 0.0;
 }
 
 float gSunVisibility = 1.0;          // SunVisibility(vPosW, vNormalW) when computed (main)
@@ -629,11 +669,33 @@ void main()
     // The ground laid on its cliffs and its repeats hidden (terrain.glsl): where its texture lies here, taken while
     // the derivatives are good; on the lighting pass, the base texture as the base pass drew it (its PBR albedo, and
     // the hexagons' weights its maps are read with).
+    // A mesh's side-loaded height (MAT_HEIGHT: its normal map's alpha): stage 0's coordinates, its normal and material
+    // maps' read where the eye's ray meets it (parallax.glsl).
+    if ((D.mat.z & MAT_HEIGHT) != 0u && (C.flags.x & (F_NORMALMAP | F_PERPIXEL)) == (F_NORMALMAP | F_PERPIXEL) &&
+        (C.flags.x & F_BUMPBASE) == 0u) {
+        gUv0Dx = dFdx(vTex0.xy);
+        gUv0Dy = dFdy(vTex0.xy);
+        gUv0 = ParallaxUv(texImages[D.texIdx.w], bindlessSamplers[D.sampIdx.w], vTex0.xy, gUv0Dx, gUv0Dy, vPosW,
+                          dFdx(vPosW), dFdy(vPosW), vNormalW.xyz, gParallaxSun);
+        gParallax = true;
+    }
     TerrainMap terrain;
+    GroundRelief ground;
+    ground.sand = 0.0;
+    ground.fade = vec2(0.0);
+    ground.tiles = false;
+    ground.cell = vec2(0.0);
+    ground.rip.smallDepth = ground.rip.bigDepth = 0.0;
     const bool terrainMapped = TerrainMapped();
     vec4 terrainBase = vec4(0.0);
     if (terrainMapped) {
         terrain = TerrainMapAt(vPosW, vSet0, vNormalW.xyz);
+        // The native ground's relief in depth up close - its tiles' heights, the sand's ripples - in both passes alike
+        // (parallax.glsl): its cells' coordinates moved to where the eye's ray meets it.
+        if (TerrainNative()) {
+            ground = GroundReliefAt(terrain, vPosW, vNormalW.xyz);
+            gParallaxSun = GroundParallax(terrain, ground, vPosW, vNormalW.xyz);
+        }
         // (The native ground's with material maps: its colour as its base pass drew it - the cells' own tiles.)
         if (D.terrainAt.w > 1.5 && ((C.flags.x & F_BUMPBASE) != 0u || (TerrainNative() && (D.mat.z & MAT_BASE) != 0u)))
             terrainBase = TerrainBase(D.texIdx.z, bindlessSamplers[D.sampIdx.x], terrain);
@@ -645,7 +707,7 @@ void main()
     if ((C.flags.x & (F_SHADOW | F_SHADOWCOMP | F_SHADOWTEX)) != 0u) {
         gSunVisibility = SunVisibility(vPosW, vNormalW.xyz);
         gSunVisibilityValid = true;
-        shade = min(1.0 - (1.0 - gSunVisibility) * FL.shadowParams.y, TerrainShade());
+        shade = min(1.0 - (1.0 - gSunVisibility) * ShadowStrength(length(vPosW - C.eyePos.xyz)), TerrainShade());
         flatShade = FlatShade();                  // (all of the light: the clouds' only in part)
     }
     if ((C.flags.x & F_SHADOWCOMP) != 0u) {
@@ -678,7 +740,8 @@ void main()
         // their faces (then a base without a normal map of its own has the flat one, and no relief from above).
         // (Not the native ground's pebbles: a few pixels across, a relief there is none to see.)
         const bool terrainRelief = terrainMapped && D.terrainAt.w > 1.5 && !terrain.pebble &&
-                                   ((C.flags.x & F_NORMALMAP) != 0u || terrain.rock || TerrainNativeMaps());
+                                   ((C.flags.x & F_NORMALMAP) != 0u || terrain.rock || TerrainNativeMaps() ||
+                                    ground.sand > 0.0);
         if (((C.flags.x & (F_NORMALMAP | F_BUMP)) != 0u || terrainRelief) && len2 > 0.0) {
             vec3 unbumped = n;
             bool base = (C.flags.x & F_BUMPBASE) != 0u || terrainRelief;
@@ -687,7 +750,13 @@ void main()
                 const uint face = terrain.rock ? TerrainRockImage(1) : D.texIdx.w;
                 n = TerrainNormalMap(n, texImages[D.texIdx.w], top, texImages[face], terrain.rock ? FL.terrainRock2.w : top,
                                      terrain);
-            } else if ((C.flags.x & F_NORMALMAP) != 0u)
+                // (On sand the tile's own relief less, by RVK_RippleSmooth: under the ripples its lumps were noise
+                // between the crests.)
+                if (ground.sand > 0.0) n = mix(n, unbumped, 0.83 * clamp(FL.sand2.x, 0.0, 1.0) * clamp(ground.sand, 0.0, 1.0));
+                n = SandRippleNormal(n, ground, terrain.uv[0]);   // (the sand's ripples: parallax.glsl)
+            } else if ((C.flags.x & F_NORMALMAP) != 0u && gParallax)
+                n = NormalMapNormalGrad(n, vPosW, gUv0, gUv0Dx, gUv0Dy);
+            else if ((C.flags.x & F_NORMALMAP) != 0u)
                 n = NormalMapNormal(n, vPosW, base ? vSet0 : vTex0.xy);
             else
                 n = base ? BumpNormal(texImages[D.texIdx.z], bindlessSamplers[D.sampIdx.z], n, vPosW, vSet0)
@@ -698,6 +767,10 @@ void main()
                 vec3 L = -normalize(FL.sunDir.xyz);
                 float before = max(dot(normalize(unbumped), L), 0.0), after = max(dot(normalize(n), L), 0.0);
                 gLightmapRelief = clamp((after + 0.25) / (before + 0.25), 0.6, 1.4);
+                // (In a shadow the sun's relief mostly goes: the sky lights it. Sunlit ripples inside a shadow read
+                // as no shadow at all.)
+                if (gSunVisibilityValid)
+                    gLightmapRelief = mix(1.0, gLightmapRelief, 0.3 + 0.7 * min(gCasterVisibility, gGroundAway));
             }
         }
         // PBR material: its maps, and the specular lobe the lights below use (lighting.glsl gPbr*). The ground's
@@ -711,6 +784,7 @@ void main()
                            : gPbrBase && terrainMapped
                            ? TerrainTexture(texImages[D.mat.x], bindlessSamplers[D.mat.y],
                                             texImages[terrain.rock ? TerrainRockImage(2) : D.mat.x], terrain, vec4(1.0)).rgb
+                           : gParallax ? textureGrad(ORMTEX, gUv0, gUv0Dx, gUv0Dy).rgb
                            : texture(ORMTEX, gPbrBase ? vSet0 : vTex0.xy).rgb;
             // (A material blended in where it is only partly: none at all - the lighting as without.)
             orm = mix(vec3(1.0, 1.0, 0.0), orm, ormCover);
@@ -733,7 +807,7 @@ void main()
         }
         vec3 ambient = vec3(0.0), diff = vec3(0.0), spec = vec3(0.0), diffL = vec3(0.0), specL = vec3(0.0);
         // Sunlight is shadowed: by the receiver's shade, or in the ground's lighting pass by the lightmap's.
-        float sunScale = (C.flags.x & F_SHADOWTEX) != 0u ? texShade * moonShade : shadeSun ? shade : 1.0;
+        float sunScale = ((C.flags.x & F_SHADOWTEX) != 0u ? texShade * moonShade : shadeSun ? shade : 1.0) * gParallaxSun;
         AccumulateLights(vPosW, n, sunScale, localScale, ambient, diff, spec, diffL, specL);
         // PBR: metals have no diffuse light; the occlusion map takes ambient light away.
         float kd = gPbrOn ? 1.0 - gPbrMetal : 1.0, kAmb = gPbrOn ? kd * gPbrAo : 1.0;
@@ -794,6 +868,7 @@ void main()
     // face. Read so, a cliff's light runs evenly down it, as the baked texel says.
     // On a cliff, blurred over the cells round it (by its steepness): one texel a cell stretched up a face of 40 units
     // turned the cells' light into hard triangles where the face crosses from a dark cell to a lit one.
+    vec3 sandGlint = vec3(0.0);
     if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
         const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
         t0 = NativeLightmapAt(at);
@@ -808,12 +883,29 @@ void main()
             t0.rgb *= NativeRockLight(vNormalW.xyz, t0.g, texShade);
             texShade = 1.0;
         } else {
-            t0.rgb *= NativeSunTurn(vNormalW.xyz, t0.g);
+            // (In its own relief's shadow - a ripple's lee, the gap between stones: the lightmap's sun share of it.)
+            // (The sand's glints: where the lightmap says the sun reaches - the shadow map's shade comes after. Added
+            // past the stages, which clip at 1: below.)
+            // (Whether the sun reaches it: on sand, our own shadows say - the map's, the ground turned from the sun, the
+            // terrain's - not the bake's cell: a low sun's bake has cells in shade where the sun now isn't hidden, and
+            // the ripples in them lost their troughs' shadows, square pale patches among shaded ripples - the user's
+            // rvk-frame-160817/160823, the sun 2 degrees up. Elsewhere, and without our shadows, the bake's.)
+            const float bakedSun = NativeSunShare(vNormalW.xyz, false, t0.g);
+            const float sunShare = gSunVisibilityValid
+                ? mix(bakedSun, gCasterVisibility * gGroundAway * gTerrainVisibility, NativeSand(terrain.uv[0])) : bakedSun;
+            sandGlint = FL.sunColor.rgb * (SandGlint(ground, terrain.uv[0], vPosW, vNormalW.xyz, terrain.px, terrain.py) *
+                                           gParallaxSun * sunShare);
+            const float dunes = NativeSand(terrain.uv[0]) * clamp(FL.sand.y, 0.0, 1.0);   // (on sand: NativeSandLight)
+            const vec3 turn = dunes > 0.0 ? mix(vec3(NativeSunTurn(vNormalW.xyz, t0.g)), NativeSandLight(vNormalW.xyz, t0.g), dunes)
+                                          : vec3(NativeSunTurn(vNormalW.xyz, t0.g));
+            // (Its relief's own shadow takes the sun's part of the light, not the sky's - kSandSun's share, as the
+            // dunes' light: taking it all, a footprint's floor and the ripples' troughs went near black.)
+            t0.rgb *= turn * mix(1.0, gParallaxSun, 0.75 * sunShare);
         }
     }
     vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
     if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
-    if (terrainBasePass && TerrainNative()) t0.rgb = TerrainGrain(t0.rgb, terrain, vPosW);
+    if (terrainBasePass && TerrainNative()) t0.rgb = SandRippleTone(TerrainGrain(t0.rgb, terrain, vPosW), ground, terrain.uv[0]);
 #ifdef RVK_GLOW
     // The surface's own colour, for the indirect light it reflects: lit draws through the stages under white light,
     // unlit ones as they are (the ground's base pass is its bare texture; its lightmap pass keeps this). A
@@ -863,6 +955,16 @@ void main()
         current.rgb += s;
         if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
     }
+    // The sand's glints: past the stages' clip, divided by the sand's colour as the highlights above - this pass
+    // multiplies the base pass's - so they shine white, not the sand's orange. Only where the sun itself reaches: a
+    // glint is the sun's image, and a shadow's shade keeps the sky's share of the light - the glints in it had stayed
+    // a third as bright, many times the sand's own.
+    const float glintSun = gSunVisibilityValid ? gCasterVisibility * gGroundAway * gTerrainVisibility * gCloudVisibility
+                                               : 1.0;
+    if (glintSun > 0.0 && any(greaterThan(sandGlint, vec3(0.0)))) {
+        current.rgb += sandGlint * glintSun / max(NativeMean(terrain.uv[0]), vec3(0.08));
+        if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
+    }
     if (!shadeSun)
         // (By night the moon's: unlit, half of it - and a storm's dimming kept, as FlatShade has it by day: without,
         // the stormy land brightened the moment the moon took over at dusk.)
@@ -898,7 +1000,8 @@ void main()
     // with HDR, for the bloom.
     vec3 emitted = vec3(0.0);
     if ((D.mat.z & MAT_EMISSIVE) != 0u && FL.pbr2.z > 0.0) {
-        emitted = texture(EMISSIVETEX, vTex0.xy).rgb * FL.pbr2.z;
+        emitted = (gParallax ? textureGrad(EMISSIVETEX, gUv0, gUv0Dx, gUv0Dy) : texture(EMISSIVETEX, vTex0.xy)).rgb *
+                  FL.pbr2.z;
         current.rgb += emitted;
         if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
     }

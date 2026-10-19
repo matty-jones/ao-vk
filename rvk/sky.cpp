@@ -477,4 +477,19 @@ void Device::DrawSkyGlow()
     m_arenaBound = m_bindlessBound = false;
 }
 
+// A desert's air now (RVK_DesertAir, RVK_HeatShimmer; docs/desert-plan.md phase 4): on a desert or wasteland playfield
+// (its climate's lean, kZoneSkies: -0.15 or clearer), by day and in fair weather - an overcast, a storm's sky or a
+// sandstorm (it brings its own dust) takes it away. The shimmer wants the sun high too: the ground hot.
+void Device::DesertAir(float out[2]) const
+{
+    out[0] = out[1] = 0.0f;
+    if (m_skyZoneLean > -0.15f)
+        return;
+    const float cloudy = m_cloudParams.enable ? SkyCloudiness() * std::clamp(m_cloudParams.vary, 0.0f, 1.0f) : 0.0f;
+    const float fair = (1.0f - SmoothRamp(0.4f, 0.9f, cloudy)) * (1.0f - StormSky()) * (1.0f - std::clamp(4.0f * m_sand, 0.0f, 1.0f));
+    const float h = SunUp();
+    out[0] = std::clamp(m_desertAir, 0.0f, 1.0f) * fair * SmoothRamp(-0.05f, 0.15f, h);
+    out[1] = std::clamp(m_heatShimmer, 0.0f, 1.0f) * fair * SmoothRamp(0.3f, 0.55f, h);
+}
+
 }  // namespace rvk

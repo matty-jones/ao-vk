@@ -212,11 +212,21 @@ uint64_t Device::NativeMapsSignature() const
         h = (h ^ o) * 1099511628211ull;
         h = (h ^ uint64_t(t && t->m_image)) * 1099511628211ull;
     }
-    return h;
+    return (h ^ uint64_t(reinterpret_cast<uintptr_t>(m_native.pebbleTable.get()))) * 1099511628211ull;   // (the sand)
+}
+
+// The sand's prevailing wind (its ripples' crests lie across it: terrain.glsl), a bearing in radians: fixed for a
+// playfield - not the weather's wind (wind.cpp), which turns by the minute; ripples are laid by the winds of months.
+float Device::SandWindBearing() const
+{
+    uint32_t h = m_skyPlayfield * 0x9E3779B1u + 0x7F4A7C15u;
+    h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12;
+    return float(h >> 8) / 16777216.0f * 6.2831853f;
 }
 
 // The per-cell textures: each cell's tile's bindless image - its albedo map if drawn with one - and turn (codes: R, G,
-// B), its normal map's (maps: R, G) and material map's (maps: B, A; 0xFFFF none).
+// B), its normal map's (maps: R, G) and material map's (maps: B, A; 0xFFFF none), its tile's mean colour and how much of
+// it is sand (means: RGB, A - filtered between cells, so the sand's ripples fade over a cell's edge, not stop at it).
 void Device::MakeNativeCodes()
 {
     const NativeGround& g = *m_native.ground;
@@ -226,6 +236,7 @@ void Device::MakeNativeCodes()
         orm(g.tiles.size(), 0xFFFFu);
     bool anyNormal = false;
     m_native.anyOrm = nullptr;
+    m_native.anyHeight = false;
     for (size_t t = 0; t < g.tiles.size(); ++t) {
         Texture* tex = g.tiles[t];
         if (!tex || !tex->m_image) continue;
@@ -234,6 +245,7 @@ void Device::MakeNativeCodes()
         if (tex->m_normalMap && m_normalMaps && m_pixelLighting) {
             normal[t] = BindlessImage(tex->m_normalMap) & 0xFFFFu;
             anyNormal = true;
+            m_native.anyHeight = m_native.anyHeight || tex->m_normalMap->m_alphaHeight;
         }
         if (tex->m_ormMap && m_pbr.enabled && m_pixelLighting) {
             orm[t] = BindlessImage(tex->m_ormMap) & 0xFFFFu;
@@ -242,12 +254,14 @@ void Device::MakeNativeCodes()
     }
     const bool anyMaps = anyNormal || m_native.anyOrm;
     std::vector<uint32_t> codes(size_t(g.cellsX) * g.cellsZ), maps(anyMaps ? codes.size() : 0), means(codes.size());
-    std::vector<uint32_t> mean(g.tiles.size(), 0xFF808080u);   // (each tile's, from its colour grid)
+    std::vector<uint32_t> mean(g.tiles.size(), 0x00808080u);   // (each tile's, from its colour grid)
+    const PebbleTable* table = m_native.pebbleTable.get();
+    auto byte = [](float v) { return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
     for (size_t t = 0; t < g.tiles.size(); ++t) {
         const Texture* tex = g.tiles[t];
-        if (!tex || tex->m_mean[0] < 0.0f) continue;
-        auto byte = [](float v) { return uint32_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
-        mean[t] = 0xFF000000u | byte(tex->m_mean[0]) << 16 | byte(tex->m_mean[1]) << 8 | byte(tex->m_mean[2]);
+        const uint32_t sand = table && t < table->sand.size() ? byte(table->sand[t]) << 24 : 0u;
+        if (!tex || tex->m_mean[0] < 0.0f) { mean[t] |= sand; continue; }
+        mean[t] = sand | byte(tex->m_mean[0]) << 16 | byte(tex->m_mean[1]) << 8 | byte(tex->m_mean[2]);
     }
     for (size_t k = 0; k < codes.size(); ++k) {
         const uint16_t code = g.codes[k];
@@ -255,7 +269,7 @@ void Device::MakeNativeCodes()
         const uint32_t t = tile < image.size() ? tile : 0;
         const uint32_t img = image.empty() ? 0u : image[t];
         codes[k] = 0xFF000000u | (img & 0xFFu) << 16 | ((img >> 8) & 0xFFu) << 8 | turn;
-        means[k] = mean.empty() ? 0xFF808080u : mean[t];
+        means[k] = mean.empty() ? 0x00808080u : mean[t];
         if (anyMaps) {
             const uint32_t nm = normal.empty() ? 0xFFFFu : normal[t], om = orm.empty() ? 0xFFFFu : orm[t];
             maps[k] = (om >> 8 & 0xFFu) << 24 | (nm & 0xFFu) << 16 | ((nm >> 8) & 0xFFu) << 8 | (om & 0xFFu);
@@ -447,6 +461,8 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
         return false;
     const bool base = !m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE];
     const bool light = m_rs[d3d::RS_LIGHTING] && IsMultiplyPass();
+    if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber)
+        EnsurePebbleTable();                     // (which cells are sand: the means' texture, made again once it is)
     if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber &&
         NativeMapsSignature() != m_native.mapsSignature)
         MakeNativeCodes();                       // (the tiles' maps or the settings changed: once a frame at most)

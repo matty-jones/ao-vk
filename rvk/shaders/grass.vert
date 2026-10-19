@@ -272,7 +272,7 @@ void main()
     {
         // (The clouds' part takes only about the sun's share of the ground's light, as on the ground: ffp FlatShade.)
         vec3 q = axis - normalize(FL.sunDir.xyz + vec3(0.0, -1e-6, 0.0)) * 0.05;
-        shade = (1.0 - (1.0 - SunShadowCasters(q)) * FL.shadowParams.y * (1.0 - storm)) *
+        shade = (1.0 - (1.0 - SunShadowCasters(q)) * ShadowStrength(length(q - GF.camera.xyz)) * (1.0 - storm)) *
                 (1.0 - 0.5 * max(1.0 - CloudShadowMap(q), storm));
     }
     shade *= 1.0 - 0.5 * storm;                  // (the storm's sky dimmer too: as the ground, ffp FlatShade)

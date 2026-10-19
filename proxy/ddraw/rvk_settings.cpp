@@ -68,6 +68,8 @@ Setting g_settings[] = {
     {"RVK_Bump", "Strength", "Materials",         Float, 0.25f, 4, 0.25f, 0.25f, "RANDYVK_BUMP", 0, "RVK_BumpOn"},
     {"RVK_NormalMaps", "Normal maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_NormalStr", "Strength", "Materials",         Float, 0.1f, 4, 0.1f, 1, nullptr, 0, "RVK_NormalMaps"},
+    {"RVK_Parallax", "Depth: textures with a height map (_h.png) stand out of the surface up close (0 = flat)", "Materials", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_NormalMaps"},
+    {"RVK_ParallaxSteps", "Depth detail: how finely the depth is traced (more: sharper edges at flat views, slower)", "Materials", Float, 0.5f, 3, 0.25f, 1, nullptr, 0, "RVK_NormalMaps"},
     {"RVK_Pbr", "PBR materials", "Materials", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PbrSpec", "Highlights", "Materials",         Float, 0, 2, 0.1f, 0.5f, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrEnv", "Reflections", "Materials",         Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Pbr"},
@@ -83,6 +85,11 @@ Setting g_settings[] = {
     {"RVK_GroundSun",  "Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundRocks", "Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundPebble", "Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_SandRipple", "Ground drawn by ao-vk: wind ripples in loose sand, in depth up close (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_SandPrints", "Ground drawn by ao-vk: footprints in loose sand, where characters walk (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_RippleSmooth", "Ground drawn by ao-vk: the sand ripples smoother - less wobble in their crests, less of the tile's bumps (0 = rough)", "Terrain", Float, 0, 1, 0.1f, 0.3f, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_DuneLight", "Ground drawn by ao-vk: dunes of loose sand shaped by the sun as it stands, their far sides in shade (0 = the game's flat light)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_SandGlint", "Ground drawn by ao-vk: a sparkle of sunlit grains in loose sand near you (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.5f, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundGrain", "Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundBlend", "Ground drawn by ao-vk: neighbouring ground textures blend into each other along a ragged edge instead of meeting in a hard straight line (0 = hard edges)", "Terrain", Float, 0, 1, 0.1f, 1.0f, nullptr, 0, "RVK_NativeGround"},
     {"RVK_GroundTess", "Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
@@ -279,6 +286,8 @@ Setting g_settings[] = {
     {"RVK_VolRays", "Light rays through gaps in the clouds", "Effects",  Float, 0, 3, 0.25f, 1, nullptr, 0, "RVK_VolOn"},
     {"RVK_DuskRays", "Sunset rays: beams fanning from a low sun through the clouds and over the hills (0: none)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolLand", "Haze over distant land (cool, as the air makes it)", "Effects",  Float, 0, 1, 0.05f, 0.1f, nullptr, 0},
+    {"RVK_DesertAir", "Deserts: dusty air in fair weather - far dunes paler and warmer, a pale band along the horizon (0 = none)", "Effects", Float, 0, 1, 0.1f, 1, nullptr, 0},
+    {"RVK_HeatShimmer", "Deserts: heat shimmer over distant land in the midday sun (0 = none)", "Effects", Float, 0, 1, 0.1f, 0.5f, nullptr, 0},
     {"RVK_NightDark", "Night darkness (0 = the game's, 2 = dark)", "Effects",  Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_Sun", "Sun brightness (0 = the game's own sun)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SunSize", "The suns' size (1: the game's own; less: tamer)", "Effects", Float, 0.3f, 1.5f, 0.05f, 0.75f, nullptr, 0, "RVK_Sun"},
@@ -368,10 +377,10 @@ Setting* Find(const char* name)
 // so switching it back on restores them). Settings not listed here only tune something these switch off.
 struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
-    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_GroundPebble", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
+    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_GroundPebble", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
-    {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
+    {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
@@ -656,6 +665,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_ProcSky") || is("RVK_SkyZone") || is("RVK_SkyBright"))
         d->SetProcSky(V("RVK_ProcSky") > 0.5f, V("RVK_SkyZone"), V("RVK_SkyBright"));
     else if (is("RVK_GoldenHour")) d->SetGoldenHour(V(n));
+    else if (is("RVK_DesertAir") || is("RVK_HeatShimmer")) d->SetDesertAir(V("RVK_DesertAir"), V("RVK_HeatShimmer"));
     // The game's sun sprites: with RVK_GameSun, or whenever our suns are off (HDR off, RVK_Sun 0) - never no sun.
     else if (is("RVK_Sun") || is("RVK_GameSun")) {
         d->SetSun(V("RVK_Sun"));
@@ -680,7 +690,8 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_HillShade")) d->SetHillShade(V(n) != 0.0f);
     else if (is("RVK_CliffTex") || is("RVK_CliffRock") || is("RVK_TileHide") || is("RVK_GroundVary") ||
              is("RVK_GroundTess") || is("RVK_CliffDepth") || is("RVK_GroundGrain") ||
-             is("RVK_GroundBlend")) {
+             is("RVK_GroundBlend") || is("RVK_Parallax") || is("RVK_ParallaxSteps") || is("RVK_SandRipple") ||
+             is("RVK_DuneLight") || is("RVK_SandGlint") || is("RVK_RippleSmooth") || is("RVK_SandPrints")) {
         rvk::Device::TerrainSettings t;
         t.cliff = V("RVK_CliffTex");
         t.rock = V("RVK_CliffRock") != 0.0f;
@@ -690,6 +701,13 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         t.depth = V("RVK_CliffDepth");
         t.grain = V("RVK_GroundGrain");
         t.blend = V("RVK_GroundBlend");
+        t.parallax = V("RVK_Parallax");
+        t.parallaxSteps = V("RVK_ParallaxSteps");
+        t.ripple = V("RVK_SandRipple");
+        t.dune = V("RVK_DuneLight");
+        t.glint = V("RVK_SandGlint");
+        t.smooth = V("RVK_RippleSmooth");
+        t.prints = V("RVK_SandPrints");
         d->SetTerrain(t);
     }
     else if (is("RVK_Contact")) d->SetContactShadows(V(n));

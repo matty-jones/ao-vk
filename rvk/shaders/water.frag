@@ -83,7 +83,7 @@ float SunShadow(vec3 posW)
             break;
         }
     }
-    return (1.0 - (1.0 - lit) * FL.shadowParams.y) * CloudShadowMap(posW);   // (and the clouds')
+    return (1.0 - (1.0 - lit) * ShadowStrength(length(posW - W.camera.xyz))) * CloudShadowMap(posW);   // (and the clouds')
 }
 
 // The ripples' slope (dh/dx, dh/dz) at a world point: two layers of the detail texture drifting across each other.

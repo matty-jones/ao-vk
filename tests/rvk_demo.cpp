@@ -910,7 +910,7 @@ float g_pick[2] = {-1.0f, -1.0f};   // --pick X Y: texture picking at (X, Y) of 
 bool g_pbrRoom = false;       // --pbr-room: unlit coloured walls around (red left, green right, blue ahead), for the
                               // environment probe: mirror balls show red on their left, green on their right
 // --pbr-maps DIR: the side-loaded files, through the proxy's loader (rvk/material_maps.h): the floor gets
-// floor_n.png, floor_ao.png / floor_r.png / floor_m.png (separate) and floor_d.png; the bottom row's middle ball
+// floor_n.png, floor_h.png, floor_ao.png / floor_r.png / floor_m.png (separate) and floor_d.png; the bottom row's middle ball
 // ball_n.png and ball_orm.png (packed). Missing files are skipped.
 std::string g_pbrMaps;
 
@@ -926,6 +926,7 @@ void AttachFileMaps(D& dev, Texture* tex, const std::string& stem)
     QueryPerformanceCounter(&t0);
     maps::MaterialFiles f;
     f.normal = file("_n.png");
+    f.height = file("_h.png");
     f.packed = file("_orm.png");
     f.parts[0] = file("_ao.png");
     f.parts[1] = file("_r.png");
@@ -1724,6 +1725,18 @@ float g_groundRocks = 1.0f;         // --ground-rocks X: RVK_GroundRocks
 float g_groundPebbles = 1.0f;       // --ground-pebbles X: RVK_GroundPebble
 float g_groundGrain = 0.6f;         // --ground-grain X: RVK_GroundGrain
 float g_groundBlend = 1.0f;         // --ground-blend X: RVK_GroundBlend
+float g_sandRipple = 1.0f;          // --sand-ripple X: RVK_SandRipple
+float g_parallax = 1.0f;            // --parallax X: RVK_Parallax
+float g_parallaxSteps = 1.0f;       // --parallax-steps X: RVK_ParallaxSteps
+float g_duneLight = 0.6f;           // --dune-light X: RVK_DuneLight
+float g_sandGlint = 0.5f;           // --sand-glint X: RVK_SandGlint
+float g_rippleSmooth = 0.3f;        // --ripple-smooth X: RVK_RippleSmooth
+float g_sandPrints = 1.0f;          // --sand-prints X: RVK_SandPrints
+bool g_printWalk = false;           // --print-walk: a walker's footprints laid ahead of the eye (sand_prints.cpp)
+float g_desertAir = 1.0f;           // --desert-air X: RVK_DesertAir
+float g_groundFog = 0.0f;           // --ground-fog END: the native ground scene fogged as the game does (linear from 0;
+                                    // Newland Desert: 1276), its colour the desert's, our sky over it; 0 none
+float g_heatShimmer = 0.5f;         // --heat-shimmer X: RVK_HeatShimmer
 bool g_tileOrm = false;             // --tile-orm: every other tile a shiny material map (PBR, pixel lighting on)
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 template <typename D>
@@ -1807,6 +1820,13 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         t.depth = g_cliffDepth;
         t.grain = g_groundGrain;
         t.blend = g_groundBlend;
+        t.ripple = g_sandRipple;
+        t.parallax = g_parallax;
+        t.parallaxSteps = g_parallaxSteps;
+        t.dune = g_duneLight;
+        t.glint = g_sandGlint;
+        t.smooth = g_rippleSmooth;
+        t.prints = g_sandPrints;
         dev.SetTerrain(t);
     }
     if (g_grassFieldOn) dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true);   // (--grass-field: the grass on it)
@@ -1823,8 +1843,29 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
             dev.RequestFrameDump("ground-frame.txt");
         }
         dev.BeginFrame();
+        // (--print-walk: a walker crossing in front of the eye, a print a step from 3 units ahead, one every 8 frames,
+        // and a second one's track across it.)
+        if (g_printWalk && frame >= 100 && frame < 100 + 8 * 24 && (frame - 100) % 8 == 0) {
+            const int k = (frame - 100) / 8, step = k % 12;
+            const float fx = std::cos(g_viewYaw), fz = std::sin(g_viewYaw), side = (k & 1) ? -1.0f : 1.0f;
+            // (The first walks away from the eye; the second crosses its way, left to right, 6 units out.)
+            const float ahead = k < 12 ? 3.0f + 0.7f * float(step) : 6.0f, right = k < 12 ? 0.0f : -4.0f + 0.7f * float(step);
+            const float dx = k < 12 ? fx : -fz, dz = k < 12 ? fz : fx;
+            const float cx = g_eye[0] + fx * ahead - fz * right, cz = g_eye[2] + fz * ahead + fx * right;
+            dev.AddSandPrint(cx - dz * 0.11f * side, cz + dx * 0.11f * side, dx, dz);
+        }
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
-        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8098B8, 1.0f);
+        constexpr uint32_t kDesertFog = 0xFFD6B878u;   // (Newland Desert's fog colour, about)
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, g_groundFog > 0.0f ? kDesertFog : 0xFF8098B8, 1.0f);
+        if (g_groundFog > 0.0f) {
+            dev.SetRenderState(RS_FOGENABLE, 1);
+            dev.SetRenderState(RS_FOGTABLEMODE, FOG_LINEAR);
+            dev.SetRenderState(RS_FOGCOLOR, kDesertFog);
+            const float fogStart = 0.0f, fogEnd = g_groundFog;
+            uint32_t bits;
+            std::memcpy(&bits, &fogStart, 4); dev.SetRenderState(RS_FOGSTART, bits);
+            std::memcpy(&bits, &fogEnd, 4); dev.SetRenderState(RS_FOGEND, bits);
+        }
         const Vector eye{g_eye[0], g_eye[1], g_eye[2]};
         const Vector at{eye.x + std::cos(g_viewYaw) * std::cos(g_viewPitch), eye.y - std::sin(g_viewPitch),
                         eye.z + std::sin(g_viewYaw) * std::cos(g_viewPitch)};
@@ -1843,6 +1884,36 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         sun.direction = g_sunDirSet ? Vector{g_sunDir[0], g_sunDir[1], g_sunDir[2]} : Vector{0.55f, -0.7f, 0.45f};
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
+        if (g_groundFog > 0.0f) {
+            // (The game's dome - a lit, unblended sphere round the eye - which our sky replaces.)
+            static std::vector<VtxMesh> dome;
+            static std::vector<uint16_t> domeIdx;
+            if (dome.empty()) {
+                for (int i = 0; i <= 8; ++i)
+                    for (int j = 0; j <= 16; ++j) {
+                        const float el = (float(i) / 8.0f - 0.5f) * kPi, az = float(j) / 16.0f * 2.0f * kPi;
+                        const float x = std::cos(el) * std::cos(az), y = std::sin(el), z = std::cos(el) * std::sin(az);
+                        dome.push_back({x * 500.0f, y * 500.0f, z * 500.0f, -x, -y, -z, kDesertFog, 0.0f, 0.0f});
+                    }
+                for (int i = 0; i < 8; ++i)
+                    for (int j = 0; j < 16; ++j) {
+                        const uint16_t a = uint16_t(i * 17 + j), b = uint16_t(a + 17);
+                        domeIdx.insert(domeIdx.end(), {a, b, uint16_t(a + 1), uint16_t(a + 1), b, uint16_t(b + 1)});
+                    }
+            }
+            dev.SetDrawVisual(uint32_t(VisualKind::Sky), "GenericMeshObject_t");
+            dev.SetTransform(World, Translate(eye.x, eye.y, eye.z));
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_ZWRITEENABLE, 0);
+            dev.SetRenderState(RS_FOGENABLE, 0);
+            dev.SetTexture(0, nullptr);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, dome.data(), uint32_t(dome.size()), domeIdx.data(),
+                                     uint32_t(domeIdx.size()));
+            dev.SetDrawVisual(0, nullptr);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetRenderState(RS_FOGENABLE, 1);
+            dev.SetTransform(World, Identity());
+        }
         dev.SetTextureStageState(0, TSS_MAGFILTER, TFG_LINEAR);   // (the game's ground: filtered, mipmapped)
         dev.SetTextureStageState(0, TSS_MINFILTER, TFN_LINEAR);
         dev.SetTextureStageState(0, TSS_MIPFILTER, TFP_LINEAR);
@@ -4548,6 +4619,17 @@ int main(int argc, char** argv)
         else if (a == "--tile-orm") g_tileOrm = true;
         else if (a == "--ground-grain" && i + 1 < argc) g_groundGrain = float(std::atof(argv[++i]));
         else if (a == "--ground-blend" && i + 1 < argc) g_groundBlend = float(std::atof(argv[++i]));
+        else if (a == "--sand-ripple" && i + 1 < argc) g_sandRipple = float(std::atof(argv[++i]));
+        else if (a == "--parallax" && i + 1 < argc) g_parallax = float(std::atof(argv[++i]));
+        else if (a == "--parallax-steps" && i + 1 < argc) g_parallaxSteps = float(std::atof(argv[++i]));
+        else if (a == "--dune-light" && i + 1 < argc) g_duneLight = float(std::atof(argv[++i]));
+        else if (a == "--sand-glint" && i + 1 < argc) g_sandGlint = float(std::atof(argv[++i]));
+        else if (a == "--ripple-smooth" && i + 1 < argc) g_rippleSmooth = float(std::atof(argv[++i]));
+        else if (a == "--sand-prints" && i + 1 < argc) g_sandPrints = float(std::atof(argv[++i]));
+        else if (a == "--print-walk") g_printWalk = true;
+        else if (a == "--desert-air" && i + 1 < argc) g_desertAir = float(std::atof(argv[++i]));
+        else if (a == "--ground-fog" && i + 1 < argc) g_groundFog = float(std::atof(argv[++i]));
+        else if (a == "--heat-shimmer" && i + 1 < argc) g_heatShimmer = float(std::atof(argv[++i]));
 
         else if (a == "--terrain-off") g_terrainOff = true;
         else if (a == "--terrain-yaw" && i + 1 < argc) g_terrainYaw = float(std::atof(argv[++i]));
@@ -4787,6 +4869,12 @@ int main(int argc, char** argv)
         return 1;
     }
     dev.SetPixelLighting(pixelLighting);
+    {
+        Device::TerrainSettings t;               // (--parallax: every scene's side-loaded heights)
+        t.parallax = g_parallax;
+        t.parallaxSteps = g_parallaxSteps;
+        dev.SetTerrain(t);
+    }
     dev.SetLightingDebug(lightingDebug);
     dev.SetHideInterface(g_hideUi);
     dev.SetLightOverride(lightOverride);
@@ -4814,6 +4902,7 @@ int main(int argc, char** argv)
         dev.SetSkyPlayfield(g_skyZone);
         dev.SetCloudParams(clouds);
     }
+    dev.SetDesertAir(g_desertAir, g_heatShimmer);
     if (g_smoke) {
         Device::SmokeParams smoke;
         smoke.enable = true;

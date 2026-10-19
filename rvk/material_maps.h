@@ -103,15 +103,67 @@ struct NormalSpread {
     }
 };
 
+// A height map (_h.png: greyscale, white high) as floats 0..1 at w x h (bilinear from its own size: the normal map's
+// needn't match).
+inline std::vector<float> HeightAt(const Image& img, int w, int h)
+{
+    std::vector<float> out(size_t(w) * h);
+    auto at = [&](int x, int y) {
+        x = std::clamp(x, 0, img.w - 1);
+        y = std::clamp(y, 0, img.h - 1);
+        return img.rgba[(size_t(y) * img.w + x) * 4] / 255.0f;
+    };
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const float fx = (x + 0.5f) * img.w / w - 0.5f, fy = (y + 0.5f) * img.h / h - 0.5f;
+            const int x0 = int(std::floor(fx)), y0 = int(std::floor(fy));
+            const float ax = fx - x0, ay = fy - y0;
+            out[size_t(y) * w + x] = (at(x0, y0) * (1 - ax) + at(x0 + 1, y0) * ax) * (1 - ay) +
+                                     (at(x0, y0 + 1) * (1 - ax) + at(x0 + 1, y0 + 1) * ax) * ay;
+        }
+    return out;
+}
+
+// The depth a height map's 0..1 spans, in repeats of the texture: what the parallax (ffp_main.glsl) marches through
+// and what the normals made from a height alone slope by.
+constexpr float kHeightDepth = 0.04f;
+
+// A normal map made from a height alone (no _n.png): its slopes over neighbouring texels, a whole texture repeat
+// kHeightDepth deep (tiled: the edges wrap). OpenGL convention, as the side-loaded ones.
+inline Image NormalsFromHeight(const Image& height)
+{
+    Image out;
+    out.w = height.w;
+    out.h = height.h;
+    out.channels = 4;
+    out.rgba.resize(size_t(out.w) * out.h * 4);
+    const std::vector<float> hv = HeightAt(height, height.w, height.h);
+    auto at = [&](int x, int y) { return hv[size_t((y + out.h) % out.h) * out.w + size_t((x + out.w) % out.w)]; };
+    for (int y = 0; y < out.h; ++y)
+        for (int x = 0; x < out.w; ++x) {
+            const float dx = (at(x + 1, y) - at(x - 1, y)) * 0.5f * out.w * kHeightDepth;
+            const float dy = (at(x, y + 1) - at(x, y - 1)) * 0.5f * out.h * kHeightDepth;   // (image rows run down)
+            const float len = std::sqrt(dx * dx + dy * dy + 1.0f);
+            uint8_t* px = &out.rgba[(size_t(y) * out.w + x) * 4];
+            px[0] = uint8_t(Byte(-dx / len * 0.5f + 0.5f));
+            px[1] = uint8_t(Byte(dy / len * 0.5f + 0.5f));
+            px[2] = uint8_t(Byte(1.0f / len * 0.5f + 0.5f));
+            px[3] = 255;
+        }
+    return out;
+}
+
 // Normal maps: each level averages the decoded normals of the level above and renormalises them, so distant
-// surfaces don't flatten or tilt; the averaged lengths go to `spread`.
-inline void MakeNormalChain(const Image& img, MipChain* out, NormalSpread* spread)
+// surfaces don't flatten or tilt; the averaged lengths go to `spread`. With a height map, its height (averaged the same
+// way) in the alpha of every level - the parallax's (ffp_main.glsl); without one the alpha is 1 (no depth).
+inline void MakeNormalChain(const Image& img, MipChain* out, NormalSpread* spread, const Image* height = nullptr)
 {
     int w = img.w, h = img.h;
     std::vector<float> nrm(size_t(w) * h * 3);
     for (size_t i = 0; i < size_t(w) * h; ++i)
         for (int c = 0; c < 3; ++c)
             nrm[i * 3 + c] = img.rgba[i * 4 + c] / 127.5f - 1.0f;
+    std::vector<float> hgt = height ? HeightAt(*height, w, h) : std::vector<float>();
     uint32_t levels = LevelCount(w, h);
     out->w = uint32_t(w);
     out->h = uint32_t(h);
@@ -124,7 +176,7 @@ inline void MakeNormalChain(const Image& img, MipChain* out, NormalSpread* sprea
             if (len < 1e-6f) { x = y = 0.0f; z = 1.0f; len = 1.0f; }
             lengths[i] = std::min(len, 1.0f);
             auto enc = [&](float v) { return Byte((v / len) * 0.5f + 0.5f); };
-            px[i] = 0xFF000000u | enc(x) << 16 | enc(y) << 8 | enc(z);
+            px[i] = (hgt.empty() ? 0xFF000000u : Byte(hgt[i]) << 24) | enc(x) << 16 | enc(y) << 8 | enc(z);
         }
         if (level == 0)                              // level 0 is the map as painted (its lengths are quantisation)
             std::fill(lengths.begin(), lengths.end(), 1.0f);
@@ -135,18 +187,32 @@ inline void MakeNormalChain(const Image& img, MipChain* out, NormalSpread* sprea
         if (level + 1 == levels)
             break;
         int nw, nh;
+        if (!hgt.empty()) hgt = Halve(hgt, w, h, 1, &nw, &nh);
         nrm = Halve(nrm, w, h, 3, &nw, &nh);
         w = nw;
         h = nh;
     }
 }
 
-inline bool DecodeNormalMap(const std::string& path, MipChain* out, NormalSpread* spread, std::string* error)
+// A normal map, with a height map's height in its alpha (heightPath: _h.png, or empty). Either alone will do: a height
+// without normals gets normals made from it.
+inline bool DecodeNormalMap(const std::string& path, MipChain* out, NormalSpread* spread, std::string* error,
+                            const std::string& heightPath = std::string(), bool* heightUsed = nullptr)
 {
-    Image img;
-    if (!LoadImage(path, &img, error))
+    Image img, height;
+    std::string heightError;
+    const bool hasHeight = !heightPath.empty() && LoadImage(heightPath, &height, &heightError);
+    if (heightUsed) *heightUsed = hasHeight;
+    if (!heightError.empty()) *error = heightError;   // (reported; the normals still drawn)
+    if (!path.empty()) {
+        if (!LoadImage(path, &img, error))
+            return false;
+    } else if (hasHeight) {
+        img = NormalsFromHeight(height);
+    } else {
         return false;
-    MakeNormalChain(img, out, spread);
+    }
+    MakeNormalChain(img, out, spread, hasHeight ? &height : nullptr);
     return true;
 }
 
@@ -289,10 +355,12 @@ inline bool DecodeAlbedoMap(const std::string& path, MipChain* out, std::string*
 // The files of one texture's material (empty = none).
 struct MaterialFiles {
     std::string normal, packed, parts[3], albedo, emissive;   // parts: occlusion, roughness, metallic
+    std::string height;                        // _h.png: greyscale, white high (the normal map's alpha: parallax)
     std::string leaves, leavesNormal;          // a tree canopy's own leaf art (_leaves.png, _leaves_n.png)
     bool Any() const
     {
-        return !normal.empty() || !packed.empty() || HasParts() || !albedo.empty() || !emissive.empty() || !leaves.empty();
+        return !normal.empty() || !height.empty() || !packed.empty() || HasParts() || !albedo.empty() ||
+               !emissive.empty() || !leaves.empty();
     }
     bool HasParts() const { return !parts[0].empty() || !parts[1].empty() || !parts[2].empty(); }
 };
@@ -300,6 +368,7 @@ struct MaterialFiles {
 // A texture's maps, decoded (Decode) and ready to upload.
 struct Decoded {
     MipChain normal, orm, albedo, emissive, leaves, leavesNormal;
+    bool height = false;                       // the normal map's alpha is a height (parallax)
     std::string ormFrom, errors;               // what the material was read from; what couldn't be read
     size_t Bytes() const
     {
@@ -331,8 +400,12 @@ inline Decoded Decode(const MaterialFiles& f)
     Decoded d;
     std::string error;
     NormalSpread spread;
-    if (!f.normal.empty() && !DecodeNormalMap(f.normal, &d.normal, &spread, &error))
-        d.errors += error + "; ";
+    if (!f.normal.empty() || !f.height.empty()) {
+        error.clear();
+        if (!DecodeNormalMap(f.normal, &d.normal, &spread, &error, f.height, &d.height) || !error.empty())
+            d.errors += error + "; ";
+        d.height = d.height && !d.normal.Empty();
+    }
     if ((!f.packed.empty() || f.HasParts()) && !DecodeOrmMap(f.packed, f.parts, spread, &d.orm, &d.ormFrom, &error))
         d.errors += error + "; ";
     if (!f.albedo.empty() && !DecodeAlbedoMap(f.albedo, &d.albedo, &error))
@@ -370,8 +443,10 @@ Texture* Upload(Dev& dev, const MipChain& chain)
 template <typename Dev>
 void Attach(Dev& dev, Texture* texture, const Decoded& d)
 {
-    if (Texture* normal = Upload(dev, d.normal))
+    if (Texture* normal = Upload(dev, d.normal)) {
+        normal->SetAlphaHeight(d.height);             // (set before the device sees it)
         dev.SetNormalMap(texture, normal);
+    }
     Texture* orm = Upload(dev, d.orm);
     Texture* albedo = Upload(dev, d.albedo);
     if (orm || albedo)
@@ -386,7 +461,9 @@ void Attach(Dev& dev, Texture* texture, const Decoded& d)
 template <typename Dev>
 void Replace(Dev& dev, Texture* texture, const Decoded& d)
 {
-    dev.SetNormalMap(texture, Upload(dev, d.normal));
+    Texture* normal = Upload(dev, d.normal);
+    if (normal) normal->SetAlphaHeight(d.height);
+    dev.SetNormalMap(texture, normal);
     dev.SetMaterialMaps(texture, Upload(dev, d.orm), Upload(dev, d.albedo));
     dev.SetEmissiveMap(texture, Upload(dev, d.emissive));
     Texture* leaves = Upload(dev, d.leaves);

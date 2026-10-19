@@ -25,9 +25,31 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Small loose stones lie on flat dirt, gravel and sand near you, grey on gravel and the colour of the ground on dirt,
   each its own shade, and grow out of the ground as you walk towards them instead of popping in (`RVK_GroundPebble`,
   1; 0 for none, up to 2 for twice as many). Grass, roads, trails, slabs and concrete stay clear; which ground gets them can
-  be set by hand per playfield in `randy-vk\terrain\pebbles.tsv` (playfield, surface type, how many).
+  be set by hand per playfield in `randy-vk\terrain\pebbles.tsv` (playfield, surface type, how many). On desert
+  sand only a few lie about, in the sand's own colour.
 - The ground at your feet has fine grit in it instead of a soft smear of its texture (`RVK_GroundGrain`, 0.6; 0 for
   none).
+- Loose sand in the deserts (Newland Desert, the Perpetual Wastelands, Wailing Wastes...) has wind ripples: their
+  crests wander and break off, up close they have real depth with sand settled in the troughs, and in a low sun each
+  crest throws its shadow over the next (`RVK_SandRipple`, 1; 0 for none). The wind's larger ripples carry them out to
+  the dunes in the distance, which no longer look like smooth felt. The grit of other ground is left off sand.
+  How smooth they are is its own setting (`RVK_RippleSmooth`, 0.3; 0 for more wobble in their crests and the sand
+  texture's own bumps under them, 1 for the smoothest).
+- Dunes are shaped by the sun as it stands: their far sides fall into shade, a little cooler, even at noon, where the
+  game's light left them almost as bright as the sunny side (`RVK_DuneLight`, 0.6; 0 for the game's flat light).
+- Characters leave footprints in the desert sand as they walk, left and right by turns, pressing the ripples flat;
+  they soften away over a few minutes (`RVK_SandPrints`, 1; 0 for none).
+- In the sun, loose sand near you sparkles here and there where a grain catches the light, changing as you move
+  (`RVK_SandGlint`, 0.5; 0 for none, 1 for more and brighter).
+- The deserts and wastelands have dusty air in fair weather: the sky turns pale and warm towards the horizon, and far
+  dunes and ridges fade into a warm haze instead of a cool blue one (`RVK_DesertAir`, 1; 0 for none). In the midday
+  sun the far land near the horizon shimmers in the heat (`RVK_HeatShimmer`, 0.5; 0 for none).
+- Texture packs and side-loaded materials can give a texture a height map (`_h.png`): up close its relief is drawn in
+  depth, bricks and stones standing out of the surface with shadows between them (`RVK_Parallax`, 1, under normal maps;
+  0 for flat). This works on buildings and on ground tiles alike, and sets the depth of the sand's ripples: at 1 or
+  more, looking along a dune the ripples' crests hide the troughs behind them, out to about 45 units. How finely the
+  depth is traced is its own setting (`RVK_ParallaxSteps`, 1; down to 0.5 for speed, up to 3 for sharper edges when
+  looking along the ground).
 - Different ground textures side by side (gravel beside dirt, where the game has no transition tile) blend into each
   other along a ragged edge instead of meeting in a hard straight line along the ground's grid (`RVK_GroundBlend`, 1;
   0 for the hard edges). Roads and the game's own transitions stay as they are.
@@ -93,6 +115,14 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   default: under the new sky they showed as coarse streaks; 1 to try them).
 
 ### Fixed
+- With the ground drawn by ao-vk and a low sun, shadows (a rock's, your character's) no longer stop dead with a hard
+  edge where the ground turns away from the sun, leaving lit sand inside them: ground facing away from the sun is in
+  shade, and stays so as the sun sets (also in its last few degrees, where they had turned a pale grey as bright as
+  the sunlit sand); sand ripples in a shadow no longer look sunlit.
+- At sunset, shadows near you keep their full strength until the sun is about 5 degrees up (a rock's long shadow over
+  the dunes); only distant ones fade out early, as before, so they don't lie as dark blocks on far mountains.
+- Sand no longer glints inside shadows.
+- At a low sun, the sand's ripples no longer lose their shadows in square, washed-out patches.
 - In a thunderstorm at night the ground no longer stays lit while the characters on it go nearly black: the storm
   dims the ground's share of the sky's light as it does everyone else's.
 - The rocks at the feet of cliffs are shaded round by the sun, lit on the side it shines on and darker away from it,

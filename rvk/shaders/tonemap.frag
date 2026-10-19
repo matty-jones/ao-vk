@@ -131,7 +131,8 @@ vec3 HazeColour()
     if (FL.skyRing[0].w > 0.5) {
         vec3 r = FL.sky[0].rgb + gSkyDelta;     // (the horizon: SkyHorizonDeltaAll gives it minus the fog)
         float l = dot(r, vec3(0.3, 0.59, 0.11));
-        return max(r + (l * vec3(0.78, 0.95, 1.25) - r) * 0.2, vec3(0.0));
+        // (In a desert's dust, FL.desert.x: paled warm, not cool.)
+        return max(r + (l * mix(vec3(0.78, 0.95, 1.25), vec3(1.1, 1.0, 0.82), FL.desert.x) - r) * 0.2, vec3(0.0));
     }
     return P.haze.rgb + gSkyDelta;
 }
@@ -182,9 +183,51 @@ vec3 Air(vec3 c, vec3 V, float dist, float phase)
     return c * through + scattered;
 }
 
+// Heat shimmer (RVK_HeatShimmer; FL.desert.y, rvk Device::DesertAir): over a desert's distant land in a high sun the
+// hot air bends the light, and the land low on the screen near the horizon wavers - where the scene is read moved by up
+// to ~1.5 pixels at 1440 lines (between pixels: read bilinear), in thin, wide cells drifting upwards. Only land past ~60
+// units (what's near, characters with it, stays still); not the sky. Where the moved read would take something much
+// nearer than the pixel (an edge in front), the pixel's own. Returns the offset in pixels (0 0: none).
+vec2 HeatShimmer(float d)
+{
+    float z = P.proj.y / min(d - P.proj.x, -1e-9);
+    float far_ = smoothstep(60.0, 140.0, z);
+    if (far_ <= 0.0 || FL.desert.z <= 0.0 || FL.desert.w <= 0.0)
+        return vec2(0.0);
+    vec2 size = vec2(textureSize(scene, 0));
+    vec2 uv = gl_FragCoord.xy / size;
+    vec3 ray = normalize(vec3((uv.x * 2.0 - 1.0) / FL.desert.z, (1.0 - uv.y * 2.0) / FL.desert.w, 1.0));
+    float up = dot(FL.skyView[1].xyz, ray);      // (the ray's world height: level near the horizon)
+    float level = smoothstep(-0.16, -0.04, up) * (1.0 - smoothstep(0.01, 0.05, up));
+    float amount = FL.desert.y * far_ * level;
+    if (amount <= 0.0)
+        return vec2(0.0);
+    float t = FL.wind.z;
+    vec2 p = gl_FragCoord.xy / size.y * vec2(45.0, 160.0);
+    vec2 wave = vec2(GustNoise(vec3(p.x, p.y + t * 9.0, t * 0.8)), GustNoise(vec3(p.x + 17.3, p.y + t * 9.0 + 5.1, t * 0.8 + 3.0)));
+    vec2 off = (wave - 0.5) * 2.0 * vec2(0.5, 1.0) * (1.5 * size.y / 1440.0) * amount;
+    ivec2 moved = clamp(ivec2(gl_FragCoord.xy + off), ivec2(0), ivec2(size) - 1);
+    float dm = texelFetch(depthTex, moved, 0).r;
+    if (dm < 1.0 && P.proj.y / min(dm - P.proj.x, -1e-9) < 0.8 * z)
+        return vec2(0.0);
+    return off;
+}
+
+// The scene at a pixel position (gl_FragCoord's units), bilinear between its pixels (it is bound point-sampled).
+vec4 SceneAt(vec2 pos)
+{
+    vec2 size = vec2(textureSize(scene, 0)), p = pos - 0.5, f = fract(p);
+    ivec2 a = clamp(ivec2(floor(p)), ivec2(0), ivec2(size) - 1), b = clamp(a + 1, ivec2(0), ivec2(size) - 1);
+    return mix(mix(texelFetch(scene, a, 0), texelFetch(scene, ivec2(b.x, a.y), 0), f.x),
+               mix(texelFetch(scene, ivec2(a.x, b.y), 0), texelFetch(scene, b, 0), f.x), f.y);
+}
+
 void main()
 {
-    vec4 s = texelFetch(scene, ivec2(gl_FragCoord.xy), 0);
+    // How far the pixel is: its view depth over the far clip's (the sky: wholly).
+    float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r;
+    vec2 shimmer = FL.desert.y > 0.0 && d < 1.0 && (int(P.proj.w) & 16) != 0 ? HeatShimmer(d) : vec2(0.0);
+    vec4 s = shimmer != vec2(0.0) ? SceneAt(gl_FragCoord.xy + shimmer) : texelFetch(scene, ivec2(gl_FragCoord.xy), 0);
     vec3 glow = P.params.z > 0.0 ? Bloom() * P.params.z : vec3(0.0);
     // The neon look (RVK_NeonSat): the halo a little more saturated - coloured light glows its colour.
     if (FL.neon.x > 0.0) {
@@ -192,8 +235,6 @@ void main()
         glow = max(mix(vec3(gl), glow, 1.0 + 0.35 * FL.neon.x), vec3(0.0));
     }
     vec3 c = Reflected(s.rgb * AmbientFactor() + Indirect());
-    // How far the pixel is: its view depth over the far clip's (the sky: wholly).
-    float d = texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r;
     float far = 1.0;
     // The rain (rvk rain.cpp's rain layer: not in the scene - its reflected light, premultiplied, and cover): laid
     // over the finished picture below, after the haze, the storm's fog and the dust - a few units off, it is veiled by

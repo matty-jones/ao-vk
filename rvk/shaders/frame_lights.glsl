@@ -87,6 +87,26 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 terrainLight;          // the native ground's lightmap as a + b.n of its slope (rvk native_ground.cpp
                                 // FitNativeLight): xyz b turned to the sun's bearing now (b when there is none), w a (0: no fit)
     vec4 terrainLight2;         // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
-    vec4 terrain3;              // ... x: the native ground's tiles blended across their cells' edges (RVK_GroundBlend)
+    vec4 terrain3;              // ... x: the native ground's tiles blended across their cells' edges (RVK_GroundBlend);
+                                // y the side-loaded height maps' depth, in repeats (RVK_Parallax; 0 off), z its
+                                // marches' step counts' scale (RVK_ParallaxSteps)
+    vec4 sand;                  // the sand (terrain.glsl): x its ripples (RVK_SandRipple), y the dunes lit by the sun
+                                // now (RVK_DuneLight), z its glints (RVK_SandGlint), w the wind's bearing (radians)
+    vec4 desert;                // a desert's air (rvk Device::DesertAir; tonemap.frag): x its dust (RVK_DesertAir), y
+                                // the heat shimmer (RVK_HeatShimmer), each as much as now; z, w the projection's m00, m11
+    vec4 sand2;                 // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSmooth); y the
+                                // footprints' map (rvk sand_prints.cpp): its bindless image + 1 | sampler << 20 (the
+                                // float's bits; 0 = none), z, w its corner (world x, z)
     Light lights[64];
 } FL;
+
+// Things' shadows' strength at a point `dist` from the eye (FL.shadowParams.y is the setting's, unfaded). As the light
+// nears the horizon their shadows lie hundreds of metres down the slopes facing it, in the far cascades' coarse texels
+// - dark blocks on the mountains, switching off at once at the cut (user, 2026-10-13): out there they fade out from ~10
+// degrees up to none at ~3. Near the eye they keep their strength to ~5 degrees, going only as the map stops at ~3 -
+// faded everywhere, a rock's long shadow over the sand at sunset was barely there (the user's rvk-frame-160158).
+float ShadowStrength(float dist)
+{
+    const float up = -normalize(FL.sunDir.xyz + vec3(0.0, 1e-6, 0.0)).y;
+    return FL.shadowParams.y * mix(smoothstep(0.05, 0.09, up), smoothstep(0.05, 0.17, up), smoothstep(40.0, 120.0, dist));
+}

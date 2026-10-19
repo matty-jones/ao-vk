@@ -154,7 +154,34 @@
   there disagree (`NativeEdgeOff`: a road's slabs, the game's transition tiles keep their edges). The lighting pass's
   normal and material maps keep each cell's own. Its cliffs' share (terrain.glsl `TerrainMapAt`) from the interpolated normal
   (the game's ground: each triangle's own, which on the native ground cut the rock off at the triangles' edges under
-  a rim), starting earlier (~23 to ~45 degrees) and wandered by noise. Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
+  a rim), starting earlier (~23 to ~45 degrees) and wandered by noise. Loose sand (docs/desert-plan.md): which tiles are
+  sand comes from the pebbles' table (`PebbleTable::sand`: its ground taken for sand - warm, bright, fine; or the hand
+  table's fifth column - times the share of its texels that are that ground), made whenever the playfield has surface
+  types (`EnsurePebbleTable`), into the means texture's alpha (filtered: it fades over a cell's edge; both passes have
+  it, `NativeSand`). On it: wind ripples (`RVK_SandRipple`, 1; shaders/parallax.glsl) - small ones 0.36 units apart,
+  2.8 cm deep, the wind's larger ones 5.5 apart in patches, crests across a fixed bearing for each playfield
+  (`SandWindBearing`), warped by value noise read once a pixel with its gradient (each step after that a fract);
+  marched in both passes alike within ~45 units, their depth there x `RVK_Parallax` (parallax: the cells' coordinates
+  moved to where the eye's ray meets them, rays followed to ~83 degrees off the normal, 3-10 steps by the wavelengths
+  crossed, no depth written; and a few steps towards the sun for the troughs' shadow, on the lightmap's sun share), their
+  slope on the lighting pass's normal (through `gLightmapRelief`), and their depth in the base pass's colour (troughs
+  darker, crests lighter: lit along their crests, the relief alone barely showed); each size fading out as its
+  wavelength nears a few pixels across its crests; none on slip faces past ~32 degrees; the rock grit off on sand (+0.4 ms at
+  2560 x 1440 in rvk_demo on Newland Desert). The dunes lit by the sun now (`RVK_DuneLight`, 0.6; terrain.glsl
+  `NativeSandLight`): as the rocks, 0.75 of the light where the bake says the sun reached is the sun's, by the smooth
+  normal's Lambert over the flat ground's, the lee a little cooler - the bake's flat sky share made the dunes a felt at
+  noon. On sand the pebbles are few (0.05) and of the sand's hue, and grains glint in the sun near the eye
+  (`RVK_SandGlint`, 0.5; parallax.glsl `SandGlint`: cells from 3 cm, doubling with distance, a hashed facet each, near
+  the half-way direction; added past the stages' clip, divided by the sand's colour). The
+  deserts' pale tile (their paths and flats) is packed ground, not sand. Over the deserts the air is dusty and the
+  far land shimmers (`RVK_DesertAir`, `RVK_HeatShimmer`: `Device::DesertAir`, our sky's horizon band, the land haze,
+  tonemap.frag `HeatShimmer`; docs/desert-plan.md phase 4). Characters leave footprints in the sand
+  (`RVK_SandPrints`, 1; sand_prints.cpp, sand_prints.frag): a print a step along the grass's trail of each character
+  (`UpdatePushTrail`), stamped into a 2048-texel map at 2 cm round the eye (toroidal, two images by turns, relaxing
+  over minutes), read on sand (parallax.glsl `SandPrintAt`) in the march (the ripples pressed to its floor), the
+  lighting pass's normal and the base pass's tone. A relief's own shadow in the march takes the sun's 0.75 of the
+  light, not the sky's. A cell's tile with a side-loaded height (`_h.png`, docs/materials.md) is marched the same way, in both passes
+  (the maps texture bound in the base pass too then: `m_native.anyHeight`, FL.terrain3.w). Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):

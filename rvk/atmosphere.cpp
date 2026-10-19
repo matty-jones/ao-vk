@@ -196,8 +196,8 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
     const float h = SunUp();
     if (m_skyFogSet && h > 0.2f)
         m_skyDayFogL += (fogL - m_skyDayFogL) * (1.0f - std::exp(-m_frameDt / 10.0f));
-    struct Push { float size[4], sun[4], moon[4], scale[4], zone[4], weather[4], night[4]; } push{};
-    static_assert(sizeof(Push) == 112, "atmos_view.frag's push constants");
+    struct Push { float size[4], sun[4], moon[4], scale[4], zone[4], weather[4], night[4], dust[4]; } push{};
+    static_assert(sizeof(Push) == 128, "atmos_view.frag's push constants");
     push.size[0] = float(kViewW);
     push.size[1] = float(kViewH);
     push.size[2] = tune[0];
@@ -233,6 +233,15 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
         for (int i = 0; i < 3; ++i) push.night[i] = night[i] * fogL * 0.08f;
     }
     push.night[3] = 0.35f * std::clamp(m_skyGlow, 0.0f, 2.0f);   // (the halo round the sun: RVK_SkyGlow)
+    // A desert's dusty air (RVK_DesertAir): a pale, warm band along the horizon. (The haze over the land takes its
+    // colour from this horizon: tonemap.frag HazeColour.)
+    {
+        float desert[2];
+        DesertAir(desert);
+        const float dusty[3] = {1.1f, 1.0f, 0.82f};   // (unit luma)
+        for (int i = 0; i < 3; ++i) push.dust[i] = dusty[i];
+        push.dust[3] = desert[0];
+    }
     FullscreenPass(cmd, m_atmosView, m_atmosViewPipeline, m_atmosTrans->m_view, m_atmosMulti->m_view, m_linearSampler,
                    &push.size[0], sizeof(push), false);
     // Its horizon row copied for the CPU (read back when this frame slot comes round again).

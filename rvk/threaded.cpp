@@ -968,6 +968,11 @@ void ThreadedDevice::SetGoldenHour(float s)
     Enqueue([this, s](const uint8_t*) { m_device.SetGoldenHour(s); });
 }
 
+void ThreadedDevice::SetDesertAir(float air, float shimmer)
+{
+    Enqueue([this, air, shimmer](const uint8_t*) { m_device.SetDesertAir(air, shimmer); });
+}
+
 void ThreadedDevice::SetShadowMemory(uint32_t mode)
 {
     Enqueue([this, mode](const uint8_t*) { m_device.SetShadowMemory(mode); });

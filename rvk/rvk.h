@@ -106,6 +106,8 @@ public:
     // PixelsThumbnail); false until a full level-0 upload has been sampled.
     bool TexelRgbAt(float u, float v, uint8_t rgb[3]) const;
     bool TexelRgbBilinear(float u, float v, uint8_t rgb[3]) const;   // ... filtered (the lightmaps)
+    // (A normal map, before the device is handed it: its alpha is a height map's - rvk/material_maps.h.)
+    void SetAlphaHeight(bool height) { m_alphaHeight = height; }
 
 private:
     friend class Device;
@@ -143,6 +145,7 @@ private:
     bool m_lightmap = false;           // captured as a terrain lightmap (a re-upload recaptures the grass's light)
     bool m_groundBase = false;         // captured as a terrain base texture (a re-upload recaptures the grass's ground)
     Texture* m_normalMap = nullptr;    // tangent-space normal map drawn with this texture (owned; SetNormalMap)
+    bool m_alphaHeight = false;        // (a normal map) its alpha is a height map's height: drawn with parallax
     Texture* m_ormMap = nullptr;       // PBR material: R occlusion, G roughness, B metallic (owned; SetMaterialMaps)
     Texture* m_albedoMap = nullptr;    // drawn instead of this texture's own pixels (owned; SetMaterialMaps)
     Texture* m_emissiveMap = nullptr;  // light the surface gives off, added to it (owned; SetEmissiveMap)
@@ -607,6 +610,16 @@ public:
     }
     // The golden hour's grade round sunrise and sunset (tonemap.frag Grade; 0 none).
     void SetGoldenHour(float s) { m_goldenHour = s; }
+    // A desert's air (docs/desert-plan.md phase 4): its dust - the far land paler and warmer, a pale band along the
+    // horizon - (RVK_DesertAir) and the heat shimmer over its distant sand (RVK_HeatShimmer), each 0..1.
+    void SetDesertAir(float air, float shimmer)
+    {
+        m_desertAir = air;
+        m_heatShimmer = shimmer;
+        m_frameLightsDirty = true;
+    }
+    // ... how much of each now (sky.cpp): out[0] the dust, out[1] the shimmer.
+    void DesertAir(float out[2]) const;
     // Remembered shadow casters (things out of view still casting) and the terrain's shade from a low sun, on / off.
     // (0 off, 1 on, 2 on without the remembered sway, 3 only big things, 4 drawn solid; switched: the churn trace and a few seconds of
     // the shadow items' counts anew - finding a blinking shadow)
@@ -620,8 +633,16 @@ public:
     struct TerrainSettings {
         float cliff = 1.0f, tiling = 1.0f, variation = 1.0f, round = 0.6f, depth = 0.4f, grain = 0.6f, blend = 1.0f;
         bool rock = true;
+        float parallax = 1.0f;                   // RVK_Parallax: side-loaded height maps' depth, x
+        float parallaxSteps = 1.0f;              // RVK_ParallaxSteps: its marches' step counts, x
+        float ripple = 1.0f, dune = 0.6f, glint = 0.5f;   // the sand: RVK_SandRipple, RVK_DuneLight, RVK_SandGlint
+        float smooth = 0.3f;                     // ... RVK_RippleSmooth
+        float prints = 1.0f;                     // ... RVK_SandPrints: footprints' depth, x (sand_prints.cpp)
     };
     void SetTerrain(const TerrainSettings& s) { m_terrainSettings = s; m_frameLightsDirty = true; }
+    // A footprint at world x, z, heading dx, dz (unit), stamped at the next frame (sand_prints.cpp; the characters'
+    // own come from the grass's trail, UpdatePushTrail - this for tests).
+    void AddSandPrint(float x, float z, float dx, float dz) { m_printsNew.push_back({x, z, dx, dz}); }
     // The ground drawn by rvk from the playfield's data instead of the game's (native_ground.cpp, RVK_NativeGround): its
     // data (null: the game's own), the baked lightmap of the hour as the game hands it over (4-bit texels, two to a
     // byte, the high nibble first; (w + 1) / 2 bytes a row) with its shade, and on / off.
@@ -1039,9 +1060,10 @@ private:
         std::future<ClutterBuild> clutterPending;   // ... being made
     };
     // The pebbles (ground_pebbles.cpp): which tiles get them - per tile how many (0..2: 1 the coarsest gravel's), their
-    // size x, and where in it (16 x 16 texels, 1 its ground, 0 grass or another ground's).
+    // size x, and where in it (16 x 16 texels, 1 its ground, 0 grass or another ground's); and how much of it is sand
+    // (0..1: its ground taken for sand, times the share of its texels that are that ground - the ripples, terrain.glsl).
     struct PebbleTable {
-        std::vector<float> density, size;
+        std::vector<float> density, size, sand;
         std::vector<uint8_t> mask;
     };
     struct PebbleBlock {                         // a block of 8 x 8 cells' pebbles, made when the eye is near
@@ -1058,6 +1080,7 @@ private:
         Texture* maps = nullptr;                 // each cell's tile's normal map and material map (their bindless images
                                                  // in R, G and B, A; 0xFFFF none)
         Texture* anyOrm = nullptr;               // a tile's material map (the lighting pass's stand-in: PBR on)
+        bool anyHeight = false;                  // a tile's normal map has a height in its alpha (parallax.glsl)
         Texture* means = nullptr;                // each cell's tile's mean colour (the cliffs' rock tint, filtered)
         uint64_t mapsSignature = 0;              // the tiles' maps and the settings the two textures were made with
         Texture* lightmap = nullptr;
@@ -1088,6 +1111,7 @@ private:
     } m_native;
     bool NativeGroundReplaces(uint32_t fvf);
     uint64_t NativeMapsSignature() const;
+    float SandWindBearing() const;
     // The native ground for the grass's capture (grass.cpp): the colour of the ground at cell coordinates (u, v) - its
     // cell's tile, turned - and its light at lightmap coordinates.
     bool NativeGroundRgb(float u, float v, uint8_t rgb[3]) const;
@@ -1102,6 +1126,7 @@ private:
     std::vector<uint8_t> GrassyTiles() const;
     void DrawNativeClutter(const d3d::Matrix& viewProj);
     std::shared_ptr<const PebbleTable> MakePebbleTable();
+    bool EnsurePebbleTable();
     static ClutterBuild BuildNativePebbles(std::shared_ptr<const NativeGround> ground, uint32_t bx, uint32_t bz,
                                            float density, std::shared_ptr<const PebbleTable> table);
     void DrawNativePebbles(const d3d::Matrix& viewProj);
@@ -1443,6 +1468,7 @@ private:
     // Our own sky (atmosphere.cpp; RVK_ProcSky): the atmosphere's tables, the sky view's frame; the dome's draw skipped.
     bool m_procSky = true;                       // RVK_ProcSky
     float m_skyZone = 0.25f;                     // RVK_SkyZone: how much of the zone's own sky colour is kept
+    float m_desertAir = 1.0f, m_heatShimmer = 0.5f;   // RVK_DesertAir, RVK_HeatShimmer (SetDesertAir)
     float m_skyBright = 1.0f;                    // RVK_SkyBright: the sky's brightness against the game's
     Texture* m_atmosTrans = nullptr;
     Texture* m_atmosMulti = nullptr;
@@ -1811,6 +1837,8 @@ private:
         double time, born;                       // last there; last moved (head) or made (trail)
         float dropX, dropZ;                      // head: where it last dropped a trail point
         bool head;                               // follows a character (else a trail point)
+        float printX = 0.0f, printZ = 0.0f;      // head: where it last left a footprint (sand_prints.cpp)
+        float printSide = 1.0f;                  // ... and the next one's side (1 left, -1 right)
     };
     std::vector<PushPoint> m_pushTrail;
     uint64_t m_drawMeshKey = 0;                  // the current draw's mesh cache key
@@ -2120,6 +2148,22 @@ private:
     float m_tsEye = 1.0f, m_tsWeight = 0.0f;
     bool m_tsDirty = false;
     uint64_t m_tsMadeFrame = ~0ull;
+    // Footprints in the sand (sand_prints.cpp, RVK_SandPrints): a print map round the eye, two images by turns (the
+    // last read, the next written), the prints the characters left since it was last stepped, where it lies.
+    struct SandPrint { float x, z, dx, dz; };    // world x, z; heading (unit)
+    std::vector<SandPrint> m_printsNew;
+    Texture* m_printMap[2] = {};
+    uint32_t m_printCur = 0;                     // the map last written
+    int m_printOrigin[2] = {};                   // its corner (world texels)
+    bool m_printValid = false;
+    double m_printTime = 0.0;
+    uint64_t m_printsStamped = 0;                // (the log's count)
+    VkPipeline m_printPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_printLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_printSetLayout = VK_NULL_HANDLE;
+    bool SandPrintsOn() const { return m_terrainSettings.prints > 0.0f && m_native.on && m_native.ground; }
+    void UpdateSandPrints(VkCommandBuffer cmd);
+    void SandPrintLights(float out[3]);
     Texture* m_terrainSunMap = nullptr;
     VkPipeline m_terrainSunPipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_terrainSunLayout = VK_NULL_HANDLE;

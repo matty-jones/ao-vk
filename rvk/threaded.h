@@ -171,6 +171,7 @@ public:
     void SetViewRange(float range);
     void SetProcSky(bool on, float zone, float bright);
     void SetGoldenHour(float s);
+    void SetDesertAir(float air, float shimmer);
     void SetShadowMemory(uint32_t mode);
     void SetHillShade(bool on);
     void SetTerrain(const Device::TerrainSettings& s);

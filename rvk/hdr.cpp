@@ -715,8 +715,14 @@ void Device::LandHaze(float out[24]) const
     if (m_landHaze <= 0.0f || !linear)
         return;
     const float l = 0.3f * fog[0] + 0.59f * fog[1] + 0.11f * fog[2];
-    const float cool[3] = {0.78f, 0.95f, 1.25f};
-    for (int k = 0; k < 3; ++k) out[k] = std::max(0.0f, fog[k] + (l * cool[k] - fog[k]) * 0.45f) * 1.08f;
+    // (A desert's dust, RVK_DesertAir: the haze warm and pale instead of cool and blue, and thicker.)
+    float desert[2];
+    DesertAir(desert);
+    const float cool[3] = {0.78f, 0.95f, 1.25f}, dusty[3] = {1.1f, 1.0f, 0.82f};
+    for (int k = 0; k < 3; ++k) {
+        const float tint = cool[k] + (dusty[k] - cool[k]) * desert[0];
+        out[k] = std::max(0.0f, fog[k] + (l * tint - fog[k]) * (0.45f + 0.2f * desert[0])) * (1.08f + 0.06f * desert[0]);
+    }
     out[3] = std::clamp(m_landHaze, 0.0f, 1.0f);
     out[4] = fogParams[0];
     out[5] = fogParams[1];
@@ -743,7 +749,7 @@ void Device::LandHaze(float out[24]) const
             morning = smooth(-0.1f, -0.02f, up) * (1.0f - smooth(0.1f, 0.26f, up)) *
                       (0.5f + 0.5f * m_sunRising) * std::max(m_mornHaze, 0.0f);
         }
-        out[10] = 0.6f / fogParams[1] * weather * (1.0f + morning);
+        out[10] = 0.6f / fogParams[1] * weather * (1.0f + morning) * (1.0f + 0.8f * desert[0]);
         out[11] = 150.0f;
         // (D3D row vectors: a world direction's view-space form is d.x * row 0 + d.y * row 1 + d.z * row 2.)
         for (int k = 0; k < 3; ++k) out[12 + k] = v[1][k];
@@ -773,8 +779,9 @@ void Device::LandHaze(float out[24]) const
             out[20 + k] = light[k] * tint[k] * (moon ? 1.0f : 0.5f * through) * terrain * clouds;
     }
     if (m_frameNumber % 600 == 3)
-        Log("land haze: colour %.2f %.2f %.2f x %.2f, the game's fog %.0f..%.0f", double(out[0]), double(out[1]),
-            double(out[2]), double(out[3]), double(out[4]), double(out[5]));
+        Log("land haze: colour %.2f %.2f %.2f x %.2f, the game's fog %.0f..%.0f; desert air %.2f, shimmer %.2f (sun %.2f up, "
+            "clouds %.2f)", double(out[0]), double(out[1]), double(out[2]), double(out[3]), double(out[4]), double(out[5]),
+            double(desert[0]), double(desert[1]), double(SunUp()), double(m_cloudParams.enable ? SkyCloudiness() : 0.0f));
 }
 
 // Depth of field (dof_*.frag): the scene with its occlusion -> focus distance (1x1, eased) -> half resolution colour

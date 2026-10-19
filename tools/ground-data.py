@@ -155,8 +155,9 @@ def verdict(mean, line, edge, grain):
         return "smooth grey", 0.0
     if grain > 50:
         return "straw", 0.3
-    if sat > 0.4 and lum > 128 and grain < 32:
-        return "sand", 0.25
+    r, g, b = mean
+    if r >= g >= b and grain < 32 and sat > 0.4 and lum > 128:
+        return "sand", 0.05
     d = min(max(0.2 + (grain - 8) / 30, 0.2), 1.0) * (1.0 if sat < 0.2 else 0.7)
     return ("gravel" if sat < 0.2 and grain > 25 else "dirt"), d
 

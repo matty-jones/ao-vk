@@ -236,7 +236,7 @@ void Scan()
            g_hot ? "; hot reload on (watching it and live\\)" : "");
 }
 
-constexpr const char* kSuffixes[] = {"_n.png", "_orm.png", "_r.png", "_m.png", "_ao.png", "_d.png", "_e.png",
+constexpr const char* kSuffixes[] = {"_n.png", "_h.png", "_orm.png", "_r.png", "_m.png", "_ao.png", "_d.png", "_e.png",
                                      "_leaves.png", "_leaves_n.png"};
 
 std::string FindIn(const Folder& f, uint32_t type, uint32_t id, const char* suffix)
@@ -289,6 +289,7 @@ rvk::maps::MaterialFiles FilesFor(uint32_t type, uint32_t id)
 {
     rvk::maps::MaterialFiles f;
     f.normal = FindMap(type, id, "_n.png");
+    f.height = FindMap(type, id, "_h.png");
     f.packed = FindMap(type, id, "_orm.png");
     f.parts[0] = FindMap(type, id, "_ao.png");
     f.parts[1] = FindMap(type, id, "_r.png");

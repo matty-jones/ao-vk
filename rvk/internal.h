@@ -69,7 +69,8 @@ constexpr float kPebbleRange = 40.0f;
 enum : uint32_t { kTerrainBase = 1, kTerrainLight = 2 };   // DrawTransform terrainAt[3]: the ground's base pass; its
                                                            // lighting pass, which reads the base's maps (F_BUMPBASE, MAT_BASE)
 constexpr float kSkySceneryHaze = 2000.0f;     // the sky's scenery's haze: its colour left e^-(distance / this)
-enum : uint32_t { kMatPbr = 1, kMatBase = 2, kMatAlbedo = 4, kMatEmissive = 8, kMatPicked = 16, kMatSky = 32, kMatCloudSheet = 64 };   // DrawTransform
+enum : uint32_t { kMatPbr = 1, kMatBase = 2, kMatAlbedo = 4, kMatEmissive = 8, kMatPicked = 16, kMatSky = 32, kMatCloudSheet = 64,
+                  kMatHeight = 128 };   // DrawTransform
                                                  // mat[2]: has an ORM map; it is the ground base's; stage 0 draws an
                                                  // albedo map; has an emissive map; its texture was picked
 // GPU-driven M2: one record a draw (binding 12). `constIndex` selects the shared DrawConstants it draws with; the
@@ -179,7 +180,15 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // FitNativeLight): xyz b turned to the sun's bearing now (b when there is none), w a (0: no fit)
     float terrainLight2[4];        // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
     float terrain3[4];             // ... x: the native ground's tiles blended across their cells' edges
-                                   // (RVK_GroundBlend)
+                                   // (RVK_GroundBlend); y the side-loaded height maps' depth, in repeats (RVK_Parallax;
+                                   // 0 off), z its marches' step counts' scale (RVK_ParallaxSteps)
+    float sand[4];                 // the sand (terrain.glsl): x its ripples (RVK_SandRipple), y the dunes lit by the sun
+                                   // now (RVK_DuneLight), z its glints (RVK_SandGlint), w the wind's bearing (radians)
+    float desert[4];               // a desert's air (Device::DesertAir; tonemap.frag): x its dust (RVK_DesertAir), y the
+                                   // heat shimmer (RVK_HeatShimmer), each as much as now; z, w the projection's m00, m11
+    float sand2[4];                // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSmooth); y the
+                                   // footprints' map (sand_prints.cpp): its bindless image + 1 | sampler << 20 (the
+                                   // float's bits; 0 = none), z, w its corner (world x, z)
     GpuLight lights[kFrameLights];
 };
 

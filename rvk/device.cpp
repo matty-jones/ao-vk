@@ -1657,6 +1657,7 @@ void Device::BeginFrame()
     m_cloudPuffs.clear();
     m_cloudsDrawn = false;
     UpdatePushTrail();
+    UpdateSandPrints(f.main);                    // (the footprints left since: sand_prints.cpp)
     UpdateLeaves();
     PruneObjects();                              // (the per-object cache: objects.cpp)
     m_tessCharsPrev.swap(m_tessChars);           // characters drawn last frame (their rigid parts: TessellateDraw)
