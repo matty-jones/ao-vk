@@ -72,7 +72,10 @@
   (zlib, stb's; deltas summed down then across) and, inside later `RunFunction` calls (the ground alive then), has the
   game make each tile's texture (`FUN_10036594`), 24 a frame; then hands it all over (`Device::SetNativeGround`).
   (`Tesselate` itself runs only when the player crosses into another cell: `RunFunction` compares.)
-  Gamecode's `AnarchyGround_t::SetShadowMap` (its import patched) hands over the hour's baked lightmap and shade. rvk
+  Gamecode's `AnarchyGround_t::SetShadowMap` (its import patched) hands over the hour's baked lightmap and shade; a
+  ground handed over without one since it was read (the call came first) has it rebuilt from the ground's own patch
+  lightmaps (their palette indices in our surfaces' CPU copies, the shade from the palette). The lightmap outlives a
+  playfield's ground (it is the hour's). rvk
   builds a static patch of (P+1)^2 vertices per 64 cells (the game's format: set 0 the cell coordinates, set 1 the
   whole playfield's lightmap; `DrawSharedIndexed`, arena-resident) and a tile-code texture (each cell's tile's bindless
   image and turn). The first ground draw of the game's in a pass draws every patch in view for it with the game's

@@ -46,6 +46,7 @@ struct Reading {
     bool active = false;
 } g_reading;
 bool g_sent = false;
+bool g_haveLightmap = false;        // the hour's lightmap handed over for this ground (SetShadowMap since it was read)
 
 bool Readable(const void* p, size_t n)
 {
@@ -143,6 +144,7 @@ void OnNewGround(void* ground, void* data)
     if (g_rvk.device) g_rvk.device->SetNativeGround(nullptr);     // (the last playfield's: its textures go)
     rnative::ground::SetNative(false);
     g_sent = false;
+    g_haveLightmap = false;
     g_reading = Reading{};
     auto g = ReadGround(static_cast<const uint8_t*>(ground), static_cast<const uint8_t*>(data));
     if (!g)
@@ -200,13 +202,60 @@ void __fastcall SetShadowMapHook(void* ground, void* edx, const void* data, int 
     }
     auto copy = std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + bytes);
     g_rvk.device->SetNativeGroundLightmap(copy, uint32_t(w), uint32_t(h), shade);
+    g_haveLightmap = true;
+}
+
+// The hour's lightmap as the ground already has it, for a ground whose SetShadowMap came before the hook (or before it
+// was read): its patches' 64 x 64 paletted textures (AnarchyGround_t +0x5CC, 0x54 a patch, +0x190 / +0x194 across /
+// down, +0x188 their size; a patch's texture at +0x10) - our surfaces keep their palette indices - packed again, and
+// the shade from the palette (entry 15 = 192 x (1 - shade): SetShadowMap's).
+void LightmapFromGround(const uint8_t* ground, const NativeGround& g)
+{
+    if (!Readable(ground, 0x5D0)) return;
+    const int P = At<int>(ground, 0x188), across = At<int>(ground, 0x190), down = At<int>(ground, 0x194);
+    const uint8_t* patches = At<const uint8_t*>(ground, 0x5CC);
+    if (P != int(g.patch) || across * P != int(g.cellsX) || down * P != int(g.cellsZ) ||
+        !Readable(patches, size_t(across) * down * 0x54))
+        return;
+    const uint32_t w = g.cellsX, h = g.cellsZ, rowBytes = (w + 1) / 2;
+    auto packed = std::make_shared<std::vector<uint8_t>>(size_t(rowBytes) * h, 0);
+    float shade = -1.0f;
+    uint32_t found = 0;
+    for (int pz = 0; pz < down; ++pz)
+        for (int px = 0; px < across; ++px) {
+            void* rt = At<void*>(patches + size_t(pz * across + px) * 0x54, 0x10);
+            if (!Readable(rt, 0x34)) continue;
+            void* surface = At<void*>(rt, 0x30);
+            if (!Readable(surface, 4)) continue;
+            auto* dds = At<IUnknown*>(surface, 0);
+            RSurface* s = nullptr;
+            if (!dds || FAILED(dds->QueryInterface(IID_RvkSurface, reinterpret_cast<void**>(&s))) || !s) continue;
+            RSurface* top = s->top ? s->top : s;
+            const uint32_t pitch = top->Pitch();
+            if (top->palettized && top->desc.dwWidth == uint32_t(P) && top->desc.dwHeight == uint32_t(P) &&
+                top->shadow.size() >= size_t(pitch) * P) {
+                for (int j = 0; j < P; ++j)
+                    for (int i = 0; i < P; ++i) {
+                        const uint8_t v = top->shadow[size_t(j) * pitch + i] & 15u;
+                        const uint32_t x = uint32_t(px * P + i), z = uint32_t(pz * P + j);
+                        uint8_t& b = (*packed)[size_t(z) * rowBytes + x / 2];
+                        b = (x & 1) ? uint8_t((b & 0xF0u) | v) : uint8_t((b & 0x0Fu) | v << 4);
+                    }
+                if (shade < 0.0f && top->palette) shade = 1.0f - float(top->palette->entries[15].peRed) / 192.0f;
+                ++found;
+            }
+            s->Release();
+        }
+    if (found * 2 < uint32_t(across * down))
+        return;                                      // (the ground's shadows off, or not made: the stand-in grey)
+    g_rvk.device->SetNativeGroundLightmap(packed, w, h, std::clamp(shade < 0.0f ? 0.5f : shade, 0.0f, 1.0f));
+    RvkLog("native ground: the hour's lightmap taken from the ground's own (%u patches)", found);
 }
 
 // rnative::ground: the game's frame of its ground (game thread; the ground and its data alive): the tiles' textures
 // made a few at a time while reading one, then the ground handed to rvk.
 void OnGroundFrame(void* ground, void* data)
 {
-    (void)ground;
     if (!g_reading.active || g_sent || data != g_reading.data || !g_rvk.device)
         return;
     for (int made = 0; made < 24 && g_reading.nextTile < g_reading.textures.size(); ++made, ++g_reading.nextTile)
@@ -226,6 +275,7 @@ void OnGroundFrame(void* ground, void* data)
         return;
     }
     g_rvk.device->SetNativeGround(g_reading.ground);
+    if (!g_haveLightmap) LightmapFromGround(static_cast<const uint8_t*>(ground), *g_reading.ground);
     rnative::ground::SetNative(g_setting);
 }
 

@@ -92,7 +92,8 @@ void Device::PollNativeSky()
 void Device::DestroyNativeGround()
 {
     if (m_native.skyPending.valid()) m_native.skyPending.wait();
-    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.lightmap, &m_native.sky})
+    // (The lightmap stays: it is the hour's, handed over when it changes - perhaps before this playfield's ground.)
+    for (Texture** t : {&m_native.codes, &m_native.maps, &m_native.sky})
         if (*t) { DestroyTexture(*t); *t = nullptr; }
     m_native.patches.clear();
     m_native.indices.reset();
