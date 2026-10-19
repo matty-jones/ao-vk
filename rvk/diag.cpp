@@ -541,7 +541,7 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
     if (minX <= maxX) std::fprintf(f, " | rect %.0f,%.0f-%.0f,%.0f", minX, minY, maxX, maxY);
     else std::fprintf(f, " | offscreen");
     std::fprintf(f, "\n");
-    if (vertices && IsTerrain(fvf)) {
+    if (vertices && IsTerrain(fvf) && !m_native.clutter) {   // (the ground's, not the rocks on it)
         DumpTerrainMapping(f, vertices, vertexCount, layout, indices, indexCount);
         const Texture* t = m_textures[0];
         if (!lit && t && t->m_thumbValid &&
