@@ -3015,13 +3015,16 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     Copy4(c.matSpecular, m_material.specular);
     Copy4(c.matEmissive, m_material.emissive);
     ArgbToFloat(m_rs[d3d::RS_AMBIENT], c.ambient);
-    // (A thunderstorm's sky: dimmer than the clear day's the ambient holds. Not the ground's light pass - its shade
-    // takes the storm's sky with the lightmap, ffp FlatShade.)
+    // (A thunderstorm's sky: dimmer than the clear day's the ambient holds - the ground's light pass's too: its shade,
+    // ffp FlatShade, takes the storm's sky with the lightmap only, and the pass adds the ambient to it - by night, under
+    // the night's dark lightmap, nearly all its light: in a night storm the land stood lit under black characters,
+    // user 2026-10-19.)
     // (And a low sun's shade the sky's cool light - sky.cpp; the ground's light pass tinted whole in ffp_main.)
-    if (!(IsTerrain(fvf) && IsMultiplyPass())) {
+    {
         const float sky = StormSkyLight();
         const bool sky_ = VisualKind(m_drawVisualKind) == VisualKind::Sky;
-        for (int i = 0; i < 3; ++i) c.ambient[i] *= sky * (sky_ ? 1.0f : m_dawnTint[1][i]);
+        const bool groundLight = IsTerrain(fvf) && IsMultiplyPass();
+        for (int i = 0; i < 3; ++i) c.ambient[i] *= sky * (sky_ || groundLight ? 1.0f : m_dawnTint[1][i]);
     }
     ArgbToFloat(m_rs[d3d::RS_FOGCOLOR], c.fogColor);
     // (A thunderstorm's: its air dark yellow-green, dimmed. Not the ground's light pass's white fog: multiplying the

@@ -93,6 +93,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   default: under the new sky they showed as coarse streaks; 1 to try them).
 
 ### Fixed
+- In a thunderstorm at night the ground no longer stays lit while the characters on it go nearly black: the storm
+  dims the ground's share of the sky's light as it does everyone else's.
 - The rocks at the feet of cliffs are shaded round by the sun, lit on the side it shines on and darker away from it,
   instead of flat patches of bright and dark triangles (bright undersides at some hours, hard-edged facets in the
   evening and in the shade of cliffs and walls).
