@@ -1061,7 +1061,8 @@ void main()
         outMotion.zw = vec2(o.x, o.y + 3.0);
     }
     // Blended with this fragment's alpha like the colour (kept by multiplying and additive passes, see the blend state).
-    outAlbedo = vec4(clamp(albedo, 0.0, 1.0), current.a);
+    // (Its alpha read by the indirect light only: the native ground's pebbles mark themselves 0.5 there - gi.frag.)
+    outAlbedo = vec4(clamp(albedo, 0.0, 1.0), terrainMapped && terrain.pebble ? 0.5 : current.a);
 #endif
     if ((C.flags.x & F_OVERBRIGHT2X) != 0u)
         current.rgb *= 0.5;                               // blended as dst * src * 2

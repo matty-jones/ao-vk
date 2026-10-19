@@ -943,7 +943,10 @@ bool Device::RenderGi(VkCommandBuffer cmd)
     MakeDepthReadable(cmd);
     float params[8] = {m_aoProj.m[2][2], m_aoProj.m[3][2], m_aoProj.m[0][0], m_aoProj.m[1][1],
                        m_giRadius, FrameNoise(), float(m_scene->m_width), float(m_scene->m_height)};
-    FullscreenPass(cmd, m_giTex[0], m_giPipeline, m_depthView, m_scene->m_view, m_pointSampler, params, sizeof(params), false);
+    // (The surface colours too: their alpha marks the native ground's pebbles, which the gathering steps round.)
+    if (m_albedo) Transition(cmd, m_albedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    FullscreenPass(cmd, m_giTex[0], m_giPipeline, m_depthView, m_scene->m_view, m_pointSampler, params, sizeof(params), false,
+                   m_albedo ? m_albedo->m_view : VK_NULL_HANDLE);
     // Two blurs each way (quarter resolution): wide taps, then the gaps between them.
     static const float kPasses[4][2] = {{1, 0}, {0, 1}, {1, 0}, {0, 1}};
     for (int pass = 0; pass < 4; ++pass) {

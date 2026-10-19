@@ -6,6 +6,7 @@
 // multiplies it by the surface colour) and view depth, for the depth-aware blur.
 layout(set = 0, binding = 0) uniform sampler2D depthTex;
 layout(set = 0, binding = 1) uniform sampler2D scene;     // HDR scene, full resolution
+layout(set = 0, binding = 2) uniform sampler2D albedo;    // the surface colours: alpha 0.5 the native ground's pebbles
 layout(push_constant) uniform Push {
     vec4 proj;          // D3D projection: m[2][2], m[3][2], m[0][0], m[1][1]
     vec4 params;        // radius (world units), this frame's noise offset, full target width, height
@@ -26,6 +27,12 @@ vec3 ViewPos(vec2 pix, out bool sky)
 void main()
 {
     vec2 pix = floor(gl_FragCoord.xy) * 4.0;     // the full-resolution pixel this one stands for
+    // Not a pebble's (ffp_main marks them in the albedo's alpha), another of its 4 x 4 if there is one: a pebble's
+    // sides face the lit ground round it and gathered its light many times over, and a few centimetres above the
+    // ground the depth-aware blur spread that onto it - each pebble glowed with a halo round it.
+    for (int k = 0; k < 16 && abs(texelFetch(albedo, ivec2(pix), 0).a - 0.5) < 0.01; ++k)
+        pix = min(floor(gl_FragCoord.xy) * 4.0 + vec2(float((k * 5 + 3) & 3), float(((k * 5 + 3) >> 2) & 3)),
+                  P.params.zw - 1.0);
     bool sky;
     vec3 p = ViewPos(pix, sky);
     if (sky) { outGi = vec4(0.0, 0.0, 0.0, 1e6); return; }
