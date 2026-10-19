@@ -364,8 +364,13 @@ vec4 TerrainClutterBase(TerrainMap m)
     const uint h = TerrainHash(uvec2(floor(m.uv[0] * 256.0)) + uvec2(0x51u, 0x2Fu));
     const float v = float(h & 0xFFFFu) / 65535.0, w = float(h >> 16) / 65535.0;
     const vec3 mean = NativeMean(m.uv[0]);
-    const float grain = clamp(Luma(c.rgb) / max(Luma(FL.terrainRock2.rgb), 0.02), 0.5, 1.6);
-    return vec4(mix(vec3(Luma(mean)), mean, 0.4 + 0.6 * w) * grain * (0.8 + 0.7 * v), c.a);
+    // (Never brighter than a ground texture can be: on pale sand the grain and the shade together made stones of
+    // twice white, which the lighting pass doubled again - they glowed in the bloom and shimmered as the TAA jittered
+    // them; scaled down, not clipped, to keep their hue.)
+    const float grain = clamp(Luma(c.rgb) / max(Luma(FL.terrainRock2.rgb), 0.02), 0.7, 1.3);
+    vec3 stone = mix(vec3(Luma(mean)), mean, 0.4 + 0.6 * w) * grain * (0.75 + 0.5 * v);
+    stone *= min(1.0, 0.92 / max(max(stone.r, stone.g), max(stone.b, 1e-4)));
+    return vec4(stone, c.a);
 }
 
 vec4 TerrainBase(uint image, sampler smp, inout TerrainMap m)
