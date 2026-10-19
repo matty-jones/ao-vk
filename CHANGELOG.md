@@ -93,9 +93,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   default: under the new sky they showed as coarse streaks; 1 to try them).
 
 ### Fixed
-- The rocks at the feet of cliffs no longer show bright tan triangles along their undersides with the rest of them
-  dark, at some hours of the day and in the shade of a cliff; they are lit from above and only a little darker
-  underneath.
+- The rocks at the feet of cliffs are shaded round by the sun, lit on the side it shines on and darker away from it,
+  instead of flat patches of bright and dark triangles (bright undersides at some hours, hard-edged facets in the
+  evening and in the shade of cliffs and walls).
 - With the camera just below the top of a wall or building (or beside a cliff face), the character and most of the
   world could vanish from view; they stay drawn now.
 - The rounded shapes of the ground and of characters (`RVK_GroundTess`, `RVK_Tess`) change smoothly as the camera moves

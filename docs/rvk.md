@@ -122,10 +122,12 @@
   format (set 0 the cell they fell from: their tint, the cliff's colour) and drawn in the ground's own passes after
   its patches (`m_native.clutter`; `D.terrainAt.y` 2): the rock laid from above and both sides by their faces
   (terrain.glsl `TerrainClutter`), the ground's lightmap where they lie turned to their faces by the lightmap's fit
-  (`NativeSunTurn`: the flat ground's a + b.y, b's height not below 0 - the ground's slopes all face up, so the fit
-  only knows a + b.y, and one hour's b.y of -0.25 lit the rocks' undersides three times their tops - their sides by b
-  turned to the sun's bearing, undersides a little darker by the sky; in a baked shadow, a texel well under the fit,
-  only the sky's shading, for the ground's slopes none). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
+  (`NativeRockLight`: where the bake says the sun reached - the texel against the fit's a + b.y, `NativeSunShare` -
+  0.6 of it is the sun's, lit by the face's smooth normal against the frame's sun over the flat ground's, the live
+  shadow on that part only; the rest the sky's, darker on their undersides. Not by the fit's b: its slopes all face
+  up, so it can't say how a face turned down or away is lit - one hour's b.y of -0.25 lit their undersides three
+  times their tops - and with the shadow map their only shading, a low sun's self-shadowing showed hard facets.
+  The ground's slopes' turn, too, fades out in a baked shadow). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
   the grass. Made on worker threads (5-8 ms a patch), 2 patches at a time, within 200 units; small ones drawn within
   90, dropped past 450. Pebbles (`rvk/ground_pebbles.cpp`, `RVK_GroundPebble`, 1; docs/pebbles-plan.md): on the
   tiles whose surface type (`NativeGround::types`, tile_type_data) is dirt, gravel or sand by its base tile's look

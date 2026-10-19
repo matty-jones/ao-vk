@@ -499,31 +499,46 @@ vec4 NativeLightmapAt(vec2 at)
 // baked it with the sun of its hour (rvk native_ground.cpp FitNativeLight: FL.terrainLight2.xyz b), and with b turned
 // to the sun's bearing now (FL.terrainLight.xyz; its height as baked) the ratio of the two is how much lighter or
 // darker this slope is now - flat ground 1, as baked; a slope that turns towards the sun through the hour brightens,
-// one that turns away darkens (by FL.terrainLight2.w, RVK_GroundSun). The rocks on it (TerrainClutter) take the
-// ground's light where they lie, which is the flat ground's, by their faces the same way: a + b.n over a + b.y.
+// one that turns away darkens (by FL.terrainLight2.w, RVK_GroundSun). Only as far as the sun reached the texel (lit:
+// its value, as the fit read it): in a baked shadow what is left is the sky's light, which comes from no one side.
 // (In the 0..1 of the texels; floored at the palette's darkest, the ratio clamped.)
-// The rocks: the ground's slopes all face more or less up, so the fit can't tell its a from b's height (b.y) - only
-// their sum, the flat ground's light, is sure; one hour's came out a 0.46 + b.y -0.25, and a rock's undersides
-// (a - b.y) lit three times brighter than its top. So a rock keeps the flat ground's light, b's height not below 0,
-// and its sides lit by b's bearing; its undersides a little darker by the sky.
-// Only as far as the sun reached the texel (lit: its value, as the fit read it): in a baked shadow - a cliff's, a
-// building's - what is left is the sky's light, which comes from no one side.
-float NativeSunTurn(vec3 n, bool rocks, float lit)
+// How much of the baked sun a texel has: 0 in a baked shadow .. 1 lit as the fit says the slope n (ground: the flat
+// ground under them) is.
+float NativeSunShare(vec3 n, bool ground, float lit)
 {
-    if (FL.terrainLight.w <= 0.0 || dot(n, n) <= 1e-8 || (!rocks && FL.terrainLight2.w <= 0.0)) return 1.0;
+    if (FL.terrainLight.w <= 0.0 || dot(n, n) <= 1e-8) return 1.0;
+    const vec3 b = FL.terrainLight2.xyz;
+    const float baked = FL.terrainLight.w + (ground ? b.y : dot(b, normalize(n)));
+    return smoothstep(0.55, 0.85, lit / max(baked, 0.06));
+}
+float NativeSunTurn(vec3 n, float lit)
+{
+    if (FL.terrainLight.w <= 0.0 || dot(n, n) <= 1e-8 || FL.terrainLight2.w <= 0.0) return 1.0;
     n = normalize(n);
     const vec3 b = FL.terrainLight2.xyz, now = mix(b, FL.terrainLight.xyz, FL.terrainLight2.w);
-    const float baked = FL.terrainLight.w + (rocks ? b.y : dot(b, n));
-    const float sky = rocks ? clamp(0.8 + 0.25 * n.y, 0.55, 1.05) : 1.0;
-    float turned;
-    if (rocks) {
-        const float up = max(b.y, 0.0);
-        turned = clamp(max((baked - up + up * n.y) * sky + dot(now.xz, n.xz), 0.06) / max(baked, 0.06), 0.3, 2.0);
-    } else {
-        turned = clamp(max(FL.terrainLight.w + dot(now, n), 0.06) / max(baked, 0.06), 0.4, 2.0);
-    }
-    const float sun = smoothstep(0.55, 0.85, lit / max(baked, 0.06));
-    return mix(sky, turned, sun);
+    const float baked = FL.terrainLight.w + dot(b, n);
+    const float turned = clamp(max(FL.terrainLight.w + dot(now, n), 0.06) / max(baked, 0.06), 0.4, 2.0);
+    return mix(1.0, turned, NativeSunShare(n, false, lit));
+}
+
+// The rocks on the native ground (TerrainClutter) take the ground's light where they lie - the flat ground's - shaped
+// by their own faces: where the bake says the sun reached, part of it is the sun's (kRockSun), lit by the face's
+// smooth normal against the frame's sun (Lambert, over the flat ground's), its live shadow (vis) taking only that
+// part; the rest the sky's, a little darker on their sides and undersides. Lit from the lightmap's fit instead they
+// had almost no shape of their own (the fit's slopes all face up: it can't say how a face turned down or away is
+// lit, and one hour's lit their undersides three times their tops) - their only shading the shadow map's, which at a
+// low sun shadowed a rock's own faces barely turned to it a triangle at a time: hard-edged facets.
+float NativeRockLight(vec3 n, float lit, float vis)
+{
+    const float kRockSun = 0.6;
+    if (dot(n, n) <= 1e-8) return 1.0;
+    n = normalize(n);
+    const float sky = clamp(0.8 + 0.25 * n.y, 0.55, 1.05);
+    const vec3 S = dot(FL.sunDir.xyz, FL.sunDir.xyz) > 0.0 ? -normalize(FL.sunDir.xyz) : vec3(0.0);
+    if (S.y <= 0.02) return sky;
+    const float sun = clamp(max(dot(n, S), 0.0) / max(S.y, 0.3), 0.0, 2.0) * vis;
+    const float k = kRockSun * NativeSunShare(n, true, lit);
+    return (1.0 - k) * sky + k * sun;
 }
 
 // The native ground's material (occlusion, roughness, metal) laid as its colour is: from above the cell's tile's own
