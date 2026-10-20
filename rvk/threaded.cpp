@@ -386,7 +386,7 @@ ThreadedDevice::LiveTimes ThreadedDevice::Live() const
 {
     const auto get = [](const std::atomic<float>& a) { return a.load(std::memory_order_relaxed); };
     return {get(m_liveFrameMs), get(m_liveGameWaitMs), get(m_device.m_liveRenderMs), get(m_device.m_liveGpuWaitMs),
-            get(m_device.m_liveGpuMs)};
+            get(m_device.m_liveGpuMs), m_device.m_liveShown.load(std::memory_order_relaxed)};
 }
 
 bool ThreadedDevice::ReadPixels(Texture* target, void* out)
@@ -1045,6 +1045,11 @@ void ThreadedDevice::SetRenderScale(uint32_t percent)
 void ThreadedDevice::SetUpscaler(uint32_t which)
 {
     Enqueue([this, which](const uint8_t*) { m_device.SetUpscaler(which); });
+}
+
+void ThreadedDevice::SetFrameGen(bool enable)
+{
+    Enqueue([this, enable](const uint8_t*) { m_device.SetFrameGen(enable); });
 }
 
 void ThreadedDevice::SetFogBanks(float s, float force)

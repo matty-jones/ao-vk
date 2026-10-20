@@ -1181,7 +1181,7 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
     }
     if (scratch > m_smokeN && m_smokeN) remake = true;
     if (remake) {
-        vkDeviceWaitIdle(m_device);
+        WaitIdle();
         auto destroy = [&](SmokeImage& i) {
             if (i.view) vkDestroyImageView(m_device, i.view, nullptr);
             if (i.image) vmaDestroyImage(m_allocator, i.image, i.allocation);

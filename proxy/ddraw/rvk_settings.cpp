@@ -343,6 +343,7 @@ Setting g_settings[] = {
     {"RVK_Taa",        "Temporal anti-aliasing",                                   "Anti-aliasing",    Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Sharpen", "Sharpening (0 = none)", "Anti-aliasing",    Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_Taa"},
     {"RVK_RenderScale", "Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster)", "Anti-aliasing", Choice, 50, 100, 1, 75, nullptr, 0, "RVK_Taa", "100 85 75 67 50"},
+    {"RVK_FrameGen", "Frame generation (AMD FSR 3.1): a frame interpolated between each two - about twice the frames shown, a little more latency", "Anti-aliasing", Bool, 0, 1, 1, 0, nullptr, 0, "RVK_Taa"},
     {"RVK_Upscaler", "Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2, 2: AMD FSR 3.1)", "Anti-aliasing", Choice, 0, 2, 1, 0, nullptr, 0, "RVK_Taa", "0 1 2"},
     {"RVK_Fxaa",       "FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer)", "Anti-aliasing", Bool, 0, 1, 1, 0, nullptr, 0},
 
@@ -774,6 +775,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Taa") || is("RVK_Sharpen")) d->SetTaa(V("RVK_Taa") != 0.0f, V("RVK_Sharpen"));
     else if (is("RVK_RenderScale")) d->SetRenderScale(uint32_t(V(n)));
     else if (is("RVK_Upscaler")) d->SetUpscaler(uint32_t(V(n)));
+    else if (is("RVK_FrameGen")) d->SetFrameGen(V(n) != 0.0f);
     else if (is("RVK_HeatFlash")) d->SetHeatFlash(V(n));
     else if (is("RVK_SandForce") || is("RVK_SandAsh")) d->SetSandForce(V("RVK_SandForce"), V("RVK_SandAsh") != 0.0f);
     else if (is("RVK_Saturation") || is("RVK_Contrast") || is("RVK_Warmth") || is("RVK_NightTint") ||

@@ -395,7 +395,7 @@ FfxFloat32x4 SampleHistory(FfxFloat32x2 fUV)
 #endif
 
 #if defined(FSR3UPSCALER_BIND_UAV_LUMA_HISTORY)
-layout (set = 0, binding = FSR3UPSCALER_BIND_UAV_LUMA_HISTORY, rgba8) uniform image2D  rw_luma_history;
+layout (set = 0, binding = FSR3UPSCALER_BIND_UAV_LUMA_HISTORY, rgba16f) uniform image2D  rw_luma_history;   // (ao-vk: was rgba8 - the image is R16G16B16A16_FLOAT)
 
 void StoreLumaHistory(FfxInt32x2 iPxPos, FfxFloat32x4 fLumaHistory)
 {

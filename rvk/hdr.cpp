@@ -565,6 +565,8 @@ void Device::EndScene()
     if (taa && !(scaled && m_upscaler == 1 && RenderFsr2(cmd, upscaled, taaParams)) &&
         !(scaled && m_upscaler == 2 && RenderFsr3(cmd, upscaled, taaParams)))
         RenderTaa(cmd, upscaled, taaParams);
+    if (taa && m_fg)
+        FgPrepare(cmd, taaParams);               // (RVK_FrameGen: the scene's depth and motion for the generated frame)
     if (fxaa) {
         // Into the main target, or - with motion blur - into an image of its own that the blur then reads (the two
         // swap: m_tonemapped is what the blur reads).

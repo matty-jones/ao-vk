@@ -149,7 +149,7 @@ bool Device::LoadStatels(const char* path, uint32_t playfield)
     if (playfield == m_statelPlayfield && !m_statelItems.empty())
         return true;
     if (m_statelBuffer || !m_statelMasks.empty()) {
-        vkDeviceWaitIdle(m_device);              // (the old buffer may be in a frame still in flight)
+        WaitIdle();                              // (the old buffer may be in a frame still in flight)
         m_completed = std::max(m_completed, m_submitted);
     }
     DestroyStatels();

@@ -49,7 +49,7 @@ FfxResource Resource(VkImage image, VkFormat format, uint32_t w, uint32_t h, VkI
 void Device::DestroyFsr3()
 {
     if (m_fsr3) {
-        vkDeviceWaitIdle(m_device);              // (its images and pipelines go at once)
+        WaitIdle();                              // (its images and pipelines go at once)
         ffxFsr3ContextDestroy(&m_fsr3->context);
         delete m_fsr3;
         m_fsr3 = nullptr;

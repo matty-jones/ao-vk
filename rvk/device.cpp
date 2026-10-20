@@ -180,7 +180,7 @@ Device::~Device()
 {
     if (!m_device)
         return;
-    vkDeviceWaitIdle(m_device);
+    WaitIdle();
     ReleaseParticleTextures(true);
     m_completed = UINT64_MAX;                   // the device is idle: everything deferred can go
     CollectGarbage();
@@ -430,6 +430,7 @@ bool Device::PickDevice(std::string* error)
             if (best < 0 || discrete) {
                 best = static_cast<int>(i);
                 m_queueFamily = q;
+                m_queueFamilyCount = qf[q].queueCount;
             }
             break;
         }
@@ -493,12 +494,14 @@ bool Device::CreateLogicalDevice(std::string* error)
     VkPhysicalDeviceVulkan13Features v13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceDescriptorIndexingFeatures descIdx{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
     VkPhysicalDeviceRobustness2FeaturesEXT rob2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
     VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     features.pNext = &v13;
     v13.pNext = &descIdx;
     descIdx.pNext = &rob2;
     rob2.pNext = &eds3;
     eds3.pNext = &vertexInput;
+    vertexInput.pNext = &timeline;
     vkGetPhysicalDeviceFeatures2(m_physical, &features);
     // Quad operations in fragment shaders (ffp_main.glsl: a 2x2 block of cut-out pixels stops before the lighting).
     VkPhysicalDeviceVulkan11Properties p11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES};
@@ -554,6 +557,11 @@ bool Device::CreateLogicalDevice(std::string* error)
     enRob2.nullDescriptor = m_bindless ? VK_TRUE : VK_FALSE;
     enRob2.pNext = &enEds3;
     enDescIdx.pNext = &enRob2;
+    // Timeline semaphores: the frame interpolation swapchain's (RVK_FrameGen, framegen.cpp) - core in Vulkan 1.2.
+    VkPhysicalDeviceTimelineSemaphoreFeatures enTimeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
+    enTimeline.timelineSemaphore = timeline.timelineSemaphore;
+    m_timelineSemaphores = timeline.timelineSemaphore == VK_TRUE;
+    enVertexInput.pNext = &enTimeline;
     VkPhysicalDeviceVulkan13Features enV13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     enV13.pNext = &enDescIdx;
     enV13.dynamicRendering = VK_TRUE;
@@ -592,11 +600,14 @@ bool Device::CreateLogicalDevice(std::string* error)
     enabled.features.pipelineStatisticsQuery = features.features.pipelineStatisticsQuery;
     Log("draw grouping (indirect firstInstance + multiDrawIndirect): %s", m_groupIndirect ? "yes" : "no");
 
-    float priority = 1.0f;
+    // The engine's queue, and for frame generation (RVK_FrameGen, framegen.cpp) two more of the same family when it has
+    // them: the frame interpolation swapchain's present queue - which the engine must not use - and its image
+    // acquire queue.
+    const float priorities[3] = {1.0f, 1.0f, 1.0f};
     VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     qci.queueFamilyIndex = m_queueFamily;
-    qci.queueCount = 1;
-    qci.pQueuePriorities = &priority;
+    qci.queueCount = std::min(m_queueFamilyCount, 3u);
+    qci.pQueuePriorities = priorities;
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     ci.pNext = &enabled;
     ci.queueCreateInfoCount = 1;
@@ -607,6 +618,10 @@ bool Device::CreateLogicalDevice(std::string* error)
         return false;
     LoadDevice(m_device);
     vkGetDeviceQueue(m_device, m_queueFamily, 0, &m_queue);
+    if (qci.queueCount >= 2) vkGetDeviceQueue(m_device, m_queueFamily, 1, &m_fgPresentQueue);
+    if (qci.queueCount >= 3) vkGetDeviceQueue(m_device, m_queueFamily, 2, &m_fgAcquireQueue);
+    Log("queues: %u of family %u's %u (frame generation %s)", qci.queueCount, m_queueFamily, m_queueFamilyCount,
+        m_fgPresentQueue ? "possible" : "not possible: one queue");
 
     VmaVulkanFunctions fns{};
     fns.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
@@ -692,7 +707,7 @@ void Device::ApplyRenderScale()
     const uint32_t want = RenderScaleNow();
     if (want == m_renderScale || !m_ldrMain || m_inFrame)
         return;
-    vkDeviceWaitIdle(m_device);
+    WaitIdle();
     m_completed = m_submitted;
     const bool wasScene = m_target == m_scene, wasMain = m_main == m_scene;
     DestroySceneTargets();
@@ -771,7 +786,7 @@ bool Device::Resize(uint32_t width, uint32_t height)
 {
     if (m_inFrame || !width || !height)
         return false;
-    vkDeviceWaitIdle(m_device);
+    WaitIdle();
     m_completed = m_submitted;
     bool wasMain = m_target == m_main;
     DestroyMainTargets();
@@ -794,7 +809,7 @@ bool Device::SetWindow(HWND window)
         return true;
     if (!m_swapchainSupported || m_inFrame)
         return false;
-    vkDeviceWaitIdle(m_device);
+    WaitIdle();
     DestroySwapchain();
     if (m_surface) {
         vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
@@ -855,11 +870,27 @@ bool Device::CreateSwapchain(std::string* error)
                                                               : VK_PRESENT_MODE_FIFO_KHR;
     Log("swapchain %ux%u, present mode %d\n", m_swapExtent.width, m_swapExtent.height, ci.presentMode);
     ci.clipped = VK_TRUE;
-    if (!Check(vkCreateSwapchainKHR(m_device, &ci, nullptr, &m_swapchain), "vkCreateSwapchainKHR", error))
+    // RVK_FrameGen: the frame interpolation swapchain (framegen.cpp); a plain one if it can't be made.
+    bool fg = false;
+    if (m_frameGenWanted && !m_frameGenFailed) {
+        std::string why;
+        fg = FgCreateSwapchain(ci, &why);
+        if (!fg) {
+            m_frameGenFailed = true;
+            Log("frame generation: off - %s", why.empty() ? "no second queue for its presenting" : why.c_str());
+        }
+    }
+    if (!fg && !Check(vkCreateSwapchainKHR(m_device, &ci, nullptr, &m_swapchain), "vkCreateSwapchainKHR", error))
         return false;
-    vkGetSwapchainImagesKHR(m_device, m_swapchain, &n, nullptr);
-    m_swapImages.resize(n);
-    vkGetSwapchainImagesKHR(m_device, m_swapchain, &n, m_swapImages.data());
+    if (fg) {
+        FgGetSwapchainImages(&n, nullptr);
+        m_swapImages.resize(n);
+        FgGetSwapchainImages(&n, m_swapImages.data());
+    } else {
+        vkGetSwapchainImagesKHR(m_device, m_swapchain, &n, nullptr);
+        m_swapImages.resize(n);
+        vkGetSwapchainImagesKHR(m_device, m_swapchain, &n, m_swapImages.data());
+    }
     m_renderDone.resize(n);
     VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     for (auto& s : m_renderDone)
@@ -873,7 +904,10 @@ void Device::DestroySwapchain()
     for (VkSemaphore s : m_renderDone) vkDestroySemaphore(m_device, s, nullptr);
     m_renderDone.clear();
     m_swapImages.clear();
-    if (m_swapchain) vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
+    if (m_fg)
+        FgDestroySwapchain();                    // (frame generation's swapchain and context)
+    else if (m_swapchain)
+        vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
     m_swapchain = VK_NULL_HANDLE;
 }
 
@@ -1584,6 +1618,7 @@ void Device::BeginFrame()
         }
         m_frameRoomVisuals = m_frameTerrainVisuals = 0;
     }
+    m_fgUiLayer = m_fg != nullptr;               // (RVK_FrameGen: the interface's layer to the swapchain, framegen.cpp)
     m_pickActive = m_pickArmed;                  // texture picking (RequestPick): this frame's draws
     m_pickArmed = false;
     m_pickBest = nullptr;
@@ -1598,8 +1633,10 @@ void Device::BeginFrame()
     m_bindlessBound = false;                     // the frame's command buffer starts with set 1 unbound
     m_arenaBound = false;                        // ... and with the draw arenas unbound
     m_shadowArenaBound = false;                  // ... and the shadow record array unbound
+    if (m_swapchain && m_frameGenWanted != (m_fg != nullptr) && !(m_frameGenWanted && m_frameGenFailed))
+        m_swapchainStale = true;                 // (RVK_FrameGen switched: the swapchain made again)
     if (m_swapchainStale) {
-        vkDeviceWaitIdle(m_device);
+        WaitIdle();
         DestroySwapchain();
         std::string error;
         if (!CreateSwapchain(&error))
@@ -1855,7 +1892,8 @@ void Device::EndFrame()
     double presentStart = ProfileCpu();              // acquire + submit + present: driver time (profile)
     if (m_swapchain) {
         // Bounded wait: if no image comes within 250 ms, skip presenting this frame instead of freezing.
-        VkResult r = vkAcquireNextImageKHR(m_device, m_swapchain, 250000000ull, f.imageAvailable, VK_NULL_HANDLE, &imageIndex);
+        VkResult r = m_fg ? FgAcquire(250000000ull, f.imageAvailable, &imageIndex)
+                          : vkAcquireNextImageKHR(m_device, m_swapchain, 250000000ull, f.imageAvailable, VK_NULL_HANDLE, &imageIndex);
         present = r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR;
         if (r == VK_TIMEOUT || r == VK_NOT_READY) {
             static int timeouts;
@@ -1875,10 +1913,14 @@ void Device::EndFrame()
         blit.dstOffsets[1] = {int32_t(m_swapExtent.width), int32_t(m_swapExtent.height), 1};
         vkCmdBlitImage(f.main, m_main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+        // (The frame interpolation swapchain's images are read by its passes - optical flow, interpolation, the
+        // interface laid over - and it expects them as shader-read textures, not to present.)
         ImageBarrier(f.main, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0);
+                     m_fg ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                     VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0);
     }
+    if (m_fg && present)
+        FgBeforePresent(f.main);                 // (frame generation: whether to generate, the interface's layer)
     vkEndCommandBuffer(f.main);
 
     VkCommandBuffer cmds[5];
@@ -1911,7 +1953,7 @@ void Device::EndFrame()
         pi.swapchainCount = 1;
         pi.pSwapchains = &m_swapchain;
         pi.pImageIndices = &imageIndex;
-        VkResult r = vkQueuePresentKHR(m_queue, &pi);
+        VkResult r = m_fg ? FgPresent(&pi) : vkQueuePresentKHR(m_queue, &pi);
         if (r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_OUT_OF_DATE_KHR)
             m_swapchainStale = true;
     }

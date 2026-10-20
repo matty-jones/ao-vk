@@ -4172,6 +4172,8 @@ float g_leafCamDist = -1.0f;       // --leaf-cam-dist D: the camera this far fro
 float g_leafCamHeight = -1.0f;     // --leaf-cam-height H: ... this high (default: a third of the tallest tree)
 float g_leafCamYaw = 0.0f;         // --leaf-cam-yaw R: ... turned R radians about the row's middle
 int g_leafFilm = 0;                // --leaf-film N: ~60 frames a second, a screenshot every N frames (film_NNN.bmp)
+int g_frameGenToggle = 0;          // --frame-gen-toggle N: frame generation off at frame N, on again at 2N (the leaf
+                                   // scenes; the swapchain made again each time)
 int g_leafForest = 0;              // --leaf-forest N: an N x N grid of the trees (12 units apart), seen from eye height
 float g_crownShade = 1.0f;         // --crown-shade X: RVK_CrownShade
 bool g_freeCam = false;            // --free-cam: the free camera on from frame 10, turning and moving ahead (Device::SetFreeCam)
@@ -4298,6 +4300,8 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
     if (g_folDither >= 0.0f) dev.SetKnob(rvk::Knob::FolDither, g_folDither);
     if (g_prepassEq >= 0) dev.SetKnob(rvk::Knob::PrepassEq, float(g_prepassEq));
     for (int frame = 0; frame < frames; ++frame) {
+        if (g_frameGenToggle > 0 && (frame == g_frameGenToggle || frame == 2 * g_frameGenToggle))
+            dev.SetFrameGen(frame == 2 * g_frameGenToggle);
         if (frame == frames - 1) {
             dev.RequestScreenshot(shot);
             if (!dump.empty()) dev.RequestFrameDump(dump);   // the last frame: the leaves are baked by then
@@ -4618,7 +4622,8 @@ int main(int argc, char** argv)
     bool lutSepia = false, taa = false, fxaa = false;
     float sharpen = 0.4f;
     int renderScale = 100;                       // --render-scale N: RVK_RenderScale (needs --hdr --taa)
-    int upscaler = 0;                            // --upscaler N: RVK_Upscaler (1: FSR 2)
+    int upscaler = 0;                            // --upscaler N: RVK_Upscaler (1: FSR 2, 2: FSR 3)
+    bool frameGen = false;                       // --frame-gen: RVK_FrameGen (needs --window)
     bool normalMapTest = false, pbrTest = false, glowOccludeTest = false;
     uint32_t anisotropy = 1;
     float motionBlur = 0.0f, dof = 0.0f, dofFocus = 0.0f;
@@ -4952,6 +4957,8 @@ int main(int argc, char** argv)
         else if (a == "--sharpen" && i + 1 < argc) sharpen = float(std::atof(argv[++i]));
         else if (a == "--render-scale" && i + 1 < argc) renderScale = std::atoi(argv[++i]);
         else if (a == "--upscaler" && i + 1 < argc) upscaler = std::atoi(argv[++i]);
+        else if (a == "--frame-gen") frameGen = true;
+        else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
             saturation = float(std::atof(argv[++i])); contrast = float(std::atof(argv[++i]));
             warmth = float(std::atof(argv[++i])); nightTint = float(std::atof(argv[++i])); vignette = float(std::atof(argv[++i]));
@@ -5109,6 +5116,7 @@ int main(int argc, char** argv)
     dev.SetTaa(taa, sharpen);
     dev.SetRenderScale(uint32_t(renderScale));
     dev.SetUpscaler(uint32_t(upscaler));
+    dev.SetFrameGen(frameGen);
     dev.SetKnob(rvk::Knob::Fxaa, fxaa);
     dev.SetGrading(saturation, contrast, warmth, 1.0f, nightTint, vignette);
     if (lutSepia) {                      // --lut-sepia: a 16^3 sepia lookup table in the day slot (the 3D LUT path)

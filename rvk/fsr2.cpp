@@ -31,7 +31,7 @@ struct Device::Fsr2State {
 void Device::DestroyFsr2()
 {
     if (m_fsr2) {
-        vkDeviceWaitIdle(m_device);              // (its images and pipelines go at once)
+        WaitIdle();                              // (its images and pipelines go at once)
         ffxFsr2ContextDestroy(&m_fsr2->context);
         delete m_fsr2;
         m_fsr2 = nullptr;
@@ -50,6 +50,8 @@ void Device::DestroyFsr2()
 // compute passes, the output ready for their writes.
 bool Device::FsrInputs(VkCommandBuffer cmd, const float params[28])
 {
+    if (m_fsrInputsFrame == m_frameNumber && m_fsrMotion && m_fsrOut)
+        return true;
     const uint32_t rw = m_scene->m_width, rh = m_scene->m_height, dw = m_ldrMain->m_width, dh = m_ldrMain->m_height;
     if (!m_fsrMotion || m_fsrMotion->m_width != rw || m_fsrMotion->m_height != rh) {
         if (m_fsrMotion) DestroyTexture(m_fsrMotion);
@@ -89,6 +91,7 @@ bool Device::FsrInputs(VkCommandBuffer cmd, const float params[28])
     dep.pMemoryBarriers = &mb;
     vkCmdPipelineBarrier2(cmd, &dep);
     Transition(cmd, m_fsrOut, VK_IMAGE_LAYOUT_GENERAL);
+    m_fsrInputsFrame = m_frameNumber;
     return true;
 }
 
@@ -100,7 +103,7 @@ bool Device::RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28
     const uint32_t rw = m_scene->m_width, rh = m_scene->m_height, dw = m_ldrMain->m_width, dh = m_ldrMain->m_height;
     // The context, for these sizes: made again when one changes (render scale, window), the GPU idle first.
     if (m_fsr2 && (m_fsr2->renderW != rw || m_fsr2->renderH != rh || m_fsr2->displayW != dw || m_fsr2->displayH != dh)) {
-        vkDeviceWaitIdle(m_device);
+        WaitIdle();
         ffxFsr2ContextDestroy(&m_fsr2->context);
         delete m_fsr2;
         m_fsr2 = nullptr;

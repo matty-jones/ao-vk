@@ -30,3 +30,6 @@ VkImageLayout getVKImageLayoutFromResourceState(FfxResourceStates state);
 VkFormat ffxGetVkFormatFromSurfaceFormat(FfxSurfaceFormat fmt);
 
 FFX_API FfxErrorCode ffxFrameInterpolationUiComposition(const FfxPresentCallbackDescription* params, void* unusedUserCtx);
+
+// (ao-vk: the UI composition's objects freed, from the swapchain's destruction - the SDK never freed them.)
+void releaseUiBlitGpuResources(const VkAllocationCallbacks* pAllocator);

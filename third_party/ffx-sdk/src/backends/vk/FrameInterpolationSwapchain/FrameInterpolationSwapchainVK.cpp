@@ -773,7 +773,11 @@ VkResult presentToSwapChain(FrameinterpolationPresentInfo* pPresenter, uint32_t 
     presentInfoKHR.pResults           = nullptr;  // Optional
 
     EnterCriticalSection(&pPresenter->swapchainCriticalSection);
-    VkResult res = vkQueuePresentKHR(pPresenter->presentQueue.queue, &presentInfoKHR);
+    VkResult res;
+    {
+        std::lock_guard<std::mutex> lock(ffxQueueMutex());   // (ao-vk)
+        res = vkQueuePresentKHR(pPresenter->presentQueue.queue, &presentInfoKHR);
+    }
     LeaveCriticalSection(&pPresenter->swapchainCriticalSection);
 
     ++(pPresenter->realPresentCount);
@@ -1123,7 +1127,8 @@ DWORD WINAPI composeAndPresent_presenterThread(LPVOID pParam)
                         if (frameInfo.doPresent)
                         {
                             SubmissionSemaphores toSignal;
-                            toSignal.add(presenter->frameRenderedSemaphores[0]);  // not a timeline semaphore
+                            // (ao-vk: the binary semaphore the present waits on is the acquired image's, added below -
+                            // one for every present reused it while an earlier present might still wait on it.)
 
                             // signal replacement buffer availability
                             // this is the last present of this entry
@@ -1149,6 +1154,7 @@ DWORD WINAPI composeAndPresent_presenterThread(LPVOID pParam)
                             if (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR)
                             {
                                 toWait.add(acquireSemaphore);
+                                toSignal.add(presenter->frameRenderedSemaphores[realSwapchainImageIndex]);  // not a timeline semaphore
 
                                 res = compositeSwapChainFrame(presenter,
                                                               &entry,
@@ -1163,7 +1169,7 @@ DWORD WINAPI composeAndPresent_presenterThread(LPVOID pParam)
                                 waitForPerformanceCount(previousPresentQpc + frameInfo.presentQpcDelta);
                                 QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&previousPresentQpc));
 
-                                res = presentToSwapChain(presenter, realSwapchainImageIndex);
+                                res = presentToSwapChain(presenter, realSwapchainImageIndex, realSwapchainImageIndex);
                                 // VK_SUBOPTIMAL_KHR & VK_ERROR_OUT_OF_DATE_KHR: the swapchain has been recreated
                                 FFX_ASSERT_MESSAGE_FORMAT(res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR,
                                                           "presentToSwapChain failed with error %d",
@@ -1644,12 +1650,8 @@ VkResult FrameInterpolationSwapChainVK::init(const VkSwapchainCreateInfoKHR* pCr
     presentInfo.realSwapchainImageDescription.flags    = FFX_RESOURCE_FLAGS_NONE;
     presentInfo.realSwapchainImageDescription.usage    = static_cast<FfxResourceUsage>(FFX_RESOURCE_USAGE_RENDERTARGET | FFX_RESOURCE_USAGE_UAV);
 
-    // create the semaphore for each image to wait on
-    for (uint32_t i = 0; i < presentInfo.realSwapchainImageCount; ++i)
-    {
-        res = createSemaphoreFormat(presentInfo.frameRenderedSemaphores[i], "AMD swapchain image semaphore %d", i);
-        EXIT_ON_VKRESULT_NOT_SUCCESS(res);
-    }
+    // (ao-vk: the semaphore for each image to wait on was made here a second time - made above for all
+    // FFX_FRAME_INTERPOLATION_SWAP_CHAIN_MAX_BUFFER_COUNT - and the first ones lost.)
 
     // create the fake backbuffer images
     FFX_ASSERT_MESSAGE(pCreateInfo->minImageCount <= FFX_FRAME_INTERPOLATION_SWAP_CHAIN_MAX_BUFFER_COUNT, "Too many backbuffer requested");
@@ -1721,6 +1723,9 @@ void FrameInterpolationSwapChainVK::destroySwapchain(VkDevice device, const VkAl
     // Wait for all operations to be finished
     waitForPresents();
     killPresenterThread();
+    // (ao-vk: and again with the threads ended - the present semaphore is signalled before the present, so the last
+    // present could still come after the wait above, and its semaphores be destroyed below while in use)
+    waitForPresents();
 
     FFX_ASSERT_MESSAGE(device == presentInfo.device, "Attempting to destroy Frame interpolation swapchain with another device");
 
@@ -1743,6 +1748,9 @@ void FrameInterpolationSwapChainVK::destroySwapchain(VkDevice device, const VkAl
     {
         destroySemaphore(presentInfo.acquireSemaphores[i]);
     }
+
+    // (ao-vk) the UI composition's pipelines, render pass, views and descriptors
+    releaseUiBlitGpuResources(pAllocator);
 
     // reset queue information
     presentInfo.gameQueue.reset();
@@ -1922,6 +1930,7 @@ bool FrameInterpolationSwapChainVK::waitForPresents()
 
     // wait for queue idle too, to make sure all the semaphores are signaled
     VkResult res = VK_SUCCESS; 
+    std::lock_guard<std::mutex> lock(ffxQueueMutex());   // (ao-vk: the presents are done; the presenter thread waits)
     if (res == VK_SUCCESS && presentInfo.asyncComputeQueue.queue != VK_NULL_HANDLE)
         res = vkQueueWaitIdle(presentInfo.asyncComputeQueue.queue);
     if (res == VK_SUCCESS && presentInfo.presentQueue.queue != VK_NULL_HANDLE)

@@ -1300,6 +1300,7 @@ struct Hud {
     bool shown = false;                          // the readout's image is with the renderer
     uint32_t frames = 0;
     LARGE_INTEGER since{};
+    uint64_t presented = 0;                      // frame generation's frames shown, at `since`
 } g_hud;
 
 void HudFrame(rvk::ThreadedDevice* device)
@@ -1325,6 +1326,9 @@ void HudFrame(rvk::ThreadedDevice* device)
     const uint32_t w = device->Width(), h = device->Height();
     if (!w || !h) return;
     const rvk::ThreadedDevice::LiveTimes t = device->Live();
+    // With frame generation (RVK_FrameGen): the frames shown, the generated ones with the rendered.
+    const double shownFps = t.shown > g_hud.presented && g_hud.presented ? (t.shown - g_hud.presented) / std::max(elapsed, 1e-3) : 0.0;
+    g_hud.presented = t.shown;
     const float game = std::max(0.0f, t.frameMs - t.gameWaitMs), render = std::max(0.0f, t.renderMs - t.gpuWaitMs);
     const char* limit = t.gpuMs > 0.0f && t.gpuMs >= game && t.gpuMs >= render ? "GPU" : game >= render ? "game" : "render";
     // (A time of 0: not measured - the renderer's profiler off.)
@@ -1332,16 +1336,18 @@ void HudFrame(rvk::ThreadedDevice* device)
         if (v > 0.0f) std::snprintf(out, size, "%-6s %5.2f ms", name, v);
         else std::snprintf(out, size, "%-6s     - ms", name);
     };
-    char lines[4][48];
+    char lines[5][48];
     std::snprintf(lines[0], sizeof(lines[0]), "%4.0f fps  %5.2f ms", fps, fps > 0.0 ? 1000.0 / fps : 0.0);
     ms(lines[1], sizeof(lines[1]), "game", game);
     ms(lines[2], sizeof(lines[2]), "render", t.renderMs > 0.0f ? render : 0.0f);
     ms(lines[3], sizeof(lines[3]), "GPU", t.gpuMs);
+    const int count = shownFps > 0.0 ? 5 : 4;
+    if (count == 5) std::snprintf(lines[4], sizeof(lines[4]), "%4.0f shown (frame gen)", shownFps);
     Metrics(w, h);
     const int cw = g.font.cw, ch = g.font.ch, pad = std::max(3, ch / 3);
     size_t widest = 0;
-    for (const auto& l : lines) widest = std::max(widest, std::strlen(l));
-    const int bw = int(widest + 2) * cw + pad * 2, bh = 4 * ch + pad * 2;
+    for (int i = 0; i < count; ++i) widest = std::max(widest, std::strlen(lines[i]));
+    const int bw = int(widest + 2) * cw + pad * 2, bh = count * ch + pad * 2;
     g.width = w;
     g.height = uint32_t(std::min<int>(int(h), bh));
     g.pixels.assign(size_t(g.width) * g.height, 0);
@@ -1351,6 +1357,7 @@ void HudFrame(rvk::ThreadedDevice* device)
         const bool limits = std::strncmp(lines[i], limit, std::strlen(limit)) == 0;   // (the one holding the frame back)
         Text(pad, pad + i * ch, C(limits ? cWarn : cText) + lines[i]);
     }
+    if (count == 5) Text(pad, pad + 4 * ch, C(cValue) + lines[4]);
     device->SetConsoleImage(g.width, g.height, g.pixels.data());
     g_hud.shown = true;
     g.shown = false;                             // (the console's own image: none now)

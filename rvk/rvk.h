@@ -630,6 +630,10 @@ public:
     // RVK_Upscaler: what brings the scaled scene up to the output's size - 0 our TAA (taa.frag), 1 AMD's FSR 2.2
     // (fsr2.cpp). At 100% the TAA either way.
     void SetUpscaler(uint32_t which) { m_upscaler = which; }
+    // RVK_FrameGen: AMD's FSR 3.1 frame generation (framegen.cpp) - the swapchain made again at the next frame.
+    void SetFrameGen(bool enable) { if (enable != m_frameGenWanted) m_frameGenFailed = false; m_frameGenWanted = enable; }
+    // Frames the frame interpolation swapchain has presented (generated ones too); 0 without frame generation.
+    uint64_t FgShownFrames() const;
     // Sunlight through leaves (RVK_LeafLight).
     void SetLeafLight(float s) { m_leafLight = s; m_frameLightsDirty = true; }
     // How dark nights, storms and dim places get (darkness.cpp; docs/darkness-plan.md): RVK_Darkness (0 lightest,
@@ -3079,6 +3083,21 @@ private:
     VkPipeline m_motionFillPipeline = VK_NULL_HANDLE;    // motion_fill.frag
     VkPipeline m_reactiveMaskPipeline = VK_NULL_HANDLE;  // reactive_mask.frag
     bool FsrInputs(VkCommandBuffer cmd, const float params[28]);   // the motion vectors filled in, the output image
+    uint64_t m_fsrInputsFrame = ~0ull;           // (FsrInputs: once a frame - FSR and frame generation both ask)
+    // RVK_FrameGen (framegen.cpp): non-null while the swapchain is the frame interpolation one.
+    bool m_frameGenWanted = false;
+    bool m_frameGenFailed = false;               // (it couldn't be made: not tried again until the setting changes)
+    struct FrameGenState;
+    FrameGenState* m_fg = nullptr;
+    bool m_fgUiLayer = false;                    // this frame's interface layer goes to the swapchain, not over the frame
+    bool FgCreateSwapchain(const VkSwapchainCreateInfoKHR& ci, std::string* error);
+    void FgDestroySwapchain();
+    void WaitIdle();                             // vkDeviceWaitIdle, frame generation's presents done first
+    VkResult FgGetSwapchainImages(uint32_t* count, VkImage* images);
+    VkResult FgAcquire(uint64_t timeout, VkSemaphore semaphore, uint32_t* index);
+    VkResult FgPresent(const VkPresentInfoKHR* info);
+    void FgPrepare(VkCommandBuffer cmd, const float params[28]);
+    void FgBeforePresent(VkCommandBuffer cmd);
     bool RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28]);   // false: not done (the TAA then)
     bool RenderFsr3(VkCommandBuffer cmd, Texture* dst, const float params[28]);   // ...
     void DestroyFsr2();
@@ -3421,6 +3440,10 @@ private:
     VkPhysicalDevice m_physical = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
     VkQueue m_queue = VK_NULL_HANDLE;
+    uint32_t m_queueFamilyCount = 1;             // queues the chosen family has
+    VkQueue m_fgPresentQueue = VK_NULL_HANDLE;   // RVK_FrameGen: the frame interpolation swapchain's (framegen.cpp)
+    VkQueue m_fgAcquireQueue = VK_NULL_HANDLE;
+    bool m_timelineSemaphores = false;           // (the frame interpolation swapchain needs them)
     uint32_t m_queueFamily = 0;
     VmaAllocator_T* m_allocator = nullptr;
     VkPhysicalDeviceProperties m_props{};
@@ -3553,6 +3576,7 @@ public:
     // The live readout (RVK_PerfHud): the last frames' GPU time, the render thread's whole frame and its wait for the
     // GPU in it (ms, smoothed; written by the render thread, read by any).
     std::atomic<float> m_liveGpuMs{0.0f}, m_liveRenderMs{0.0f}, m_liveGpuWaitMs{0.0f};
+    std::atomic<uint64_t> m_liveShown{0};        // frame generation's frames shown (framegen.cpp; 0 without it)
     static void LiveSmooth(std::atomic<float>& a, double ms)
     {
         const float old = a.load(std::memory_order_relaxed);

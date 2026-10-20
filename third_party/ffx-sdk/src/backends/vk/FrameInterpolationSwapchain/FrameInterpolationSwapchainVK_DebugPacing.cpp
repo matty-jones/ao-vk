@@ -214,7 +214,7 @@ VkResult CreateDebugPacingPipeline(VkDevice device, VkFormat fmt, const VkAlloca
         rasterizationStateCreateInfo.depthBiasConstantFactor                = 0.0f;
         rasterizationStateCreateInfo.depthBiasClamp                         = 0.0f;
         rasterizationStateCreateInfo.depthBiasSlopeFactor                   = 0.0f;
-        rasterizationStateCreateInfo.lineWidth                              = 0.0f;
+        rasterizationStateCreateInfo.lineWidth                              = 1.0f;   // (ao-vk: 1 without wide lines)
 
         VkPipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo = {};
         depthStencilStateCreateInfo.sType                                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;

@@ -53,9 +53,11 @@ VkFramebuffer         s_uiCompositionFramebuffers[c_uiCompositionRingBufferSize]
 
 void releaseUiBlitGpuResources(const VkAllocationCallbacks* pAllocator)
 {
+    // (ao-vk: nothing made yet; the sets go with their pool - which can't free sets one by one.)
+    if (s_uiCompositionDevice == VK_NULL_HANDLE)
+        return;
     for (uint32_t i = 0; i < _countof(s_uiCompositionDescriptorSets); ++i)
     {
-        vkFreeDescriptorSets(s_uiCompositionDevice, s_uiCompositionDescriptorPool, 1, &s_uiCompositionDescriptorSets[i]);
         s_uiCompositionDescriptorSets[i] = VK_NULL_HANDLE;
     }
 
@@ -86,6 +88,8 @@ void releaseUiBlitGpuResources(const VkAllocationCallbacks* pAllocator)
         vkDestroyFramebuffer(s_uiCompositionDevice, s_uiCompositionFramebuffers[i], pAllocator);
         s_uiCompositionFramebuffers[i] = VK_NULL_HANDLE;
     }
+    s_uiCompositionAttachmentFormat = VK_FORMAT_UNDEFINED;
+    s_uiCompositionDevice           = VK_NULL_HANDLE;
 }
 
 void DestroyUiCompositionPipeline(VkDevice device, const VkAllocationCallbacks* pAllocator)
@@ -242,7 +246,7 @@ VkResult CreateUiCompositionPipeline(VkDevice device, VkFormat fmt, const VkAllo
         rasterizationStateCreateInfo.depthBiasConstantFactor                = 0.0f;
         rasterizationStateCreateInfo.depthBiasClamp                         = 0.0f;
         rasterizationStateCreateInfo.depthBiasSlopeFactor                   = 0.0f;
-        rasterizationStateCreateInfo.lineWidth                              = 0.0f;
+        rasterizationStateCreateInfo.lineWidth                              = 1.0f;   // (ao-vk: 1 without wide lines)
 
         VkPipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo = {};
         depthStencilStateCreateInfo.sType                                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -391,15 +395,10 @@ FfxErrorCodes verifyUiBlitGpuResources(VkDevice device, VkFormat fmt, const VkAl
 
     if (s_uiCompositionDevice != device)
     {
-        if (s_uiCompositionDevice != VK_NULL_HANDLE)
-        {
-            // new device
-            releaseUiBlitGpuResources(pAllocator);
-        }
-        else
-        {
-            s_uiCompositionDevice = device;
-        }
+        // new device (ao-vk: the old device's objects go - the swapchain's destruction releases them first, so its
+        // device is still there - and the new device is kept; the SDK kept the old one, made with neither)
+        releaseUiBlitGpuResources(pAllocator);
+        s_uiCompositionDevice = device;
     }
 
     VkResult res = VK_SUCCESS;

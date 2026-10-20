@@ -30,6 +30,13 @@
 #include <Windows.h>
 #include <synchapi.h>
 
+#include <mutex>
+
+// (ao-vk: the swapchain's queues are used from the game's thread - a frame presented without interpolation - and from
+// its presenter thread at once; Vulkan wants a queue's use externally synchronised. Every submit, present and wait on
+// them takes this.)
+std::mutex& ffxQueueMutex();
+
 
 void waitForPerformanceCount(const int64_t targetCount);
 

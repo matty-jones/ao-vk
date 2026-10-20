@@ -69,6 +69,9 @@ FfxErrorCode ffxFsr3ContextCreate(FfxFsr3Context* context, FfxFsr3ContextDescrip
     bool interpolationOnly                  = (contextDescription->flags & FFX_FSR3_ENABLE_INTERPOLATION_ONLY) != 0;
     contextPrivate->asyncWorkloadSupported  = (contextDescription->flags & FFX_FSR3_ENABLE_ASYNC_WORKLOAD_SUPPORT) != 0;
     contextPrivate->sharedResourceCount     = contextPrivate->asyncWorkloadSupported ? FSR3_MAX_QUEUED_FRAMES : 1;
+    // (ao-vk: the field the checks below read; the SDK set only the local, so an interpolation-only context made the
+    // upscaler's shared images from an upscaler never made - 0x0 images.)
+    contextPrivate->interpolationOnly       = interpolationOnly;
 
     // ensure upscalingOnly and interpolationOnly are not set simultaneously
     FFX_ASSERT(upscalingOnly == false || interpolationOnly == false);
@@ -194,10 +197,22 @@ FfxErrorCode ffxFsr3ContextCreate(FfxFsr3Context* context, FfxFsr3ContextDescrip
     }
 
     // set up FSR3Upscaler resources
-    if (!contextPrivate->interpolationOnly)
+    // (ao-vk: and for an interpolation-only context the same three, which its prepare pass writes, described by the
+    // frame interpolation - the SDK had no such branch, and made them from the upscaler it hadn't made: 0x0.)
     {
         FfxFsr3UpscalerSharedResourceDescriptions fs3UpscalerResourceDescs = {};
-        FFX_VALIDATE(ffxFsr3UpscalerGetSharedResourceDescriptions(&contextPrivate->upscalerContext, &fs3UpscalerResourceDescs));
+        if (!contextPrivate->interpolationOnly)
+        {
+            FFX_VALIDATE(ffxFsr3UpscalerGetSharedResourceDescriptions(&contextPrivate->upscalerContext, &fs3UpscalerResourceDescs));
+        }
+        else
+        {
+            FfxFrameInterpolationSharedResourceDescriptions fiResourceDescs = {};
+            FFX_VALIDATE(ffxFrameInterpolationGetSharedResourceDescriptions(&contextPrivate->fiContext, &fiResourceDescs));
+            fs3UpscalerResourceDescs.dilatedDepth = fiResourceDescs.dilatedDepth;
+            fs3UpscalerResourceDescs.dilatedMotionVectors = fiResourceDescs.dilatedMotionVectors;
+            fs3UpscalerResourceDescs.reconstructedPrevNearestDepth = fiResourceDescs.reconstructedPrevNearestDepth;
+        }
 
         wchar_t Name[256] = {};
         for (FfxUInt32 i = 0; i < contextPrivate->sharedResourceCount; i++)

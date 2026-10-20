@@ -153,9 +153,12 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   interface and name labels stay sharp at full size, and loading screens are drawn at full size. It is 75 by default
   and needs TAA on; 100 draws everything at full size as before.
 - AMD FSR 2.2 and FSR 3.1 as upscalers for the render scale (`RVK_Upscaler`, Anti-aliasing; console `upscaler 1` for
-  FSR 2.2, `upscaler 2` for FSR 3.1): a sharper picture at the same scale - FSR 2.2 at 50% about as close to full size
-  as ao-vk's own upscaler at 75%; FSR 3.1 the closest at 75% and the best with rain - at a little more GPU time.
-  ao-vk's own (0) by default.
+  FSR 2.2, `upscaler 2` for FSR 3.1): a sharper picture at the same scale than ao-vk's own upscaler, most of all at
+  50%; FSR 3.1 keeps rain best - at a little more GPU time. ao-vk's own (0) by default.
+- Frame generation (`RVK_FrameGen`, Anti-aliasing, under TAA; console `framegen 1`): AMD FSR 3.1 puts a frame of its
+  own between each two the game draws, for about twice the frames on screen, at the cost of a little more delay
+  between your input and the picture. The interface is laid over every frame as it is, so text and windows don't
+  wobble. It works with any `RVK_Upscaler` and render scale. Off by default.
 ### Changed
 - The game's own frame work is lighter in busy places: ao-vk checked memory with a slow system call for nearly every
   object drawn. At a lamp-lit outpost by night the frame rate went from about 125 to about 140 fps.
@@ -259,7 +262,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   it (green).
 - A small performance readout in the top left (`RVK_PerfHud`, General; console `perfhud 1`): frames a second, and
   how long the game's thread, the renderer's thread and the GPU each take a frame - the one holding the frame back
-  shown in amber.
+  shown in amber. With frame generation on, a last line gives the frames shown a second, the generated ones included.
 - `RVK_SceneProf` (randy-vk.ini or console `sceneprof 1`): the `gpu ms` log line splits the scene by kind of draw
   (buildings, ground, plants, characters, effects, water...) and a `scene shading` line says how many times each
   screen pixel was shaded by each - where a slow spot's time goes. Was the `RANDYVK_SCENE_PROFILE` variable.

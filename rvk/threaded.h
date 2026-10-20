@@ -27,8 +27,9 @@ namespace rvk {
 class ThreadedDevice {
 public:
     // The live readout (RVK_PerfHud), ms smoothed over the last frames: the game thread's whole frame and its wait for
-    // the render thread in it; the render thread's frame and its wait for the GPU; the GPU's frame.
-    struct LiveTimes { float frameMs, gameWaitMs, renderMs, gpuWaitMs, gpuMs; };
+    // the render thread in it; the render thread's frame and its wait for the GPU; the GPU's frame. shown: with frame
+    // generation on, the frames put on screen so far (real and generated; 0 without it).
+    struct LiveTimes { float frameMs, gameWaitMs, renderMs, gpuWaitMs, gpuMs; uint64_t shown; };
     LiveTimes Live() const;
     ThreadedDevice();
     ~ThreadedDevice();
@@ -119,6 +120,7 @@ public:
     void SetTaa(bool enable, float sharpen);
     void SetRenderScale(uint32_t percent);
     void SetUpscaler(uint32_t which);
+    void SetFrameGen(bool enable);
     void SetFogBanks(float s, float force = -1.0f);
     void SetHeatFlash(float s, bool force = false);
     void SetSandForce(float amount, bool ash);

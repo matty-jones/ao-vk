@@ -227,7 +227,7 @@ void Device::ApplyShadowResolution()
     if (m_shadowSizeWanted == m_shadowSize && m_pointShadowSizeWanted == m_pointShadowSize &&
         m_cubeCountWanted == m_cubeCount)
         return;
-    vkDeviceWaitIdle(m_device);
+    WaitIdle();
     std::string error;
     if (m_shadowSizeWanted != m_shadowSize) {
         DestroyShadowMap();

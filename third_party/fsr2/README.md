@@ -15,3 +15,5 @@ pointers - each marked "ao-vk" where it isn't a plain `nullptr` -> `VK_NULL_HAND
 - `vk/ffx_fsr2_vk.cpp`: `nullptr` -> `VK_NULL_HANDLE` for handles; the resource casts to and from `uint64_t`;
   host-visible allocations rounded up to 4 KB (a 32-bit process's memory maps under Wine are placed ones, which
   need it).
+- `shaders/ffx_fsr2_callbacks_glsl.h`: two storage images declared in their images' formats - the dilated depth `r32f`
+  (it said `r16f`), the prepared input colour `rgba16f` (it said `rgba16`); the writes were undefined.

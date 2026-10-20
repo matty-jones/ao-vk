@@ -3,7 +3,14 @@
 Status: Phase A built 2026-10-20 (`RVK_Upscaler 2`, staged `randy31-fsr3a.dll`). Demo, mean difference from 100%
 (forest 1440p): at 75% ours 4.95, FSR 2.2 5.05, **FSR 3.1 4.52**; at 50% ours 6.33, **FSR 2.2 4.96**, FSR 3.1 5.77.
 Walker at 50%: FSR 2.2 1.89, FSR 3.1 1.87; storm at 50%: ours 5.31, FSR 2.2 5.81, **FSR 3.1 5.20** (keeps the rain).
-GPU cost: to measure with the GPU idle. Phase B (frame generation) next.
+GPU cost: to measure with the GPU idle.
+
+Phase B built 2026-10-20 (`RVK_FrameGen`, `rvk/framegen.cpp`, staged `randy31-framegen1.dll`): the demo windowed shows
+~1195 frames for 600 rendered, with each upscaler, and with frame generation switched off and on mid-run
+(`--frame-gen-toggle`); validation clean. AMD bugs found on the way are listed in `third_party/ffx-sdk/README.md`; two
+storage-image format mismatches of the same kind in FSR 2.2 too (`third_party/fsr2/README.md`). After those, at 75%
+(forest 1440p): FSR 2.2 4.40, FSR 3.1 4.86, ours 4.95; at 50%: FSR 2.2 5.74, FSR 3.1 5.76, ours 6.33; storm 50%: FSR
+3.1 5.14, ours 5.31, FSR 2.2 5.35. To try in game: pacing, latency, the interface over generated frames.
 
 The user asked for FSR 3.1 after FSR 2.2 went in (`RVK_Upscaler` 1, `rvk/fsr2.cpp`, `third_party/fsr2`). FSR 3.1 is
 two things:

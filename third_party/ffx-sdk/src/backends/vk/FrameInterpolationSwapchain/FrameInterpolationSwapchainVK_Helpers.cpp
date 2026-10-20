@@ -35,6 +35,12 @@ void waitForPerformanceCount(const int64_t targetCount)
     } while (currentCount < targetCount);
 }
 
+std::mutex& ffxQueueMutex()
+{
+    static std::mutex m;
+    return m;
+}
+
 VkResult VulkanQueue::submit(VkCommandBuffer commandBuffer, SubmissionSemaphores& semaphoresToWait, SubmissionSemaphores& semaphoresToSignal, VkFence fence)
 {
     VkSubmitInfo submitInfo         = {};
@@ -74,10 +80,13 @@ VkResult VulkanQueue::submit(VkCommandBuffer commandBuffer, SubmissionSemaphores
     }
 
     VkResult res = VK_SUCCESS;
-    if (submitFunc != nullptr)
-        res = submitFunc(1, &submitInfo, fence);
-    else
-        res = vkQueueSubmit(queue, 1, &submitInfo, fence);
+    {
+        std::lock_guard<std::mutex> lock(ffxQueueMutex());   // (ao-vk)
+        if (submitFunc != nullptr)
+            res = submitFunc(1, &submitInfo, fence);
+        else
+            res = vkQueueSubmit(queue, 1, &submitInfo, fence);
+    }
 
     semaphoresToWait.reset();
     semaphoresToSignal.reset();

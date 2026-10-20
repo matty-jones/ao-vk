@@ -23,3 +23,18 @@ pointers) and Wine; each marked "ao-vk" where it is more than `nullptr` -> `VK_N
   function pointer types: `__stdcall` on 32-bit); the debug name helper takes a `uint64_t`; two `submit` calls get a
   named `SubmissionSemaphores` (clang-cl binds no temporary to a non-const reference).
 - `src/components/fsr3upscaler/ffx_fsr3upscaler.cpp`: its null tests of `resource` compare with 0.
+
+AMD bugs fixed (frame generation, `RVK_FrameGen`, `rvk/framegen.cpp`; each found by the validation layer):
+- `src/components/fsr3/ffx_fsr3.cpp`: an interpolation-only context never set its `interpolationOnly` field, and made
+  the shared dilated depth / motion / previous depth images from the upscaler it hadn't made (0x0): they are made
+  from the frame interpolation's descriptions.
+- `src/backends/vk/ffx_vk.cpp`: the backend's descriptor pool listed 6 sizes and said 5 (no storage buffers).
+- `include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h`: the luma history (an RGBA16F image)
+  declared `rgba8`, so its loads and stores were undefined (the 3.1 upscaler too).
+- `src/backends/vk/FrameInterpolationSwapchain/`: line width 1 (not 0) in the UI composition's and pacing debug's
+  pipelines; the presenter thread's present semaphore the acquired image's own (one for every present was reused
+  while an earlier present could still wait on it); the per-image semaphores made once (made twice, the first lost);
+  the UI composition's pipelines, render pass, views and descriptors freed with the swapchain (never freed; the "new
+  device" branch freed through the old device and never kept the new one); every submit, present and queue wait under
+  one lock (`ffxQueueMutex`: the game's thread and the presenter thread used the present and acquire queues at once);
+  a second wait for presents once the threads have ended (the present semaphore is signalled before the present).
