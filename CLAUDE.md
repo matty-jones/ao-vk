@@ -65,7 +65,8 @@ launch runs it:
 
 ## Architecture
 
-Three layers, see `docs/architecture.md`, `docs/frame.md`, `docs/rvk.md`, `docs/native.md`:
+Three layers, see `docs/pipeline.md` (diagrams: the layers, a frame on the GPU, the per-frame world state),
+`docs/architecture.md`, `docs/frame.md`, `docs/rvk.md`, `docs/native.md`:
 
 - **`proxy/`** — the `randy31.dll` proxy. It exports the same 771 functions as the original (`proxy/randy31.def`,
   `exports.gen.cpp` thunks); unported exports forward to `randy31_orig.dll`. `trace.cpp` loads the original and runs
@@ -83,6 +84,19 @@ Three layers, see `docs/architecture.md`, `docs/frame.md`, `docs/rvk.md`, `docs/
   `HookSlot` patches vtable slots. Each part has a `[Native]` mode in `randy-vk.ini` (`off` / `on` / often `verify`,
   which runs both and logs differences). Unported callees are reached through `orig_api.gen.h`; game heap /
   containers through `vc10.h` (VS2010 STL layouts).
+
+Rules from the October 2026 audit (`docs/audit-2026-10.md`):
+
+- **World state.** Features read the time of day from `m_cond` (rvk.h `Conditions`, filled by
+  `sky.cpp` UpdateConditions) and the weather from `CloudCover`/`StormDeck`/`StormFull`/`ClearSky`. Don't write a new
+  "how much is it night" ramp where it is used; add a named one to `Conditions` (and `FL.cond` if shaders need it).
+- **Darkness.** Anything that darkens the picture by night, weather or place takes its share of `RVK_Darkness`
+  through `m_dark` (`darkness.cpp`), so the one setting keeps controlling it.
+- **Plain settings.** A setting that is one value read as it is goes in `RVK_FLOAT_KNOBS`/`RVK_BOOL_KNOBS` (rvk.h),
+  not a new setter + ThreadedDevice forwarder + ApplyOne branch.
+- **Renames and new defaults.** A renamed setting or a changed default gets a `kMigrations` entry
+  (rvk_settings.cpp), or players keep the old value forever (the ini stores every setting). Setting names stay
+  within 15 characters, or AOReloaded's window can't show them.
 
 Constraints that matter when touching native code: object layouts and vtables that other game DLLs see
 (`RVisual_t` 0x178, `RRefFrame_t` 0xA4, compiled-in allocation sizes, ~120 DisplaySystem subclasses) must stay
