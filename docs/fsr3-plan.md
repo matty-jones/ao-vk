@@ -11,6 +11,11 @@ Phase B built 2026-10-20 (`RVK_FrameGen`, `rvk/framegen.cpp`, staged `randy31-fr
 storage-image format mismatches of the same kind in FSR 2.2 too (`third_party/fsr2/README.md`). After those, at 75%
 (forest 1440p): FSR 2.2 4.40, FSR 3.1 4.86, ours 4.95; at 50%: FSR 2.2 5.74, FSR 3.1 5.76, ours 6.33; storm 50%: FSR
 3.1 5.14, ours 5.31, FSR 2.2 5.35. To try in game: pacing, latency, the interface over generated frames.
+First in-game try: no smoother - the configuration's interpolation rectangle was left empty, and every pixel outside
+it is the real frame's, so each generated frame was a copy of the next real one (a probe of the frames: generated vs
+next real 0.000). With the whole frame as the rectangle (staged `randy31-framegen2.dll`) the generated frame lies
+halfway: 0.13 from the previous real frame, 0.12 from the next, 0.25 between the two. With the screen at 144 Hz it
+can only help where the game renders well under 144 fps; above about 72 the present mode (mailbox) drops some.
 
 The user asked for FSR 3.1 after FSR 2.2 went in (`RVK_Upscaler` 1, `rvk/fsr2.cpp`, `third_party/fsr2`). FSR 3.1 is
 two things:

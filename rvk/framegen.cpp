@@ -236,6 +236,9 @@ void Device::FgBeforePresent(VkCommandBuffer cmd)
         config.frameGenerationCallbackContext = &s.context;
         config.frameGenerationEnabled = s.prepared;
         config.allowAsyncWorkloads = false;
+        // The part of the frame interpolated: all of it. (Pixels outside it are the real frame's - left empty, every
+        // generated frame was a copy of the next real one.)
+        config.interpolationRect = {0, 0, int32_t(s.displayW), int32_t(s.displayH)};
         config.frameID = s.frame;
         ffxFsr3ConfigureFrameGeneration(&s.context, &config);
     }
