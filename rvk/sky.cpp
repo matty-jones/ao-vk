@@ -193,6 +193,33 @@ V3 SkyTwilightCpu(const float dir[3], const float* s0, const float* s1, const fl
 
 }  // namespace
 
+// The world's conditions (rvk.h Conditions), with the sun's clock: the time of day's ramps, each set once here.
+void Device::UpdateConditions()
+{
+    Conditions& c = m_cond;
+    const float h = SunUp();
+    c.sunKnown = SunKnown();
+    c.sunUp = h;
+    c.golden = Smoothstep(-0.035f, 0.0f, h) * (1.0f - Smoothstep(0.14f, 0.26f, h));
+    c.afterglow = Smoothstep(-0.14f, -0.035f, h) * (1.0f - Smoothstep(0.0f, 0.035f, h));
+    c.blueHour = Smoothstep(-0.26f, -0.19f, h) * (1.0f - Smoothstep(-0.087f, -0.035f, h));
+    c.night = 1.0f - Smoothstep(-0.24f, -0.035f, h);
+    c.moonNight = 1.0f - Smoothstep(-0.14f, -0.035f, h);
+    // (By the sun's true height, not its light: that goes out with the sun still 3 degrees up, where its shadows end,
+    // and the clouds' night brightening came on at once under a dusk sky still near daylight - blown out white, user.)
+    c.cloudNight = 1.0f - Smoothstep(-0.2f, 0.03f, h);
+    c.deepNight = c.sunKnown ? 1.0f - Smoothstep(-0.24f, -0.14f, h) : 1.0f;
+    c.gameStars = c.sunKnown ? 1.0f - Smoothstep(-0.24f, -0.105f, h) : 1.0f;
+    // (Without the fade - RVK_StarFade off - still none with the sun well up: none would show, and the field costs.)
+    c.ourStars = !c.sunKnown ? 1.0f : !m_starFade ? 1.0f - Smoothstep(0.05f, 0.15f, h) : 1.0f - Smoothstep(-0.24f, -0.03f, h);
+    c.heatNight = c.sunKnown ? 1.0f - std::clamp((h + 0.03f) / 0.1f, 0.0f, 1.0f) : 0.0f;
+    // The grading's night: by the sun's height while it is known, else (indoors) by the game's light and ambient -
+    // eased over a few seconds either way.
+    const float grade = c.sunKnown ? c.night : NightByLight();
+    c.grade = m_nightSet ? c.grade + (grade - c.grade) * (1.0f - std::exp(-m_frameDt / 3.0f)) : grade;
+    m_nightSet = true;
+}
+
 // Once a frame, at its end (before the shadow map, which is drawn from the sun or the moon these find): the time of
 // day and the weather's light, in order - each reads what the ones before it set.
 void Device::UpdateEnvironment(VkCommandBuffer cmd)
@@ -240,31 +267,17 @@ void Device::UpdateSunClock()
         }
     }
     const float h = SunUp();
-    // The golden hour: the sun from ~15 degrees down to the horizon, and a little under it.
-    m_sunPhase[0] = Smoothstep(-0.035f, 0.0f, h) * (1.0f - Smoothstep(0.14f, 0.26f, h));
-    // The afterglow: the sun from the horizon to ~8 degrees under (most within the first 2).
-    m_sunPhase[1] = Smoothstep(-0.14f, -0.035f, h) * (1.0f - Smoothstep(0.0f, 0.035f, h));
-    // The blue hour: ~2 to ~15 degrees under (all of it from 5 to 11).
-    m_sunPhase[2] = Smoothstep(-0.26f, -0.19f, h) * (1.0f - Smoothstep(-0.087f, -0.035f, h));
-    // Night: from ~2 degrees under to ~14.
-    m_sunPhase[3] = 1.0f - Smoothstep(-0.24f, -0.035f, h);
     // Rising or setting: the trend over the last half minute (mist.cpp), eased over a minute (the sun hovering near the
     // horizon flips it back and forth).
     {
         const float target = m_mistSunTrend >= 0.0f ? 1.0f : 0.0f;
         m_sunRising += (target - m_sunRising) * (1.0f - std::exp(-m_frameDt / 60.0f));
     }
-    // The game's stars (draw.cpp: its sky's point lists, x this): none with the sun ~6 degrees under, all by ~14 - and
-    // over ~20 s from when the game begins drawing them, should it switch them on at once while the sky is dark.
+    UpdateConditions();
+    // The game's stars (draw.cpp: its sky's point lists, x this): in their dark (m_cond.gameStars) - and over ~20 s
+    // from when the game begins drawing them, should it switch them on at once while the sky is dark.
     m_starsAge = m_duskSkyLast.stars > 0 && m_duskSkyLast.frame + 2 >= m_frameNumber ? m_starsAge + m_frameDt : 0.0f;
-    // (No sun known - a zone without one: by the game's own.)
-    const float dark = SunKnown() ? 1.0f - Smoothstep(-0.24f, -0.105f, h) : 1.0f;
-    m_starsShown = m_starFade ? dark * Smoothstep(0.0f, 20.0f, m_starsAge) : 1.0f;
-    // The grading's night: by the sun's height while it is known, else (indoors) by the game's light and ambient -
-    // eased over a few seconds either way.
-    const float night = SunKnown() ? m_sunPhase[3] : NightByLight();
-    m_nightAmount = m_nightSet ? m_nightAmount + (night - m_nightAmount) * (1.0f - std::exp(-m_frameDt / 3.0f)) : night;
-    m_nightSet = true;
+    m_starsShown = m_starFade ? m_cond.gameStars * Smoothstep(0.0f, 20.0f, m_starsAge) : 1.0f;
     // The dusk log (docs/dusk-plan.md §0): with the sun near the horizon, every 2 seconds or so - the game's light, its
     // ambient, fog, dome and stars as they go dark, and ours.
     if (h > -0.4f && h < 0.3f && (m_frameNumber % 120) == 11) {
@@ -276,8 +289,8 @@ void Device::UpdateSunClock()
             double(h), double(m_sunLuminance > 0.0f ? -m_sunDir[1] : 0.0f), double(m_sunColor[0]), double(m_sunColor[1]),
             double(m_sunColor[2]), m_sunLuminance > 0.0f ? "" : ", none this frame", double(m_sceneAmbient),
             double(fog[0]), double(fog[1]), double(fog[2]), m_duskSkyLast.domeVerts, m_duskSkyLast.domeTexture,
-            m_duskSkyLast.domeAmbient & 0xFFFFFFu, m_duskSkyLast.stars, m_duskSkyLast.starVerts, double(m_sunPhase[0]),
-            double(m_sunPhase[1]), double(m_sunPhase[2]), double(m_sunPhase[3]), double(m_nightAmount),
+            m_duskSkyLast.domeAmbient & 0xFFFFFFu, m_duskSkyLast.stars, m_duskSkyLast.starVerts, double(m_cond.golden),
+            double(m_cond.afterglow), double(m_cond.blueHour), double(m_cond.night), double(m_cond.grade),
             double(m_sunRising), double(m_moonFade), double(m_frameSunColor[0]), double(m_frameSunColor[1]),
             double(m_frameSunColor[2]));
     }
@@ -336,11 +349,9 @@ void Device::UpdateSkyModel()
         for (int i = 0; i < 3; ++i) m_skyFog[i] += (fog[i] - m_skyFog[i]) * k;
         m_skyFogSet = true;
     }
-    const float cloudy = CloudCover();
     // (Only an overcast, storms and rain mute the colours: broken cloud covers the sky behind it itself, and muting
     // for it left a fair evening's sunset at half strength.)
-    const float overcast = Smoothstep(0.55f, 0.95f, cloudy);
-    const float clear = (1.0f - 0.7f * overcast) * (1.0f - StormSky()) * (1.0f - 0.6f * std::clamp(m_mistWet, 0.0f, 1.0f));
+    const float clear = ClearSky() * (1.0f - 0.6f * std::clamp(m_mistWet, 0.0f, 1.0f));
     std::memcpy(m, m_skyFog, sizeof(m_skyFog));
     m[3] = std::clamp(m_twilight, 0.0f, 1.5f) * clear;
     float to[3];
@@ -433,7 +444,7 @@ void Device::UpdateSkyModel()
     }
     // The blue hour's grade (tonemap.frag Grade): the picture cooler, its darks greyer - as the sky - between sunset's
     // colours and the night's grade, which comes in under it (NightAmount).
-    m_blueGrade = std::clamp(m_blueHour, 0.0f, 1.0f) * m_sunPhase[2] * clear;
+    m_blueGrade = std::clamp(m_blueHour, 0.0f, 1.0f) * m_cond.blueHour * clear;
     // (No fog seen yet: no sky to fit the twilight to - the model off; the low sun's light above needs none.)
     if (!m_skyFogSet)
         std::memset(m_skyModel, 0, sizeof(m_skyModel));
@@ -453,13 +464,8 @@ void Device::UpdateSkyModel()
 // RVK_Aurora 1, wandering in strength).
 void Device::UpdateNightSky()
 {
-    const float h = SunUp();
-    const float cloudy = CloudCover();
-    const float clear = (1.0f - 0.7f * Smoothstep(0.55f, 0.95f, cloudy)) * (1.0f - StormSky());
-    // (Without the fade - RVK_StarFade off - still none with the sun well up: none would show, and the field costs.)
-    const float dark = !SunKnown() ? 1.0f : !m_starFade ? 1.0f - Smoothstep(0.05f, 0.15f, h)
-                                                        : 1.0f - Smoothstep(-0.24f, -0.03f, h);
-    m_starsDark = dark * clear;
+    const float clear = ClearSky();
+    m_starsDark = m_cond.ourStars * clear;
     const double t = SkyClock();
     // The shooting star.
     m_meteor[1][3] = -1.0f;
@@ -518,7 +524,7 @@ void Device::UpdateNightSky()
         level = Smoothstep(th, th + 0.08f, Noise(t, 5400.0, 71u)) * (0.6f + 0.4f * Noise(t, 300.0, 73u)) * std::min(a, 1.0f);
     }
     // (RVK_AuroraForce: every night, clear or not - to see one now.)
-    m_auroraNow = m_nightSky.auroraForce > 0.0f ? m_nightSky.auroraForce * m_sunPhase[3] : level * m_sunPhase[3] * clear;
+    m_auroraNow = m_nightSky.auroraForce > 0.0f ? m_nightSky.auroraForce * m_cond.night : level * m_cond.night * clear;
     if (m_frameNumber % 600 == 17 && (m_starsDark > 0.0f || m_auroraNow > 0.0f))
         Log("sky: night - stars %.2f, aurora %.2f%s", double(m_starsDark), double(m_auroraNow),
             m_meteor[1][3] >= 0.0f ? ", a shooting star" : "");

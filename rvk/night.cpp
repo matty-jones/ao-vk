@@ -116,7 +116,7 @@ void Device::UpdateMoon()
     // sun's light is gone at the horizon, so the two never overlap and the shadow map turns to the moon with both out
     // -, full ~8 degrees down. The moon's light by its own height: none at the horizon, full from ~27 degrees.
     const float sunUp = SunUp();
-    const float night = 1.0f - Smoothstep(-0.14f, -0.035f, sunUp);
+    const float night = m_cond.moonNight;
     const float target2 = have && m_moonLight > 0.0f ? night * Smoothstep(0.05f, 0.45f, m_moonPos[1]) : 0.0f;
     if (m_moonFade > 0.0f || target2 > 0.0f)
         m_constantsDirty = true;                 // (the draws' lights: MoonLightFor)

@@ -473,6 +473,12 @@ public:
     void SetWetNow(float wet, float puddles) { m_wetness = wet; m_puddles = puddles; }   // (tests: soaked already)
     float StormOvercast() const;
     float StormSky() const { return std::clamp(m_stormSky, 0.0f, 1.0f); }   // how much a storm's sky (rain.cpp)
+    // The weather's ramps (rain.cpp), read live: a storm's deck thickening the cloud layer and its reach (StormSky
+    // 0.1 .. 0.7, smoothed); the storm in full - the land's darkening, the air's hue (0.05 .. 0.6); how clear the sky
+    // over us is - an overcast and a storm take it (the twilight's colours, the stars, the auroras).
+    float StormDeck() const;
+    float StormFull() const;
+    float ClearSky() const;
     void StormSmokeWind(float out[3]) const;                       // a storm's own wind on the smoke (smoke.cpp)                                   // how much a thunderstorm hides the sun (rain.cpp)
     void StormHue(float rgb[3]) const;                             // a colour turned the storm's dark yellow-green (rain.cpp)
     void StormAirColour(float rgb[3]) const;                             // ... and the air's (fog, haze) dimmed under its deck
@@ -1635,8 +1641,29 @@ private:
     // night that the sky, the light handover and the grading all read, instead of each its own narrow ramp.
     double m_sunClockLast = -1.0, m_sunLightClock = -1.0;
     float m_frameDt = 0.0f;                      // real seconds since the last frame (0..0.25)
-    float m_sunPhase[4] = {};                    // golden hour, afterglow, blue hour, night (FL.phase)
-    float m_nightAmount = 0.0f;                  // NightAmount, eased
+    // The world's conditions (sky.cpp UpdateConditions, with the sun's clock - docs/audit-2026-10.md §1): every
+    // feature's "how much is it night", each named and set here once instead of worked out again where it is read.
+    // Each ramp was tuned against the game on its own and keeps its span (sun heights are sines: 0.035 ~2 degrees, 0.14
+    // ~8, 0.24 ~14). A feature's own window (the morning haze, the sunset rays) stays with the feature; the weather's
+    // ramps, which change within a frame, are functions read live (CloudCover, StormDeck, StormFull, ClearSky).
+    struct Conditions {
+        bool sunKnown = false;   // a sun seen lately (none: a room's playfield, a zone without one)
+        float sunUp = 1.0f;      // the true sun's height (the sine of its elevation; eased: UpdateSunClock)
+        float golden = 0.0f;     // the golden hour: ~15 degrees up to the horizon and a little under (FL.phase.x)
+        float afterglow = 0.0f;  // the horizon to ~8 degrees under, most within the first 2 (FL.phase.y)
+        float blueHour = 0.0f;   // ~2 to ~15 degrees under, all of it from 5 to 11 (FL.phase.z)
+        float night = 0.0f;      // the sky's night: ~2 to ~14 degrees under (FL.phase.w)
+        float moonNight = 0.0f;  // the moon's light coming in: ~2 to ~8 under (our sun's ends at the horizon: never both)
+        float cloudNight = 0.0f; // the clouds' night (the sky's light on them raised): ~2 up to ~11 under (FL.cond.x)
+        float deepNight = 0.0f;  // past the blue hour: ~8 to ~14 under (RVK_Darkness's sky and clouds; 1 without a sun)
+        float gameStars = 1.0f;  // the dark the game's stars show in: ~6 to ~14 under (1 without a sun)
+        float ourStars = 1.0f;   // ... our own: ~2 to ~14 under, or with RVK_StarFade off none only by day (1 without)
+        float heatNight = 0.0f;  // dark enough for heat lightning: from ~2 under, linear to ~7 (0 without a sun)
+        float grade = 0.0f;      // the grading's night (NightAmount): `night`, or by the game's light without a sun;
+                                 // eased over ~3 s
+    };
+    Conditions m_cond;
+    void UpdateConditions();
     float m_sunRising = 1.0f;                    // 1 rising .. 0 setting, eased (the trend over minutes)
     bool m_nightSet = false;
     void UpdateSunClock();
@@ -2313,7 +2340,7 @@ private:
     uint64_t m_sceneAmbientFrame = ~0ull;
     // How much it is night for the grading (tone map, bloom, night glow): by the sun's eased height (UpdateSunClock),
     // from ~2 degrees under the horizon to ~14; without a sun (indoors) the game's light and ambient, as before.
-    float NightAmount() const { return m_nightAmount; }
+    float NightAmount() const { return m_cond.grade; }
     float NightByLight() const;
     void SceneFog(float colour[4], float params[4]) const;
     void RenderStateFog(float colour[4], float params[4]) const;

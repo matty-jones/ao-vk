@@ -99,12 +99,11 @@ vec3 DuskSkyTint()
     return mix(vec3(1.0), c, 0.5 * v);
 }
 
-// How much it is night for the clouds' light: 0 with the sun up .. 1 with it ~11 degrees down - by the sun's true
-// height (FL.sunTrue), not its light: that goes out with the sun still 3 degrees up (where its shadows end), and the
-// night's brightening then came on at once under a dusk sky still near daylight - clouds blown out white (user).
+// How much it is night for the clouds' light: 0 with the sun up .. 1 with it ~11 degrees down (rvk sky.cpp
+// UpdateConditions: m_cond.cloudNight, by the sun's true height).
 float Night()
 {
-    return 1.0 - smoothstep(-0.2, 0.03, normalize(FL.sunTrue.xyz + vec3(0.0, 1e-6, 0.0)).y);
+    return FL.cond.x;
 }
 
 // How much the sky's light is raised at night (1 by day): lit only by the sky, cloud dimmed inside to 0.4 came out a

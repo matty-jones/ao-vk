@@ -98,7 +98,7 @@ void Device::UpdateDarkness()
     // The sky and clouds at night: lighter below 1, darker above (log10 of the sky's factor) - coming in with the night
     // itself, the sun from ~8 to ~14 degrees down: the blue hour before it is the same at every setting.
     const float lift = d <= 1.0f ? 0.3f * (1.0f - d) : -0.25f * (d - 1.0f);
-    const float deep = SunKnown() ? 1.0f - Smoothstep(-0.24f, -0.14f, SunUp()) : 1.0f;
+    const float deep = m_cond.deepNight;
     f.skyLog = lift * deep;
     f.clouds = std::pow(10.0f, 0.8f * f.skyLog);
     // The moon's light: stronger on a lighter night, weaker on a darker one.

@@ -821,8 +821,7 @@ void Device::UpdateHeatLightning()
     const float setting = std::clamp(m_heatFlash, 0.0f, 2.0f);
     const float chance = 0.33f * setting;
     const float tonight = setting > 0.0f && (m_heatForce || StrikeHash(key, 41) < chance) ? 1.0f : 0.0f;
-    const float h = SunUp();
-    const float dark = SunKnown() ? 1.0f - std::clamp((h + 0.03f) / 0.1f, 0.0f, 1.0f) : 0.0f;   // (from ~2 degrees under)
+    const float dark = m_cond.heatNight;
     const float dry = (1.0f - std::clamp((m_rain - 0.05f) / 0.15f, 0.0f, 1.0f)) * (1.0f - StormSky());
     const float level = tonight * dark * dry * (m_frameEyeValid && !m_indoors ? 1.0f : 0.0f);
     if ((level > 0.2f) != (m_heatTonight > 0.2f))
@@ -863,9 +862,12 @@ float Device::StormOvercast() const
 {
     if (!m_weatherParams.enable)
         return 0.0f;
-    const float r = std::clamp((StormSky() - 0.05f) / 0.55f, 0.0f, 1.0f);
-    return std::clamp(r * r * (3.0f - 2.0f * r) * std::max(m_stormDark, 0.0f) * m_dark.storm, 0.0f, 1.0f);
+    return std::clamp(StormFull() * std::max(m_stormDark, 0.0f) * m_dark.storm, 0.0f, 1.0f);
 }
+
+float Device::StormDeck() const { return Smoothstep(0.1f, 0.7f, StormSky()); }
+float Device::StormFull() const { return Smoothstep(0.05f, 0.6f, StormSky()); }
+float Device::ClearSky() const { return (1.0f - 0.7f * Smoothstep(0.55f, 0.95f, CloudCover())) * (1.0f - StormSky()); }
 
 // A colour of the air in a thunderstorm turned its dark yellow-green, its brightness kept (a little darker): the game's
 // fog, its clouds' colours and our haze - in a zone with a teal fog the far land, the game's puffs and the clouds'
@@ -874,8 +876,7 @@ void Device::StormHue(float rgb[3]) const
 {
     if (!m_weatherParams.enable || m_stormSky <= 0.0f || m_stormGreen <= 0.0f)
         return;
-    const float r = std::clamp((StormSky() - 0.05f) / 0.55f, 0.0f, 1.0f);
-    const float k = std::clamp(m_stormGreen, 0.0f, 1.0f) * r * r * (3.0f - 2.0f * r);
+    const float k = std::clamp(m_stormGreen, 0.0f, 1.0f) * StormFull();
     const float green[3] = {1.01f, 1.063f, 0.638f};   // (unit luma: as StormGreen)
     const float l = 0.3f * rgb[0] + 0.59f * rgb[1] + 0.11f * rgb[2];
     for (int i = 0; i < 3; ++i) {

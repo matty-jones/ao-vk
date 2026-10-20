@@ -106,6 +106,7 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 fogBanks;              // fog banks (rvk mist.cpp FogBankParams): their noise at the eye (world x, z, drifted), how
                                 // deep they stand over the low ground (world units), how much (0: none)
     vec4 lightGrid;             // the frame lights' grid (rvk Device::LightGridLights): its corner x, z, cells across, down
+    vec4 cond;                  // the world's conditions (rvk rvk.h Conditions): x the clouds' night; y, z, w unused
     Light lights[64];
 } FL;
 

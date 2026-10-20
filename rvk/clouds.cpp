@@ -1613,9 +1613,9 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     lf.eye[3] = float(clock);
     lf.layer[0] = m_cloudBase;
     // (A thunderstorm's layer taller: its towers - cloud_layer.frag Profile - the rest keep to the lower 1300.)
-    lf.layer[1] = m_cloudBase + kLayerThickness * (1.0f + 2.0f * Smoothstep(0.1f, 0.7f, StormSky()));
+    lf.layer[1] = m_cloudBase + kLayerThickness * (1.0f + 2.0f * StormDeck());
     lf.layer[2] = kLayerRadius;
-    lf.layer[3] = kLayerReach + (kStormReach - kLayerReach) * Smoothstep(0.1f, 0.7f, StormSky());
+    lf.layer[3] = kLayerReach + (kStormReach - kLayerReach) * StormDeck();
     lf.weather[0] = m_cloudWeatherArea[0];
     lf.weather[1] = m_cloudWeatherArea[1];
     lf.weather[2] = 1.0f / m_cloudWeatherArea[2];
@@ -1702,7 +1702,7 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     const float storm = StormSky();
     {
         // RVK_CloudNight: by night (as the shaders' Night(): by the sun's true height) their brightness x more.
-        const float night = 1.0f - Smoothstep(-0.2f, 0.03f, SunUp());
+        const float night = m_cond.cloudNight;
         // (A storm darker - by RVK_StormThick: at 2 half as bright, as before; at 1 three quarters.)
         // (And x RVK_Darkness's share at night: darkness.cpp.)
         lf.tint[3] = m_cloudParams.brightness * (1.0f + (m_cloudParams.night - 1.0f) * night) * m_dark.clouds *
@@ -1754,7 +1754,7 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     static const float deckOverride = getenv("RANDYVK_CLOUD_DECK") ? float(atof(getenv("RANDYVK_CLOUD_DECK"))) : -1.0f;
     lf.deck[0] = std::clamp((deckOverride >= 0.0f ? deckOverride : m_cloudDeck) * m_cloudParams.low, 0.0f, 1.0f);
     // (Between the ground and the layer's base; a thunderstorm's lower - its scud, near over the land.)
-    const float scud = Smoothstep(0.1f, 0.7f, StormSky());
+    const float scud = StormDeck();
     lf.deck[1] = m_cloudBase - (0.55f + 0.15f * scud) * m_cloudParams.height;
     lf.deck[2] = lf.deck[1] + kDeckThickness;
     // The game's sheets' faint shadow (the shadow map), while it draws them.

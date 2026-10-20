@@ -454,7 +454,10 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
         for (int i = 0; i < 3; ++i) fl->sunTrue[i] = -d[i] / l;
         fl->sunTrue[3] = night;
     }
-    std::memcpy(fl->phase, m_sunPhase, sizeof(fl->phase));   // (the dusk's phases: sky.cpp UpdateSunClock)
+    const float phase[4] = {m_cond.golden, m_cond.afterglow, m_cond.blueHour, m_cond.night};   // (the dusk's phases)
+    std::memcpy(fl->phase, phase, sizeof(fl->phase));
+    fl->cond[0] = m_cond.cloudNight;             // (cloud_light.glsl Night())
+    fl->cond[1] = fl->cond[2] = fl->cond[3] = 0.0f;
     std::memcpy(fl->skyRing, m_skyRing, sizeof(fl->skyRing));
     std::memcpy(fl->skyUp, m_skyUp, sizeof(fl->skyUp));
     if (!ProcSkyReady()) {
