@@ -3,7 +3,7 @@
 /proc/PID/maps and each image's SizeOfImage) and, for randy31_orig.dll and our randy31.dll, by function.
 
 Function names: randy31_orig from a Ghidra function list (build/profile/orig-functions.txt, made with
-`tools/ghidra-run.sh randy31.dll ListFunctions.java <file>` if missing), ours from build/linux-release/randy31.map.
+`tools/ghidra-run.sh randy31.dll ListFunctions.java <file>` if missing), ours from build/linux-release/randy31.map (or $PROFILE_MAP: the map of the build that ran).
 Other modules (GUI.dll, DisplaySystem.dll, ...): a Ghidra list build/profile/<module>-functions.txt if there is one
 (`tools/ghidra-run.sh GUI.dll ListFunctions.java build/profile/GUI.dll-functions.txt`), else the module's exports -
 then a sample is named after the nearest export before it, shown as "~Name" (an internal function after it can be
@@ -12,6 +12,7 @@ counted there).
 Usage: tools/profile-report.py samples.txt maps.txt [--thread TID | --rank N] [--top N] [--module NAME]
 """
 import bisect
+import os
 import collections
 import pathlib
 import re
@@ -61,7 +62,7 @@ def orig_functions():
 
 def own_functions():
     funcs = []
-    for line in open(ROOT / "build/linux-release/randy31.map", errors="replace"):
+    for line in open(os.environ.get("PROFILE_MAP", ROOT / "build/linux-release/randy31.map"), errors="replace"):
         m = re.match(r"\s*0001:([0-9a-f]+)\s+(\S+)\s+([0-9a-f]{8,16})", line)
         if m:
             funcs.append((int(m.group(3), 16) - 0x10000000, m.group(2)))

@@ -22,11 +22,14 @@ constexpr uint32_t kParent = 0x14;                 // RRefFrame_t: its parent fr
 
 bool g_active;                                     // Visuals on (hooked here, or driven by viewport.cpp)
 
+void ForgetPages();
+
 void* Enter(void* viewport)
 {
     void* previous = g_viewport;
     g_viewport = viewport;
     ++g_renders;
+    ForgetPages();
     return previous;
 }
 
@@ -47,27 +50,36 @@ void __fastcall RenderRefractionHook(void* viewport, void*, int listFrom, int li
 
 // Reads through pointers that may be stale (Randy's light list can hold lights whose frames are gone) must never
 // fault - not even inside __try: the game's crash handler sees every access violation first and ends the game. So
-// memory is checked first (VirtualQuery; a few pages cached, the cache cleared at each scene update / description).
-struct PageCache {
-    uintptr_t page[16];
-    bool readable[16];
+// memory is checked first (VirtualQuery). What it says is cached as the run of pages it reports in the same state (a
+// heap segment: one query covers most of a frame's objects) - each query is a system call, and with a page at a time,
+// cleared at each visual's description, the walks up visuals' frames made thousands a frame (~0.5 ms of the game
+// thread at a lamp-lit outpost, 2026-10-20). Cleared at each scene update and each viewport's render: the stale reads
+// (the lights' frames) come right after the scene update; what is described while drawing is alive.
+struct RegionCache {
+    uintptr_t begin[32], end[32];
+    bool readable[32];
     int count = 0, next = 0;
-} g_pages;
+} g_regions;
+uint32_t g_memoryQueries = 0;                       // VirtualQuery calls (the scene update's log line)
 
-void ForgetPages() { g_pages.count = 0; }
+void ForgetPages() { g_regions.count = 0; }
 
 bool PageReadable(uintptr_t page)
 {
-    for (int i = 0; i < g_pages.count; ++i)
-        if (g_pages.page[i] == page) return g_pages.readable[i];
+    for (int i = 0; i < g_regions.count; ++i)
+        if (g_regions.begin[i] <= page && page < g_regions.end[i]) return g_regions.readable[i];
     MEMORY_BASIC_INFORMATION mbi{};
-    bool ok = VirtualQuery(reinterpret_cast<const void*>(page), &mbi, sizeof(mbi)) == sizeof(mbi) &&
-              mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) &&
+    ++g_memoryQueries;
+    const bool queried = VirtualQuery(reinterpret_cast<const void*>(page), &mbi, sizeof(mbi)) == sizeof(mbi);
+    bool ok = queried && mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) &&
               (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
                               PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
-    const int slot = g_pages.count < 16 ? g_pages.count++ : (g_pages.next++ & 15);
-    g_pages.page[slot] = page;
-    g_pages.readable[slot] = ok;
+    // (BaseAddress is the queried page's; RegionSize runs from it to the end of the pages in the same state.)
+    const uintptr_t end = queried && mbi.RegionSize ? page + mbi.RegionSize : page + 0x1000;
+    const int slot = g_regions.count < 32 ? g_regions.count++ : (g_regions.next++ & 31);
+    g_regions.begin[slot] = page;
+    g_regions.end[slot] = end > page ? end : page + 0x1000;
+    g_regions.readable[slot] = ok;
     return ok;
 }
 
@@ -310,6 +322,12 @@ void __fastcall ProcessHook(void* viewport, void*, void* root)
 void Lights()
 {
     ForgetPages();
+    static uint32_t updates = 0;
+    if (++updates == 600) {                      // (the readable checks' cost: RegionCache)
+        Log("visuals: %.1f memory queries a scene update (avg of 600)", double(g_memoryQueries) / 600.0);
+        updates = 0;
+        g_memoryQueries = 0;
+    }
     if (!g_lightSink)
         return;
     static std::vector<SceneLight> lights;
@@ -381,7 +399,6 @@ void NoteDumpRequested()
 
 VisualInfo Describe(const void* visual)
 {
-    ForgetPages();
     if (!visual)
         return {};
     if (g_renders <= g_chainLogUntil)
