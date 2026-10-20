@@ -110,12 +110,15 @@ void Device::SetConsoleImage(uint32_t width, uint32_t height, const void* pixels
 }
 
 // The console's image over the top of the main target (EndFrame, which has it in TRANSFER_SRC for presenting and
-// gets it back so). Its upload goes with the frame's others, before its draws. An image made for another size (the
-// window just resized) waits for the console's next one.
-void Device::DrawConsole(VkCommandBuffer cmd)
+// gets it back so), or of `dst` (frame generation's overlay, framegen.cpp). Its upload goes with the frame's others,
+// before its draws. An image made for another size (the window just resized) waits for the console's next one.
+void Device::DrawConsole(VkCommandBuffer cmd, Texture* dst)
 {
-    if (!m_consoleH || !m_uiCompositePipeline || !m_main || m_main->m_format != Format::A8R8G8B8 ||
-        m_consoleW != m_main->m_width || m_consoleH > m_main->m_height)
+    if (!dst && m_fgUiLayer)
+        return;                                  // (RVK_FrameGen: in the overlay the swapchain lays over the frames)
+    Texture* target = dst ? dst : m_main;
+    if (!m_consoleH || !m_uiCompositePipeline || !target || m_main->m_format != Format::A8R8G8B8 ||
+        m_consoleW != target->m_width || m_consoleH > target->m_height)
         return;
     if (!m_consoleTex || m_consoleTex->m_width != m_consoleW || m_consoleTex->m_height != m_consoleH) {
         if (m_consoleTex) DestroyTexture(m_consoleTex);
@@ -130,9 +133,10 @@ void Device::DrawConsole(VkCommandBuffer cmd)
     // (The interface layer's pass: texel for pixel, blended ONE / INV_SRC_ALPHA - only the console's rows drawn.)
     const VkRect2D area{{0, 0}, {m_consoleW, m_consoleH}};
     const float params[4] = {};
-    FullscreenPass(cmd, m_main, m_uiCompositePipeline, m_consoleTex->m_view, m_consoleTex->m_view, m_pointSampler, params,
+    FullscreenPass(cmd, target, m_uiCompositePipeline, m_consoleTex->m_view, m_consoleTex->m_view, m_pointSampler, params,
                    sizeof(params), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &area);
-    Transition(cmd, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    if (!dst)
+        Transition(cmd, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 }
 
 }  // namespace rvk

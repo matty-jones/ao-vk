@@ -1832,7 +1832,7 @@ void Device::Clear(uint32_t count, const Rect* rects, uint32_t flags, uint32_t a
         ArgbToFloat(argb, att[n].clearValue.color.float32);
         // In the interface layer a clear covers what is under it, as it would on the frame: alpha is coverage there,
         // and the PF map's black (0x00000000) would clear it see-through.
-        if (m_uiLayerActive && m_target == m_uiLayer)
+        if (InLayer())
             att[n].clearValue.color.float32[3] = 1.0f;
         ++n;
     }
@@ -2118,7 +2118,7 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     }
     // The interface layer (interface.cpp): every draw blends - its colour as asked (unblended: ONE, ZERO) - and its
     // alpha accumulates its coverage.
-    const bool uiLayer = m_uiLayerActive && m_target == m_uiLayer;
+    const bool uiLayer = InLayer();
     VkBool32 blend = m_rs[d3d::RS_ALPHABLENDENABLE] != 0 || uiLayer;
     if (c.blendEnable != blend) {
         blendDirty |= 1u;
@@ -3419,7 +3419,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // (Bit 8: in the interface layer, a draw replacing what is there - unblended, or blended ONE, ZERO - covers it
     // fully, whatever its alpha: on the frame it would. The PF map's light-map tiles have alpha 0; as coverage they
     // left the map's black parts see-through.)
-    const bool layerReplace = m_uiLayerActive && m_target == m_uiLayer &&
+    const bool layerReplace = InLayer() &&
                               (!m_rs[d3d::RS_ALPHABLENDENABLE] || (m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_ONE &&
                                                                     m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ZERO));
     // (Bit 9: a PF map tile of an AI mission (RVK_AlienMap). That map is an untextured fill in transparent black, then

@@ -1883,7 +1883,9 @@ void Device::EndFrame()
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {m_width, m_height, 1};
-        vkCmdCopyImageToBuffer(f.main, m_main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_readback, 1, &region);
+        Texture* shot = FgComposedFrame(f.main);   // (RVK_FrameGen: the labels and interface aren't in the frame)
+        vkCmdCopyImageToBuffer(f.main, (shot ? shot : m_main)->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_readback, 1,
+                               &region);
     }
     if (!consoleInShots) DrawConsole(f.main);    // (after the screenshot's copy: not in it)
 
@@ -2022,8 +2024,19 @@ bool Device::ReadPixels(Texture* target, void* out)
         VkCommandBuffer cmd = m_frames[m_frameIndex].main;
         m_renderEndCause = kEndReadback;
         EndRendering();
-        Transition(cmd, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        vkCmdCopyImageToBuffer(cmd, t->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+        Texture* src = t;
+        if (t == m_main) {
+            // (RVK_FrameGen: the labels and the interface laid over, as the player sees it - the game's screenshots.)
+            if (Texture* composed = FgComposedFrame(cmd)) {
+                src = composed;
+                m_cache = StateCache{};          // (its passes changed the pipeline and pushed set 0: InterfaceEnd)
+                m_arenaBound = false;
+                m_bindlessBound = false;
+                m_constantsDirty = true;
+            }
+        }
+        Transition(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        vkCmdCopyImageToBuffer(cmd, src->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
         SubmitAndWait();
         BeginRenderingOn(m_target);
     } else {

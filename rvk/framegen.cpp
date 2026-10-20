@@ -223,6 +223,99 @@ void Device::FgPrepare(VkCommandBuffer cmd, const float params[28])
         s.prepared = true;
 }
 
+// The name labels (EndScene, after the post passes) into a layer of their own, cleared, for the overlay - drawn as the
+// interface is into its layer (Device::InLayer), still behind what stands in front. False: no layer (drawn over the
+// frame as without frame generation).
+bool Device::FgLabelsBegin()
+{
+    const uint32_t w = m_ldrMain->m_width, h = m_ldrMain->m_height;
+    if (!m_fgLabels || m_fgLabels->m_width != w || m_fgLabels->m_height != h) {
+        if (m_fgLabels) DestroyTexture(m_fgLabels);
+        m_fgLabels = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+        if (!m_fgLabels)
+            return false;
+    }
+    m_renderEndCause = kEndTarget;
+    EndRendering();
+    m_target = m_fgLabels;
+    m_fgLabelsActive = true;
+    m_cache = StateCache{};                      // (the layer's blend equations differ)
+    BeginRenderingOn(m_fgLabels);
+    VkClearAttachment clear{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
+    clear.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkClearRect rect{{{0, 0}, {w, h}}, 0, 1};
+    vkCmdClearAttachments(m_frames[m_frameIndex].main, 1, &clear, 1, &rect);
+    return true;
+}
+
+void Device::FgLabelsEnd()
+{
+    m_renderEndCause = kEndTarget;
+    EndRendering();
+    m_fgLabelsActive = false;
+    m_fgLabelsFrame = m_frameNumber;
+    m_target = m_ldrMain;
+    m_cache = StateCache{};
+    BeginRenderingOn(m_ldrMain);
+}
+
+// An image cleared to transparent black (a render target, left as a colour attachment).
+void Device::ClearImage(VkCommandBuffer cmd, Texture* t)
+{
+    Transition(cmd, t, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    color.imageView = t->m_view;
+    color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, {t->m_width, t->m_height}};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &color;
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdEndRendering(cmd);
+}
+
+// The frame as the player sees it, for reading back with frame generation on (screenshots, the game's own through a
+// Lock - ReadPixels): the frame with the labels and the interface over it (not the console, as without frame
+// generation), in an image of its own, left in TRANSFER_SRC. Null: nothing is laid over the frame - m_main is it.
+// (Outside a rendering; the passes change the pipeline, the caller binds again.)
+Texture* Device::FgComposedFrame(VkCommandBuffer cmd)
+{
+    if (!m_fgUiLayer || !m_main || m_main->m_format != Format::A8R8G8B8 || !m_uiCompositePipeline)
+        return nullptr;
+    const uint32_t w = m_main->m_width, h = m_main->m_height;
+    const bool interface = m_uiLayer && m_uiLayerReady.load(std::memory_order_relaxed) && !m_hideInterface &&
+                           m_uiLayer->m_width == w && m_uiLayer->m_height == h;
+    const bool labels = m_fgLabels && m_fgLabelsFrame == m_frameNumber && m_fgLabels->m_width == w &&
+                        m_fgLabels->m_height == h;
+    if (!interface && !labels)
+        return nullptr;
+    if (!m_fgShot || m_fgShot->m_width != w || m_fgShot->m_height != h) {
+        if (m_fgShot) DestroyTexture(m_fgShot);
+        m_fgShot = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+        if (!m_fgShot)
+            return nullptr;
+    }
+    Transition(cmd, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    Transition(cmd, m_fgShot, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkImageCopy region{};
+    region.srcSubresource = region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.extent = {w, h, 1};
+    vkCmdCopyImage(cmd, m_main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_fgShot->m_image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    const float none[4] = {};
+    for (Texture* layer : {labels ? m_fgLabels : nullptr, interface ? m_uiLayer : nullptr}) {
+        if (!layer) continue;
+        Transition(cmd, layer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        FullscreenPass(cmd, m_fgShot, m_uiCompositePipeline, layer->m_view, layer->m_view, m_pointSampler, none,
+                       sizeof(none), true);
+    }
+    Transition(cmd, m_fgShot, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    return m_fgShot;
+}
+
 // Before the frame is presented (EndFrame, its commands still open): whether a frame is generated before it (only
 // after a prepared one - menus and loading screens without 3D have none), and the interface's layer for the
 // swapchain to lay over both.
@@ -242,14 +335,44 @@ void Device::FgBeforePresent(VkCommandBuffer cmd)
         config.frameID = s.frame;
         ffxFsr3ConfigureFrameGeneration(&s.context, &config);
     }
-    FfxResource ui{};
-    if (m_fgUiLayer && m_uiLayer && m_uiLayerReady.load(std::memory_order_relaxed) && !m_hideInterface &&
-        m_uiLayer->m_width == m_ldrMain->m_width && m_uiLayer->m_height == m_ldrMain->m_height) {
-        Transition(cmd, m_uiLayer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        ui = Resource(m_uiLayer->m_image, GetFormatInfo(m_uiLayer->m_format).vk, m_uiLayer->m_width, m_uiLayer->m_height,
-                      FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ, L"interface");
+    // The overlay: the interface layer alone when nothing else is over the frame, otherwise put together - the name
+    // labels, the interface, the console - in an image of its own. The swapchain copies it at present (double
+    // buffering: it lays it over a generated frame later, while the next frame is being drawn into ours).
+    const uint32_t w = m_ldrMain->m_width, h = m_ldrMain->m_height;
+    const bool interface = m_uiLayer && m_uiLayerReady.load(std::memory_order_relaxed) && !m_hideInterface &&
+                           m_uiLayer->m_width == w && m_uiLayer->m_height == h;
+    const bool labels = m_fgLabels && m_fgLabelsFrame == m_frameNumber && m_fgLabels->m_width == w &&
+                        m_fgLabels->m_height == h;
+    const bool console = m_consoleH && m_consoleW == w && m_consoleH <= h && m_uiCompositePipeline;
+    Texture* overlay = interface ? m_uiLayer : nullptr;
+    if (labels || console) {
+        if (!m_fgOverlay || m_fgOverlay->m_width != w || m_fgOverlay->m_height != h) {
+            if (m_fgOverlay) DestroyTexture(m_fgOverlay);
+            m_fgOverlay = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+        }
+        if (m_fgOverlay) {
+            overlay = m_fgOverlay;
+            ClearImage(cmd, m_fgOverlay);
+            const float none[4] = {};
+            for (Texture* layer : {labels ? m_fgLabels : nullptr, interface ? m_uiLayer : nullptr}) {
+                if (!layer) continue;
+                Transition(cmd, layer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                FullscreenPass(cmd, m_fgOverlay, m_uiCompositePipeline, layer->m_view, layer->m_view, m_pointSampler, none,
+                               sizeof(none), true);
+            }
+            if (console)
+                DrawConsole(cmd, m_fgOverlay);
+        }
     }
-    ffxRegisterFrameinterpolationUiResourceVK(FfxSwapchain(m_swapchain), ui, FFX_UI_COMPOSITION_FLAG_USE_PREMUL_ALPHA);
+    FfxResource ui{};
+    if (overlay) {
+        Transition(cmd, overlay, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        ui = Resource(overlay->m_image, GetFormatInfo(overlay->m_format).vk, w, h, FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ,
+                      L"interface");
+    }
+    ffxRegisterFrameinterpolationUiResourceVK(FfxSwapchain(m_swapchain), ui,
+                                              FFX_UI_COMPOSITION_FLAG_USE_PREMUL_ALPHA |
+                                                  FFX_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING);
     if (s.prepared) ++s.generatedAsked;
     s.prepared = false;
     m_liveShown.store(FgShownFrames(), std::memory_order_relaxed);   // (the readout's shown rate)

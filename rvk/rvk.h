@@ -1863,7 +1863,13 @@ private:
     uint32_t m_consoleW = 0, m_consoleH = 0;
     bool m_consoleDirty = false;
     Texture* m_consoleTex = nullptr;
-    void DrawConsole(VkCommandBuffer cmd);       // EndFrame: m_main in TRANSFER_SRC, left so
+    void DrawConsole(VkCommandBuffer cmd, Texture* dst = nullptr);   // EndFrame: m_main in TRANSFER_SRC, left so
+    // A draw into a layer laid over the frame later (the interface's, frame generation's labels): it blends, its alpha
+    // as coverage (draw.cpp).
+    bool InLayer() const
+    {
+        return (m_uiLayerActive && m_target == m_uiLayer) || (m_fgLabelsActive && m_target == m_fgLabels);
+    }
     bool m_sceneSaw3D = false;
     uint32_t m_sceneEndDraw = 0, m_sceneEndFvf = 0;   // frame dumps: where the scene phase ended
     VkPipeline m_pipelinesHdr[3] = {};           // m_pipelines for the float target
@@ -3090,6 +3096,18 @@ private:
     struct FrameGenState;
     FrameGenState* m_fg = nullptr;
     bool m_fgUiLayer = false;                    // this frame's interface layer goes to the swapchain, not over the frame
+    // What the swapchain lays over the real and the generated frames, so none of it is interpolated: the name labels
+    // (drawn into a layer of their own, FgLabelsBegin/End - EndScene), the interface layer and the console, put
+    // together each frame (FgBeforePresent).
+    Texture* m_fgLabels = nullptr;
+    bool m_fgLabelsActive = false;               // the held labels' draws go into m_fgLabels
+    uint64_t m_fgLabelsFrame = ~0ull;            // the frame they were drawn in
+    Texture* m_fgOverlay = nullptr;
+    bool FgLabelsBegin();
+    void FgLabelsEnd();
+    void ClearImage(VkCommandBuffer cmd, Texture* t);
+    Texture* m_fgShot = nullptr;
+    Texture* FgComposedFrame(VkCommandBuffer cmd);   // the frame as seen, for reading back (null: m_main is)
     bool FgCreateSwapchain(const VkSwapchainCreateInfoKHR& ci, std::string* error);
     void FgDestroySwapchain();
     void WaitIdle();                             // vkDeviceWaitIdle, frame generation's presents done first

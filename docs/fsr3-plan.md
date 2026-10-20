@@ -16,6 +16,12 @@ it is the real frame's, so each generated frame was a copy of the next real one 
 next real 0.000). With the whole frame as the rectangle (staged `randy31-framegen2.dll`) the generated frame lies
 halfway: 0.13 from the previous real frame, 0.12 from the next, 0.25 between the two. With the screen at 144 Hz it
 can only help where the game renders well under 144 fps; above about 72 the present mode (mailbox) drops some.
+Second try: name labels smeared in fast turns (interpolated - their pixels take the motion of what is behind them),
+the console and readout went under the game's interface and were interpolated too (drawn into the frame at
+present). Now one overlay goes to the swapchain: the labels (a layer of their own, drawn as the interface is), the
+interface, the console - with the SDK's double buffering, as it lays the overlay over a generated frame while the
+next is being drawn. Screenshots and the game's Lock read the frame with the labels and interface laid back over
+(`FgComposedFrame`). Staged `randy31-framegen3.dll`.
 
 The user asked for FSR 3.1 after FSR 2.2 went in (`RVK_Upscaler` 1, `rvk/fsr2.cpp`, `third_party/fsr2`). FSR 3.1 is
 two things:
