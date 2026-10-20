@@ -148,6 +148,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   clear ground between, deeper the wetter it has been and most in wet country (`RVK_FogBanks`, 1; 0 for none).
 
 ### Changed
+- Faster where water or smoke is near but not in view: water out of the camera's view is no longer drawn (about
+  1.5 ms a frame with a lake behind you), and smoke out of view is simulated a sixth as often, still evolving, still
+  there when you turn round (about half a millisecond with a few chimneys behind you).
 - Nights are lighter by default (`RVK_Darkness` 0.5): the land and the night sky keep more of the blue hour's light,
   the moon lights a little more, and storms are less dark. Rooms and other places without a sun no longer get the
   night's darkening on top of their own dim light. Set `RVK_Darkness` to 1 for the old look.

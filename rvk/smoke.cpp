@@ -185,6 +185,7 @@ uint32_t DriftCells(float size, const Device::SmokeParams& P)
 constexpr double kMsPerCell = 1.0e-6;          // (corrected as it runs by the measured: m_smokeCostScale)
 constexpr uint32_t kJacobiFar = 12;              // pressure steps for a volume beyond kSimFar (less exact, unseen there)
 constexpr float kMostSlow = 6.0f;                // over budget, steps at most this many times further apart
+constexpr float kOutOfView = 6.0f;               // out of view, steps this many times further apart
 double StepCost(uint32_t n, uint32_t jacobi)
 {
     return double(n) * n * n * kMsPerCell * (0.5 + 0.5 * double(jacobi) / double(kJacobi));
@@ -1132,7 +1133,9 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
     EnsureRingSpace(live.size() * (sizeof(SmokeBodies) + sizeof(SandHeader) + 512) + kSandCellsMax * kSandCellsMax * kSandColumnFloats * 4u + 1024);
     Frame& f = m_frames[m_frameIndex];
     // Which volumes step this frame. Each has its period: kSimStep (half that warming up), twice it beyond kSimFar,
-    // twice again out of view. Over RVK_SmokeBudget (the steps' cost a second, at this frame rate) all but the sand's
+    // kOutOfView times out of view - about 10 a second, steps of 0.1 s as when over budget: unseen smoke goes on
+    // evolving, still there when the camera turns, at a sixth of the cost (five sources behind the camera took ~1.7
+    // ms a frame at twice: the user's profiling sweep, 2026-10-20). Over RVK_SmokeBudget (the steps' cost a second, at this frame rate) all but the sand's
     // (round the camera) are stretched alike, up to kMostSlow. Of those due, the most overdue first, as many as keep
     // each frame's cost about the average - not two volumes' steps in one frame and none in the next (a stutter) -
     // and any a period late.
@@ -1157,7 +1160,7 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
             jacobiOf[i] = !sandV && live[i].first > kSimFar ? kJacobiFar : kJacobi;
             float t = warmingNow[i] ? 0.5f * kSimStep : kSimStep;
             if (!sandV && live[i].first > kSimFar) t *= 2.0f;
-            if (!sandV && !warmingNow[i] && !inView(v)) t *= 2.0f;
+            if (!sandV && !warmingNow[i] && !inView(v)) t *= kOutOfView;
             period[i] = t;
             (sandV ? fixed : demand) += StepCost(v.n, jacobiOf[i]) / std::max(double(t), double(dt));
         }

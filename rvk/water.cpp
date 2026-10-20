@@ -33,6 +33,47 @@ using namespace detail;
 
 namespace {
 
+// Whether any part of a world-space triangle lies in a view-projection's frustum (D3D clip space, depth 0..w): the
+// triangle clipped against each plane in turn - exact, where the corners-outside-one-plane test keeps every large
+// triangle the camera stands over.
+bool TriangleInView(const float a[3], const float b[3], const float c[3], const d3d::Matrix& vp)
+{
+    struct P { float v[4]; };
+    P poly[9], next[9];
+    int n = 3;
+    const float* in[3] = {a, b, c};
+    for (int k = 0; k < 3; ++k)
+        for (int j = 0; j < 4; ++j)
+            poly[k].v[j] = in[k][0] * vp.m[0][j] + in[k][1] * vp.m[1][j] + in[k][2] * vp.m[2][j] + vp.m[3][j];
+    auto dist = [](const P& p, int plane) {
+        switch (plane) {
+        case 0: return p.v[3] + p.v[0];
+        case 1: return p.v[3] - p.v[0];
+        case 2: return p.v[3] + p.v[1];
+        case 3: return p.v[3] - p.v[1];
+        case 4: return p.v[2];
+        default: return p.v[3] - p.v[2];
+        }
+    };
+    for (int plane = 0; plane < 6 && n > 0; ++plane) {
+        int m = 0;
+        for (int k = 0; k < n; ++k) {
+            const P& p = poly[k];
+            const P& q = poly[(k + 1) % n];
+            const float dp = dist(p, plane), dq = dist(q, plane);
+            if (dp >= 0.0f && m < 9) next[m++] = p;
+            if ((dp >= 0.0f) != (dq >= 0.0f) && m < 9) {
+                const float t = dp / (dp - dq);
+                for (int j = 0; j < 4; ++j) next[m].v[j] = p.v[j] + (q.v[j] - p.v[j]) * t;
+                ++m;
+            }
+        }
+        n = m;
+        for (int k = 0; k < n; ++k) poly[k] = next[k];
+    }
+    return n > 0;
+}
+
 const uint32_t kWaterVertSpirv[] = {
 #include "water.vert.inc"
 };
@@ -1465,6 +1506,29 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     WaterMap* map = WaterMapFor(vertices, vertexCount, indices, indexCount, steep);
     if (!map && steep.empty())
         return;
+    // None of it in view - each of the game's triangles, raised and lowered by the tallest waves, outside the camera's
+    // frustum: nothing is drawn, and the scene's copy, the disturbance's step and the grid's draw go unpaid (a lake
+    // behind the camera cost ~1.6 ms a frame: the user's profiling sweep, 2026-10-20).
+    {
+        const d3d::Matrix vp = MulMatrix(m_view, m_proj);
+        bool seen = false;
+        for (uint32_t t = 0; t + 2 < indexCount && !seen; t += 3) {
+            if (indices[t] >= vertexCount || indices[t + 1] >= vertexCount || indices[t + 2] >= vertexCount)
+                continue;
+            for (float lift : {-3.0f, 3.0f}) {
+                float p[3][3];
+                for (int k = 0; k < 3; ++k) {
+                    std::memcpy(p[k], vertices[indices[t + k]].pos, sizeof(p[k]));
+                    p[k][1] += lift;
+                }
+                seen = seen || TriangleInView(p[0], p[1], p[2], vp);
+            }
+        }
+        if (!seen) {
+            if (m_dumpFile) std::fprintf(m_dumpFile, "# water: %u triangles, none in view - not drawn\n", indexCount / 3);
+            return;
+        }
+    }
     const WaterParams& P = m_waterParams;
     const uint32_t quality = std::clamp(P.quality, 1u, 3u);
     const uint32_t segments = quality == 1 ? 128u : quality == 2 ? 224u : 320u;
