@@ -266,6 +266,15 @@ thread takes 8 ms while the GPU needs 6.3. A deferred or tiled light pass would 
 frame rate. 2b / 2c wait until the CPU side (Phase 4) brings the game thread under the GPU again, or for players at
 100%.
 
+### 2b check (2026-10-20): how many tested lights reach the pixel
+
+After the sweep (per-pixel lighting 1.97 ms at night, light override 0.91 of it): `RVK_PbrDebug` 11 counts the frame
+lights the loop tests at each pixel and those whose range reaches it; a frame dump's `-scene.bmp` gives the counts
+exactly (v = x / (1 - x), x = byte^2.2, x 16). The city bench with 90 lamps (`--city-bench --city-lamps 90
+--pixel-lighting --light-override --taa`): 10.3 tested, 8.4 reaching - 81%. The ones that don't reach leave the loop
+at its distance test, so screen tiles would save well under a fifth of it: the cost is the lights that do reach.
+Waiting for the same count at the outpost (`randy31-lightcount1.dll`: `pbrdebug 11`, `dump`).
+
 ### 2b. Screen-tile light lists (clustered, forward)
 
 The cheaper half, and it keeps forward shading:
