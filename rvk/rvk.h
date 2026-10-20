@@ -3274,6 +3274,7 @@ private:
     bool m_uiLayerOpen = false;                  // between InterfaceBegin and InterfaceEnd
     std::atomic<bool> m_uiLayerReady{false};
     VkPipeline m_uiCompositePipeline = VK_NULL_HANDLE;
+    VkPipeline m_uiOverlayPipeline = VK_NULL_HANDLE;   // the same, its coverage kept (frame generation's overlay)
     void InterfaceSceneEnd();                    // what the interface's first draw does: the scene ends
     // GPU profiling (profile.cpp): a mark when the scene's draw class changes, so the 4.8 ms "scene" block splits
     // into opaque / terrain base / terrain light / foliage.

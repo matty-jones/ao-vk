@@ -264,6 +264,13 @@ bool Device::CreateHdrResources(std::string* error)
             att.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;   // the target's alpha stays
             att.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
             att.colorBlendOp = att.alphaBlendOp = VK_BLEND_OP_ADD;
+        } else if (blend == 4) {
+            // Premultiplied over, its coverage too: layers put together into one laid over later (frame generation's
+            // overlay - with blend 2 it stayed see-through, and the swapchain added the interface onto the frame).
+            att.blendEnable = VK_TRUE;
+            att.srcColorBlendFactor = att.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            att.dstColorBlendFactor = att.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            att.colorBlendOp = att.alphaBlendOp = VK_BLEND_OP_ADD;
         }
         VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
         cb.attachmentCount = blend == 3 ? 0 : 1;
@@ -319,6 +326,8 @@ bool Device::CreateHdrResources(std::string* error)
               fullscreen(kFxaaSpirv, sizeof(kFxaaSpirv), kColorFormat, false, m_bloomLayout, &m_fxaaPipeline) &&
               fullscreen(kUiCompositeSpirv, sizeof(kUiCompositeSpirv), kColorFormat, 2, m_bloomLayout,
                          &m_uiCompositePipeline) &&
+              fullscreen(kUiCompositeSpirv, sizeof(kUiCompositeSpirv), kColorFormat, 4, m_bloomLayout,
+                         &m_uiOverlayPipeline) &&
               fullscreen(kMotionBlurSpirv, sizeof(kMotionBlurSpirv), kColorFormat, false, m_bloomLayout, &m_motionPipeline) &&
               fullscreen(kTileMaxSpirv, sizeof(kTileMaxSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_tileMaxPipeline) &&
@@ -391,6 +400,7 @@ void Device::DestroyHdrResources()
                           &m_envAccumPipeline, &m_envFilterPipeline, &m_atmosTransPipeline, &m_atmosMultiPipeline,
                           &m_atmosViewPipeline, &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
+                          &m_uiOverlayPipeline,
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,

@@ -133,7 +133,7 @@ void Device::DrawConsole(VkCommandBuffer cmd, Texture* dst)
     // (The interface layer's pass: texel for pixel, blended ONE / INV_SRC_ALPHA - only the console's rows drawn.)
     const VkRect2D area{{0, 0}, {m_consoleW, m_consoleH}};
     const float params[4] = {};
-    FullscreenPass(cmd, target, m_uiCompositePipeline, m_consoleTex->m_view, m_consoleTex->m_view, m_pointSampler, params,
+    FullscreenPass(cmd, target, dst ? m_uiOverlayPipeline : m_uiCompositePipeline, m_consoleTex->m_view, m_consoleTex->m_view, m_pointSampler, params,
                    sizeof(params), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &area);
     if (!dst)
         Transition(cmd, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);

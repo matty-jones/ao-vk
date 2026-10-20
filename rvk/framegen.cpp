@@ -343,7 +343,7 @@ void Device::FgBeforePresent(VkCommandBuffer cmd)
                            m_uiLayer->m_width == w && m_uiLayer->m_height == h;
     const bool labels = m_fgLabels && m_fgLabelsFrame == m_frameNumber && m_fgLabels->m_width == w &&
                         m_fgLabels->m_height == h;
-    const bool console = m_consoleH && m_consoleW == w && m_consoleH <= h && m_uiCompositePipeline;
+    const bool console = m_consoleH && m_consoleW == w && m_consoleH <= h && m_uiOverlayPipeline;
     Texture* overlay = interface ? m_uiLayer : nullptr;
     if (labels || console) {
         if (!m_fgOverlay || m_fgOverlay->m_width != w || m_fgOverlay->m_height != h) {
@@ -357,7 +357,7 @@ void Device::FgBeforePresent(VkCommandBuffer cmd)
             for (Texture* layer : {labels ? m_fgLabels : nullptr, interface ? m_uiLayer : nullptr}) {
                 if (!layer) continue;
                 Transition(cmd, layer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-                FullscreenPass(cmd, m_fgOverlay, m_uiCompositePipeline, layer->m_view, layer->m_view, m_pointSampler, none,
+                FullscreenPass(cmd, m_fgOverlay, m_uiOverlayPipeline, layer->m_view, layer->m_view, m_pointSampler, none,
                                sizeof(none), true);
             }
             if (console)
