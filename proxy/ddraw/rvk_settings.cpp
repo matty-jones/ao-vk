@@ -341,7 +341,7 @@ Setting g_settings[] = {
 
     {"RVK_Taa",        "Temporal anti-aliasing",                                   "Anti-aliasing",    Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Sharpen", "Sharpening (0 = none)", "Anti-aliasing",    Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_Taa"},
-    {"RVK_RenderScale", "Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster)", "Anti-aliasing", Choice, 50, 100, 1, 100, nullptr, 0, "RVK_Taa", "100 85 75 67 50"},
+    {"RVK_RenderScale", "Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster)", "Anti-aliasing", Choice, 50, 100, 1, 75, nullptr, 0, "RVK_Taa", "100 85 75 67 50"},
     {"RVK_Fxaa",       "FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer)", "Anti-aliasing", Bool, 0, 1, 1, 0, nullptr, 0},
 
     {"RVK_GradeOn",    "Colour grading",                                           "Colour grading",   Bool,  0, 1, 1, 1, nullptr, 0},
@@ -565,6 +565,8 @@ const Migration kMigrations[] = {
     {"RippleSoft", "RVK_RippleSoft", "RVK_RippleSmooth", kKeep},
     // (One setting for how dark the game gets, lighter by default: docs/darkness-plan.md.)
     {"Darkness", "RVK_Darkness", "RVK_NightDark", 1.0f},
+    // (The 3D world drawn at 75% and upscaled by the TAA: about a third less GPU work, 2026-10-20.)
+    {"RenderScale75", "RVK_RenderScale", "RVK_RenderScale", 100.0f},
 };
 
 // A key in randy-vk.ini's [Renderer] twice (a hand edit): only the first counts - an edit to the other did nothing

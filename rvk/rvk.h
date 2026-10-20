@@ -3041,7 +3041,10 @@ private:
     // RVK_RenderScale: wanted, and what the scene's targets are made at now (100 without TAA). ApplyRenderScale (at
     // a frame's start) recreates them when the two differ.
     uint32_t m_renderScaleWanted = 100, m_renderScale = 100;
-    uint32_t RenderScaleNow() const { return TaaActive() ? m_renderScaleWanted : 100u; }
+    // Frames with no 3D at all (loading screens) are drawn at full size after a second of them: what is in them is
+    // the interface and 2D pictures, which the upscaling would only soften. Scaled again at the first 3D frame.
+    uint32_t RenderScaleNow() const { return TaaActive() && m_framesWithout3D < 60 ? m_renderScaleWanted : 100u; }
+    uint32_t m_framesWithout3D = 0;              // frames in a row whose scene drew no 3D (EndFrame)
     void ApplyRenderScale();
     // The scene is smaller than the output: the TAA upscales it, and the depth is brought up to the output size
     // after it (UpsampleDepth).

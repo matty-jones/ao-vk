@@ -1815,6 +1815,7 @@ void Device::EndFrame()
         DrawOrphanParticles();
     }
     EndScene();                                  // if the interface didn't end it (no interface drawn)
+    m_framesWithout3D = m_sceneSaw3D ? 0u : std::min(m_framesWithout3D + 1u, 1000u);   // (RenderScaleNow)
     Frame& f = m_frames[m_frameIndex];
     m_renderEndCause = kEndScene;
     EndRendering();

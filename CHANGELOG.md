@@ -149,8 +149,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 - Render scale (`RVK_RenderScale`, Anti-aliasing, under TAA; console `renderscale`): the 3D world can be drawn at
   85, 75, 67 or 50% of the screen's size and brought back up to full size by the TAA, for a higher frame rate. At 75%
-  the world costs the GPU about a third less; the interface and name labels stay sharp at full size. It is 100 (off)
-  by default and needs TAA on.
+  the world costs the GPU about a third less (at a lamp-lit outpost by night, about 102 fps went to about 125); the
+  interface and name labels stay sharp at full size, and loading screens are drawn at full size. It is 75 by default
+  and needs TAA on; 100 draws everything at full size as before.
 ### Changed
 - The ground drawn by ao-vk costs less: it is drawn once instead of in the game's two passes (its texture, then its
   light), with the same look - about 9% of the ground's cost, 0.3-0.4 ms a frame at 1440p where it fills the view.
