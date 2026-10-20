@@ -2,4 +2,5 @@
 // functions directly, which rvk loads at run time (vk.h) - here they are rvk::vk's pointers.
 #pragma once
 #include "vk.h"
+#include "fsr2_rename.h"
 using namespace rvk::vk;

@@ -393,7 +393,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_Taa` | Temporal anti-aliasing | on / off | on | window; game value off |
 | `RVK_Sharpen` | Temporal anti-aliasing: sharpening (0 = none) | 0 .. 1 | 0.4 | window; switch `RVK_Taa` |
 | `RVK_RenderScale` | Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster) | 100 / 85 / 75 / 67 / 50 | 75 | window; switch `RVK_Taa`; game value 100 |
-| `RVK_Upscaler` | Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2) | 0 / 1 | 0 | window; switch `RVK_Taa` |
+| `RVK_Upscaler` | Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2, 2: AMD FSR 3.1) | 0 / 1 / 2 | 0 | window; switch `RVK_Taa` |
 | `RVK_Fxaa` | FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer) | on / off | off | window; game value off; knob |
 
 ## Colour grading

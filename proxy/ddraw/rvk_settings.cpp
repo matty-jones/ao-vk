@@ -343,7 +343,7 @@ Setting g_settings[] = {
     {"RVK_Taa",        "Temporal anti-aliasing",                                   "Anti-aliasing",    Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Sharpen", "Sharpening (0 = none)", "Anti-aliasing",    Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_Taa"},
     {"RVK_RenderScale", "Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster)", "Anti-aliasing", Choice, 50, 100, 1, 75, nullptr, 0, "RVK_Taa", "100 85 75 67 50"},
-    {"RVK_Upscaler", "Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2)", "Anti-aliasing", Choice, 0, 1, 1, 0, nullptr, 0, "RVK_Taa", "0 1"},
+    {"RVK_Upscaler", "Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2, 2: AMD FSR 3.1)", "Anti-aliasing", Choice, 0, 2, 1, 0, nullptr, 0, "RVK_Taa", "0 1 2"},
     {"RVK_Fxaa",       "FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer)", "Anti-aliasing", Bool, 0, 1, 1, 0, nullptr, 0},
 
     {"RVK_GradeOn",    "Colour grading",                                           "Colour grading",   Bool,  0, 1, 1, 1, nullptr, 0},

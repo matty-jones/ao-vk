@@ -8,6 +8,7 @@
 // descriptors and memory.
 #include "internal.h"
 
+#include "fsr2_rename.h"                         // (its names apart from the FidelityFX SDK's: FSR 3.1)
 #include "ffx_fsr2.h"
 #include "vk/ffx_fsr2_vk.h"
 
@@ -40,8 +41,55 @@ void Device::DestroyFsr2()
         m_fsr2Reactive = VK_NULL_HANDLE;
         m_fsr2ReactiveOf = VK_NULL_HANDLE;
     }
-    if (m_fsr2Motion) { DestroyTextureNow(m_fsr2Motion); m_fsr2Motion = nullptr; }
-    if (m_fsr2Out) { DestroyTextureNow(m_fsr2Out); m_fsr2Out = nullptr; }
+    if (m_fsrMotion) { DestroyTextureNow(m_fsrMotion); m_fsrMotion = nullptr; }
+    if (m_fsrOut) { DestroyTextureNow(m_fsrOut); m_fsrOut = nullptr; }
+}
+
+// FSR 2's and FSR 3's inputs and output (params: TaaParams'): the images at these sizes, the motion vectors whole
+// (motion_fill.frag: the camera's where none was written), what the fragment passes wrote made visible to their
+// compute passes, the output ready for their writes.
+bool Device::FsrInputs(VkCommandBuffer cmd, const float params[28])
+{
+    const uint32_t rw = m_scene->m_width, rh = m_scene->m_height, dw = m_ldrMain->m_width, dh = m_ldrMain->m_height;
+    if (!m_fsrMotion || m_fsrMotion->m_width != rw || m_fsrMotion->m_height != rh) {
+        if (m_fsrMotion) DestroyTexture(m_fsrMotion);
+        m_fsrMotion = CreateImage(rw, rh, Format::RG16F, 1, true);
+    }
+    if (!m_fsrOut || m_fsrOut->m_width != dw || m_fsrOut->m_height != dh) {
+        if (m_fsrOut) DestroyTexture(m_fsrOut);
+        m_fsrOut = CreateImage(dw, dh, Format::RGBA16F, 1, true, true);
+    }
+    if (!m_fsrMotion || !m_fsrOut)
+        return false;
+    const bool continuous = params[23] > 0.5f;
+
+    // The motion vectors whole (motion_fill.frag): the camera's where none was written.
+    Transition(cmd, m_motionVectors, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    MakeDepthReadable(cmd);
+    float fill[20];
+    std::memcpy(fill, params, 64);
+    fill[16] = float(rw);
+    fill[17] = float(rh);
+    fill[18] = params[19];                       // object motion written this frame
+    fill[19] = continuous ? 1.0f : 0.0f;         // the camera's reprojection known
+    FullscreenPass(cmd, m_fsrMotion, m_motionFillPipeline, m_motionVectors->m_view, m_depthView, m_pointSampler, fill,
+                   sizeof(fill), false);
+    Transition(cmd, m_fsrMotion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    Transition(cmd, m_tonemapped, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // (What the fragment passes wrote - the reactive mask's too - for FSR's compute passes: its barriers only move the
+    // layouts.)
+    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT |
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    Transition(cmd, m_fsrOut, VK_IMAGE_LAYOUT_GENERAL);
+    return true;
 }
 
 // params: TaaParams'. False: FSR 2 couldn't run (no context) - the TAA does it.
@@ -82,16 +130,6 @@ bool Device::RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28
         m_fsr2 = s;
         Log("FSR 2: %ux%u -> %ux%u", rw, rh, dw, dh);
     }
-    if (!m_fsr2Motion || m_fsr2Motion->m_width != rw || m_fsr2Motion->m_height != rh) {
-        if (m_fsr2Motion) DestroyTexture(m_fsr2Motion);
-        m_fsr2Motion = CreateImage(rw, rh, Format::RG16F, 1, true);
-    }
-    if (!m_fsr2Out || m_fsr2Out->m_width != dw || m_fsr2Out->m_height != dh) {
-        if (m_fsr2Out) DestroyTexture(m_fsr2Out);
-        m_fsr2Out = CreateImage(dw, dh, Format::RGBA16F, 1, true, true);
-    }
-    if (!m_fsr2Motion || !m_fsr2Out)
-        return false;
     // The reactive mask: m_tonemapped's alpha as red (a view of it - remade when the image is).
     if (m_fsr2ReactiveOf != m_tonemapped->m_image) {
         if (m_fsr2Reactive)                      // (in use by frames in flight: freed with this frame slot)
@@ -107,32 +145,8 @@ bool Device::RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28
         m_fsr2ReactiveOf = m_tonemapped->m_image;
     }
     const bool continuous = params[23] > 0.5f;   // (TaaParams: the camera's last frame known, no teleport)
-
-    // The motion vectors whole (motion_fill.frag): the camera's where none was written.
-    Transition(cmd, m_motionVectors, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    MakeDepthReadable(cmd);
-    float fill[20];
-    std::memcpy(fill, params, 64);
-    fill[16] = float(rw);
-    fill[17] = float(rh);
-    fill[18] = params[19];                       // object motion written this frame
-    fill[19] = continuous ? 1.0f : 0.0f;         // the camera's reprojection known
-    FullscreenPass(cmd, m_fsr2Motion, m_motionFillPipeline, m_motionVectors->m_view, m_depthView, m_pointSampler, fill,
-                   sizeof(fill), false);
-    Transition(cmd, m_fsr2Motion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    Transition(cmd, m_tonemapped, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    // (What the fragment passes wrote, for FSR 2's compute passes: its own barriers only move the layouts.)
-    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
-    mb.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT |
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-    mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    mb.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    mb.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
-    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-    dep.memoryBarrierCount = 1;
-    dep.pMemoryBarriers = &mb;
-    vkCmdPipelineBarrier2(cmd, &dep);
-    Transition(cmd, m_fsr2Out, VK_IMAGE_LAYOUT_GENERAL);
+    if (!FsrInputs(cmd, params))
+        return false;
 
     FfxFsr2Context* c = &m_fsr2->context;
     FfxFsr2DispatchDescription d{};
@@ -141,12 +155,12 @@ bool Device::RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28
                                       GetFormatInfo(m_tonemapped->m_format).vk, L"color", FFX_RESOURCE_STATE_COMPUTE_READ);
     d.depth = ffxGetTextureResourceVK(c, m_depth, m_depthView, rw, rh, kDepthFormat, L"depth",
                                       FFX_RESOURCE_STATE_COMPUTE_READ);
-    d.motionVectors = ffxGetTextureResourceVK(c, m_fsr2Motion->m_image, m_fsr2Motion->m_view, rw, rh,
+    d.motionVectors = ffxGetTextureResourceVK(c, m_fsrMotion->m_image, m_fsrMotion->m_view, rw, rh,
                                               GetFormatInfo(Format::RG16F).vk, L"motion", FFX_RESOURCE_STATE_COMPUTE_READ);
     d.reactive = ffxGetTextureResourceVK(c, m_tonemapped->m_image, m_fsr2Reactive, rw, rh,
                                          GetFormatInfo(m_tonemapped->m_format).vk, L"reactive",
                                          FFX_RESOURCE_STATE_COMPUTE_READ);
-    d.output = ffxGetTextureResourceVK(c, m_fsr2Out->m_image, m_fsr2Out->m_view, dw, dh, GetFormatInfo(Format::RGBA16F).vk,
+    d.output = ffxGetTextureResourceVK(c, m_fsrOut->m_image, m_fsrOut->m_view, dw, dh, GetFormatInfo(Format::RGBA16F).vk,
                                        L"output", FFX_RESOURCE_STATE_UNORDERED_ACCESS);
     // The scene's jitter in its pixels (x right, y down: TaaParams), and D3D's half-pixel shift the scene keeps in its
     // own pixels (rvk ViewportState): FSR 2 takes output pixel i's centre to be scene position (i + 0.5) * scale, ours
@@ -170,15 +184,15 @@ bool Device::RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28
     d.viewSpaceToMetersFactor = 1.0f;            // (Anarchy Online's units are about a metre)
     const FfxErrorCode e = ffxFsr2ContextDispatch(c, &d);
     // Its barriers left the images in these: our books say so.
-    m_fsr2Out->m_layout = VK_IMAGE_LAYOUT_GENERAL;
+    m_fsrOut->m_layout = VK_IMAGE_LAYOUT_GENERAL;
     if (e != FFX_OK) {
         static bool logged;
         if (!logged) { logged = true; Log("FSR 2: dispatch failed (error 0x%x)", unsigned(e)); }
         return false;
     }
-    Transition(cmd, m_fsr2Out, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    Transition(cmd, m_fsrOut, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     float sharpen[4] = {params[21], 0.0f, 0.0f, 0.0f};
-    FullscreenPass(cmd, dst, m_sharpenPipeline, m_fsr2Out->m_view, m_fsr2Out->m_view, m_pointSampler, sharpen,
+    FullscreenPass(cmd, dst, m_sharpenPipeline, m_fsrOut->m_view, m_fsrOut->m_view, m_pointSampler, sharpen,
                    sizeof(sharpen), false);
     return true;
 }

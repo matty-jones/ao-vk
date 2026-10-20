@@ -150,7 +150,8 @@ The version exists only in the tag and `CHANGELOG.md`; nothing in the DLL carrie
 - Everything for a version lives in one folder, `../dist/ao-vk-X.Y.Z/`:
   - `ao-vk-X.Y.Z/`: the zip's contents (the zip's one top-level folder): `randy31.dll`, AOReloaded's
     `version.dll` (built from `../AOReloaded`), `INSTALL.txt`, `README-ao-vk.md`, `LICENSE-ao-vk.txt`,
-    `LICENSE-AOReloaded.txt`, `LICENSE-FSR2.txt` (`third_party/fsr2/LICENSE.txt`: AMD's FSR 2 is in the DLL).
+    `LICENSE-AOReloaded.txt`, `LICENSE-FSR2.txt` (`third_party/fsr2/LICENSE.txt`: AMD's FSR 2 is in the DLL), `LICENSE-FidelityFX-SDK.txt`
+    (`third_party/ffx-sdk/LICENSE.txt`: FSR 3.1).
   - `ao-vk-X.Y.Z.zip`: that folder zipped.
   - `release-notes.md`: the GitHub release text, drafted from the version's `CHANGELOG.md` section.
 - Create the GitHub release on the tag, named `ao-vk X.Y.Z`, from that folder

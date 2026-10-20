@@ -152,9 +152,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   the world costs the GPU about a third less (at a lamp-lit outpost by night, about 102 fps went to about 125); the
   interface and name labels stay sharp at full size, and loading screens are drawn at full size. It is 75 by default
   and needs TAA on; 100 draws everything at full size as before.
-- AMD FSR 2.2 as a second upscaler for the render scale (`RVK_Upscaler`, Anti-aliasing; console `upscaler 1`): a
-  sharper picture at the same scale - at 50% about as close to full size as ao-vk's own upscaler at 75% - at a
-  little more GPU time. Off (0, ao-vk's own) by default.
+- AMD FSR 2.2 and FSR 3.1 as upscalers for the render scale (`RVK_Upscaler`, Anti-aliasing; console `upscaler 1` for
+  FSR 2.2, `upscaler 2` for FSR 3.1): a sharper picture at the same scale - FSR 2.2 at 50% about as close to full size
+  as ao-vk's own upscaler at 75%; FSR 3.1 the closest at 75% and the best with rain - at a little more GPU time.
+  ao-vk's own (0) by default.
 ### Changed
 - The game's own frame work is lighter in busy places: ao-vk checked memory with a slow system call for nearly every
   object drawn. At a lamp-lit outpost by night the frame rate went from about 125 to about 140 fps.

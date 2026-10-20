@@ -83,6 +83,9 @@ const uint32_t kDepthUpSpirv[] = {
 const uint32_t kMotionFillSpirv[] = {
 #include "motion_fill.frag.inc"
 };
+const uint32_t kReactiveMaskSpirv[] = {
+#include "reactive_mask.frag.inc"
+};
 const uint32_t kSharpenSpirv[] = {
 #include "sharpen.frag.inc"
 };
@@ -335,7 +338,9 @@ bool Device::CreateHdrResources(std::string* error)
               fullscreen(kDofFinalSpirv, sizeof(kDofFinalSpirv), hdrFormat, false, m_bloomLayout, &m_dofFinalPipeline) &&
               fullscreen(kDepthUpSpirv, sizeof(kDepthUpSpirv), VK_FORMAT_UNDEFINED, 3, m_bloomLayout, &m_depthUpPipeline) &&
               fullscreen(kMotionFillSpirv, sizeof(kMotionFillSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
-                         &m_motionFillPipeline);
+                         &m_motionFillPipeline) &&
+              fullscreen(kReactiveMaskSpirv, sizeof(kReactiveMaskSpirv), GetFormatInfo(Format::RGBA8).vk, false,
+                         m_bloomLayout, &m_reactiveMaskPipeline);
     vkDestroyShaderModule(m_device, vert, nullptr);
     return ok;
 }
@@ -372,6 +377,7 @@ void Device::DestroyHdrResources()
     if (m_fxaaOut) { DestroyTextureNow(m_fxaaOut); m_fxaaOut = nullptr; }
     if (m_taaOut) { DestroyTextureNow(m_taaOut); m_taaOut = nullptr; }
     DestroyFsr2();
+    DestroyFsr3();
     if (m_uiLayer) { DestroyTextureNow(m_uiLayer); m_uiLayer = nullptr; }
     m_uiLayerReady.store(false, std::memory_order_relaxed);
     for (Texture*& t : m_motionTiles)
@@ -385,7 +391,8 @@ void Device::DestroyHdrResources()
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,
-                          &m_dofFinalPipeline, &m_depthUpPipeline, &m_motionFillPipeline})
+                          &m_dofFinalPipeline, &m_depthUpPipeline, &m_motionFillPipeline,
+                          &m_reactiveMaskPipeline})
         if (*p) { vkDestroyPipeline(m_device, *p, nullptr); *p = VK_NULL_HANDLE; }
     if (m_bloomLayout) vkDestroyPipelineLayout(m_device, m_bloomLayout, nullptr);
     if (m_volumeLayout) vkDestroyPipelineLayout(m_device, m_volumeLayout, nullptr);
@@ -553,9 +560,11 @@ void Device::EndScene()
     if (taa) params[7] = float(int(params[7]) | 16);
     TonemapInputsPass(cmd, toned, m_tonemapPipeline, scene, bloom, ao, gi, volume, params);
     ProfileMark("tonemap");
-    // (RVK_Upscaler 1: FSR 2 upscales the scaled scene - fsr2.cpp - the TAA if it can't.)
-    if (taa && !(scaled && m_upscaler == 1 && RenderFsr2(cmd, blur ? blurSrc : m_ldrMain, taaParams)))
-        RenderTaa(cmd, blur ? blurSrc : m_ldrMain, taaParams);
+    // (RVK_Upscaler 1: FSR 2 upscales the scaled scene - fsr2.cpp; 2: FSR 3.1 - fsr3.cpp; the TAA if they can't.)
+    Texture* upscaled = blur ? blurSrc : m_ldrMain;
+    if (taa && !(scaled && m_upscaler == 1 && RenderFsr2(cmd, upscaled, taaParams)) &&
+        !(scaled && m_upscaler == 2 && RenderFsr3(cmd, upscaled, taaParams)))
+        RenderTaa(cmd, upscaled, taaParams);
     if (fxaa) {
         // Into the main target, or - with motion blur - into an image of its own that the blur then reads (the two
         // swap: m_tonemapped is what the blur reads).

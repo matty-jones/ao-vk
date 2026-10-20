@@ -18,6 +18,7 @@
     X(vkDestroyInstance) \
     X(vkEnumeratePhysicalDevices) \
     X(vkGetPhysicalDeviceProperties) \
+    X(vkGetPhysicalDeviceFeatures) \
     X(vkGetPhysicalDeviceProperties2) \
     X(vkGetPhysicalDeviceFeatures2) \
     X(vkGetPhysicalDeviceQueueFamilyProperties) \
@@ -34,6 +35,25 @@
     X(vkGetPhysicalDeviceSurfacePresentModesKHR)
 
 #define RVK_VK_DEVICE_FUNCS(X) \
+    /* (the FidelityFX SDK's frame interpolation swapchain and backend call these directly: rvk/ffx_vk_shim.h) */ \
+    X(vkAllocateMemory) \
+    X(vkFreeMemory) \
+    X(vkBindImageMemory) \
+    X(vkGetImageMemoryRequirements) \
+    X(vkCreateImage) \
+    X(vkDestroyImage) \
+    X(vkCreateBuffer) \
+    X(vkCreateRenderPass) \
+    X(vkDestroyRenderPass) \
+    X(vkCreateFramebuffer) \
+    X(vkDestroyFramebuffer) \
+    X(vkCmdBeginRenderPass) \
+    X(vkCmdEndRenderPass) \
+    X(vkCmdPipelineBarrier) \
+    X(vkFreeDescriptorSets) \
+    X(vkResetCommandPool) \
+    X(vkWaitSemaphores) \
+    X(vkGetSemaphoreCounterValue) \
     X(vkDestroyDevice) \
     X(vkGetDeviceQueue) \
     X(vkDeviceWaitIdle) \

@@ -3062,19 +3062,27 @@ private:
     float SceneScaleX() const { return m_scene && m_ldrMain ? float(m_scene->m_width) / float(m_ldrMain->m_width) : 1.0f; }
     float SceneScaleY() const { return m_scene && m_ldrMain ? float(m_scene->m_height) / float(m_ldrMain->m_height) : 1.0f; }
     Texture* m_taaOut = nullptr;                 // scaled, with motion blur: the upscaled picture the blur reads
-    // RVK_Upscaler 1 (fsr2.cpp): FSR 2's context (made at the first scaled frame, again when a size changes), the
-    // scene's motion vectors filled in for it, its output (sharpened into the frame as the TAA's), and m_tonemapped's
-    // alpha - the effects' share - seen as red, its reactive mask.
+    // RVK_Upscaler 1 (fsr2.cpp) and 2 (fsr3.cpp): FSR 2's / FSR 3's context (made at the first scaled frame, again
+    // when a size changes); the scene's motion vectors filled in for them and their output (sharpened into the frame
+    // as the TAA's), shared; the reactive mask - m_tonemapped's alpha, the effects' share, as red: for FSR 2 a view
+    // of it, for FSR 3 an image (reactive_mask.frag).
     uint32_t m_upscaler = 0;
     struct Fsr2State;
     Fsr2State* m_fsr2 = nullptr;
-    Texture* m_fsr2Motion = nullptr;
-    Texture* m_fsr2Out = nullptr;
+    struct Fsr3State;
+    Fsr3State* m_fsr3 = nullptr;
+    Texture* m_fsrMotion = nullptr;
+    Texture* m_fsrOut = nullptr;
     VkImage m_fsr2ReactiveOf = VK_NULL_HANDLE;
     VkImageView m_fsr2Reactive = VK_NULL_HANDLE;
-    VkPipeline m_motionFillPipeline = VK_NULL_HANDLE;   // motion_fill.frag
+    Texture* m_fsr3Reactive = nullptr;
+    VkPipeline m_motionFillPipeline = VK_NULL_HANDLE;    // motion_fill.frag
+    VkPipeline m_reactiveMaskPipeline = VK_NULL_HANDLE;  // reactive_mask.frag
+    bool FsrInputs(VkCommandBuffer cmd, const float params[28]);   // the motion vectors filled in, the output image
     bool RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28]);   // false: not done (the TAA then)
+    bool RenderFsr3(VkCommandBuffer cmd, Texture* dst, const float params[28]);   // ...
     void DestroyFsr2();
+    void DestroyFsr3();
     VkPipeline m_depthUpPipeline = VK_NULL_HANDLE;   // depth_up.frag (UpsampleDepth)
     // Scaled: the scene's depth drawn up to the output size into the other depth image, which becomes the depth from
     // there on (the motion blur, name labels and the interface test against it); BeginScene swaps the scene's back.
