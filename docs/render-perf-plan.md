@@ -1,6 +1,8 @@
 # Frame rate plan: upscaling, deferred point lights, and what else is left
 
-Status: planned 2026-10-20 (branch `darkness`). Phase 0 is done; nothing after it is started.
+Status: Phase 0 done. Phase 1 (upscaling) built 2026-10-20 on main: `RVK_RenderScale` (default 100) staged as
+`randy31-renderscale1.dll` for the in-game check; 1a-1c and the mip bias are in, 1d's demo checks done (results under
+Phase 1). Phase 2a's night measurement is waiting on the user.
 
 The goal is a higher frame rate with the same look. This plan covers the GPU work that is left after the October 2026
 performance round, and gives a verdict on each of the rendering techniques the user asked about (deferred lighting,
@@ -136,6 +138,28 @@ resolution. The interface stays at full resolution.
 
 Setting: `RVK_RenderScale` (Anti-aliasing section, Choice `100 85 75 67 50`, default 100 until it is proven; 15
 characters at most). It requires TAA: with TAA off it acts as 100. Console name `renderscale`.
+
+### Results so far (2026-10-20)
+
+Demo, best of 3, RTX 4070 Ti, GPU total in ms:
+
+| Scene | 100 | 85 | 75 | 67 | 50 |
+| --- | --- | --- | --- | --- | --- |
+| Forest, 1440p (no post effects) | 2.13 | 1.78 | 1.54 | 1.35 | 1.04 |
+| Native ground pf790 + bloom, AO, GI, volume, contact, blur, clouds, 1440p | 3.80 | | 2.62 | | |
+
+- Scene passes cost ~0.62-0.66 of 100% at 75% (pixels 0.56). The upscale costs ~0.04 ms over the plain TAA, the depth
+  upsampling 0.04 ms at 1440p.
+- Look: aligned with 100% (no shift); 75% a little softer on bark, 50% visibly softer; grass and a moving character
+  show no ghost trail; rain streaks hold. 100% is unchanged (look-check; the old TAA path is kept bit for bit).
+- How it's built: one depth image at the scene's size during the scene; after the TAA, `UpsampleDepth` draws it into
+  a second, output-size depth image and the two swap (`SwapDepth`), so the motion blur, name labels and the interface
+  test against full-size depth; `BeginScene` swaps back. The game's viewports, scissors, clears and back-buffer blits
+  are scaled while the scene is the target (`ViewportState`, `SceneRect`). The scene's motion vectors are in scene
+  pixels (`FL.screen`). The scene keeps D3D's half-pixel shift in its own pixels, so output pixel i is scene position
+  i * scale + jitter (taa.frag `Upscale`).
+- Open: frames with no 3D at all (loading screens) draw the interface into the scaled scene, so it is upscaled
+  there; in-game fps at the outpost and in a city; whether `RVK_Sharpen` should rise with the scale.
 
 ### 1a. Lower-resolution scene targets
 

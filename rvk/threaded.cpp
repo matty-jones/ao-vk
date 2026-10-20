@@ -1026,6 +1026,11 @@ void ThreadedDevice::SetTaa(bool enable, float sharpen)
     Enqueue([this, enable, sharpen](const uint8_t*) { m_device.SetTaa(enable, sharpen); });
 }
 
+void ThreadedDevice::SetRenderScale(uint32_t percent)
+{
+    Enqueue([this, percent](const uint8_t*) { m_device.SetRenderScale(percent); });
+}
+
 void ThreadedDevice::SetFogBanks(float s, float force)
 {
     Enqueue([this, s, force](const uint8_t*) { m_device.SetFogBanks(s, force); });

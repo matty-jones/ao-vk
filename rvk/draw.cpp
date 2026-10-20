@@ -458,6 +458,9 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     std::memcpy(fl->phase, phase, sizeof(fl->phase));
     fl->cond[0] = m_cond.cloudNight;             // (cloud_light.glsl Night())
     fl->cond[1] = fl->cond[2] = fl->cond[3] = 0.0f;
+    fl->screen[0] = SceneScaleX();
+    fl->screen[1] = SceneScaleY();
+    fl->screen[2] = fl->screen[3] = 0.0f;
     std::memcpy(fl->skyRing, m_skyRing, sizeof(fl->skyRing));
     std::memcpy(fl->skyUp, m_skyUp, sizeof(fl->skyUp));
     if (!ProcSkyReady()) {
@@ -1786,11 +1789,14 @@ void Device::Clear(uint32_t count, const Rect* rects, uint32_t flags, uint32_t a
     FlushEdges();                                // ... and two-pass foliage's queued edges
     if (!(flags & (d3d::CLEAR_TARGET | d3d::CLEAR_ZBUFFER)))
         return;
-    // D3D clears the given rectangles (or the whole viewport), always clipped to the viewport.
-    int32_t vx0 = int32_t(std::min(m_viewport.x, m_target->m_width));
-    int32_t vy0 = int32_t(std::min(m_viewport.y, m_target->m_height));
-    int32_t vx1 = int32_t(std::min(m_viewport.x + m_viewport.width, m_target->m_width));
-    int32_t vy1 = int32_t(std::min(m_viewport.y + m_viewport.height, m_target->m_height));
+    // D3D clears the given rectangles (or the whole viewport), always clipped to the viewport. (RVK_RenderScale: the
+    // game's rectangles are in back-buffer pixels, brought onto the smaller scene.)
+    const bool scaled = m_target == m_scene && SceneScaled();
+    const uint32_t tw = scaled ? m_ldrMain->m_width : m_target->m_width, th = scaled ? m_ldrMain->m_height : m_target->m_height;
+    int32_t vx0 = int32_t(std::min(m_viewport.x, tw));
+    int32_t vy0 = int32_t(std::min(m_viewport.y, th));
+    int32_t vx1 = int32_t(std::min(m_viewport.x + m_viewport.width, tw));
+    int32_t vy1 = int32_t(std::min(m_viewport.y + m_viewport.height, th));
     Rect whole{vx0, vy0, vx1, vy1};
     if (!count) {
         count = 1;
@@ -1798,10 +1804,17 @@ void Device::Clear(uint32_t count, const Rect* rects, uint32_t flags, uint32_t a
     }
     std::vector<VkClearRect> clears;
     for (uint32_t i = 0; i < count; ++i) {
-        int32_t x0 = std::max(rects[i].left, vx0), y0 = std::max(rects[i].top, vy0);
-        int32_t x1 = std::min(rects[i].right, vx1), y1 = std::min(rects[i].bottom, vy1);
-        if (x1 > x0 && y1 > y0)
-            clears.push_back({{{x0, y0}, {uint32_t(x1 - x0), uint32_t(y1 - y0)}}, 0, 1});
+        Rect c{std::max(rects[i].left, vx0), std::max(rects[i].top, vy0), std::min(rects[i].right, vx1),
+               std::min(rects[i].bottom, vy1)};
+        if (c.right <= c.left || c.bottom <= c.top)
+            continue;
+        if (scaled) {
+            c = SceneRect(c);
+            c.right = std::min(c.right, int32_t(m_target->m_width));
+            c.bottom = std::min(c.bottom, int32_t(m_target->m_height));
+        }
+        if (c.right > c.left && c.bottom > c.top)
+            clears.push_back({{{c.left, c.top}, {uint32_t(c.right - c.left), uint32_t(c.bottom - c.top)}}, 0, 1});
     }
     if (clears.empty())
         return;
@@ -1852,6 +1865,12 @@ void Device::CopyTexture(Texture* dst, const Rect* dstRect, Texture* src, const 
     blit.srcSubresource = blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     Rect s = srcRect ? *srcRect : Rect{0, 0, int32_t(src->m_width), int32_t(src->m_height)};
     Rect d = dstRect ? *dstRect : Rect{0, 0, int32_t(dst->m_width), int32_t(dst->m_height)};
+    // RVK_RenderScale: the game's rectangles on the back buffer are in its pixels; the scene standing in for it is
+    // smaller (the blit scales).
+    if (SceneScaled()) {
+        if (src == m_scene && srcRect) s = SceneRect(s);
+        if (dst == m_scene && dstRect) d = SceneRect(d);
+    }
     blit.srcOffsets[0] = {s.left, s.top, 0};
     blit.srcOffsets[1] = {s.right, s.bottom, 1};
     blit.dstOffsets[0] = {d.left, d.top, 0};
@@ -1924,15 +1943,34 @@ void Device::DrawIndexedPrimitiveVB(uint32_t primitive, VertexBuffer* vb, uint32
 // centres. The scissor is the viewport within the target.
 void Device::ViewportState(VkViewport* vp, VkRect2D* scissor) const
 {
-    vp->x = float(m_viewport.x) + 0.5f;
-    vp->y = float(m_viewport.y + m_viewport.height) + 0.5f;
-    vp->width = float(m_viewport.width);
-    vp->height = -float(m_viewport.height);
+    // RVK_RenderScale: the game's viewport is in back-buffer pixels; the scene is smaller (the half-pixel shift of
+    // D3D's pixel centres stays half a scene pixel, as in the passes that draw into the scene themselves).
+    const bool scaled = m_target == m_scene && SceneScaled();
+    const float kx = scaled ? SceneScaleX() : 1.0f, ky = scaled ? SceneScaleY() : 1.0f;
+    vp->x = float(m_viewport.x) * kx + 0.5f;
+    vp->y = float(m_viewport.y + m_viewport.height) * ky + 0.5f;
+    vp->width = float(m_viewport.width) * kx;
+    vp->height = -float(m_viewport.height) * ky;
     vp->minDepth = m_viewport.minZ;
     vp->maxDepth = m_viewport.maxZ;
     uint32_t w = m_target->m_width, h = m_target->m_height;
+    if (scaled) {
+        Rect r = SceneRect({int32_t(m_viewport.x), int32_t(m_viewport.y), int32_t(m_viewport.x + m_viewport.width),
+                            int32_t(m_viewport.y + m_viewport.height)});
+        uint32_t sx = std::min(uint32_t(r.left), w), sy = std::min(uint32_t(r.top), h);
+        *scissor = {{int32_t(sx), int32_t(sy)}, {std::min(uint32_t(r.right), w) - sx, std::min(uint32_t(r.bottom), h) - sy}};
+        return;
+    }
     uint32_t sx = std::min(m_viewport.x, w), sy = std::min(m_viewport.y, h);
     *scissor = {{int32_t(sx), int32_t(sy)}, {std::min(m_viewport.width, w - sx), std::min(m_viewport.height, h - sy)}};
+}
+
+// A rectangle in back-buffer pixels on the scene's (RVK_RenderScale): every scene pixel it touches.
+Device::Rect Device::SceneRect(const Rect& r) const
+{
+    const float kx = SceneScaleX(), ky = SceneScaleY();
+    return {int32_t(std::floor(float(r.left) * kx)), int32_t(std::floor(float(r.top) * ky)),
+            int32_t(std::ceil(float(r.right) * kx - 1e-3f)), int32_t(std::ceil(float(r.bottom) * ky - 1e-3f))};
 }
 
 // Vertex layout: binding 0 = the draw's vertex buffer (draws address it through their vertex offset), binding 1 =

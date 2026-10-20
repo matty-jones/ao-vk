@@ -341,6 +341,7 @@ Setting g_settings[] = {
 
     {"RVK_Taa",        "Temporal anti-aliasing",                                   "Anti-aliasing",    Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Sharpen", "Sharpening (0 = none)", "Anti-aliasing",    Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_Taa"},
+    {"RVK_RenderScale", "Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster)", "Anti-aliasing", Choice, 50, 100, 1, 100, nullptr, 0, "RVK_Taa", "100 85 75 67 50"},
     {"RVK_Fxaa",       "FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer)", "Anti-aliasing", Bool, 0, 1, 1, 0, nullptr, 0},
 
     {"RVK_GradeOn",    "Colour grading",                                           "Colour grading",   Bool,  0, 1, 1, 1, nullptr, 0},
@@ -412,7 +413,7 @@ const Vanilla kVanilla[] = {
     {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_GroundOn", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_Pebbles", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_FolDither", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
-    {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
+    {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_RenderScale", 100}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
@@ -767,6 +768,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         d->SetLeaves(l);
     }
     else if (is("RVK_Taa") || is("RVK_Sharpen")) d->SetTaa(V("RVK_Taa") != 0.0f, V("RVK_Sharpen"));
+    else if (is("RVK_RenderScale")) d->SetRenderScale(uint32_t(V(n)));
     else if (is("RVK_HeatFlash")) d->SetHeatFlash(V(n));
     else if (is("RVK_SandForce") || is("RVK_SandAsh")) d->SetSandForce(V("RVK_SandForce"), V("RVK_SandAsh") != 0.0f);
     else if (is("RVK_Saturation") || is("RVK_Contrast") || is("RVK_Warmth") || is("RVK_NightTint") ||

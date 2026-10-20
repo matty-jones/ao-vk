@@ -622,6 +622,10 @@ public:
     }
     // With HDR: temporal anti-aliasing (jittered scene, resolved against the last frame) and sharpening after it.
     void SetTaa(bool enable, float sharpen) { m_taa = enable; m_sharpen = sharpen; m_frameLightsDirty = true; }
+    // RVK_RenderScale: the scene drawn at this percentage of the output size per axis (50..100), the TAA bringing it
+    // up to the output size (docs/render-perf-plan.md Phase 1). Without TAA it acts as 100. Takes effect at the next
+    // frame (the scene's targets are recreated).
+    void SetRenderScale(uint32_t percent) { m_renderScaleWanted = std::clamp<uint32_t>(percent, 50, 100); }
     // Sunlight through leaves (RVK_LeafLight).
     void SetLeafLight(float s) { m_leafLight = s; m_frameLightsDirty = true; }
     // How dark nights, storms and dim places get (darkness.cpp; docs/darkness-plan.md): RVK_Darkness (0 lightest,
@@ -1037,6 +1041,8 @@ private:
     bool CreateLogicalDevice(std::string* error);
     bool CreateMainTargets(std::string* error);
     void DestroyMainTargets();
+    bool CreateSceneTargets();                   // (RVK_RenderScale's size)
+    void DestroySceneTargets();                  // ... and both depth images
     bool CreateSwapchain(std::string* error);
     void DestroySwapchain();
     bool CreatePipelines(std::string* error);
@@ -1993,6 +1999,7 @@ private:
     void FrameCommandsSubmitted(Frame& f);       // back to one main command buffer
     // Shared with ApplyDynamicState: the D3D viewport as Vulkan's (and its scissor), the FVF's vertex input.
     void ViewportState(VkViewport* vp, VkRect2D* scissor) const;
+    Rect SceneRect(const Rect& r) const;         // back-buffer pixels -> the scene's (RVK_RenderScale)
     static void SetVertexInput(VkCommandBuffer cmd, uint32_t fvf, uint32_t stride);
     Texture* m_contactTex[2] = {};               // half resolution: contact shadow (1 = lit), view depth (ping-pong)
     VkPipeline m_contactPipeline = VK_NULL_HANDLE;
@@ -3031,10 +3038,31 @@ private:
     uint64_t m_taaFrame = ~0ull;                 // frame of the last resolve (history valid if it was the previous)
     VkPipeline m_taaPipeline = VK_NULL_HANDLE, m_sharpenPipeline = VK_NULL_HANDLE, m_fxaaPipeline = VK_NULL_HANDLE;
     bool TaaActive() const { return m_taa && m_hdr; }
+    // RVK_RenderScale: wanted, and what the scene's targets are made at now (100 without TAA). ApplyRenderScale (at
+    // a frame's start) recreates them when the two differ.
+    uint32_t m_renderScaleWanted = 100, m_renderScale = 100;
+    uint32_t RenderScaleNow() const { return TaaActive() ? m_renderScaleWanted : 100u; }
+    void ApplyRenderScale();
+    // The scene is smaller than the output: the TAA upscales it, and the depth is brought up to the output size
+    // after it (UpsampleDepth).
+    bool SceneScaled() const
+    {
+        return m_scene && m_ldrMain && (m_scene->m_width != m_ldrMain->m_width || m_scene->m_height != m_ldrMain->m_height);
+    }
+    // Scene pixels per output (back-buffer) pixel, x and y: 1 1 unscaled.
+    float SceneScaleX() const { return m_scene && m_ldrMain ? float(m_scene->m_width) / float(m_ldrMain->m_width) : 1.0f; }
+    float SceneScaleY() const { return m_scene && m_ldrMain ? float(m_scene->m_height) / float(m_ldrMain->m_height) : 1.0f; }
+    Texture* m_taaOut = nullptr;                 // scaled, with motion blur: the upscaled picture the blur reads
+    VkPipeline m_depthUpPipeline = VK_NULL_HANDLE;   // depth_up.frag (UpsampleDepth)
+    // Scaled: the scene's depth drawn up to the output size into the other depth image, which becomes the depth from
+    // there on (the motion blur, name labels and the interface test against it); BeginScene swaps the scene's back.
+    void UpsampleDepth(VkCommandBuffer cmd);
+    void SwapDepth();
+    bool SceneMipBias() const;                   // the scene's textures sample finer mips (resources.cpp SamplerKey)
     // A per-frame offset (0..1) for the noise patterns of sampled effects while the TAA averages frames; else 0.
     float FrameNoise() const { return TaaActive() ? float(m_frameNumber % 64 * 618034 % 1000000) * 1e-6f : 0.0f; }
-    bool TaaParams(float out[24]);               // before MotionBlurParams (it moves on the last frame's camera)
-    void RenderTaa(VkCommandBuffer cmd, Texture* dst, const float params[24]);
+    bool TaaParams(float out[28]);               // before MotionBlurParams (it moves on the last frame's camera)
+    void RenderTaa(VkCommandBuffer cmd, Texture* dst, const float params[28]);
     float m_bloomOverNearer = 0.15f;             // bloom left on objects in front of its light (1 = all)
     float m_neonSat = 0.0f, m_bloomWide = 0.0f;  // RVK_NeonSat, RVK_BloomWide (SetNeonSat, SetBloomWide)
     float m_bloomWeightSum = 1.0f;               // the bloom levels' weights summed this frame (RenderBloom)
@@ -3064,7 +3092,7 @@ private:
                         VkSampler sampler, const float* params, uint32_t paramBytes, bool load,
                         VkImageView src3 = VK_NULL_HANDLE, VkImageView src4 = VK_NULL_HANDLE,
                         const VkRect2D* scissor = nullptr);   // (only this part of dst drawn)
-    void RenderObjectMotionBlur(VkCommandBuffer cmd, const float params[24]);
+    void RenderObjectMotionBlur(VkCommandBuffer cmd, Texture* src, const float params[28]);
     float m_aoStrength = 1.0f, m_aoRadius = 1.5f;
     Texture* m_aoTex[2] = {};                    // half resolution: raw, blurred (ping-pong)
     VkPipeline m_aoPipeline = VK_NULL_HANDLE, m_aoBlurPipeline = VK_NULL_HANDLE;
@@ -3145,7 +3173,7 @@ private:
     float m_prevEye[3] = {};
     bool m_prevViewProjValid = false;
     double m_prevSceneTime = 0.0;
-    bool MotionBlurParams(float out[24]);        // reprojection + parameters for this frame; false: no blur
+    bool MotionBlurParams(float out[28]);        // reprojection + parameters for this frame; false: no blur
     bool m_dof = false, m_dofBokeh = true, m_dofNear = true, m_dofFar = false;
     float m_dofCloseFocus = 3.0f;
     float m_dofStrength = 0.5f, m_dofRadius = 16.0f, m_dofFocusDistance = 0.0f, m_dofRange = 0.2f;
@@ -3383,6 +3411,16 @@ private:
     VmaAllocation_T* m_depthAllocation = nullptr;
     VkImageLayout m_depthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     uint32_t m_depthWidth = 0, m_depthHeight = 0;
+    // RVK_RenderScale: the other depth image (SwapDepth): the output-size one during the scene, the scene's after
+    // UpsampleDepth. Unused (empty) unscaled.
+    struct DepthImage {
+        VkImage image = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+        VmaAllocation_T* allocation = nullptr;
+        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        uint32_t width = 0, height = 0;
+    } m_otherDepth;
+    bool m_depthSwapped = false;                 // m_depth is the output-size one (after UpsampleDepth)
     struct DeadImage { VkImage image; VkImageView view; VmaAllocation_T* allocation; };
     // Deferred destruction: each object is tagged with the last submission that may still use it and freed
     // once that submission has completed (m_completed). Frames run concurrently with recording, so freeing at

@@ -147,6 +147,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Fog banks: at dawn and after rain the valley mist gathers into thick banks drifting through the low ground, with
   clear ground between, deeper the wetter it has been and most in wet country (`RVK_FogBanks`, 1; 0 for none).
 
+- Render scale (`RVK_RenderScale`, Anti-aliasing, under TAA; console `renderscale`): the 3D world can be drawn at
+  85, 75, 67 or 50% of the screen's size and brought back up to full size by the TAA, for a higher frame rate. At 75%
+  the world costs the GPU about a third less; the interface and name labels stay sharp at full size. It is 100 (off)
+  by default and needs TAA on.
 ### Changed
 - The ground drawn by ao-vk costs less: it is drawn once instead of in the game's two passes (its texture, then its
   light), with the same look - about 9% of the ground's cost, 0.3-0.4 ms a frame at 1440p where it fills the view.

@@ -2,16 +2,18 @@
 // Temporal anti-aliasing (hdr.cpp), after the tone mapping: the scene is drawn with a different sub-pixel offset each
 // frame; each pixel blends its new sample into its history - last frame's result where this surface was then (object
 // motion vectors, or the camera's reprojection for the sky and anything without) - after clipping that history to
-// the range of colours around the pixel now, so what moved or appeared doesn't leave ghosts.
+// the range of colours around the pixel now, so what moved or appeared doesn't leave ghosts. With RVK_RenderScale the
+// scene is smaller than the output, and this pass upscales it (Upscale).
 layout(set = 0, binding = 0) uniform sampler2D current;    // tone mapped scene (jittered); alpha: how much of it
                                                             // additive effects made (tonemap.frag)
 layout(set = 0, binding = 1) uniform sampler2D history;    // last frame's result
-layout(set = 0, binding = 2) uniform sampler2D motion;     // screen motion since last frame, pixels (now - then)
-layout(set = 0, binding = 3) uniform sampler2D depthTex;
+layout(set = 0, binding = 2) uniform sampler2D motion;     // screen motion since last frame, scene pixels (now - then)
+layout(set = 0, binding = 3) uniform sampler2D depthTex;   // the scene's
 layout(push_constant) uniform Push {
     mat4 reproject;     // this frame's clip -> last frame's clip (raw D3DMATRIX memory)
-    vec4 size;          // width, height, history valid, object motion written
-    vec4 params;        // new frame's weight, sharpening, unused, unused
+    vec4 size;          // output (history) width, height, history valid, object motion written
+    vec4 params;        // new frame's weight, sharpening, upscaling (RVK_RenderScale), unused
+    vec4 up;            // upscaling: scene pixels per output pixel x, y; this frame's jitter in scene pixels x, y
 } P;
 layout(location = 0) out vec4 outColor;
 
@@ -39,8 +41,82 @@ vec3 SampleHistory(vec2 uv)
     return max(r, vec3(0.0));
 }
 
+// The history clipped into the colours seen now, and the new frame blended over it.
+vec4 Blend(vec3 c, vec3 mean, vec3 sigma, vec2 move, float effect, float confidence)
+{
+    vec2 uv = (gl_FragCoord.xy - move) / P.size.xy;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(c, 1.0);
+
+    // Clip the history towards the mean into the box of colours seen now.
+    vec3 h = ToYCoCg(SampleHistory(uv));
+    vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
+    vec3 centre = 0.5 * (lo + hi), extent = max(0.5 * (hi - lo), vec3(1e-4));
+    vec3 offset = h - centre, units = abs(offset / extent);
+    float far = max(units.x, max(units.y, units.z));
+    if (far > 1.0) h = centre + offset / far;
+    h = FromYCoCg(h);
+    // Blend, weighting by inverse brightness (a bright sample doesn't dominate: less flicker); a little more of the
+    // new frame while moving fast, where the history is blurred by resampling.
+    // Where effects are, mostly the new frame and no brightness weighting (it held their bright pixels back).
+    float weight = clamp(P.params.x + length(move) * 0.002, P.params.x, 0.4) * confidence;
+    weight = mix(weight, 0.85, effect);
+    float lc = dot(c, vec3(0.3, 0.59, 0.11)) * (1.0 - effect), lh = dot(h, vec3(0.3, 0.59, 0.11)) * (1.0 - effect);
+    float wc = weight / (1.0 + lc), wh = (1.0 - weight) / (1.0 + lh);
+    return vec4((c * wc + h * wh) / (wc + wh), 1.0);
+}
+
+// Where the camera saw this output pixel's point last frame (no object motion: the sky, still things), as a move in
+// output pixels; d the depth there.
+vec2 CameraMove(float d)
+{
+    vec2 ndc = vec2(gl_FragCoord.x / P.size.x * 2.0 - 1.0, 1.0 - gl_FragCoord.y / P.size.y * 2.0);
+    vec4 prev = P.reproject * vec4(ndc, min(d, 1.0), 1.0);
+    vec2 prevNdc = prev.xy / prev.w;
+    vec2 prevPix = vec2((prevNdc.x + 1.0) * 0.5 * P.size.x, (1.0 - prevNdc.y) * 0.5 * P.size.y);
+    return gl_FragCoord.xy - prevPix;
+}
+
+// RVK_RenderScale: the scene is smaller than the output. Each output pixel gathers the 3x3 scene samples nearest it,
+// each weighted by how near its jittered position fell (a Gaussian about an output pixel wide), and takes more of
+// this frame the nearer the nearest one was - over the jitter's phases (8 / scale^2) samples land near every output
+// pixel's centre and the history fills in. The scene keeps D3D's half-pixel shift in its own pixels (rvk
+// ViewportState), so output pixel i's centre is at scene position i * scale (+ the jitter), pixel centres at integers.
+void Upscale()
+{
+    ivec2 sceneSize = textureSize(current, 0);
+    vec2 q = (gl_FragCoord.xy - 0.5) * P.up.xy + P.up.zw;
+    ivec2 base = ivec2(floor(q + 0.5));
+    vec3 m1 = vec3(0.0), m2 = vec3(0.0);
+    vec4 sum = vec4(0.0);
+    float total = 0.0, nearestSample = 0.0, nearest = 2.0;
+    ivec2 nearestPix = clamp(base, ivec2(0), sceneSize - 1);
+    for (int y = -1; y <= 1; ++y)
+        for (int x = -1; x <= 1; ++x) {
+            ivec2 j = base + ivec2(x, y), at = clamp(j, ivec2(0), sceneSize - 1);
+            vec4 s = texelFetch(current, at, 0);
+            vec3 yc = ToYCoCg(s.rgb);
+            m1 += yc;
+            m2 += yc * yc;
+            vec2 off = (vec2(j) - q) / P.up.xy;             // (output pixels)
+            float w = exp(-2.29 * dot(off, off));
+            sum += s * w;
+            total += w;
+            nearestSample = max(nearestSample, w);
+            float d = texelFetch(depthTex, at, 0).r;
+            if (d < nearest) { nearest = d; nearestPix = at; }
+        }
+    vec4 cur = sum / max(total, 1e-5);
+    vec3 mean = m1 / 9.0, sigma = sqrt(max(m2 / 9.0 - mean * mean, vec3(0.0)));
+    if (P.size.z < 0.5) { outColor = vec4(cur.rgb, 1.0); return; }
+    vec2 move = P.size.w > 0.5 ? texelFetch(motion, nearestPix, 0).xy / P.up.xy : vec2(0.0);
+    if (move == vec2(0.0))
+        move = CameraMove(texelFetch(depthTex, nearestPix, 0).r);
+    outColor = Blend(cur.rgb, mean, sigma, move, cur.a, mix(0.25, 1.0, nearestSample));
+}
+
 void main()
 {
+    if (P.params.z > 0.5) { Upscale(); return; }
     ivec2 p = ivec2(gl_FragCoord.xy), size = ivec2(P.size.xy);
     vec4 cur = texelFetch(current, p, 0);
     vec3 c = cur.rgb;
@@ -63,32 +139,7 @@ void main()
     if (P.size.z < 0.5) { outColor = vec4(c, 1.0); return; }
 
     vec2 move = P.size.w > 0.5 ? texelFetch(motion, nearestPix, 0).xy : vec2(0.0);
-    if (move == vec2(0.0)) {
-        // No object motion: where the camera saw this point last frame.
-        float d = min(texelFetch(depthTex, nearestPix, 0).r, 1.0);
-        vec2 ndc = vec2((float(p.x) + 0.5) / P.size.x * 2.0 - 1.0, 1.0 - (float(p.y) + 0.5) / P.size.y * 2.0);
-        vec4 prev = P.reproject * vec4(ndc, d, 1.0);
-        vec2 prevNdc = prev.xy / prev.w;
-        vec2 prevPix = vec2((prevNdc.x + 1.0) * 0.5 * P.size.x, (1.0 - prevNdc.y) * 0.5 * P.size.y);
-        move = gl_FragCoord.xy - prevPix;
-    }
-    vec2 uv = (gl_FragCoord.xy - move) / P.size.xy;
-    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { outColor = vec4(c, 1.0); return; }
-
-    // Clip the history towards the mean into the box of colours seen now.
-    vec3 h = ToYCoCg(SampleHistory(uv));
-    vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
-    vec3 centre = 0.5 * (lo + hi), extent = max(0.5 * (hi - lo), vec3(1e-4));
-    vec3 offset = h - centre, units = abs(offset / extent);
-    float far = max(units.x, max(units.y, units.z));
-    if (far > 1.0) h = centre + offset / far;
-    h = FromYCoCg(h);
-    // Blend, weighting by inverse brightness (a bright sample doesn't dominate: less flicker); a little more of the
-    // new frame while moving fast, where the history is blurred by resampling.
-    // Where effects are, mostly the new frame and no brightness weighting (it held their bright pixels back).
-    float weight = clamp(P.params.x + length(move) * 0.002, P.params.x, 0.4);
-    weight = mix(weight, 0.85, effect);
-    float lc = dot(c, vec3(0.3, 0.59, 0.11)) * (1.0 - effect), lh = dot(h, vec3(0.3, 0.59, 0.11)) * (1.0 - effect);
-    float wc = weight / (1.0 + lc), wh = (1.0 - weight) / (1.0 + lh);
-    outColor = vec4((c * wc + h * wh) / (wc + wh), 1.0);
+    if (move == vec2(0.0))
+        move = CameraMove(texelFetch(depthTex, nearestPix, 0).r);   // no object motion: the camera's
+    outColor = Blend(c, mean, sigma, move, effect, 1.0);
 }

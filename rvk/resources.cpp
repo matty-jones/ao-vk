@@ -839,8 +839,13 @@ uint64_t Device::SamplerKey(uint32_t stage) const
            uint64_t(t[d3d::TSS_MIPFILTER] & 7) << 6 | uint64_t(t[d3d::TSS_ADDRESSU] & 7) << 9 |
            uint64_t(t[d3d::TSS_ADDRESSV] & 7) << 12 | uint64_t(t[d3d::TSS_MAXMIPLEVEL] & 15) << 15 |
            uint64_t(t[d3d::TSS_BORDERCOLOR] >> 24 ? 1 : 0) << 19 |
-           uint64_t(m_anisotropy) << 20;        // samplers made at another level stay valid for work in flight
+           uint64_t(m_anisotropy) << 20 |      // samplers made at another level stay valid for work in flight
+           uint64_t(SceneMipBias() ? 100 - m_renderScale : 0) << 26;
 }
+
+// RVK_RenderScale: the scene's textures sample a finer mip level by log2(scale), as sharp as at the output's size
+// (the TAA resolves the extra detail); not the interface's, drawn at the output's size.
+bool Device::SceneMipBias() const { return m_target == m_scene && SceneScaled(); }
 
 // Samplers are never destroyed while the device lives (SamplerFor's map owns them), so a stage whose sampler state
 // is unchanged keeps its slot. Only a successful registration is remembered.
@@ -894,6 +899,8 @@ VkSampler Device::SamplerFor(uint32_t stage)
                                                      : VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
     // Enhancement: anisotropic filtering for textures the game filters linearly (point-filtered ones stay crisp), as
     // DXVK's forced anisotropy does.
+    if (SceneMipBias() && t[d3d::TSS_MIPFILTER] != d3d::TFP_NONE)
+        ci.mipLodBias = std::log2(float(m_renderScale) / 100.0f);
     if (m_anisotropy > 1 && ci.minFilter == VK_FILTER_LINEAR && ci.magFilter == VK_FILTER_LINEAR) {
         ci.anisotropyEnable = VK_TRUE;
         ci.maxAnisotropy = float(m_anisotropy);

@@ -199,6 +199,7 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float fogBanks[4];             // fog banks (mist.cpp FogBankParams): their noise at the eye (x, z), how deep, how much
     float lightGrid[4];            // the frame lights' grid (Device::LightGridLights): its corner x, z, cells across, down
     float cond[4];                 // the world's conditions (rvk.h Conditions): x the clouds' night; y, z, w unused
+    float screen[4];               // x, y scene pixels per back-buffer pixel (RVK_RenderScale: the motion vectors); z, w unused
     GpuLight lights[kFrameLights];
 };
 

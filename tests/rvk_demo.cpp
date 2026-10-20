@@ -4587,6 +4587,7 @@ int main(int argc, char** argv)
     float saturation = 1.0f, contrast = 1.0f, warmth = 0.0f, nightTint = 0.0f, vignette = 0.0f;
     bool lutSepia = false, taa = false, fxaa = false;
     float sharpen = 0.4f;
+    int renderScale = 100;                       // --render-scale N: RVK_RenderScale (needs --hdr --taa)
     bool normalMapTest = false, pbrTest = false, glowOccludeTest = false;
     uint32_t anisotropy = 1;
     float motionBlur = 0.0f, dof = 0.0f, dofFocus = 0.0f;
@@ -4917,6 +4918,7 @@ int main(int argc, char** argv)
         else if (a == "--two-lamps") g_twoLamps = true;
         else if (a == "--lamp-wobble") g_lampWobble = true;
         else if (a == "--sharpen" && i + 1 < argc) sharpen = float(std::atof(argv[++i]));
+        else if (a == "--render-scale" && i + 1 < argc) renderScale = std::atoi(argv[++i]);
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
             saturation = float(std::atof(argv[++i])); contrast = float(std::atof(argv[++i]));
             warmth = float(std::atof(argv[++i])); nightTint = float(std::atof(argv[++i])); vignette = float(std::atof(argv[++i]));
@@ -5072,6 +5074,7 @@ int main(int argc, char** argv)
     dev.SetPointLightIntensity(ptLight, ptLight);
     dev.SetTessellation(tess, 20.0f, uint32_t(tessLevel));
     dev.SetTaa(taa, sharpen);
+    dev.SetRenderScale(uint32_t(renderScale));
     dev.SetKnob(rvk::Knob::Fxaa, fxaa);
     dev.SetGrading(saturation, contrast, warmth, 1.0f, nightTint, vignette);
     if (lutSepia) {                      // --lut-sepia: a 16^3 sepia lookup table in the day slot (the 3D LUT path)

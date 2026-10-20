@@ -1235,7 +1235,8 @@ void main()
     outLocal = vec4(gLocalFraction, clamp(reflectivity, 0.0, 1.0), gSunShare, current.a);
     // Motion vectors (written by depth-writing draws only, see the blend state): where this point was last frame.
     vec2 now = vClip.xy / vClip.w, before = vPrevClip.xy / max(vPrevClip.w, 1e-6);
-    outMotion = vec4(vPrevClip.w > 1e-6 ? (now - before) * 0.5 * C.viewport.zw * vec2(1.0, -1.0) : vec2(0.0), 0.0, 1.0);
+    outMotion = vec4(vPrevClip.w > 1e-6 ? (now - before) * 0.5 * C.viewport.zw * FL.screen.xy * vec2(1.0, -1.0) : vec2(0.0),
+                     0.0, 1.0);   // (scene pixels: the game's viewport is in back-buffer pixels)
     // PBR surfaces give the screen-space reflections their shading normal (view space, octahedral; w above 1.5 marks
     // it): the depth buffer's normals are the triangles' own, which mirror faceted on curved low-poly meshes.
     if (gPbrOn && reflectivity > 0.0) {

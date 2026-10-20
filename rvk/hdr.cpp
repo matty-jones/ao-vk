@@ -77,6 +77,9 @@ const uint32_t kContactSpirv[] = {
 const uint32_t kTaaSpirv[] = {
 #include "taa.frag.inc"
 };
+const uint32_t kDepthUpSpirv[] = {
+#include "depth_up.frag.inc"
+};
 const uint32_t kSharpenSpirv[] = {
 #include "sharpen.frag.inc"
 };
@@ -215,7 +218,7 @@ bool Device::CreateHdrResources(std::string* error)
     if (!module(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), &vert))
         return false;
     // A full-target triangle with one fragment shader, no depth. blend: 0 none, 1 additive (the bloom upsampling), 2
-    // a premultiplied image over the target (the interface layer).
+    // a premultiplied image over the target (the interface layer); 3 no colour, the depth written (UpsampleDepth).
     auto fullscreen = [&](const uint32_t* code, size_t size, VkFormat format, int blend, VkPipelineLayout layout,
                           VkPipeline* out) {
         VkShaderModule frag;
@@ -257,11 +260,16 @@ bool Device::CreateHdrResources(std::string* error)
             att.colorBlendOp = att.alphaBlendOp = VK_BLEND_OP_ADD;
         }
         VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        cb.attachmentCount = 1;
+        cb.attachmentCount = blend == 3 ? 0 : 1;
         cb.pAttachments = &att;
         VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-        rendering.colorAttachmentCount = 1;
+        rendering.colorAttachmentCount = blend == 3 ? 0 : 1;
         rendering.pColorAttachmentFormats = &format;
+        if (blend == 3) {
+            rendering.depthAttachmentFormat = kDepthFormat;
+            dss.depthTestEnable = dss.depthWriteEnable = VK_TRUE;
+            dss.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+        }
         VkGraphicsPipelineCreateInfo gi{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
         gi.pNext = &rendering;
         gi.stageCount = 2;
@@ -321,7 +329,8 @@ bool Device::CreateHdrResources(std::string* error)
               fullscreen(kDofTilesSpirv, sizeof(kDofTilesSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_dofTilesPipeline) &&
               fullscreen(kDofGatherSpirv, sizeof(kDofGatherSpirv), hdrFormat, false, m_bloomLayout, &m_dofGatherPipeline) &&
-              fullscreen(kDofFinalSpirv, sizeof(kDofFinalSpirv), hdrFormat, false, m_bloomLayout, &m_dofFinalPipeline);
+              fullscreen(kDofFinalSpirv, sizeof(kDofFinalSpirv), hdrFormat, false, m_bloomLayout, &m_dofFinalPipeline) &&
+              fullscreen(kDepthUpSpirv, sizeof(kDepthUpSpirv), VK_FORMAT_UNDEFINED, 3, m_bloomLayout, &m_depthUpPipeline);
     vkDestroyShaderModule(m_device, vert, nullptr);
     return ok;
 }
@@ -356,6 +365,7 @@ void Device::DestroyHdrResources()
         if (t) { DestroyTextureNow(t); t = nullptr; }
     if (m_tonemapped) { DestroyTextureNow(m_tonemapped); m_tonemapped = nullptr; }
     if (m_fxaaOut) { DestroyTextureNow(m_fxaaOut); m_fxaaOut = nullptr; }
+    if (m_taaOut) { DestroyTextureNow(m_taaOut); m_taaOut = nullptr; }
     if (m_uiLayer) { DestroyTextureNow(m_uiLayer); m_uiLayer = nullptr; }
     m_uiLayerReady.store(false, std::memory_order_relaxed);
     for (Texture*& t : m_motionTiles)
@@ -369,7 +379,7 @@ void Device::DestroyHdrResources()
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,
-                          &m_dofFinalPipeline})
+                          &m_dofFinalPipeline, &m_depthUpPipeline})
         if (*p) { vkDestroyPipeline(m_device, *p, nullptr); *p = VK_NULL_HANDLE; }
     if (m_bloomLayout) vkDestroyPipelineLayout(m_device, m_bloomLayout, nullptr);
     if (m_volumeLayout) vkDestroyPipelineLayout(m_device, m_volumeLayout, nullptr);
@@ -398,13 +408,20 @@ void Device::DestroyHdrResources()
 // Frame start (before rendering begins): with HDR the main target is the float scene until EndScene.
 void Device::BeginScene()
 {
-    // Temporal anti-aliasing: the scene moves by a sub-pixel offset each frame (Halton 2, 3 over 8 frames).
+    if (m_depthSwapped) {                        // (RVK_RenderScale: the scene's own depth again)
+        SwapDepth();
+        m_depthSwapped = false;
+    }
+    // Temporal anti-aliasing: the scene moves by a sub-pixel offset each frame (Halton 2, 3 over 8 frames; with
+    // RVK_RenderScale over 8 / scale^2, FSR 2's rule, so each output pixel still sees about 8 different samples).
     auto halton = [](uint32_t i, uint32_t base) {
         float f = 1.0f, r = 0.0f;
         for (; i; i /= base) { f /= float(base); r += f * float(i % base); }
         return r;
     };
-    uint32_t k = uint32_t(m_frameNumber % 8) + 1;
+    const float scale = SceneScaleX();
+    const uint32_t phases = SceneScaled() ? uint32_t(std::ceil(8.0f / (scale * scale))) : 8u;
+    uint32_t k = uint32_t(m_frameNumber % phases) + 1;
     float w = m_scene ? float(m_scene->m_width) : 1.0f, h = m_scene ? float(m_scene->m_height) : 1.0f;
     m_taaJitter[0] = (halton(k, 2) - 0.5f) * 2.0f / w;
     m_taaJitter[1] = (halton(k, 3) - 0.5f) * 2.0f / h;
@@ -495,19 +512,29 @@ void Device::EndScene()
     if (dof) params[6] = params[7] = 0.0f;
     // With motion blur or anti-aliasing the tone mapping goes to an intermediate image: the anti-aliasing resolves
     // it (and sharpens it back into it, or into the main target), the blur reads it into the main target.
-    float taaParams[24];
+    // RVK_RenderScale: the tone mapping at the scene's size, the TAA bringing it up to the output's (with motion
+    // blur into m_taaOut, which the blur then reads).
+    const bool scaled = SceneScaled();
+    float taaParams[28];
     bool taa = TaaParams(taaParams);
-    float motion[24];
+    float motion[28];
     bool blur = MotionBlurParams(motion);
     bool fxaa = m_fxaa && !taa && m_fxaaPipeline;    // (TAA anti-aliases already)
     if ((blur || taa || fxaa) &&
-        (!m_tonemapped || m_tonemapped->m_width != m_ldrMain->m_width || m_tonemapped->m_height != m_ldrMain->m_height)) {
+        (!m_tonemapped || m_tonemapped->m_width != m_scene->m_width || m_tonemapped->m_height != m_scene->m_height)) {
         if (m_tonemapped) DestroyTexture(m_tonemapped);
-        m_tonemapped = CreateImage(m_ldrMain->m_width, m_ldrMain->m_height, Format::A8R8G8B8, 1, true);
+        m_tonemapped = CreateImage(m_scene->m_width, m_scene->m_height, Format::A8R8G8B8, 1, true);
         blur = blur && m_tonemapped;
         taa = taa && m_tonemapped;
         fxaa = fxaa && m_tonemapped;
     }
+    if (scaled && blur &&
+        (!m_taaOut || m_taaOut->m_width != m_ldrMain->m_width || m_taaOut->m_height != m_ldrMain->m_height)) {
+        if (m_taaOut) DestroyTexture(m_taaOut);
+        m_taaOut = CreateImage(m_ldrMain->m_width, m_ldrMain->m_height, Format::A8R8G8B8, 1, true);
+        blur = blur && m_taaOut;
+    }
+    Texture* blurSrc = scaled ? m_taaOut : m_tonemapped;   // what the motion blur reads
     if (fxaa && blur &&
         (!m_fxaaOut || m_fxaaOut->m_width != m_ldrMain->m_width || m_fxaaOut->m_height != m_ldrMain->m_height)) {
         if (m_fxaaOut) DestroyTexture(m_fxaaOut);
@@ -521,7 +548,7 @@ void Device::EndScene()
     TonemapInputsPass(cmd, toned, m_tonemapPipeline, scene, bloom, ao, gi, volume, params);
     ProfileMark("tonemap");
     if (taa)
-        RenderTaa(cmd, blur ? m_tonemapped : m_ldrMain, taaParams);
+        RenderTaa(cmd, blur ? blurSrc : m_ldrMain, taaParams);
     if (fxaa) {
         // Into the main target, or - with motion blur - into an image of its own that the blur then reads (the two
         // swap: m_tonemapped is what the blur reads).
@@ -532,13 +559,16 @@ void Device::EndScene()
         if (blur) std::swap(m_tonemapped, m_fxaaOut);
     }
     ProfileMark("taa + sharpen");
+    if (scaled)
+        UpsampleDepth(cmd);                      // (the blur, name labels and the interface: the output's depth)
+    ProfileMark("depth upsampling");
     if (blur) {
-        Transition(cmd, m_tonemapped, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        Transition(cmd, blurSrc, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         MakeDepthReadable(cmd);
         if (m_motionMode == 1)
-            RenderObjectMotionBlur(cmd, motion);
+            RenderObjectMotionBlur(cmd, blurSrc, motion);
         else
-            FullscreenPass(cmd, m_ldrMain, m_motionPipeline, m_tonemapped->m_view, m_depthView, m_pointSampler, motion,
+            FullscreenPass(cmd, m_ldrMain, m_motionPipeline, blurSrc->m_view, m_depthView, m_pointSampler, motion,
                            sizeof(motion), false);
     }
     ProfileMark("motion blur");
@@ -1428,11 +1458,14 @@ static void CameraReprojection(const d3d::Matrix& view, const d3d::Matrix& proj,
 }
 
 // Temporal anti-aliasing: this frame's camera against the last one's (reprojection for pixels without object motion,
-// the sky) and whether the history can be used - the last frame resolved, same size, no teleport.
-bool Device::TaaParams(float out[24])
+// the sky) and whether the history can be used - the last frame resolved, same size, no teleport. RVK_RenderScale:
+// also the scene's scale and this frame's jitter in its pixels (taa.frag upscales), and a frame the TAA couldn't
+// otherwise resolve (no perspective camera) is still brought up to the output's size, without history.
+bool Device::TaaParams(float out[28])
 {
     bool perspective = m_aoProjValid && m_aoProj.m[2][3] == 1.0f && m_aoProj.m[3][3] == 0.0f;
-    if (!TaaActive() || !perspective || !m_depth)
+    const bool scaled = SceneScaled();
+    if (!TaaActive() || ((!perspective || !m_depth) && !scaled))
         return false;
     d3d::Matrix reproject{};
     const auto& v = m_aoView.m;
@@ -1441,28 +1474,36 @@ bool Device::TaaParams(float out[24])
         float eye = -(v[3][0] * v[i][0] + v[3][1] * v[i][1] + v[3][2] * v[i][2]);
         jump2 += (eye - m_prevEye[i]) * (eye - m_prevEye[i]);
     }
-    bool history = m_prevViewProjValid && m_taaFrame + 1 == m_frameNumber && jump2 < 25.0f && m_taaHistory[0] &&
-                   m_taaHistory[0]->m_width == m_scene->m_width && m_taaHistory[0]->m_height == m_scene->m_height;
+    bool history = perspective && m_depth && m_prevViewProjValid && m_taaFrame + 1 == m_frameNumber && jump2 < 25.0f &&
+                   m_taaHistory[0] && m_taaHistory[0]->m_width == m_ldrMain->m_width &&
+                   m_taaHistory[0]->m_height == m_ldrMain->m_height;
     if (history)
         CameraReprojection(m_aoView, m_aoProj, m_prevView, m_prevProj, &reproject);
     std::memcpy(out, &reproject, 64);
-    out[16] = float(m_scene->m_width);
-    out[17] = float(m_scene->m_height);
+    out[16] = float(m_ldrMain->m_width);              // (the output's size: the history's)
+    out[17] = float(m_ldrMain->m_height);
     out[18] = history ? 1.0f : 0.0f;
     out[19] = m_prevViewProjValid ? 1.0f : 0.0f;      // object motion written this frame (MotionVectorDraw)
     out[20] = 0.1f;                                    // weight of the new frame
     out[21] = m_sharpen;
-    out[22] = out[23] = 0.0f;
+    out[22] = scaled ? 1.0f : 0.0f;                    // upscaling
+    out[23] = 0.0f;
+    // Scene pixels per output pixel, and the jitter in scene pixels (the scene moved by it: clip x right, y up).
+    out[24] = SceneScaleX();
+    out[25] = SceneScaleY();
+    out[26] = m_taaJitter[0] * 0.5f * float(m_scene->m_width);
+    out[27] = -m_taaJitter[1] * 0.5f * float(m_scene->m_height);
     return true;
 }
 
-// Resolve m_tonemapped against the history into the next history image, then sharpen that into dst.
-void Device::RenderTaa(VkCommandBuffer cmd, Texture* dst, const float params[24])
+// Resolve m_tonemapped against the history into the next history image, then sharpen that into dst. The history
+// is at the output's size (RVK_RenderScale: m_tonemapped is the scene's).
+void Device::RenderTaa(VkCommandBuffer cmd, Texture* dst, const float params[28])
 {
     for (Texture*& t : m_taaHistory)
-        if (!t || t->m_width != m_scene->m_width || t->m_height != m_scene->m_height) {
+        if (!t || t->m_width != m_ldrMain->m_width || t->m_height != m_ldrMain->m_height) {
             if (t) DestroyTexture(t);
-            t = CreateImage(m_scene->m_width, m_scene->m_height, Format::RGBA16F, 1, true);
+            t = CreateImage(m_ldrMain->m_width, m_ldrMain->m_height, Format::RGBA16F, 1, true);
         }
     if (!m_taaHistory[0] || !m_taaHistory[1])
         return;
@@ -1472,13 +1513,62 @@ void Device::RenderTaa(VkCommandBuffer cmd, Texture* dst, const float params[24]
     Transition(cmd, prev, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Transition(cmd, m_motionVectors, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     MakeDepthReadable(cmd);
-    FullscreenPass(cmd, next, m_taaPipeline, m_tonemapped->m_view, prev->m_view, m_linearSampler, params, 96, false,
+    FullscreenPass(cmd, next, m_taaPipeline, m_tonemapped->m_view, prev->m_view, m_linearSampler, params, 112, false,
                    m_motionVectors->m_view, m_depthView);
     Transition(cmd, next, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     float sharpen[4] = {params[21], 0.0f, 0.0f, 0.0f};
     FullscreenPass(cmd, dst, m_sharpenPipeline, next->m_view, next->m_view, m_pointSampler, sharpen, sizeof(sharpen), false);
     m_taaIndex ^= 1;
     m_taaFrame = m_frameNumber;
+}
+
+// RVK_RenderScale: the scene's depth (nearest sample) drawn into the output-size depth image, which then becomes
+// the depth (SwapDepth) - for the motion blur, the name labels drawn after the scene and the interface.
+void Device::UpsampleDepth(VkCommandBuffer cmd)
+{
+    if (m_depthSwapped || !m_depthUpPipeline || !m_depth)
+        return;
+    MakeDepthReadable(cmd);
+    const VkImageView sceneDepth = m_depthView;
+    SwapDepth();
+    m_depthSwapped = true;
+    const uint32_t w = m_ldrMain->m_width, h = m_ldrMain->m_height;
+    if (!EnsureDepth(w, h)) {
+        SwapDepth();
+        m_depthSwapped = false;
+        return;
+    }
+    ImageBarrier(cmd, m_depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                 VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0,
+                 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    m_depthLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    depth.imageView = m_depthView;
+    depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, {w, h}};
+    ri.layerCount = 1;
+    ri.pDepthAttachment = &depth;
+    vkCmdBeginRendering(cmd, &ri);
+    VkViewport viewport{0.0f, 0.0f, float(w), float(h), 0.0f, 1.0f};
+    VkRect2D scissor{{0, 0}, {w, h}};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_depthUpPipeline);
+    VkDescriptorImageInfo image{m_pointSampler, sceneDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    wr.dstBinding = 0;
+    wr.descriptorCount = 1;
+    wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wr.pImageInfo = &image;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_bloomLayout, 0, 1, &wr);
+    const float push[4] = {SceneScaleX(), SceneScaleY(), float(m_scene->m_width), float(m_scene->m_height)};
+    vkCmdPushConstants(cmd, m_bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRendering(cmd);
 }
 
 // Bloom: the scene's light above the threshold, downsampled level by level from half resolution to ~16 pixels,
@@ -1535,9 +1625,9 @@ void Device::RenderBloom(VkCommandBuffer cmd)
 
 // Per-object motion blur from the motion vectors: strongest motion per tile, of each tile's neighbourhood, then the
 // reconstruction filter from m_tonemapped into the main target. The depth buffer is readable (EndScene).
-void Device::RenderObjectMotionBlur(VkCommandBuffer cmd, const float params[24])
+void Device::RenderObjectMotionBlur(VkCommandBuffer cmd, Texture* src, const float params[28])
 {
-    uint32_t tw = (m_scene->m_width + kMotionTile - 1) / kMotionTile, th = (m_scene->m_height + kMotionTile - 1) / kMotionTile;
+    uint32_t tw = (m_ldrMain->m_width + kMotionTile - 1) / kMotionTile, th = (m_ldrMain->m_height + kMotionTile - 1) / kMotionTile;
     if (!m_motionTiles[0] || m_motionTiles[0]->m_width != tw || m_motionTiles[0]->m_height != th) {
         for (Texture*& t : m_motionTiles) {
             if (t) DestroyTexture(t);
@@ -1545,26 +1635,26 @@ void Device::RenderObjectMotionBlur(VkCommandBuffer cmd, const float params[24])
         }
     }
     if (!m_motionTiles[0] || !m_motionTiles[1]) {
-        FullscreenPass(cmd, m_ldrMain, m_motionPipeline, m_tonemapped->m_view, m_depthView, m_pointSampler, params, 96, false);
+        FullscreenPass(cmd, m_ldrMain, m_motionPipeline, src->m_view, m_depthView, m_pointSampler, params, 112, false);
         return;
     }
     // The blur reaches at most a tile beyond its own: cap the motion at two tiles.
-    float p[24];
+    float p[28];
     std::memcpy(p, params, sizeof(p));
     p[17] = std::min(p[17], float(2 * kMotionTile));
     Transition(cmd, m_motionVectors, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    FullscreenPass(cmd, m_motionTiles[0], m_tileMaxPipeline, m_motionVectors->m_view, m_depthView, m_pointSampler, p, 96, false);
+    FullscreenPass(cmd, m_motionTiles[0], m_tileMaxPipeline, m_motionVectors->m_view, m_depthView, m_pointSampler, p, 112, false);
     Transition(cmd, m_motionTiles[0], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     FullscreenPass(cmd, m_motionTiles[1], m_neighbourMaxPipeline, m_motionTiles[0]->m_view, m_motionTiles[0]->m_view,
-                   m_pointSampler, p, 96, false);
+                   m_pointSampler, p, 112, false);
     Transition(cmd, m_motionTiles[1], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    FullscreenPass(cmd, m_ldrMain, m_objectBlurPipeline, m_tonemapped->m_view, m_depthView, m_pointSampler, p, 96, false,
+    FullscreenPass(cmd, m_ldrMain, m_objectBlurPipeline, src->m_view, m_depthView, m_pointSampler, p, 112, false,
                    m_motionVectors->m_view, m_motionTiles[1]->m_view);
 }
 
 // This frame's camera against the last one's: the reprojection matrix (current clip -> previous clip) and the blur
 // parameters for motion_blur.frag. Remembers this frame's camera for the next.
-bool Device::MotionBlurParams(float out[24])
+bool Device::MotionBlurParams(float out[28])
 {
     double now = SwayClock(), dt = now - m_prevSceneTime;
     m_prevSceneTime = now;
@@ -1587,13 +1677,16 @@ bool Device::MotionBlurParams(float out[24])
         std::memcpy(out, &reproject, 64);
         dt = std::clamp(dt, 1.0 / 500.0, 0.25);
         out[16] = float(m_motionBlur / 60.0 / dt);        // per-frame motion -> motion during the exposure
-        out[17] = 0.04f * float(m_scene->m_width);        // at most 4% of the screen width
+        out[17] = 0.04f * float(m_ldrMain->m_width);      // at most 4% of the screen width
         out[18] = m_motionNear;
         out[19] = m_motionNear * 1.5f;
         out[20] = m_aoProj.m[2][2];
         out[21] = m_aoProj.m[3][2];
-        out[22] = float(m_scene->m_width);
-        out[23] = float(m_scene->m_height);
+        out[22] = float(m_ldrMain->m_width);              // (it runs at the output's size, after the TAA)
+        out[23] = float(m_ldrMain->m_height);
+        out[24] = SceneScaleX();                          // (RVK_RenderScale: the motion vectors are the scene's)
+        out[25] = SceneScaleY();
+        out[26] = out[27] = 0.0f;
     }
     m_prevView = m_aoView;
     m_prevProj = m_aoProj;

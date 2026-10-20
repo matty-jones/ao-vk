@@ -223,6 +223,8 @@ Device::~Device()
     if (m_pipelineLayout) vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     if (m_setLayout) vkDestroyDescriptorSetLayout(m_device, m_setLayout, nullptr);
     if (m_bindlessPool) vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
+    m_bindlessSet = VK_NULL_HANDLE;              // (freed with its pool: the targets below were made after it - their
+                                                 // slots aren't cleared)
     if (m_bindlessSetLayout) vkDestroyDescriptorSetLayout(m_device, m_bindlessSetLayout, nullptr);
     if (m_nullBuffer) vmaDestroyBuffer(m_allocator, m_nullBuffer, m_nullAllocation);
     DestroyMainTargets();
@@ -619,12 +621,7 @@ bool Device::CreateLogicalDevice(std::string* error)
 bool Device::CreateMainTargets(std::string* error)
 {
     m_ldrMain = CreateImage(m_width, m_height, Format::A8R8G8B8, 1, true);
-    m_scene = CreateImage(m_width, m_height, Format::RGBA16F, 1, true);
-    m_glow = CreateImage(m_width, m_height, Format::RGBA16F, 1, true);
-    m_localFraction = CreateImage(m_width, m_height, Format::RGBA8, 1, true);
-    m_motionVectors = CreateImage(m_width, m_height, Format::RGBA16F, 1, true);   // zw: PBR shading normal (ssr.frag)
-    m_albedo = CreateImage(m_width, m_height, Format::A8R8G8B8, 1, true);
-    if (!m_ldrMain || !m_scene || !m_glow || !m_localFraction || !m_motionVectors || !m_albedo) {
+    if (!m_ldrMain || !CreateSceneTargets()) {
         if (error) *error = "main colour target";
         return false;
     }
@@ -632,7 +629,9 @@ bool Device::CreateMainTargets(std::string* error)
     m_target = m_main;
 
     m_depthWidth = m_depthHeight = 0;
-    if (!EnsureDepth(m_width, m_height)) {
+    // (At the scene's size: the post passes read it by the scene's coordinates. RVK_RenderScale: the output's own
+    // depth is made by UpsampleDepth.)
+    if (!EnsureDepth(m_scene->m_width, m_scene->m_height)) {
         if (error) *error = "depth buffer";
         return false;
     }
@@ -649,6 +648,72 @@ bool Device::CreateMainTargets(std::string* error)
         return false;
     m_readbackData = info.pMappedData;
     return true;
+}
+
+// The scene's targets: the float scene and its further attachments, at RVK_RenderScale's share of the output size.
+bool Device::CreateSceneTargets()
+{
+    const uint32_t w = std::max(1u, (m_width * m_renderScale + 50) / 100);
+    const uint32_t h = std::max(1u, (m_height * m_renderScale + 50) / 100);
+    m_scene = CreateImage(w, h, Format::RGBA16F, 1, true);
+    m_glow = CreateImage(w, h, Format::RGBA16F, 1, true);
+    m_localFraction = CreateImage(w, h, Format::RGBA8, 1, true);
+    m_motionVectors = CreateImage(w, h, Format::RGBA16F, 1, true);   // zw: PBR shading normal (ssr.frag)
+    m_albedo = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+    return m_scene && m_glow && m_localFraction && m_motionVectors && m_albedo;
+}
+
+void Device::DestroySceneTargets()
+{
+    for (Texture** t : {&m_scene, &m_glow, &m_localFraction, &m_motionVectors, &m_albedo})
+        if (*t) { DestroyTextureNow(*t); *t = nullptr; }
+    if (m_depthSwapped) {
+        SwapDepth();
+        m_depthSwapped = false;
+    }
+    if (m_otherDepth.view) vkDestroyImageView(m_device, m_otherDepth.view, nullptr);
+    if (m_otherDepth.image) vmaDestroyImage(m_allocator, m_otherDepth.image, m_otherDepth.allocation);
+    m_otherDepth = DepthImage{};
+    if (m_depthView) { vkDestroyImageView(m_device, m_depthView, nullptr); m_depthView = VK_NULL_HANDLE; }
+    if (m_depth) { vmaDestroyImage(m_allocator, m_depth, m_depthAllocation); m_depth = VK_NULL_HANDLE; }
+    m_depthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_depthWidth = m_depthHeight = 0;
+}
+
+// RVK_RenderScale changed (or the TAA it needs went on or off): between frames, the scene's targets and depth made
+// again at the new size. Everything sized from the scene follows by itself; the TAA's history (output size) is
+// started again.
+void Device::ApplyRenderScale()
+{
+    const uint32_t want = RenderScaleNow();
+    if (want == m_renderScale || !m_ldrMain || m_inFrame)
+        return;
+    vkDeviceWaitIdle(m_device);
+    m_completed = m_submitted;
+    const bool wasScene = m_target == m_scene, wasMain = m_main == m_scene;
+    DestroySceneTargets();
+    m_renderScale = want;
+    if (!CreateSceneTargets() || !EnsureDepth(m_scene->m_width, m_scene->m_height)) {
+        Log("rvk: render scale %u%%: the scene's targets could not be made", want);
+        return;
+    }
+    if (wasScene) m_target = m_scene;
+    if (wasMain) m_main = m_scene;
+    m_taaFrame = ~0ull;
+    m_frameLightsDirty = true;
+    Log("rvk: render scale %u%%: the scene %ux%u of %ux%u", m_renderScale, m_scene->m_width, m_scene->m_height,
+        m_width, m_height);
+}
+
+// The current depth image and the other one (m_otherDepth) trade places.
+void Device::SwapDepth()
+{
+    std::swap(m_depth, m_otherDepth.image);
+    std::swap(m_depthView, m_otherDepth.view);
+    std::swap(m_depthAllocation, m_otherDepth.allocation);
+    std::swap(m_depthLayout, m_otherDepth.layout);
+    std::swap(m_depthWidth, m_otherDepth.width);
+    std::swap(m_depthHeight, m_otherDepth.height);
 }
 
 bool Device::EnsureDepth(uint32_t width, uint32_t height)
@@ -691,16 +756,10 @@ bool Device::EnsureDepth(uint32_t width, uint32_t height)
 void Device::DestroyMainTargets()
 {
     if (m_ldrMain) { DestroyTextureNow(m_ldrMain); m_ldrMain = nullptr; }
-    if (m_scene) { DestroyTextureNow(m_scene); m_scene = nullptr; }
-    if (m_glow) { DestroyTextureNow(m_glow); m_glow = nullptr; }
-    if (m_localFraction) { DestroyTextureNow(m_localFraction); m_localFraction = nullptr; }
-    if (m_motionVectors) { DestroyTextureNow(m_motionVectors); m_motionVectors = nullptr; }
-    if (m_albedo) { DestroyTextureNow(m_albedo); m_albedo = nullptr; }
     m_main = nullptr;
     for (auto& [tag, d] : m_deadImages) { vkDestroyImageView(m_device, d.view, nullptr); vmaDestroyImage(m_allocator, d.image, d.allocation); }
     m_deadImages.clear();
-    if (m_depthView) { vkDestroyImageView(m_device, m_depthView, nullptr); m_depthView = VK_NULL_HANDLE; }
-    if (m_depth) { vmaDestroyImage(m_allocator, m_depth, m_depthAllocation); m_depth = VK_NULL_HANDLE; }
+    DestroySceneTargets();
     if (m_readback) { vmaDestroyBuffer(m_allocator, m_readback, m_readbackAllocation); m_readback = VK_NULL_HANDLE; }
 }
 
@@ -1552,6 +1611,7 @@ void Device::BeginFrame()
     vkResetFences(m_device, 1, &f.fence);
     CollectGarbage();
     ApplyShadowResolution();
+    ApplyRenderScale();
     if (!uploadsPending) {
         if (f.ringSize != m_ringWanted) {        // the slot is idle (waited for): a bigger (or again smaller) ring
             std::string error;

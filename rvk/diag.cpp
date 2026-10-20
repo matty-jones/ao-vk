@@ -45,12 +45,13 @@ void Device::BeginFrameDump()
     const auto& v = m_view.m;
     float eye[3];
     for (int i = 0; i < 3; ++i) eye[i] = -(v[3][0] * v[i][0] + v[3][1] * v[i][1] + v[3][2] * v[i][2]);
-    std::fprintf(m_dumpFile, "# rvk frame dump; eye (%.2f %.2f %.2f); pixel lighting %d\n"
+    std::fprintf(m_dumpFile, "# rvk frame dump; eye (%.2f %.2f %.2f); pixel lighting %d; render scale %u%% (scene %ux%u)\n"
                              "# D draw: prim fvf verts idx | lit lights(idx:nearest vertex distance) | material diffuse/ambient/emissive,"
                              " sources d/a/s/e, colorvertex, global ambient | stages op/arg1/arg2 | tex | blend src/dst | z test/write/func |"
                              " world translation | screen rect\n"
                              "# L index: type position direction range atten0/1/2 diffuse ambient\n",
-                 eye[0], eye[1], eye[2], m_pixelLighting ? 1 : 0);
+                 eye[0], eye[1], eye[2], m_pixelLighting ? 1 : 0, m_renderScale, m_scene ? m_scene->m_width : 0u,
+                 m_scene ? m_scene->m_height : 0u);
 }
 
 // GPU memory in one line: each memory heap's usage against the driver's budget for it (with VK_EXT_memory_budget the

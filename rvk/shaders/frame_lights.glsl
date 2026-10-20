@@ -107,6 +107,8 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
                                 // deep they stand over the low ground (world units), how much (0: none)
     vec4 lightGrid;             // the frame lights' grid (rvk Device::LightGridLights): its corner x, z, cells across, down
     vec4 cond;                  // the world's conditions (rvk rvk.h Conditions): x the clouds' night; y, z, w unused
+    vec4 screen;                // x, y the scene's pixels per back-buffer pixel (rvk RVK_RenderScale: the game's viewport is
+                                // in back-buffer pixels, the motion vectors in the scene's); z, w unused
     Light lights[64];
 } FL;
 

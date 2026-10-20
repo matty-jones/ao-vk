@@ -15,7 +15,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-323 settings, 155 of them in the settings window.
+324 settings, 156 of them in the settings window.
 
 ## Sections
 
@@ -32,7 +32,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Shadows](#shadows) (16)
 - [Effects](#effects) (46)
 - [Tone mapping](#tone-mapping) (2)
-- [Anti-aliasing](#anti-aliasing) (3)
+- [Anti-aliasing](#anti-aliasing) (4)
 - [Colour grading](#colour-grading) (10)
 - [Depth of field](#depth-of-field) (9)
 - [Particles](#particles) (18)
@@ -391,6 +391,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | --- | --- | --- | --- | --- |
 | `RVK_Taa` | Temporal anti-aliasing | on / off | on | window; game value off |
 | `RVK_Sharpen` | Temporal anti-aliasing: sharpening (0 = none) | 0 .. 1 | 0.4 | window; switch `RVK_Taa` |
+| `RVK_RenderScale` | Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster) | 100 / 85 / 75 / 67 / 50 | 100 | window; switch `RVK_Taa`; game value 100 |
 | `RVK_Fxaa` | FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer) | on / off | off | window; game value off; knob |
 
 ## Colour grading

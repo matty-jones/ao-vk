@@ -113,6 +113,7 @@ public:
     void SetPointLightIntensity(float lights, float characters);
     void SetTessellation(float shape, float distance, uint32_t level);
     void SetTaa(bool enable, float sharpen);
+    void SetRenderScale(uint32_t percent);
     void SetFogBanks(float s, float force = -1.0f);
     void SetHeatFlash(float s, bool force = false);
     void SetSandForce(float amount, bool ash);
