@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -541,13 +542,24 @@ bool ParseIni(const Setting& s, const char* text, float* out)
     return true;
 }
 
-// Settings renamed (the old name read once if the new one isn't in the ini yet, then dropped from it). Most for the game's
-// option variables, which take at most 15 characters: AOReloaded's settings window leaves a longer name out, so the
-// setting couldn't be changed in game (RVK_NativeGround, the native ground's own switch, among them - 2026-10-20).
-struct Renamed { const char* now; const char* was; };
-const Renamed kRenamed[] = {
-    {"RVK_SmokeThick", "RVK_SmokeDensity"}, {"RVK_GroundOn", "RVK_NativeGround"}, {"RVK_Pebbles", "RVK_GroundPebble"},
-    {"RVK_DepthSteps", "RVK_ParallaxSteps"}, {"RVK_RippleSoft", "RVK_RippleSmooth"},
+// Settings renamed or given a new default since players have had them. The ini keeps every setting, so neither
+// reaches a player by itself: once (the entry's id under [Migrations]), the value under the old name moves to the new
+// one - and a value still at the old default, which the player never chose, takes the new default instead (NaN: kept
+// as it is). In [Renderer] and in the presets saved in the ini (AOReloaded's slots) alike. A new default for a
+// setting that keeps its name: an entry with `was` the same as `now`.
+struct Migration { const char* id; const char* now; const char* was; float oldDefault; };
+constexpr float kKeep = std::numeric_limits<float>::quiet_NaN();
+const Migration kMigrations[] = {
+    // (Most for the game's option variables, which take at most 15 characters: AOReloaded's settings window leaves a
+    // longer name out, so the setting couldn't be changed in game - RVK_NativeGround, the native ground's own switch,
+    // among them, 2026-10-20.)
+    {"SmokeThick", "RVK_SmokeThick", "RVK_SmokeDensity", kKeep},
+    {"GroundOn", "RVK_GroundOn", "RVK_NativeGround", kKeep},
+    {"Pebbles", "RVK_Pebbles", "RVK_GroundPebble", kKeep},
+    {"DepthSteps", "RVK_DepthSteps", "RVK_ParallaxSteps", kKeep},
+    {"RippleSoft", "RVK_RippleSoft", "RVK_RippleSmooth", kKeep},
+    // (One setting for how dark the game gets, lighter by default: docs/darkness-plan.md.)
+    {"Darkness", "RVK_Darkness", "RVK_NightDark", 1.0f},
 };
 
 // A key in randy-vk.ini's [Renderer] twice (a hand edit): only the first counts - an edit to the other did nothing
@@ -575,6 +587,50 @@ void LogDuplicateKeys()
             seen.push_back(key);
     }
     std::fclose(f);
+}
+
+// kMigrations, each once (inIni: which settings the ini's [Renderer] held - a value moved in counts as held).
+void Migrate(std::vector<bool>& inIni)
+{
+    for (const Migration& m : kMigrations) {
+        if (GetPrivateProfileIntA("Migrations", m.id, 0, g_iniPath) != 0)
+            continue;
+        Setting* s = Find(m.now);
+        if (!s) continue;
+        const size_t index = size_t(s - g_settings);
+        const bool renamed = std::strcmp(m.now, m.was) != 0;
+        auto read = [&](const char* section, float* out) {
+            char text[64] = "";
+            GetPrivateProfileStringA(section, m.was, "", text, sizeof(text), g_iniPath);
+            if (!text[0] || !ParseIni(*s, text, out))
+                return false;
+            if (!std::isnan(m.oldDefault) && std::fabs(*out - m.oldDefault) < 1e-4f)
+                *out = s->defaultValue;
+            *out = Clamp(*s, *out);
+            return true;
+        };
+        float v;
+        if ((!renamed || !inIni[index]) && read("Renderer", &v)) {
+            RvkLog("settings: %s = %g (migration %s, from %s)", m.now, v, m.id, m.was);
+            s->value = v;
+            inIni[index] = true;
+        }
+        if (renamed)
+            WritePrivateProfileStringA("Renderer", m.was, nullptr, g_iniPath);
+        for (int i = 1; i <= 9; ++i) {
+            char section[16];
+            std::snprintf(section, sizeof(section), "Preset %d", i);
+            if (!read(section, &v))
+                continue;
+            char text[32];
+            if (s->type == Colour) std::snprintf(text, sizeof(text), "%06X", unsigned(v) & 0xFFFFFFu);
+            else std::snprintf(text, sizeof(text), "%g", v);
+            if (renamed)
+                WritePrivateProfileStringA(section, m.was, nullptr, g_iniPath);
+            WritePrivateProfileStringA(section, m.now, text, g_iniPath);
+        }
+        WritePrivateProfileStringA("Migrations", m.id, "1", g_iniPath);
+    }
 }
 
 // randy-vk.ini next to randy31.dll (the client folder).
@@ -962,10 +1018,6 @@ void Load()
         char buf[64] = "";
         GetPrivateProfileStringA("Renderer", s.name, "", buf, sizeof(buf), g_iniPath);
         inIni.push_back(buf[0] != 0);
-        // (A setting renamed: its value under the old name, once.)
-        for (const Renamed& r : kRenamed)
-            if (!buf[0] && std::strcmp(s.name, r.now) == 0)
-                GetPrivateProfileStringA("Renderer", r.was, "", buf, sizeof(buf), g_iniPath);
         float read = 0.0f;
         if (buf[0] && !ParseIni(s, buf, &read)) {   // (a NaN a broken slider saved - user, 2026-10-14)
             RvkLog("settings: %s = %s in randy-vk.ini is not a number - its default instead", s.name, buf);
@@ -981,6 +1033,7 @@ void Load()
             s.value = std::strcmp(buf, "camera") == 0 ? 0.0f : 1.0f;
         }
     }
+    Migrate(inIni);
     // A feature's on / off setting new to the ini (older ones had "0 = off" strengths): on unless its strength (the
     // first setting it switches with a game value) was at the game's value - which then gets its default back, so
     // that switching the feature on shows it.
@@ -1011,53 +1064,9 @@ void Load()
             }
         WritePrivateProfileStringA("Migrations", "AlwaysOn", "1", g_iniPath);
     }
-    // Once: RVK_NightDark becomes RVK_Darkness (docs/darkness-plan.md) - a value the player chose carried over, the
-    // old default (1) to the new, lighter one; in the settings and in the presets saved in the ini alike.
-    if (GetPrivateProfileIntA("Migrations", "Darkness", 0, g_iniPath) == 0) {
-        auto carried = [](const char* section, float* out) {
-            char text[64] = "";
-            GetPrivateProfileStringA(section, "RVK_NightDark", "", text, sizeof(text), g_iniPath);
-            char* end = nullptr;
-            const float v = std::strtof(text, &end);
-            if (!text[0] || end == text || !std::isfinite(v))
-                return false;
-            *out = std::fabs(v - 1.0f) < 1e-3f ? Find("RVK_Darkness")->defaultValue : std::clamp(v, 0.0f, 2.0f);
-            return true;
-        };
-        float v;
-        const size_t darkness = size_t(Find("RVK_Darkness") - g_settings);
-        if (carried("Renderer", &v) && !inIni[darkness]) {
-            g_settings[darkness].value = v;
-            RvkLog("settings: RVK_NightDark is now RVK_Darkness (%g)", v);
-        }
-        WritePrivateProfileStringA("Renderer", "RVK_NightDark", nullptr, g_iniPath);
-        for (int i = 1; i <= 9; ++i) {
-            char section[16];
-            std::snprintf(section, sizeof(section), "Preset %d", i);
-            if (!carried(section, &v))
-                continue;
-            char text[32];
-            std::snprintf(text, sizeof(text), "%g", v);
-            WritePrivateProfileStringA(section, "RVK_Darkness", text, g_iniPath);
-            WritePrivateProfileStringA(section, "RVK_NightDark", nullptr, g_iniPath);
-        }
-        WritePrivateProfileStringA("Migrations", "Darkness", "1", g_iniPath);
-    }
     for (Setting& s : g_settings) {
         s.value = Clamp(s, s.value);
         Save(s);                                  // the ini always lists every setting
-    }
-    for (const Renamed& r : kRenamed) {
-        WritePrivateProfileStringA("Renderer", r.was, nullptr, g_iniPath);
-        for (int i = 1; i <= 9; ++i) {           // (and in the presets saved in the ini: AOReloaded's slots)
-            char section[16], text[64] = "";
-            std::snprintf(section, sizeof(section), "Preset %d", i);
-            GetPrivateProfileStringA(section, r.was, "", text, sizeof(text), g_iniPath);
-            if (!text[0])
-                continue;
-            WritePrivateProfileStringA(section, r.now, text, g_iniPath);
-            WritePrivateProfileStringA(section, r.was, nullptr, g_iniPath);
-        }
     }
     g_iniWritten = IniWriteTime();
 }
