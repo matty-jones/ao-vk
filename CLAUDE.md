@@ -95,7 +95,8 @@ binary-identical — the numbers are in `docs/architecture.md` and `interface/*.
 `*.gen.cpp` / `*.gen.h`: `proxy/exports.gen.cpp` and `interface/` (`tools/gen_interface.py`, which also owns the
 hooked exports in the `.def`), `proxy/ddraw/com_trace.gen.h` / `com_stub.gen.h` (`tools/gen_com_trace.py`),
 `proxy/native/orig_api.gen.*` (`tools/gen_orig_api.py`), `proxy/native/entry_guard.gen.h`
-(`tools/gen_entry_guard.py`).
+(`tools/gen_entry_guard.py`), `docs/settings.md` (`tools/gen_settings_doc.py` from the settings table: run it after
+adding or changing a setting; `--check` says whether it is current).
 
 ## Local-only material
 
