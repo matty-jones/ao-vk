@@ -5184,7 +5184,10 @@ int main(int argc, char** argv)
         tdev.SetHdr(hdr);
         tdev.SetBloom(bloom, 1.0f);
         // (Only as asked: the bench's baselines were made without.)
-        if (lightOverride) tdev.SetLightOverride(true);
+        if (lightOverride) {
+            tdev.SetLightOverride(true);
+            tdev.SetPointShadows(pointShadows);   // (--point-shadows N, 4 by default: the nearest lamps' cubes)
+        }
         if (taa) {
             tdev.SetTaa(true, sharpen);
             tdev.SetRenderScale(uint32_t(renderScale));

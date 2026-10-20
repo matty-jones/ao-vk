@@ -20,6 +20,8 @@ using namespace detail;
 
 namespace {
 
+constexpr uint32_t kCubeKeepMost = 30;          // a cube kept as drawn: redrawn after this many frames all the same
+
 // Per face: major axis, s axis, t axis (Vulkan's cube map face selection: s = sc/|ma|, t = tc/|ma|, mapped to 0..1).
 const float kFaceAxes[6][3][3] = {
     {{1, 0, 0}, {0, 0, -1}, {0, -1, 0}},    // +X: sc = -z, tc = -y
@@ -608,8 +610,10 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         const d3d::Light& l = m_lightsCur[candidates[slots[k].candidate].index].light;
         float pos[3] = {l.position.x, l.position.y, l.position.z};
         float fade = slots[k].fade;
-        // A cube still holding the same light where it was keeps last frame's map every other frame (half the cubes
-        // each frame) - if only still things are around it. Moving lights (carried) render every frame.
+        // A cube still holding the same light where it was keeps its map while what is in the light's range is
+        // unchanged - the same casters, where they were, none swaying, no grass (it sways) - redrawn at least every
+        // kCubeKeepMost frames; else, if only still things are around it, every other frame (half the cubes each
+        // frame). Moving lights (carried) render every frame.
         // Not while anything animated is in its range: a character's body moves every frame, and against last frame's
         // map its own limbs and torso shadow it in the wrong places - dark patches flickering on bodies in crowds.
         double scanStart = ProfileCpu();
@@ -621,20 +625,20 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
                 break;
             }
         }
-        if (!animatedNear && k < previousCount && previous[k].range == l.range && ((k + m_frameNumber) & 1)) {
+        bool sameLight = false;
+        if (k < previousCount && previous[k].range == l.range) {
             float dx = previous[k].position[0] - pos[0], dy = previous[k].position[1] - pos[1], dz = previous[k].position[2] - pos[2];
-            if (dx * dx + dy * dy + dz * dz < 1e-4f) {
-                // This frame's position (the game's lamps wobble in the last bits): PointShadowLayer matches exactly.
-                std::memcpy(s.position, pos, sizeof(pos));
-                s.fade = fade;
-                pointScanMs += ProfileCpu() - scanStart;
-                continue;
-            }
+            sameLight = dx * dx + dy * dy + dz * dz < 1e-4f;
         }
         inRange.clear();
         inRangeFaces.clear();
         // Batch-key order (CollectShadowItems): longer batches per face. The boxes come packed in that order
         // (m_shadowOrderBox): this scan runs per light over every caster.
+        uint64_t casters = 1469598103934665603ull;   // (FNV-1a over what each caster in range draws, and where)
+        bool swaying = false;
+        const auto mix = [&](const void* p, size_t n) {
+            for (size_t b = 0; b < n; ++b) casters = (casters ^ static_cast<const uint8_t*>(p)[b]) * 1099511628211ull;
+        };
         const float* box = m_shadowOrderBox.data();
         for (size_t n = 0; n < m_shadowOrder.size(); ++n, box += 6) {
             float d2 = BoxDistance2(box, box + 3, pos);
@@ -654,7 +658,35 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
                 continue;
             inRange.push_back(i);
             inRangeFaces.push_back(uint8_t(faces));
+            if (sameLight && !animatedNear) {
+                const ShadowItem& it = m_shadowItems[i];
+                swaying = swaying || it.sway[0] != 0.0f || it.sway[1] != 0.0f || it.sway[2] != 0.0f || it.sway[3] != 0.0f;
+                mix(&it.world, sizeof(it.world));
+                mix(&it.buffer, sizeof(it.buffer));
+                mix(&it.ibBuffer, sizeof(it.ibBuffer));
+                mix(&it.vbOffset, sizeof(it.vbOffset));
+                mix(&it.ibOffset, sizeof(it.ibOffset));
+                mix(&it.vertexCount, sizeof(it.vertexCount));
+                mix(&it.indexCount, sizeof(it.indexCount));
+                mix(&it.texture, sizeof(it.texture));
+                mix(&it.alphaRef, sizeof(it.alphaRef));
+                mix(&faces, sizeof(faces));
+            }
         }
+        if (sameLight && !animatedNear) {
+            const bool still = !swaying && casters == s.casters && s.kept < kCubeKeepMost && !GrassNearLight(pos, l.range);
+            if (still || ((k + m_frameNumber) & 1)) {
+                // This frame's position (the game's lamps wobble in the last bits): PointShadowLayer matches exactly.
+                std::memcpy(s.position, pos, sizeof(pos));
+                s.fade = fade;
+                ++s.kept;
+                ++m_pointCubesKept;
+                pointScanMs += ProfileCpu() - scanStart;
+                continue;
+            }
+        }
+        s.casters = casters;
+        s.kept = 0;
         pointScanMs += ProfileCpu() - scanStart;
         double drawStart = ProfileCpu();
         const bool grassUp = !GrassBelow(pos, l.range);   // (+Y, face 2: only if some grass reaches above the light)
@@ -703,6 +735,12 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         s.fade = fade;                           // newly shadowed lights fade their shadow in instead of popping in
     }
     m_pointShadowCount = count;
+    m_pointCubesAll += count;
+    if (++m_pointCubeFrames == 600) {
+        Log("point shadows: %.1f cubes a frame, %.1f of them kept as drawn (avg of 600 frames)", m_pointCubesAll / 600.0,
+            m_pointCubesKept / 600.0);
+        m_pointCubesKept = m_pointCubesAll = m_pointCubeFrames = 0;
+    }
     ProfileCpuAddMs("point scan", pointScanMs);
     ProfileCpuAddMs("point draw", pointDrawMs);
 

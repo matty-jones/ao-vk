@@ -2408,6 +2408,7 @@ private:
     // its texel size, depth its light-space depth range.
     void DrawGrassShadow(VkCommandBuffer cmd, const d3d::Matrix& lightViewProj, float texel, float depth);
     bool DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range);
+    bool GrassNearLight(const float light[3], float range) const;   // some of our grass casts into its cube (it sways)
     bool GrassBelow(const float light[3], float range) const;
     bool m_grassDrawnThisFrame = false;            // the blades go in before the game's transparent pass (see Draw)
     // The water (water.cpp).
@@ -3321,12 +3322,15 @@ private:
     struct PointShadowLight {
         float position[3], range;
         float fade;                              // 0..1: a newly shadowed light's shadow fades in (m_pointShadowFadeIn)
+        uint64_t casters = 0;                    // what its cube was drawn from (RenderPointShadowMaps: kept while the same)
+        uint32_t kept = 0;                       // frames since it was drawn
     };
     double m_pointShadowFadeIn = 0.3;            // seconds (0 = shadows appear at once)
     double m_pointShadowClock = 0.0;
     PointShadowLight m_pointShadowLights[kMaxPointShadows] = {};   // the lights the cubes hold (for this frame)
     uint32_t m_pointShadowCount = 0;
     uint32_t m_pointShadowDraws = 0;             // last pass: caster draws into the cubes (frame dumps)
+    uint32_t m_pointCubesKept = 0, m_pointCubesAll = 0, m_pointCubeFrames = 0;   // cubes kept as drawn (the log)
     bool CreatePointShadowResources(std::string* error);
     void DestroyPointShadowResources();
     void PreparePointShadowMaps(VkCommandBuffer cmd);

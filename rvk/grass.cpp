@@ -2153,6 +2153,25 @@ void Device::DrawGrassShadow(VkCommandBuffer cmd, const d3d::Matrix& lightViewPr
 // rendering open): the tiles within the light's range that reach the face, each blade square to the light
 // (grass_shadow.vert's point mode). Tiles further than a few units from the light through their sparse quarter.
 // Returns whether anything was drawn (the caller then rebinds the shadow pipelines' state).
+bool Device::GrassNearLight(const float light[3], float range) const
+{
+    if (!m_grassOn || !m_grassShadows || !m_grassShadowPipeline || !m_grassPool || !m_grassIndex || !m_frameEyeValid)
+        return false;
+    const float tall = m_grassHeight * 1.7f + 1.0f;
+    for (const auto& [key, tp] : m_grassTiles) {     // (DrawGrassPointShadow's test, without the face's)
+        const GrassTile& t = *tp;
+        if (!t.built || !t.blades)
+            continue;
+        const float x0 = float(t.tx) * kGrassTileSize, z0 = float(t.tz) * kGrassTileSize;
+        const float nx = std::max({x0 - 1.0f - light[0], 0.0f, light[0] - (x0 + kGrassTileSize + 1.0f)});
+        const float ny = std::max({t.minY - 1.0f - light[1], 0.0f, light[1] - (t.maxY + tall)});
+        const float nz = std::max({z0 - 1.0f - light[2], 0.0f, light[2] - (z0 + kGrassTileSize + 1.0f)});
+        if (nx * nx + ny * ny + nz * nz <= range * range)
+            return true;
+    }
+    return false;
+}
+
 bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range)
 {
     if (!m_grassOn || !m_grassShadows || !m_grassShadowPipeline || !m_grassPool || !m_grassIndex || !m_frameEyeValid ||

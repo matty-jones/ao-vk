@@ -273,7 +273,20 @@ lights the loop tests at each pixel and those whose range reaches it; a frame du
 exactly (v = x / (1 - x), x = byte^2.2, x 16). The city bench with 90 lamps (`--city-bench --city-lamps 90
 --pixel-lighting --light-override --taa`): 10.3 tested, 8.4 reaching - 81%. The ones that don't reach leave the loop
 at its distance test, so screen tiles would save well under a fifth of it: the cost is the lights that do reach.
-Waiting for the same count at the outpost (`randy31-lightcount1.dll`: `pbrdebug 11`, `dump`).
+At the outpost (frame dump of 2026-10-20, 75%): 4.1 tested, 2.9 reaching (70%) over 93% of the screen; under 4% of
+pixels test 8 or more. **Screen tiles (2b) and deferred lights (2c): not worth it** - they would skip about one cheap
+test a pixel.
+
+What the loop's cost is (city bench, 40 lamps, 1440p at 75%, best of 3, a temporary switch): all 3.24 ms; the loop
+skipped 2.81; the loop and each light's constants read but no lighting 3.02; no point-shadow taps 3.20; no PBR
+highlight 3.24; lights under 2% at the pixel skipped 3.25; without the grid's cell mask 3.27. So half is walking the
+lights, half their lighting, neither shadows nor highlights. Walking them together per subgroup (one light index for
+all its pixels, subgroupOr of the masks - uniform-buffer reads at one index) changed nothing: not kept.
+
+Kept instead: point-shadow cubes whose light and casters in range are unchanged (a fingerprint of each caster's
+matrix, buffers and texture; none swaying; no grass in range) keep their map up to 30 frames (pointshadow.cpp);
+pixel-identical in the bench (its cube pass 0.06 -> 0.01 ms). In game the cube pass is 0.33 ms; how much it keeps
+there shows in the "point shadows: ... kept as drawn" log line.
 
 ### 2b. Screen-tile light lists (clustered, forward)
 
