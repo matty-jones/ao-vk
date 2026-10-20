@@ -15,11 +15,11 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-322 settings, 155 of them in the settings window.
+323 settings, 155 of them in the settings window.
 
 ## Sections
 
-- [General](#general) (6)
+- [General](#general) (7)
 - [Lighting](#lighting) (17)
 - [Materials](#materials) (14)
 - [Debug](#debug) (7)
@@ -43,6 +43,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | --- | --- | --- | --- | --- |
 | `RVK_Enhance` | All enhancements (Ctrl+Shift+E) | on / off | on | window |
 | `RVK_Prepass` | Depth pre-pass | on / off | on | ini only; knob |
+| `RVK_PrepassEq` | Depth pre-pass: what it covers shaded only where it is seen | on / off | on | ini only; switch `RVK_Prepass`; knob |
 | `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 / 30 / 60 / 90 / 120 | 60 | window |
 | `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | window; knob |
 | `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | window |

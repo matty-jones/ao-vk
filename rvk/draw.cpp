@@ -2034,8 +2034,16 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     if (WaterWritesDepth(fvf))
         zWrite = 1;
     uint32_t zFunc = m_rs[d3d::RS_ZFUNC];
-    if (m_drawPrepassed && zFunc == d3d::CMP_LESS)
-        zFunc = d3d::CMP_LESSEQUAL;              // its own depth is already in the buffer (the pre-pass): pass equal
+    // Its own depth is already in the buffer (the pre-pass, same coverage, same positions: invariant): only where it
+    // is equal is this draw seen, and nothing is left to write. Without a depth write the test runs before the shader
+    // even when the shader can discard - with one it ran after, so every see-through fragment of a plant card in front
+    // of the visible surface was shaded and then dropped (foliage ~6 shader runs a screen pixel at an outpost).
+    if (m_drawPrepassed && (zFunc == d3d::CMP_LESS || zFunc == d3d::CMP_LESSEQUAL) && m_prepassEqual) {
+        zFunc = d3d::CMP_EQUAL;
+        zWrite = 0;
+    } else if (m_drawPrepassed && zFunc == d3d::CMP_LESS) {
+        zFunc = d3d::CMP_LESSEQUAL;
+    }
     if (c.depthTest != zEnable) { vkCmdSetDepthTestEnable(cmd, zEnable); c.depthTest = zEnable; }
     if (c.depthWrite != zWrite) { vkCmdSetDepthWriteEnable(cmd, zWrite); c.depthWrite = zWrite; }
     if (c.depthOp != zFunc) { vkCmdSetDepthCompareOp(cmd, CompareOp(zFunc)); c.depthOp = zFunc; }

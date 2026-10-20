@@ -33,7 +33,7 @@
   scene shader runs about once per pixel. "Opaque": no discard, depth written, not blended or blended by an alpha
   that is provably 1 (`AlphaOneCheck`); not characters, swaying plants, labels or particles. A segment ends with the
   scene's rendering (target switch, copy, flush, end of the scene) or at a second depth clear. `ffp.vert` declares
-  `gl_Position` invariant so both passes produce the same depth; a pre-passed draw's `LESS` becomes `LESSEQUAL`. Backgrounds (draws ignoring depth, not writing it, before anything
+  `gl_Position` invariant so both passes produce the same depth; a pre-passed draw's `LESS` or `LESSEQUAL` becomes `EQUAL`, without a depth write (`RVK_PrepassEq`, hidden; off: `LESSEQUAL` with writes, as before). The write is what mattered: with it, a shader that can discard has its depth test after it, so every see-through fragment of a plant card in front of the visible surface ran the whole uber-shader before being dropped. Demo forest 1440p: foliage 1.58 -> 0.79 ms, 1.74 -> 0.35 shader runs a screen pixel. Backgrounds (draws ignoring depth, not writing it, before anything
   in the segment wrote depth) get the depth bounds test [clear, clear]: they are shaded only where the pre-pass found
   no opaque surface, which is the only place they stay visible.
   **Cut-outs** go in with a second pipeline, `prepass_cutout.frag` (`ffp_main.glsl` built with `RVK_PREPASS_CUTOUT`),

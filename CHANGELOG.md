@@ -157,6 +157,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Faster where water or smoke is near but not in view: water out of the camera's view is no longer drawn (about
   1.5 ms a frame with a lake behind you), and smoke out of view - or hidden behind the houses in front of it - is simulated a sixth as often, still
   evolving, still there when you turn round (about half a millisecond with a few chimneys out of sight).
+- Trees, bushes and other plants cost much less to draw: the parts of their leaf cards you see through are now
+  skipped before they are shaded, where before each was shaded and then thrown away. In a demo forest the leaves cost
+  half as much and the frame about a third less; the look is unchanged. `RVK_PrepassEq` in randy-vk.ini (1; 0 for
+  the old way).
 - Trees and bushes further than 20 m away cost less. Their leaves are drawn in one pass instead of two: the soft edge
   of each leaf is a fine dither that the anti-aliasing (TAA) smooths back out, so a crown no longer gets lit once for
   every layer of leaf edges in it. Closer plants keep the blended edge. In a demo forest the frame cost 10-20% less.

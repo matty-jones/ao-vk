@@ -266,6 +266,7 @@ struct DeviceInfo {
     X(Headroom, m_lightHeadroom, C|L)                 /* how bright local lights may make a surface (1..2) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
+    X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
     X(FolEdges, m_foliageEdges, 0)                    /* plants' soft edges in a second pass */ \
     X(OwnLight, m_carrierLit, C)                      /* a character's own light lights the character */ \
     X(Fxaa, m_fxaa, 0)                                /* FXAA while TAA is off */ \
@@ -1944,6 +1945,7 @@ private:
     // out of the pre-pass (RANDYVK_PREPASS_CUTOUT=0, or the pipeline failed).
     VkPipeline m_prepassCutoutPipeline = VK_NULL_HANDLE;
     VkPipeline m_leafPrepassPipeline = VK_NULL_HANDLE;   // ... leaf.vert + prepass_cutout.frag (our own canopy's sprigs)
+    bool m_prepassEqual = true;                  // RVK_PrepassEq: pre-passed draws test EQUAL, no depth write
     bool m_prepassSway = true;                   // swaying plants in the pre-pass too (RANDYVK_PREPASS_SWAY=0: not)
     struct PrepassCache {
         bool bound = false;                      // pipeline, front face, depth state, arrays, set 1

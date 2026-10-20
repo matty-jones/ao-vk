@@ -4132,6 +4132,7 @@ void RunPointShadowTest(D& dev, int frames, const std::string& shot, const std::
 std::string g_leafTrees;           // --leaf-tree: the files, comma-separated
 Device::LeafSettings g_leafSettings{true};   // --leaf-off, --leaf-density, --leaf-size, --leaf-dist, --leaf-core, --leaf-wind, --leaf-flutter
 int g_folEdges = -1;               // --fol-edges 0|1: RVK_FolEdges, plants' soft edges in a second pass (-1: the default)
+int g_prepassEq = -1;              // --prepass-eq 0|1: RVK_PrepassEq, pre-passed draws shaded only where their depth is
 float g_folDither = -1.0f;         // --fol-dither D: RVK_FolDither, soft edges dithered past D units (0 never; -1: default)
 float g_leafCamDist = -1.0f;       // --leaf-cam-dist D: the camera this far from the row (default: from the trees' size)
 float g_leafCamHeight = -1.0f;     // --leaf-cam-height H: ... this high (default: a third of the tallest tree)
@@ -4261,6 +4262,7 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
     dev.SetKnob(rvk::Knob::CrownShade, g_crownShade);
     if (g_folEdges >= 0) dev.SetKnob(rvk::Knob::FolEdges, float(g_folEdges));
     if (g_folDither >= 0.0f) dev.SetKnob(rvk::Knob::FolDither, g_folDither);
+    if (g_prepassEq >= 0) dev.SetKnob(rvk::Knob::PrepassEq, float(g_prepassEq));
     for (int frame = 0; frame < frames; ++frame) {
         if (frame == frames - 1) {
             dev.RequestScreenshot(shot);
@@ -4716,6 +4718,7 @@ int main(int argc, char** argv)
         else if (a == "--leaf-flutter" && i + 1 < argc) g_leafSettings.flutter = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-dist" && i + 1 < argc) g_leafCamDist = float(std::atof(argv[++i]));
         else if (a == "--fol-edges" && i + 1 < argc) g_folEdges = std::atoi(argv[++i]);
+        else if (a == "--prepass-eq" && i + 1 < argc) g_prepassEq = std::atoi(argv[++i]);
         else if (a == "--fol-dither" && i + 1 < argc) g_folDither = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-height" && i + 1 < argc) g_leafCamHeight = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-yaw" && i + 1 < argc) g_leafCamYaw = float(std::atof(argv[++i]));
