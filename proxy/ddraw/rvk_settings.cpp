@@ -550,6 +550,33 @@ const Renamed kRenamed[] = {
     {"RVK_DepthSteps", "RVK_ParallaxSteps"}, {"RVK_RippleSoft", "RVK_RippleSmooth"},
 };
 
+// A key in randy-vk.ini's [Renderer] twice (a hand edit): only the first counts - an edit to the other did nothing
+// (the user's RVK_CloudNight, 2026-10-20). Logged once at load.
+void LogDuplicateKeys()
+{
+    FILE* f = std::fopen(g_iniPath, "r");
+    if (!f) return;
+    std::vector<std::string> seen;
+    char line[512];
+    bool renderer = false;
+    while (std::fgets(line, sizeof(line), f)) {
+        if (line[0] == '[') {
+            renderer = std::strncmp(line, "[Renderer]", 10) == 0;
+            continue;
+        }
+        const char* eq = std::strchr(line, '=');
+        if (!renderer || !eq) continue;
+        std::string key(line, size_t(eq - line));
+        while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
+        if (std::find(seen.begin(), seen.end(), key) != seen.end())
+            RvkLog("settings: %s is in randy-vk.ini's [Renderer] more than once - only the first counts; remove the "
+                   "others", key.c_str());
+        else
+            seen.push_back(key);
+    }
+    std::fclose(f);
+}
+
 // randy-vk.ini next to randy31.dll (the client folder).
 void ResolveIniPath()
 {
@@ -925,6 +952,7 @@ void Load()
     if (g_loaded) return;
     g_loaded = true;
     ResolveIniPath();
+    LogDuplicateKeys();
     for (const Setting& s : g_settings)             // the game's option variables take at most 15 characters: a longer
         if (std::strlen(s.name) > 15)               // name's slider has no variable behind it and breaks the game
             RvkLog("settings: %s is longer than 15 characters - it can't be in the Renderer tab", s.name);

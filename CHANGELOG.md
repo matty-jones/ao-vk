@@ -220,6 +220,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ### Diagnostics
+- randy-vk.log names a setting written twice in randy-vk.ini's `[Renderer]` (after a hand edit): only the first one
+  counts, so changing the other did nothing.
+- randy-vk.log has a `darkness:` line every 10 seconds: the `RVK_Darkness` setting, how much it is night, how bright
+  the land shows against the floor and how much the picture is brightened.
 - A frame dump also saves the renderer's in-between images next to it (`-scene`, `-local`, `-albedo`, `-glow`, `-ao`,
   `-gi`, `-volume`, `-contact`, `-env`, `-ssr`.bmp), so a fault can be traced to the step that makes it.
 - Console `bisect`: finds which setting causes a fault that `enhance off` takes away. Each step puts half of the
