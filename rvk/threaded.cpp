@@ -356,8 +356,11 @@ void ThreadedDevice::EndFrame()
 {
     m_inFrame = false;
     auto now = std::chrono::steady_clock::now();     // profiling: the game thread's whole frame
-    if (m_lastEndFrame.time_since_epoch().count())
-        AddGameSection("game thread frame", std::chrono::duration<double, std::milli>(now - m_lastEndFrame).count());
+    if (m_lastEndFrame.time_since_epoch().count()) {
+        const double ms = std::chrono::duration<double, std::milli>(now - m_lastEndFrame).count();
+        AddGameSection("game thread frame", ms);
+        Device::LiveSmooth(m_liveFrameMs, ms);
+    }
     m_lastEndFrame = now;
     Enqueue([this](const uint8_t*) {
         m_device.EndFrame();
@@ -374,8 +377,16 @@ void ThreadedDevice::EndFrame()
             break;
         WaitWhileEqual(m_framesDone, done, 100);
     }
-    m_device.m_profileGameWaitUs.fetch_add(uint64_t(
-        std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - waitStart).count()));
+    const double waitedUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - waitStart).count();
+    m_device.m_profileGameWaitUs.fetch_add(uint64_t(waitedUs));
+    Device::LiveSmooth(m_liveGameWaitMs, waitedUs * 1e-3);
+}
+
+ThreadedDevice::LiveTimes ThreadedDevice::Live() const
+{
+    const auto get = [](const std::atomic<float>& a) { return a.load(std::memory_order_relaxed); };
+    return {get(m_liveFrameMs), get(m_liveGameWaitMs), get(m_device.m_liveRenderMs), get(m_device.m_liveGpuWaitMs),
+            get(m_device.m_liveGpuMs)};
 }
 
 bool ThreadedDevice::ReadPixels(Texture* target, void* out)

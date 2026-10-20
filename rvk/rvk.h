@@ -3520,6 +3520,14 @@ public:
     uint64_t m_profileDraws = 0, m_profileGroupCalls = 0, m_profileGroupDraws = 0, m_profileConstBlocks = 0,
              m_profileConstReused = 0;   // the draws' batching (summed per frame for the log)
     std::atomic<uint64_t> m_profileGameWaitUs{0};
+    // The live readout (RVK_PerfHud): the last frames' GPU time, the render thread's whole frame and its wait for the
+    // GPU in it (ms, smoothed; written by the render thread, read by any).
+    std::atomic<float> m_liveGpuMs{0.0f}, m_liveRenderMs{0.0f}, m_liveGpuWaitMs{0.0f};
+    static void LiveSmooth(std::atomic<float>& a, double ms)
+    {
+        const float old = a.load(std::memory_order_relaxed);
+        a.store(old == 0.0f ? float(ms) : old + 0.1f * (float(ms) - old), std::memory_order_relaxed);
+    }
     double m_profileIdleMs = 0.0;
     double m_timerCost = 0.0;                    // ms per clock read (subtracted from the draw sections)
     // Per-draw CPU sections, timed on every 16th frame (Draw); scaled to a per-frame average.

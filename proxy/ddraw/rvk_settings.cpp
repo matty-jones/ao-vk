@@ -47,6 +47,7 @@ Setting g_settings[] = {
     {"RVK_Prepass",    "Depth pre-pass", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PrepassEq",  "Depth pre-pass: what it covers shaded only where it is seen", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
+    {"RVK_PerfHud", "Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's", "General", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_AlienMap", "AI missions' PF map: rooms shown black on green (the game's is black on black)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
     {"RVK_ViewRange",   "How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws)", "General", Float, 1, 3, 0.25f, 1.5f, nullptr, 0},

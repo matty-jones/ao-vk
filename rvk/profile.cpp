@@ -94,7 +94,9 @@ void Device::ProfileBeginFrame(VkCommandBuffer cmd)
                     m_smokeCostScale = std::clamp(0.9f * m_smokeCostScale +
                                                   0.1f * float(ms / m_smokeEstimate[m_frameIndex]), 0.1f, 5.0f);
             }
-            ProfileAdd(m_profileGpu, "total", double(t[p.count - 1] - t[0]) * m_timestampPeriod * 1e-6);
+            const double total = double(t[p.count - 1] - t[0]) * m_timestampPeriod * 1e-6;
+            ProfileAdd(m_profileGpu, "total", total);
+            LiveSmooth(m_liveGpuMs, total);
             ++m_profileFrames;
             // The clouds' own pass (clouds.cpp) runs between the pre-pass and the scene's draws: inside the interval
             // the pre-pass's mark closes - taken out of it.
@@ -131,8 +133,10 @@ void Device::ProfileBeginFrame(VkCommandBuffer cmd)
     // The render thread's whole frame (start to start), so what the named sections don't cover shows: the record
     // replay outside draws, Vulkan calls between sections.
     double now = CpuNow();
-    if (m_profileCpuStart > 0.0)
+    if (m_profileCpuStart > 0.0) {
         ProfileAdd(m_profileCpu, "render thread frame", now - m_profileCpuStart);
+        LiveSmooth(m_liveRenderMs, now - m_profileCpuStart);
+    }
     m_profileCpuStart = now;
     ProfileMark("start");
     if (m_profileFrames >= kProfileFrames && !m_profileManual) {

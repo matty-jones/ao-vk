@@ -1713,6 +1713,7 @@ void Device::BeginFrame()
     ++m_frameNumber;
     ProfileBeginFrame(f.main);
     ProfileCpuAddMs("wait for the GPU (frame slot)", waitMs);
+    LiveSmooth(m_liveGpuWaitMs, waitMs);
     MakeCloudNoise(f.main);                      // (once: before any rendering opens)
     if (!m_cloudPuffs.empty()) {
         m_cloudPuffsLast.swap(m_cloudPuffs);

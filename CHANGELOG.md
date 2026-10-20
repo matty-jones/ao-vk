@@ -249,6 +249,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ### Diagnostics
+- A small performance readout in the top left (`RVK_PerfHud`, General; console `perfhud 1`): frames a second, and
+  how long the game's thread, the renderer's thread and the GPU each take a frame - the one holding the frame back
+  shown in amber.
 - `RVK_SceneProf` (randy-vk.ini or console `sceneprof 1`): the `gpu ms` log line splits the scene by kind of draw
   (buildings, ground, plants, characters, effects, water...) and a `scene shading` line says how many times each
   screen pixel was shaded by each - where a slow spot's time goes. Was the `RANDYVK_SCENE_PROFILE` variable.

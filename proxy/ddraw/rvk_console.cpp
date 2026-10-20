@@ -1293,6 +1293,69 @@ void Draw(uint32_t w, uint32_t h)
     }
 }
 
+// RVK_PerfHud: a small readout in the top left, redrawn four times a second into the console's image while the
+// console is closed (it has the image while open). Each thread's time is its frame less its waiting - the game thread
+// for the render thread, the render thread for the GPU - so the largest of the three is what holds the frame back.
+struct Hud {
+    bool shown = false;                          // the readout's image is with the renderer
+    uint32_t frames = 0;
+    LARGE_INTEGER since{};
+} g_hud;
+
+void HudFrame(rvk::ThreadedDevice* device)
+{
+    if (rvk_settings::Get("RVK_PerfHud") == 0.0f) {
+        if (g_hud.shown) device->SetConsoleImage(0, 0, nullptr);
+        g_hud = Hud{};
+        return;
+    }
+    LARGE_INTEGER now, freq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    ++g_hud.frames;
+    if (!g_hud.since.QuadPart) {
+        g_hud.since = now;
+        return;
+    }
+    const double elapsed = double(now.QuadPart - g_hud.since.QuadPart) / double(freq.QuadPart);
+    if (elapsed < 0.25 && g_hud.shown) return;
+    const double fps = (g_hud.frames - 1) / std::max(elapsed, 1e-3);
+    g_hud.frames = 1;
+    g_hud.since = now;
+    const uint32_t w = device->Width(), h = device->Height();
+    if (!w || !h) return;
+    const rvk::ThreadedDevice::LiveTimes t = device->Live();
+    const float game = std::max(0.0f, t.frameMs - t.gameWaitMs), render = std::max(0.0f, t.renderMs - t.gpuWaitMs);
+    const char* limit = t.gpuMs > 0.0f && t.gpuMs >= game && t.gpuMs >= render ? "GPU" : game >= render ? "game" : "render";
+    // (A time of 0: not measured - the renderer's profiler off.)
+    const auto ms = [](char* out, size_t size, const char* name, float v) {
+        if (v > 0.0f) std::snprintf(out, size, "%-6s %5.2f ms", name, v);
+        else std::snprintf(out, size, "%-6s     - ms", name);
+    };
+    char lines[4][48];
+    std::snprintf(lines[0], sizeof(lines[0]), "%4.0f fps  %5.2f ms", fps, fps > 0.0 ? 1000.0 / fps : 0.0);
+    ms(lines[1], sizeof(lines[1]), "game", game);
+    ms(lines[2], sizeof(lines[2]), "render", t.renderMs > 0.0f ? render : 0.0f);
+    ms(lines[3], sizeof(lines[3]), "GPU", t.gpuMs);
+    Metrics(w, h);
+    const int cw = g.font.cw, ch = g.font.ch, pad = std::max(3, ch / 3);
+    size_t widest = 0;
+    for (const auto& l : lines) widest = std::max(widest, std::strlen(l));
+    const int bw = int(widest + 2) * cw + pad * 2, bh = 4 * ch + pad * 2;
+    g.width = w;
+    g.height = uint32_t(std::min<int>(int(h), bh));
+    g.pixels.assign(size_t(g.width) * g.height, 0);
+    Fill(0, 0, bw, bh, 0.035f, 0.045f, 0.06f, 0.72f);
+    Text(pad, pad, C(cValue) + lines[0]);
+    for (int i = 1; i < 4; ++i) {
+        const bool limits = std::strncmp(lines[i], limit, std::strlen(limit)) == 0;   // (the one holding the frame back)
+        Text(pad, pad + i * ch, C(limits ? cWarn : cText) + lines[i]);
+    }
+    device->SetConsoleImage(g.width, g.height, g.pixels.data());
+    g_hud.shown = true;
+    g.shown = false;                             // (the console's own image: none now)
+}
+
 }  // namespace
 
 bool ConsoleOpen() { return g_open; }
@@ -1448,7 +1511,13 @@ void ConsoleFrame(rvk::ThreadedDevice* device, HWND window)
             if (!e.ctrl || uint8_t(e.code) >= 32) Typed(char(e.code));
         }
     }
-    if (!g_open && !g.shown && g.slide == 0.0f && !shot) return;
+    const bool hud = !g_open && !g.shown && g.slide == 0.0f && rvk_settings::Get("RVK_PerfHud") != 0.0f;
+    if (!g_open && !g.shown && g.slide == 0.0f && (!shot || hud)) {
+        HudFrame(device);                        // (RVK_PerfHud: with the console closed; {shot}: its image)
+        if (shot && g_hud.shown) SaveTestShot();
+        return;
+    }
+    g_hud.shown = false;                         // (the console has the image)
     // The slide in and out (~0.12 s), the caret's blink.
     LARGE_INTEGER now, freq;
     QueryPerformanceCounter(&now);
