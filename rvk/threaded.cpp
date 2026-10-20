@@ -1042,6 +1042,11 @@ void ThreadedDevice::SetRenderScale(uint32_t percent)
     Enqueue([this, percent](const uint8_t*) { m_device.SetRenderScale(percent); });
 }
 
+void ThreadedDevice::SetUpscaler(uint32_t which)
+{
+    Enqueue([this, which](const uint8_t*) { m_device.SetUpscaler(which); });
+}
+
 void ThreadedDevice::SetFogBanks(float s, float force)
 {
     Enqueue([this, s, force](const uint8_t*) { m_device.SetFogBanks(s, force); });

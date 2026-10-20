@@ -33,7 +33,7 @@ find_program(GLSLC glslc HINTS "${VULKAN_SDK_DIR}/bin" REQUIRED)
 
 set(RVK_SHADER_OUT "${CMAKE_CURRENT_BINARY_DIR}/rvk-shaders")
 set(RVK_SHADER_INCS)
-foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag ffp_glow_nocut.frag prepass_cutout.frag shadow.vert shadow.frag fullscreen.vert tonemap.frag bloom_down.frag bloom_up.frag ao.frag ao_blur.frag gi.frag gi_blur.frag volume.frag volume_blur.frag sand_fog.frag sand_fog_blur.frag ssr.frag contact.frag taa.frag depth_up.frag sharpen.frag fxaa.frag motion_blur.frag motion_tilemax.frag motion_neighbourmax.frag motion_object.frag dof_composite.frag dof_focus.frag dof_prefilter.frag dof_tiles.frag dof_gather.frag dof_final.frag ui_composite.frag grass.vert grass.frag grass_shadow.vert particles.comp skin.comp water.vert water.frag water_spray.vert water_spray.frag water_sim.comp rain.vert rain.frag splash.vert splash.frag bolt.vert bolt.frag debris.vert debris.frag smoke_sim.comp smoke.vert smoke.frag smoke_up.frag cloud.vert cloud.frag cloud_up.frag cloud_shadow.frag cloud_noise.comp cloud_layer_noise.comp cloud_weather.frag cloud_layer.frag cloud_resolve.frag sun.frag sky_glow.frag atmos_transmittance.frag atmos_multi.frag atmos_view.frag sun_vis.comp scene_luma.comp smoke_seen.comp terrain_sun.frag sand_prints.frag env_accum.frag env_filter.frag)
+foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag ffp_glow_nocut.frag prepass_cutout.frag shadow.vert shadow.frag fullscreen.vert tonemap.frag bloom_down.frag bloom_up.frag ao.frag ao_blur.frag gi.frag gi_blur.frag volume.frag volume_blur.frag sand_fog.frag sand_fog_blur.frag ssr.frag contact.frag taa.frag depth_up.frag motion_fill.frag sharpen.frag fxaa.frag motion_blur.frag motion_tilemax.frag motion_neighbourmax.frag motion_object.frag dof_composite.frag dof_focus.frag dof_prefilter.frag dof_tiles.frag dof_gather.frag dof_final.frag ui_composite.frag grass.vert grass.frag grass_shadow.vert particles.comp skin.comp water.vert water.frag water_spray.vert water_spray.frag water_sim.comp rain.vert rain.frag splash.vert splash.frag bolt.vert bolt.frag debris.vert debris.frag smoke_sim.comp smoke.vert smoke.frag smoke_up.frag cloud.vert cloud.frag cloud_up.frag cloud_shadow.frag cloud_noise.comp cloud_layer_noise.comp cloud_weather.frag cloud_layer.frag cloud_resolve.frag sun.frag sky_glow.frag atmos_transmittance.frag atmos_multi.frag atmos_view.frag sun_vis.comp scene_luma.comp smoke_seen.comp terrain_sun.frag sand_prints.frag env_accum.frag env_filter.frag)
     set(src "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/${shader}")
     set(out "${RVK_SHADER_OUT}/${shader}.inc")
     add_custom_command(OUTPUT "${out}"
@@ -110,8 +110,25 @@ foreach(entry "cliff_side_diff_1k.jpg|kRockAlbedo" "cliff_side_nor_gl_1k.jpg|kRo
     list(APPEND RVK_ASSET_INCS "${out}")
 endforeach()
 
-add_library(rvk STATIC rvk/vk.cpp rvk/vma.cpp rvk/device.cpp rvk/resources.cpp rvk/draw.cpp rvk/objects.cpp rvk/diag.cpp rvk/shadow.cpp rvk/pointshadow.cpp rvk/hdr.cpp rvk/particles.cpp rvk/grading.cpp rvk/profile.cpp rvk/skin.cpp rvk/skin_gpu.cpp rvk/static_gpu.cpp rvk/prepass.cpp rvk/threaded.cpp rvk/interface.cpp rvk/grass.cpp rvk/leaves.cpp rvk/water.cpp rvk/rain.cpp rvk/smoke.cpp rvk/clouds.cpp rvk/meshids.cpp rvk/statels.cpp rvk/night.cpp rvk/darkness.cpp rvk/knobs.cpp rvk/sky.cpp rvk/atmosphere.cpp rvk/mist.cpp rvk/sun.cpp rvk/terrain_sun.cpp rvk/terrain.cpp rvk/native_ground.cpp rvk/ground_clutter.cpp rvk/ground_pebbles.cpp rvk/wind.cpp rvk/sand_map.cpp rvk/sand_prints.cpp ${RVK_SHADER_INCS} ${RVK_ASSET_INCS})
-target_include_directories(rvk PUBLIC rvk PRIVATE "${RVK_SHADER_OUT}" third_party)   # (stb: terrain.cpp decodes the embedded rock)
+# FSR 2.2 (third_party/fsr2: AMD's FidelityFX Super Resolution 2, MIT; rvk/fsr2.cpp): its compute passes compiled by
+# tools/gen_fsr2_shaders.py in place of AMD's Windows shader tool; its sources built quietly, our Vulkan loader's
+# functions forced in (rvk/fsr2_vk_shim.h).
+find_program(SPIRV_CROSS spirv-cross HINTS "${VULKAN_SDK_DIR}/bin" REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+file(GLOB FSR2_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fsr2/shaders/*")
+set(FSR2_SHADERS_CPP "${RVK_SHADER_OUT}/fsr2_shaders.gen.cpp")
+add_custom_command(OUTPUT "${FSR2_SHADERS_CPP}"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fsr2_shaders.py" ${GLSLC} ${SPIRV_CROSS}
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fsr2" "${FSR2_SHADERS_CPP}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_fsr2_shaders.py" ${FSR2_SHADER_SOURCES}
+    COMMENT "FSR 2 shaders")
+set(FSR2_SOURCES third_party/fsr2/ffx_fsr2.cpp third_party/fsr2/ffx_assert.cpp third_party/fsr2/vk/ffx_fsr2_vk.cpp
+    "${FSR2_SHADERS_CPP}")
+set_source_files_properties(${FSR2_SOURCES} PROPERTIES
+    COMPILE_OPTIONS "-w;/FI${CMAKE_CURRENT_SOURCE_DIR}/rvk/fsr2_vk_shim.h")
+
+add_library(rvk STATIC rvk/vk.cpp rvk/vma.cpp rvk/device.cpp rvk/resources.cpp rvk/draw.cpp rvk/objects.cpp rvk/diag.cpp rvk/shadow.cpp rvk/pointshadow.cpp rvk/hdr.cpp rvk/particles.cpp rvk/grading.cpp rvk/profile.cpp rvk/skin.cpp rvk/skin_gpu.cpp rvk/static_gpu.cpp rvk/prepass.cpp rvk/threaded.cpp rvk/interface.cpp rvk/grass.cpp rvk/leaves.cpp rvk/water.cpp rvk/rain.cpp rvk/smoke.cpp rvk/clouds.cpp rvk/meshids.cpp rvk/statels.cpp rvk/night.cpp rvk/darkness.cpp rvk/knobs.cpp rvk/sky.cpp rvk/atmosphere.cpp rvk/mist.cpp rvk/sun.cpp rvk/terrain_sun.cpp rvk/terrain.cpp rvk/native_ground.cpp rvk/ground_clutter.cpp rvk/ground_pebbles.cpp rvk/wind.cpp rvk/sand_map.cpp rvk/sand_prints.cpp rvk/fsr2.cpp ${FSR2_SOURCES} ${RVK_SHADER_INCS} ${RVK_ASSET_INCS})
+target_include_directories(rvk PUBLIC rvk PRIVATE "${RVK_SHADER_OUT}" third_party third_party/fsr2)   # (stb: terrain.cpp decodes the embedded rock)
 # Vulkan headers and VMA come from the SDK; /imsvc keeps their warnings quiet.
 target_compile_options(rvk PUBLIC "/imsvc${VULKAN_SDK_DIR}/include")
 target_compile_options(rvk PRIVATE /W3)

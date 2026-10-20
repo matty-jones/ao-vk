@@ -481,12 +481,13 @@ void main()
         white *= 1.0 - FL.neon.x * smoothstep(0.35, 0.8, sat);
         c = mix(c * (shown / m), vec3(shown), white);
     }
-    // Alpha: with TAA (flag 16), how much of this pixel additive effects made - their glow, as shown (taa.frag gives
-    // those pixels more of the new frame); else the scene's alpha.
+    // Alpha: with TAA (flag 16), how much of this pixel additive effects made - their glow, as shown - and the rain's
+    // near streaks: new each frame, the TAA (taa.frag) and FSR 2 (its reactive mask, rvk fsr2.cpp) give those pixels
+    // more of the new frame (FSR 2 averaged the streaks away); else the scene's alpha.
     float alpha = clamp(s.a, 0.0, 1.0);
     if ((int(P.proj.w) & 16) != 0) {
         vec3 effect = texelFetch(glowRaw, ivec2(gl_FragCoord.xy), 0).rgb * P.params.y;
-        alpha = smoothstep(0.01, 0.25, dot(effect, vec3(0.3, 0.59, 0.11)));
+        alpha = max(smoothstep(0.01, 0.25, dot(effect, vec3(0.3, 0.59, 0.11))), smoothstep(0.0, 0.3, rain.a));
     }
     outColor = vec4(Dither8(Grade(min(c, vec3(1.0)), far), gl_FragCoord.xy, FL.taa.z), alpha);   // (moving: the TAA averages it)
 }

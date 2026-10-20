@@ -165,6 +165,18 @@ Demo, best of 3, RTX 4070 Ti, GPU total in ms:
 - Open: frames with no 3D at all (loading screens) draw the interface into the scaled scene, so it is upscaled
   there; in-game fps at the outpost and in a city; whether `RVK_Sharpen` should rise with the scale.
 
+### FSR 2.2 as a second upscaler (2026-10-20, `RVK_Upscaler` 1)
+
+AMD's FSR 2.2.1 in `third_party/fsr2` (MIT; patched for 32-bit Vulkan handles, its README lists the changes), its
+passes compiled by `tools/gen_fsr2_shaders.py` (glslc + spirv-cross in place of AMD's Windows tool). `rvk/fsr2.cpp`
+feeds it the tone mapped scene (LDR), the scene's depth, the motion vectors filled in where none were written
+(`motion_fill.frag`), the jitter (+ 0.5 * (1 - scale) scene pixels: our scene keeps D3D's half-pixel shift, FSR 2
+assumes Vulkan's - without it the picture stood half an output pixel off at 50%), and the tone mapping's alpha as
+its reactive mask (effects, and now the near rain's streaks); its output goes through our sharpening. Mean difference
+from 100% on the demo forest at 1440p: ours 4.95 at 75%, 6.33 at 50%; FSR 2 6.35 -> 4.96 at 50% after the shift fix
+(about our 75%). The walker at 50%: FSR 2 closer (1.89 vs 2.20), no ghosting either way. Weak spot: rain streaks
+at 50% fade more than with ours. Cost: to measure with the GPU idle.
+
 ### 1a. Lower-resolution scene targets
 
 - In `device.cpp` CreateMainTargets, size these by the scale: `m_scene`, `m_glow`, `m_localFraction`,

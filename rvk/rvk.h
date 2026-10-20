@@ -146,6 +146,7 @@ private:
     uint32_t m_width = 0, m_height = 0, m_levels = 1;
     Format m_format = Format::A8R8G8B8;
     bool m_renderTarget = false;
+    bool m_storage = false;            // also a storage image (CreateImage: FSR 2's output, fsr2.cpp)
     bool m_opaque = false;             // the texture's pixels are all alpha 1 (a blended static draw can be opaque)
     // Up to 64 x 64, from level-0 uploads: every texel black - with m_opaque, the PF map's tiles in AI missions
     // (RVK_AlienMap).
@@ -626,6 +627,9 @@ public:
     // up to the output size (docs/render-perf-plan.md Phase 1). Without TAA it acts as 100. Takes effect at the next
     // frame (the scene's targets are recreated).
     void SetRenderScale(uint32_t percent) { m_renderScaleWanted = std::clamp<uint32_t>(percent, 50, 100); }
+    // RVK_Upscaler: what brings the scaled scene up to the output's size - 0 our TAA (taa.frag), 1 AMD's FSR 2.2
+    // (fsr2.cpp). At 100% the TAA either way.
+    void SetUpscaler(uint32_t which) { m_upscaler = which; }
     // Sunlight through leaves (RVK_LeafLight).
     void SetLeafLight(float s) { m_leafLight = s; m_frameLightsDirty = true; }
     // How dark nights, storms and dim places get (darkness.cpp; docs/darkness-plan.md): RVK_Darkness (0 lightest,
@@ -1053,7 +1057,8 @@ private:
     void CreatePipelineCache();
     void SavePipelineCache(const char* why);
     bool CreateFrames(std::string* error);
-    Texture* CreateImage(uint32_t width, uint32_t height, Format format, uint32_t levels, bool renderTarget);
+    Texture* CreateImage(uint32_t width, uint32_t height, Format format, uint32_t levels, bool renderTarget,
+                         bool storage = false);
     friend class ThreadedDevice;
 
     VkDeviceSize Allocate(VkDeviceSize size, VkDeviceSize alignment, void** cpu);
@@ -3057,6 +3062,19 @@ private:
     float SceneScaleX() const { return m_scene && m_ldrMain ? float(m_scene->m_width) / float(m_ldrMain->m_width) : 1.0f; }
     float SceneScaleY() const { return m_scene && m_ldrMain ? float(m_scene->m_height) / float(m_ldrMain->m_height) : 1.0f; }
     Texture* m_taaOut = nullptr;                 // scaled, with motion blur: the upscaled picture the blur reads
+    // RVK_Upscaler 1 (fsr2.cpp): FSR 2's context (made at the first scaled frame, again when a size changes), the
+    // scene's motion vectors filled in for it, its output (sharpened into the frame as the TAA's), and m_tonemapped's
+    // alpha - the effects' share - seen as red, its reactive mask.
+    uint32_t m_upscaler = 0;
+    struct Fsr2State;
+    Fsr2State* m_fsr2 = nullptr;
+    Texture* m_fsr2Motion = nullptr;
+    Texture* m_fsr2Out = nullptr;
+    VkImage m_fsr2ReactiveOf = VK_NULL_HANDLE;
+    VkImageView m_fsr2Reactive = VK_NULL_HANDLE;
+    VkPipeline m_motionFillPipeline = VK_NULL_HANDLE;   // motion_fill.frag
+    bool RenderFsr2(VkCommandBuffer cmd, Texture* dst, const float params[28]);   // false: not done (the TAA then)
+    void DestroyFsr2();
     VkPipeline m_depthUpPipeline = VK_NULL_HANDLE;   // depth_up.frag (UpsampleDepth)
     // Scaled: the scene's depth drawn up to the output size into the other depth image, which becomes the depth from
     // there on (the motion blur, name labels and the interface test against it); BeginScene swaps the scene's back.

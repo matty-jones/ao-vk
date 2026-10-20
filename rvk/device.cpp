@@ -84,6 +84,10 @@ void LayoutUse(VkImageLayout layout, VkPipelineStageFlags2* stage, VkAccessFlags
         *stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
         *access = VK_ACCESS_2_TRANSFER_WRITE_BIT;
         break;
+    case VK_IMAGE_LAYOUT_GENERAL:                // (storage images: FSR 2's output, written by compute)
+        *stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        *access = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        break;
     default:
         *stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         *access = 0;

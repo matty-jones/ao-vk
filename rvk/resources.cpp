@@ -142,6 +142,8 @@ bool Device::RealizeTexture(Texture* t)
     ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (t->m_renderTarget)
         ci.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if (t->m_storage)
+        ci.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     VmaAllocationCreateInfo ac{};
     ac.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     if (t->m_renderTarget)
@@ -167,9 +169,10 @@ bool Device::RealizeTexture(Texture* t)
     return true;
 }
 
-Texture* Device::CreateImage(uint32_t width, uint32_t height, Format format, uint32_t levels, bool renderTarget)
+Texture* Device::CreateImage(uint32_t width, uint32_t height, Format format, uint32_t levels, bool renderTarget, bool storage)
 {
     Texture* t = NewTexture(width, height, format, levels, renderTarget);
+    if (t) t->m_storage = storage;
     if (t && !RealizeTexture(t)) {
         delete t;
         return nullptr;

@@ -80,6 +80,9 @@ const uint32_t kTaaSpirv[] = {
 const uint32_t kDepthUpSpirv[] = {
 #include "depth_up.frag.inc"
 };
+const uint32_t kMotionFillSpirv[] = {
+#include "motion_fill.frag.inc"
+};
 const uint32_t kSharpenSpirv[] = {
 #include "sharpen.frag.inc"
 };
@@ -330,7 +333,9 @@ bool Device::CreateHdrResources(std::string* error)
                          &m_dofTilesPipeline) &&
               fullscreen(kDofGatherSpirv, sizeof(kDofGatherSpirv), hdrFormat, false, m_bloomLayout, &m_dofGatherPipeline) &&
               fullscreen(kDofFinalSpirv, sizeof(kDofFinalSpirv), hdrFormat, false, m_bloomLayout, &m_dofFinalPipeline) &&
-              fullscreen(kDepthUpSpirv, sizeof(kDepthUpSpirv), VK_FORMAT_UNDEFINED, 3, m_bloomLayout, &m_depthUpPipeline);
+              fullscreen(kDepthUpSpirv, sizeof(kDepthUpSpirv), VK_FORMAT_UNDEFINED, 3, m_bloomLayout, &m_depthUpPipeline) &&
+              fullscreen(kMotionFillSpirv, sizeof(kMotionFillSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
+                         &m_motionFillPipeline);
     vkDestroyShaderModule(m_device, vert, nullptr);
     return ok;
 }
@@ -366,6 +371,7 @@ void Device::DestroyHdrResources()
     if (m_tonemapped) { DestroyTextureNow(m_tonemapped); m_tonemapped = nullptr; }
     if (m_fxaaOut) { DestroyTextureNow(m_fxaaOut); m_fxaaOut = nullptr; }
     if (m_taaOut) { DestroyTextureNow(m_taaOut); m_taaOut = nullptr; }
+    DestroyFsr2();
     if (m_uiLayer) { DestroyTextureNow(m_uiLayer); m_uiLayer = nullptr; }
     m_uiLayerReady.store(false, std::memory_order_relaxed);
     for (Texture*& t : m_motionTiles)
@@ -379,7 +385,7 @@ void Device::DestroyHdrResources()
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,
-                          &m_dofFinalPipeline, &m_depthUpPipeline})
+                          &m_dofFinalPipeline, &m_depthUpPipeline, &m_motionFillPipeline})
         if (*p) { vkDestroyPipeline(m_device, *p, nullptr); *p = VK_NULL_HANDLE; }
     if (m_bloomLayout) vkDestroyPipelineLayout(m_device, m_bloomLayout, nullptr);
     if (m_volumeLayout) vkDestroyPipelineLayout(m_device, m_volumeLayout, nullptr);
@@ -547,7 +553,8 @@ void Device::EndScene()
     if (taa) params[7] = float(int(params[7]) | 16);
     TonemapInputsPass(cmd, toned, m_tonemapPipeline, scene, bloom, ao, gi, volume, params);
     ProfileMark("tonemap");
-    if (taa)
+    // (RVK_Upscaler 1: FSR 2 upscales the scaled scene - fsr2.cpp - the TAA if it can't.)
+    if (taa && !(scaled && m_upscaler == 1 && RenderFsr2(cmd, blur ? blurSrc : m_ldrMain, taaParams)))
         RenderTaa(cmd, blur ? blurSrc : m_ldrMain, taaParams);
     if (fxaa) {
         // Into the main target, or - with motion blur - into an image of its own that the blur then reads (the two
@@ -1474,10 +1481,11 @@ bool Device::TaaParams(float out[28])
         float eye = -(v[3][0] * v[i][0] + v[3][1] * v[i][1] + v[3][2] * v[i][2]);
         jump2 += (eye - m_prevEye[i]) * (eye - m_prevEye[i]);
     }
-    bool history = perspective && m_depth && m_prevViewProjValid && m_taaFrame + 1 == m_frameNumber && jump2 < 25.0f &&
-                   m_taaHistory[0] && m_taaHistory[0]->m_width == m_ldrMain->m_width &&
-                   m_taaHistory[0]->m_height == m_ldrMain->m_height;
-    if (history)
+    // (Continuous: the camera's last frame known, no teleport - FSR 2 keeps its own history on it, fsr2.cpp.)
+    const bool continuous = perspective && m_depth && m_prevViewProjValid && jump2 < 25.0f;
+    bool history = continuous && m_taaFrame + 1 == m_frameNumber && m_taaHistory[0] &&
+                   m_taaHistory[0]->m_width == m_ldrMain->m_width && m_taaHistory[0]->m_height == m_ldrMain->m_height;
+    if (continuous)
         CameraReprojection(m_aoView, m_aoProj, m_prevView, m_prevProj, &reproject);
     std::memcpy(out, &reproject, 64);
     out[16] = float(m_ldrMain->m_width);              // (the output's size: the history's)
@@ -1487,7 +1495,7 @@ bool Device::TaaParams(float out[28])
     out[20] = 0.1f;                                    // weight of the new frame
     out[21] = m_sharpen;
     out[22] = scaled ? 1.0f : 0.0f;                    // upscaling
-    out[23] = 0.0f;
+    out[23] = continuous ? 1.0f : 0.0f;
     // Scene pixels per output pixel, and the jitter in scene pixels (the scene moved by it: clip x right, y up).
     out[24] = SceneScaleX();
     out[25] = SceneScaleY();
