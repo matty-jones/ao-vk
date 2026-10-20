@@ -262,7 +262,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   it (green).
 - A small performance readout in the top left (`RVK_PerfHud`, General; console `perfhud 1`): frames a second, and
   how long the game's thread, the renderer's thread and the GPU each take a frame - the one holding the frame back
-  shown in amber. With frame generation on, a last line gives the frames shown a second, the generated ones included.
+  shown in amber. Next to the GPU's time, how busy ao-vk keeps the GPU (its share of each second; other programs'
+  GPU work isn't counted), and a CPU line: how busy the whole machine's processor is, and the game's own share of
+  it. With frame generation on, a last line gives the frames shown a second, the generated ones included.
 - `RVK_SceneProf` (randy-vk.ini or console `sceneprof 1`): the `gpu ms` log line splits the scene by kind of draw
   (buildings, ground, plants, characters, effects, water...) and a `scene shading` line says how many times each
   screen pixel was shaded by each - where a slow spot's time goes. Was the `RANDYVK_SCENE_PROFILE` variable.

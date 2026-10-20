@@ -1296,12 +1296,42 @@ void Draw(uint32_t w, uint32_t h)
 // RVK_PerfHud: a small readout in the top left, redrawn four times a second into the console's image while the
 // console is closed (it has the image while open). Each thread's time is its frame less its waiting - the game thread
 // for the render thread, the render thread for the GPU - so the largest of the three is what holds the frame back.
+// The GPU's share of the time is its frame times the frame rate: how busy ao-vk keeps it (a 32-bit process can't ask
+// the driver - NVIDIA's NVML is 64-bit only, and under Wine not there at all - so other programs' GPU work isn't in
+// it). The CPU's: the whole machine's busy time (GetSystemTimes) and the game's own, both over all its cores.
 struct Hud {
     bool shown = false;                          // the readout's image is with the renderer
     uint32_t frames = 0;
     LARGE_INTEGER since{};
     uint64_t presented = 0;                      // frame generation's frames shown, at `since`
+    uint64_t idle = 0, kernel = 0, user = 0;     // the machine's CPU times at `since` (100 ns; kernel includes idle)
+    uint64_t game = 0;                           // the game process's (kernel + user)
 } g_hud;
+
+uint64_t Ticks(const FILETIME& f) { return (uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime; }
+
+// The CPU's busy share since the last call, the machine's and the game's (0..100; -1: not known yet).
+void CpuUse(double elapsed, double* machine, double* game)
+{
+    *machine = *game = -1.0;
+    FILETIME idle, kernel, user, created, exited, pKernel, pUser;
+    if (!GetSystemTimes(&idle, &kernel, &user) ||
+        !GetProcessTimes(GetCurrentProcess(), &created, &exited, &pKernel, &pUser))
+        return;
+    const uint64_t i = Ticks(idle), k = Ticks(kernel), u = Ticks(user), gm = Ticks(pKernel) + Ticks(pUser);
+    if (g_hud.kernel) {
+        const uint64_t total = (k - g_hud.kernel) + (u - g_hud.user);
+        if (total > 0) *machine = 100.0 * (1.0 - double(i - g_hud.idle) / double(total));
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        const double wall = elapsed * 1e7 * std::max<DWORD>(si.dwNumberOfProcessors, 1);
+        if (wall > 0.0) *game = 100.0 * double(gm - g_hud.game) / wall;
+    }
+    g_hud.idle = i;
+    g_hud.kernel = k;
+    g_hud.user = u;
+    g_hud.game = gm;
+}
 
 void HudFrame(rvk::ThreadedDevice* device)
 {
@@ -1321,6 +1351,8 @@ void HudFrame(rvk::ThreadedDevice* device)
     const double elapsed = double(now.QuadPart - g_hud.since.QuadPart) / double(freq.QuadPart);
     if (elapsed < 0.25 && g_hud.shown) return;
     const double fps = (g_hud.frames - 1) / std::max(elapsed, 1e-3);
+    double cpu, cpuGame;
+    CpuUse(elapsed, &cpu, &cpuGame);
     g_hud.frames = 1;
     g_hud.since = now;
     const uint32_t w = device->Width(), h = device->Height();
@@ -1336,13 +1368,21 @@ void HudFrame(rvk::ThreadedDevice* device)
         if (v > 0.0f) std::snprintf(out, size, "%-6s %5.2f ms", name, v);
         else std::snprintf(out, size, "%-6s     - ms", name);
     };
-    char lines[5][48];
+    char lines[6][48];
     std::snprintf(lines[0], sizeof(lines[0]), "%4.0f fps  %5.2f ms", fps, fps > 0.0 ? 1000.0 / fps : 0.0);
     ms(lines[1], sizeof(lines[1]), "game", game);
     ms(lines[2], sizeof(lines[2]), "render", t.renderMs > 0.0f ? render : 0.0f);
     ms(lines[3], sizeof(lines[3]), "GPU", t.gpuMs);
-    const int count = shownFps > 0.0 ? 5 : 4;
-    if (count == 5) std::snprintf(lines[4], sizeof(lines[4]), "%4.0f shown (frame gen)", shownFps);
+    if (t.gpuMs > 0.0f && fps > 0.0) {           // (its share of the time: busy ms a second)
+        const size_t at = std::strlen(lines[3]);
+        std::snprintf(lines[3] + at, sizeof(lines[3]) - at, " %3.0f%%", std::min(100.0, t.gpuMs * fps / 10.0));
+    }
+    if (cpu >= 0.0)
+        std::snprintf(lines[4], sizeof(lines[4]), "CPU    %3.0f%%  game %3.0f%%", cpu, std::max(0.0, cpuGame));
+    else
+        std::snprintf(lines[4], sizeof(lines[4]), "CPU      -");
+    int count = 5;
+    if (shownFps > 0.0) std::snprintf(lines[count++], sizeof(lines[5]), "%4.0f shown (frame gen)", shownFps);
     Metrics(w, h);
     const int cw = g.font.cw, ch = g.font.ch, pad = std::max(3, ch / 3);
     size_t widest = 0;
@@ -1357,7 +1397,8 @@ void HudFrame(rvk::ThreadedDevice* device)
         const bool limits = std::strncmp(lines[i], limit, std::strlen(limit)) == 0;   // (the one holding the frame back)
         Text(pad, pad + i * ch, C(limits ? cWarn : cText) + lines[i]);
     }
-    if (count == 5) Text(pad, pad + 4 * ch, C(cValue) + lines[4]);
+    Text(pad, pad + 4 * ch, C(cText) + lines[4]);
+    if (count == 6) Text(pad, pad + 5 * ch, C(cValue) + lines[5]);
     device->SetConsoleImage(g.width, g.height, g.pixels.data());
     g_hud.shown = true;
     g.shown = false;                             // (the console's own image: none now)
