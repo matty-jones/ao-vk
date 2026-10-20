@@ -1643,8 +1643,8 @@ bool Device::GlowOccluder(uint32_t fvf) const
 {
     if (m_effectGlow <= 0.0f || m_target != m_scene || (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW ||
         !m_rs[d3d::RS_ZENABLE] || !m_rs[d3d::RS_ZWRITEENABLE] || m_rs[d3d::RS_ZFUNC] == d3d::CMP_ALWAYS ||
-        m_drawIsLabel || m_drawTerrainLight || IsMultiplyPass())
-        return false;
+        m_drawIsLabel || ((m_drawTerrainLight || IsMultiplyPass()) && !m_groundOne))   // (the ground's one pass: its
+        return false;                                                                // base pass's part, covering it)
     return !(m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE);
 }
 
@@ -2410,12 +2410,30 @@ void Device::FlushGroup()
     m_group.count = 0;
 }
 
+// The scene's fog and ambient, from the ground's base pass (its lighting pass's fog is white): the sky's and the
+// grading's references. Also taken when the base pass is deferred (RVK_GroundOne: native_ground.cpp).
+void Device::NoteSceneFog()
+{
+    RenderStateFog(m_sceneFogColour, m_sceneFogParams);
+    m_sceneFogFrame = m_frameNumber;
+    if (m_sceneAmbientFrame != m_frameNumber) {   // (once a frame: eased - a zone's change shouldn't pop)
+        const uint32_t a = m_rs[d3d::RS_AMBIENT];
+        const float luma = (0.3f * float((a >> 16) & 0xFF) + 0.59f * float((a >> 8) & 0xFF) + 0.11f * float(a & 0xFF)) / 255.0f;
+        m_sceneAmbient = m_sceneAmbient < 0.0f ? luma : m_sceneAmbient + (luma - m_sceneAmbient) * (1.0f - std::exp(-m_frameDt / 0.5f));
+        m_sceneAmbientFrame = m_frameNumber;
+    }
+}
+
 void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
                   const uint16_t* indices, uint32_t indexCount)
 {
     if (!m_inFrame || !vertexCount)
         return;
     // The game's ground, drawn by rvk from the playfield's data instead (native_ground.cpp): its own draws skipped.
+    // (Its base pass deferred to the lighting pass - RVK_GroundOne - but something else came first: drawn now.)
+    if (m_native.basePending && !m_native.drawing &&
+        !(m_drawVisualKind == uint32_t(VisualKind::Terrain) && IsTerrain(fvf)))
+        DrawPendingGroundBase();
     if (m_native.ground && NativeGroundReplaces(fvf))
         return;
     m_drawObject = nullptr;                      // (found below for a static mesh)
@@ -2705,22 +2723,14 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         m_terrainLitPassCur = true;
     // (The terrain's base pass: its light pass multiplies, its fog white - not the scene's fog colour.)
     // (Not the native ground's rocks: the ground's heights are the ground's.)
-    const bool groundHeights = IsTerrain(fvf) && !m_native.clutter && !IsMultiplyPass() && m_scenePhase &&
+    const bool groundHeights = IsTerrain(fvf) && !m_native.clutter && (!IsMultiplyPass() || m_groundOne) && m_scenePhase &&
                                m_target == m_scene && !m_external && !m_drawGpu;
     if (groundHeights)
         NoteTerrainHeights(fvf, vertices, vertexCount);   // (the valley mist's low ground: mist.cpp)
     if (groundHeights)
         NoteTerrainSun(fvf, vertices, vertexCount);   // (the terrain's shade from a low sun: terrain_sun.cpp)
-    if (IsTerrain(fvf) && !IsMultiplyPass() && m_scenePhase && m_target == m_scene && !m_external) {
-        RenderStateFog(m_sceneFogColour, m_sceneFogParams);
-        m_sceneFogFrame = m_frameNumber;
-        if (m_sceneAmbientFrame != m_frameNumber) {   // (once a frame: eased - a zone's change shouldn't pop)
-            const uint32_t a = m_rs[d3d::RS_AMBIENT];
-            const float luma = (0.3f * float((a >> 16) & 0xFF) + 0.59f * float((a >> 8) & 0xFF) + 0.11f * float(a & 0xFF)) / 255.0f;
-            m_sceneAmbient = m_sceneAmbient < 0.0f ? luma : m_sceneAmbient + (luma - m_sceneAmbient) * (1.0f - std::exp(-m_frameDt / 0.5f));
-            m_sceneAmbientFrame = m_frameNumber;
-        }
-    }
+    if (IsTerrain(fvf) && !IsMultiplyPass() && m_scenePhase && m_target == m_scene && !m_external)
+        NoteSceneFog();
     Frame& f = m_frames[m_frameIndex];
     VkCommandBuffer cmd = f.main;
     // Ground grass (RVK_GrassOn): the blades are opaque and write depth, so they must go in before the game's first
@@ -3023,6 +3033,10 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                 const uint32_t sky = m_native.sky && m_native.ao > 0.0f ? BindlessImage(m_native.sky) + 1 : 0u;
                 std::memcpy(&dt.terrain[3], &sky, 4);
                 dt.terrainAt[0] = 0.0f;
+                if (m_groundOne && m_native.means) {   // (the one pass lays the base's colour too: its tints' means)
+                    const uint32_t means = BindlessImage(m_native.means) + 1;
+                    std::memcpy(&dt.terrainAt[0], &means, 4);
+                }
             }
         }
     } else if (terrain && m_textures[0]) {
@@ -3049,6 +3063,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             }
         } else if (m_rs[d3d::RS_LIGHTING] && IsMultiplyPass()) {
             auto it = m_terrainBases.find(chunk);
+            if (it == m_terrainBases.end() && m_groundOne)   // (the one pass: its base pass's stand-in, not drawn)
+                it = m_terrainBases.emplace(chunk, m_blackTexture).first;
             if (it != m_terrainBases.end() &&
                 (m_bump > 0.0f || (m_normalMaps && m_pixelLighting && it->second->m_normalMap) ||
                  (m_pbr.enabled && m_pixelLighting && it->second->m_ormMap)))

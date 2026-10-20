@@ -15,7 +15,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-320 settings, 154 of them in the settings window.
+321 settings, 154 of them in the settings window.
 
 ## Sections
 
@@ -23,7 +23,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Lighting](#lighting) (17)
 - [Materials](#materials) (14)
 - [Debug](#debug) (7)
-- [Terrain](#terrain) (21)
+- [Terrain](#terrain) (22)
 - [Plants](#plants) (37)
 - [Water](#water) (22)
 - [Weather](#weather) (35)
@@ -106,6 +106,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | Setting | What it does | Values | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `RVK_GroundOn` | Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter | on / off | on | window; game value off; was `RVK_NativeGround` |
+| `RVK_GroundOne` | Ground drawn by ao-vk: in one pass - its texture and its light together (off: the game's two passes, the same look, slower) | on / off | on | ini only; switch `RVK_GroundOn`; knob |
 | `RVK_GroundAo` | Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none) | 0 .. 1 | 0.6 | window; switch `RVK_GroundOn`; game value 0 |
 | `RVK_GroundSun` | Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
 | `RVK_GroundRocks` | Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many) | 0 .. 2 | 1 | window; switch `RVK_GroundOn`; game value 0 |

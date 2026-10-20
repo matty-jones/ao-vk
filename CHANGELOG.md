@@ -148,6 +148,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   clear ground between, deeper the wetter it has been and most in wet country (`RVK_FogBanks`, 1; 0 for none).
 
 ### Changed
+- The ground drawn by ao-vk costs less: it is drawn once instead of in the game's two passes (its texture, then its
+  light), with the same look - about 9% of the ground's cost, 0.3-0.4 ms a frame at 1440p where it fills the view.
+  `RVK_GroundOne` in randy-vk.ini (1; 0 for the two passes).
 - Trees cost less up close: every tree's leaves now go into the depth pre-pass, so a crown many leaves deep is lit
   about once per pixel instead of once per layer (only trees with ao-vk's own leaf art did before). In a demo forest
   the leaves cost about 40% less; their look is unchanged.

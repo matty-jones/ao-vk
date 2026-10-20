@@ -690,6 +690,10 @@ void main()
     ground.rip.smallDepth = ground.rip.bigDepth = 0.0;
     const bool terrainMapped = TerrainMapped();
     vec4 terrainBase = vec4(0.0);
+    const uvec3 oneSlots = uvec3(gRecords.records[gRecord].pad[0], gRecords.records[gRecord].pad[1],
+                                 gRecords.records[gRecord].pad[2]);
+    const bool groundOne = oneSlots.x != 0u && terrainMapped && D.terrainAt.w > 1.5;
+    vec3 oneBase = vec3(1.0);
     if (terrainMapped) {
         terrain = TerrainMapAt(vPosW, vSet0, vNormalW.xyz);
         // The native ground's relief in depth up close - its tiles' heights, the sand's ripples - in both passes alike
@@ -698,8 +702,29 @@ void main()
             ground = GroundReliefAt(terrain, vPosW, vNormalW.xyz);
             gParallaxSun = GroundParallax(terrain, ground, vPosW, vNormalW.xyz);
         }
+        // The native ground in one pass (RVK_GroundOne; rvk native_ground.cpp DrawNativeGroundOne): its lighting pass
+        // lays its base pass's colour too, as that pass lays it - its stand-in and sampler in the record's spare words
+        // - and multiplies it in at the fog (below), where the blend did with two passes.
+        // Laid on a copy of the map (laying it settles its weights, which this pass's lighting would then read where it
+        // doesn't lay the colour itself - the ripples' crests lit a little differently); once only where it does: its
+        // material maps' albedo below is the same colour.
+        if (groundOne) {
+            TerrainMap mb = terrain;
+            const vec4 b = TerrainBase(oneSlots.x - 1u, bindlessSamplers[oneSlots.y], mb);
+            oneBase = TerrainVariation(b.rgb, vPosW, mb);
+            if (TerrainNative()) {
+                const vec3 at = vPosW + vec3((mb.uv[0] - ground.cell).x, 0.0, (mb.uv[0] - ground.cell).y) / max(D.terrain.x, 1e-6);
+                oneBase = SandRippleTone(TerrainGrain(oneBase, mb, ground.tiles || ground.sand > 0.0 ? at : vPosW), ground, mb.uv[0]);
+            }
+            if (D.terrainAt.w > 1.5 && ((C.flags.x & F_BUMPBASE) != 0u || (TerrainNative() && (D.mat.z & MAT_BASE) != 0u))) {
+                terrainBase = b;
+                terrain = mb;
+            } else if (D.terrainAt.w > 1.5 && terrain.rock && !terrain.pebble) {
+                TerrainSettle(texImages[TerrainRockImage(0)], terrain);
+            }
+        }
         // (The native ground's with material maps: its colour as its base pass drew it - the cells' own tiles.)
-        if (D.terrainAt.w > 1.5 && ((C.flags.x & F_BUMPBASE) != 0u || (TerrainNative() && (D.mat.z & MAT_BASE) != 0u)))
+        else if (D.terrainAt.w > 1.5 && ((C.flags.x & F_BUMPBASE) != 0u || (TerrainNative() && (D.mat.z & MAT_BASE) != 0u)))
             terrainBase = TerrainBase(D.texIdx.z, bindlessSamplers[D.sampIdx.x], terrain);
         else if (D.terrainAt.w > 1.5 && terrain.rock && !terrain.pebble)   // (no maps of the base's own: only the rock's relief)
             TerrainSettle(texImages[TerrainRockImage(0)], terrain);
@@ -1101,6 +1126,7 @@ void main()
         current.rgb = CloudSheet(Sample(0u));
         current.a = clamp(current.a * FL.cloudSky.w, 0.0, 1.0);
     }
+    float fogF = 1.0;                                     // (how much of the surface shows through the fog)
     if ((C.flags.x & F_FOG) != 0u && !cloudSheet) {
         float f = vFogFactor;
         uint table = C.flags.z;
@@ -1113,9 +1139,23 @@ void main()
         // (Our own sky - C.fogParams.w: its horizon towards the pixel, rvk draw.cpp.)
         vec3 fogC = C.fogParams.w > 0.5 ? SkyHorizonRing(normalize(vPosW - C.eyePos.xyz), FL.skyRing) : C.fogColor.rgb;
         current.rgb = mix(fogC, current.rgb, f);
+        fogF = f;
 #ifdef RVK_GLOW
         albedo *= f;                                      // indirect light fades into the fog with the surface
         reflectivity *= f;                                // ... and so do reflections
+#endif
+    }
+    if (groundOne) {
+        // (The base pass's colour, fogged as that pass fogs - the game's fog in a storm's air, or our sky's horizon -
+        // times this pass's light, fogged to white: what the multiplying blend made of the two. Its albedo too, the
+        // base pass's - this pass's keeps it.)
+        const float fb = (oneSlots.z & (1u << 25)) != 0u ? fogF : 1.0;
+        const vec3 baseFog = (oneSlots.z & (1u << 24)) != 0u
+            ? SkyHorizonRing(normalize(vPosW - C.eyePos.xyz), FL.skyRing)
+            : vec3(float((oneSlots.z >> 16) & 255u), float((oneSlots.z >> 8) & 255u), float(oneSlots.z & 255u)) / 255.0;
+        current.rgb *= mix(baseFog, oneBase, fb);
+#ifdef RVK_GLOW
+        albedo = oneBase * fb;
 #endif
     }
     if ((C.flags.x & F_DEBUGLIGHT) != 0u && (C.vtx.x & 0xEu) != 4u) {
@@ -1201,7 +1241,7 @@ void main()
         outAlbedo = vec4(0.0);
     }
 #endif
-    if ((C.flags.x & F_OVERBRIGHT2X) != 0u)
+    if ((C.flags.x & F_OVERBRIGHT2X) != 0u && !groundOne)
         current.rgb *= 0.5;                               // blended as dst * src * 2
     // An AI mission's PF map tile (RVK_AlienMap, draw.cpp): the space that isn't a room, drawn green - the rooms black.
     if ((C.flags.w & 512u) != 0u)

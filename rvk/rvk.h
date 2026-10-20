@@ -275,6 +275,7 @@ struct DeviceInfo {
     X(ShadowView, m_shadowViewDebug, L)               /* debug: the sun shadow map's light shown */ \
     X(AlienMap, m_alienMap, 0)                        /* AI missions' map on green */ \
     X(HillShade, m_hillShade, 0)                      /* the terrain shaded from a low sun */ \
+    X(GroundOne, m_groundOnePass, C)                  /* the native ground drawn in one pass, not two */ \
     X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */
 enum class Knob : uint32_t {
 #define RVK_KNOB_NAME(name, member, refresh) name,
@@ -1157,7 +1158,23 @@ private:
         bool on = true, drawing = false;
         uint64_t drawnBase = ~0ull, drawnLight = ~0ull;   // the frames each pass was last drawn
         uint32_t patchesDrawn = 0, framesDrawn = 0;
+        // One pass (RVK_GroundOne): the base pass deferred to the lighting pass, which draws the ground once - its
+        // texture and its light together (DrawNativeGroundOne). The base pass's state, kept for that and for the base
+        // pass drawn late, should something other than the lighting pass come next (DrawPendingGroundBase).
+        bool basePending = false;
+        uint32_t baseSampler = 0;
+        std::array<uint32_t, d3d::RS_COUNT> baseRs{};
+        std::array<std::array<uint32_t, d3d::TSS_COUNT>, 2> baseTss{};
+        Texture* baseTex1 = nullptr;
+        d3d::Matrix baseWorld{}, baseView{}, baseProj{};
     } m_native;
+    void DrawNativeGroundOne();
+    void DrawPendingGroundBase();
+    void NoteSceneFog();
+    bool m_groundOnePass = true;                 // RVK_GroundOne
+    bool m_groundOne = false;                    // the ground's one pass is drawing: its lighting pass (IsMultiplyPass),
+                                                 // drawn opaque, the base pass's colour in it (ffp_main)
+    uint32_t m_recordExtra[3] = {};              // the draw record's spare words (AppendRecord): the one pass's base slots
     bool NativeGroundReplaces(uint32_t fvf);
     uint64_t NativeMapsSignature() const;
     float SandWindBearing() const;

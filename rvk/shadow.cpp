@@ -955,6 +955,8 @@ bool Device::ShadowReceiver(uint32_t fvf) const
 
 bool Device::IsMultiplyPass() const
 {
+    if (m_groundOne)
+        return true;                             // (the ground's one pass: its lighting pass, drawn opaque)
     uint32_t src = m_rs[d3d::RS_SRCBLEND], dst = m_rs[d3d::RS_DESTBLEND];
     return m_rs[d3d::RS_ALPHABLENDENABLE] &&
            ((src == d3d::BLEND_ZERO && dst == d3d::BLEND_SRCCOLOR) || (src == d3d::BLEND_DESTCOLOR && dst == d3d::BLEND_ZERO));

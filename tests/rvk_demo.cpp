@@ -1740,6 +1740,7 @@ float g_groundSun = 1.0f;           // --ground-sun X: RVK_GroundSun
 float g_groundRocks = 1.0f;         // --ground-rocks X: RVK_GroundRocks
 float g_groundPebbles = 1.0f;       // --ground-pebbles X: RVK_Pebbles
 float g_groundGrain = 0.6f;         // --ground-grain X: RVK_GroundGrain
+int g_groundOne = 1;                // --ground-one 0|1: RVK_GroundOne, the native ground in one pass (0: the game's two)
 float g_groundBlend = 1.0f;         // --ground-blend X: RVK_GroundBlend
 float g_sandRipple = 1.0f;          // --sand-ripple X: RVK_SandRipple
 float g_parallax = 1.0f;            // --parallax X: RVK_Parallax
@@ -4663,6 +4664,7 @@ int main(int argc, char** argv)
         else if (a == "--ground-pebbles" && i + 1 < argc) g_groundPebbles = float(std::atof(argv[++i]));
         else if (a == "--tile-orm") g_tileOrm = true;
         else if (a == "--ground-grain" && i + 1 < argc) g_groundGrain = float(std::atof(argv[++i]));
+        else if (a == "--ground-one" && i + 1 < argc) g_groundOne = std::atoi(argv[++i]);
         else if (a == "--ground-blend" && i + 1 < argc) g_groundBlend = float(std::atof(argv[++i]));
         else if (a == "--sand-ripple" && i + 1 < argc) g_sandRipple = float(std::atof(argv[++i]));
         else if (a == "--parallax" && i + 1 < argc) g_parallax = float(std::atof(argv[++i]));
@@ -4999,6 +5001,7 @@ int main(int argc, char** argv)
         dev.SetWeatherParams(weather);
     }
     dev.SetKnob(rvk::Knob::StormThick, g_stormThick);
+    dev.SetKnob(rvk::Knob::GroundOne, float(g_groundOne));
     dev.SetFogBanks(1.0f, g_fogBankForce);
     dev.SetHeatFlash(1.0f, g_heatForce);
     dev.SetKnob(rvk::Knob::SandBlow, g_sandBlow);

@@ -473,12 +473,89 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
         PollNativeSky();
     if (base && m_native.drawnBase != m_frameNumber) {
         m_native.drawnBase = m_frameNumber;
-        DrawNativeGround(false);
+        // One pass (RVK_GroundOne): deferred to the lighting pass, which draws the ground once, its texture and its
+        // light together - while the ground had a lighting pass last frame (this one's is then all but sure to come
+        // right after), per-pixel lit into the HDR scene. The scene's fog and ambient noted now, from this pass.
+        if (m_groundOnePass && m_pixelLighting && m_target == m_scene && m_scene && m_target->m_format == Format::RGBA16F &&
+            m_native.drawnLight + 1 == m_frameNumber) {
+            m_native.basePending = true;
+            m_native.baseRs = m_rs;
+            m_native.baseTss = m_tss;
+            m_native.baseTex1 = m_textures[1];
+            m_native.baseWorld = m_world;
+            m_native.baseView = m_view;
+            m_native.baseProj = m_proj;
+            m_native.baseSampler = StageSamplerSlot(0);
+            if (m_scenePhase && !m_external) NoteSceneFog();
+        } else {
+            DrawNativeGround(false);
+        }
     } else if (light && m_native.drawnLight != m_frameNumber) {
         m_native.drawnLight = m_frameNumber;
-        DrawNativeGround(true);
+        if (m_native.basePending) DrawNativeGroundOne();
+        else DrawNativeGround(true);
     }
     return true;
+}
+
+// The ground in one pass (RVK_GroundOne): its lighting pass's state - lights, lightmap, fog - drawn as its base pass
+// is, opaque and writing depth (the depth pre-pass takes it), with the base pass's stand-in texture, sampler and fog in
+// the draw records' spare words: ffp_main lays the base's colour in the same pixel and multiplies it in, where two
+// passes laid the ground's tiles twice and blended the second over the first (~1.5-2 ms of 4.4 at 2560 x 1440 over
+// Stret West Bank - rvk_demo, 2026-10-20).
+void Device::DrawNativeGroundOne()
+{
+    m_native.basePending = false;
+    const auto rs = m_rs;
+    m_rs[d3d::RS_ALPHABLENDENABLE] = m_native.baseRs[d3d::RS_ALPHABLENDENABLE];
+    m_rs[d3d::RS_ZWRITEENABLE] = m_native.baseRs[d3d::RS_ZWRITEENABLE];
+    m_rs[d3d::RS_ZFUNC] = m_native.baseRs[d3d::RS_ZFUNC];
+    m_groundOne = true;
+    // The base pass's fog: the game's colour turned to a storm's air (as Draw does for a non-multiplying pass), or our
+    // own sky's horizon (bit 24); whether it fogs at all (bit 25).
+    const uint32_t argb = m_native.baseRs[d3d::RS_FOGCOLOR];
+    float fog[3] = {float((argb >> 16) & 0xFF) / 255.0f, float((argb >> 8) & 0xFF) / 255.0f, float(argb & 0xFF) / 255.0f};
+    StormAirColour(fog);
+    uint32_t fogBits = 0;
+    for (int i = 0; i < 3; ++i)
+        fogBits |= uint32_t(std::clamp(fog[i], 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * i);
+    if (ProcSkyReady() && m_skyRing[0][3] > 0.5f) fogBits |= 1u << 24;
+    if (m_native.baseRs[d3d::RS_FOGENABLE]) fogBits |= 1u << 25;
+    m_recordExtra[0] = BindlessImage(m_blackTexture) + 1;
+    m_recordExtra[1] = m_native.baseSampler;
+    m_recordExtra[2] = fogBits;
+    m_constantsDirty = true;
+    DrawNativeGround(true);
+    m_recordExtra[0] = m_recordExtra[1] = m_recordExtra[2] = 0;
+    m_groundOne = false;
+    m_rs = rs;
+    m_constantsDirty = true;
+}
+
+// The deferred base pass after all (RVK_GroundOne): something other than the ground's lighting pass came next - drawn
+// now, as it was to be.
+void Device::DrawPendingGroundBase()
+{
+    m_native.basePending = false;
+    const auto rs = m_rs;
+    const auto tss = m_tss;
+    Texture* tex1 = m_textures[1];
+    const d3d::Matrix world = m_world, view = m_view, proj = m_proj;
+    m_rs = m_native.baseRs;
+    m_tss = m_native.baseTss;
+    m_textures[1] = m_native.baseTex1;
+    m_world = m_native.baseWorld;
+    m_view = m_native.baseView;
+    m_proj = m_native.baseProj;
+    m_constantsDirty = true;
+    DrawNativeGround(false);
+    m_rs = rs;
+    m_tss = tss;
+    m_textures[1] = tex1;
+    m_world = world;
+    m_view = view;
+    m_proj = proj;
+    m_constantsDirty = true;
 }
 
 // The patches in view for one pass, with the game's state for it: the base pass's stage 0 texture a stand-in (the

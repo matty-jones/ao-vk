@@ -437,6 +437,8 @@ void Device::BeginScene()
 // first interface draw, before a read-back of the main target, and at the end of the frame.
 void Device::EndScene()
 {
+    if (m_native.basePending && m_scenePhase)
+        DrawPendingGroundBase();                 // (RVK_GroundOne: no lighting pass came after the ground's base pass)
     if (!m_scenePhase)
         return;
     m_scenePhase = false;

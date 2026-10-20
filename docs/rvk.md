@@ -184,6 +184,16 @@
   (the maps texture bound in the base pass too then: `m_native.anyHeight`, FL.terrain3.w). Not yet: level of detail. `rvk_demo --native-ground-test [--native-on]` (a synthetic playfield drawn the game's way and natively -
   the same picture), `--native-ground-file F` (a real one: `tools/ground-data.py 790 --export F`; `--eye`,
   `--view-yaw`, `--view-pitch`).
+  *One pass* (`RVK_GroundOne`, hidden, on): the base pass is deferred to the lighting pass, which draws the ground once
+  (`DrawNativeGroundOne`): its own state - lights, lightmap, white fog, `IsMultiplyPass` - drawn as the base pass is
+  (opaque, writing depth, in the depth pre-pass, covering the glow), with the base pass's stand-in texture, stage-0
+  sampler and fog (its colour in a storm's air, or our sky's horizon) in the draw record's spare words. ffp_main lays
+  the base's colour in the same pixel (on a copy of the terrain map, once for both where the tiles have material maps)
+  and multiplies it in at the fog, writing the base's albedo; the image matches the two passes (the half-float rounding
+  of the base colour in between gone). The base pass's state is kept, and the base pass drawn late as it was should
+  something else come before the lighting pass, or the scene end (`DrawPendingGroundBase`). Only while the ground had a
+  lighting pass the frame before, per-pixel lit, into the HDR scene. ~0.35-0.4 ms of ~4 at 2560 x 1440 with the ground
+  filling the view (Stret West Bank, Newland Desert; demo `--ground-one 0|1`).
 - **Ground range** (setting `RVK_GroundRange`, Terrain; 1 = the game's own, 1.5 the default, up to 2.5):
   DisplaySystem.dll's AnarchyGround_t draws the heightmap as a split tree of triangles; within its full-quality radius
   (+0x1A8: entering a playfield the game sets 8, 44 - the option `DisplayGroundFullQualityRadius`, its slider 7..44 -

@@ -1374,7 +1374,7 @@ uint32_t Device::AppendRecord(uint32_t constIndex, const DrawTransform& d)
     uint32_t index = m_recordCount++;
     // Straight into the ring (a record built and copied was two passes over ~250 bytes a draw).
     uint8_t* dst = m_frames[m_frameIndex].ringData + m_recordsBase + VkDeviceSize(index) * sizeof(DrawRecord);
-    const uint32_t head[4] = {constIndex, 0u, 0u, 0u};
+    const uint32_t head[4] = {constIndex, m_recordExtra[0], m_recordExtra[1], m_recordExtra[2]};
     std::memcpy(dst, head, sizeof(head));
     std::memcpy(dst + offsetof(DrawRecord, d), &d, sizeof(d));
     return index;

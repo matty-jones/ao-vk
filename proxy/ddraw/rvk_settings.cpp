@@ -85,6 +85,7 @@ Setting g_settings[] = {
     {"RVK_Albedo", "Enhanced textures", "Materials",     Bool,  0, 1, 1, 1, nullptr, 0},
 
     {"RVK_GroundOn", "Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_GroundOne",  "Ground drawn by ao-vk: in one pass - its texture and its light together (off: the game's two passes, the same look, slower)", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundAo",   "Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none)", "Terrain", Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundSun",  "Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundRocks", "Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_GroundOn"},
@@ -423,7 +424,7 @@ const char* const kHidden[] = {
     "RVK_HeapCheck",
     "RVK_Prepass", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
     "RVK_GrassTex", "RVK_ShadowMem", "RVK_FxGlowOn", "RVK_NightOn", "RVK_MoonOn", "RVK_GameSun", "RVK_HillShade",
-    "RVK_DarkFloor",
+    "RVK_DarkFloor", "RVK_GroundOne",
     // leaves
     "RVK_LeafSize", "RVK_LeafCore", "RVK_LeafWind", "RVK_LeafFlutter", "RVK_LeafOwn", "RVK_LeafTrees",
     "RVK_LeafShrubs", "RVK_LeafPalms", "RVK_LeafShadow",
