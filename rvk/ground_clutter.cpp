@@ -187,10 +187,18 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
         const float gx = (b + e - a - d) / (2.0f * g.cellX), gz = (d + e - a - b) / (2.0f * g.cellZ);
         return std::sqrt(gx * gx + gz * gz);
     };
-    // A grass tile gets only the cliffs' scree, not stones over its slopes.
+    // A grass tile gets only the cliffs' scree, not stones over its slopes. Made ground (paving, slabs, smooth grey:
+    // GrassyTiles 2) gets none, nor ground at the foot of it: in a city the heights rise in ramps under the buildings
+    // and steps, not cliffs, and boulders lay against Borealis's shop fronts (the user, 2026-10-19).
     auto green = [&](int c, int r) {
         const uint32_t tile = g.codes[size_t(r) * g.cellsX + c] & 0x3FFFu;
-        return tile < grassy.size() && grassy[tile];
+        return tile < grassy.size() && grassy[tile] == 1;
+    };
+    auto made = [&](int c, int r) {
+        c = std::clamp(c, 0, int(g.cellsX) - 1);
+        r = std::clamp(r, 0, int(g.cellsZ) - 1);
+        const uint32_t tile = g.codes[size_t(r) * g.cellsX + c] & 0x3FFFu;
+        return tile < grassy.size() && grassy[tile] == 2;
     };
     const auto& shapes = Shapes();
     std::vector<Vertex> lists[2];                // the big rocks, the small
@@ -236,6 +244,7 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
                 const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
                 return t * t * (3.0f - 2.0f * t);
             };
+            if (made(c, r) || (cliff > 0.0f && made(fromC, fromR))) continue;
             const float foot = (1.0f - smooth(0.7f, 1.2f, s)) * smooth(1.0f, 2.2f, cliff);
             const float rough = smooth(0.35f, 0.75f, s) * (1.0f - smooth(1.1f, 1.7f, s)) * (green(c, r) ? 0.0f : 0.3f);
             Rng rng{Hash(uint32_t(c), uint32_t(r), g.id)};
@@ -353,6 +362,7 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
             if (!p.clutterPending.valid()) {
                 if (pending >= kMakeAtOnce) continue;
                 if (grassy.empty()) grassy = GrassyTiles();
+                if (grassy.empty()) continue;    // (the tiles' looks not measured yet: made ground unknown - later)
                 p.clutterPending = std::async(std::launch::async, BuildNativeClutter, m_native.ground, i, m_native.rocks,
                                               grassy);
             }
@@ -372,13 +382,24 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
     m_native.clutter = false;
 }
 
-// Which of the ground's tiles are grass (their mean colour green), by tile.
+// Which of the ground's tiles are grass (their mean colour green: 1) or made ground - slabs, smooth grey, cool grey
+// paving (2; as ground_pebbles.cpp's verdicts), by tile.
 std::vector<uint8_t> Device::GrassyTiles() const
 {
     std::vector<uint8_t> out(m_native.ground->tiles.size(), 0);
     for (size_t i = 0; i < out.size(); ++i) {
         const Texture* t = m_native.ground->tiles[i];
-        out[i] = t && t->m_mean[0] >= 0.0f && t->m_mean[1] > t->m_mean[0] * 1.08f && t->m_mean[1] > t->m_mean[2] * 1.08f;
+        if (t && t->m_image && (!t->m_thumbValid || t->m_line < 0.0f)) return {};   // (not measured yet: again later)
+        if (!t || t->m_mean[0] < 0.0f) continue;
+        const float r = t->m_mean[0], g = t->m_mean[1], b = t->m_mean[2];
+        if (g > r * 1.08f && g > b * 1.08f) { out[i] = 1; continue; }
+        const float hi = std::max({r, g, b}), lo = std::min({r, g, b}), sat = (hi - lo) / std::max(hi, 1e-3f);
+        const float lum = 255.0f * (0.3f * r + 0.59f * g + 0.11f * b);
+        const bool measured = t->m_line >= 0.0f;
+        if ((measured && (t->m_line > 0.3f || t->m_edge > 1.2f)) ||
+            (measured && sat < 0.12f && (t->m_grain < 15.0f || (sat < 0.08f && lum > 150.0f))) ||
+            (b > r * 1.05f && sat < 0.25f))
+            out[i] = 2;
     }
     return out;
 }

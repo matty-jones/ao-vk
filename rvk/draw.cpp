@@ -463,6 +463,11 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->sand[3] = SandWindBearing();
     fl->sand2[0] = std::clamp(m_terrainSettings.smooth, 0.0f, 1.0f);
     SandPrintLights(&fl->sand2[1]);
+    fl->sand3[0] = m_normalMaps && m_pixelLighting ? std::clamp(m_terrainSettings.rippleDepth, 0.0f, 3.0f) : 0.0f;
+    fl->sand3[1] = fl->sand3[2] = fl->sand3[3] = 0.0f;
+    fl->pick[0] = m_pickHighlight ? float(m_pickHighlightTile) : 0.0f;
+    fl->pick[1] = fl->pick[2] = fl->pick[3] = 0.0f;
+    fl->lightGrid[0] = fl->lightGrid[1] = fl->lightGrid[2] = fl->lightGrid[3] = 0.0f;
     DesertAir(fl->desert);
     fl->desert[2] = m_aoProjValid ? m_aoProj.m[0][0] : 0.0f;
     fl->desert[3] = m_aoProjValid ? m_aoProj.m[1][1] : 0.0f;
@@ -557,6 +562,45 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
         std::fprintf(m_dumpFile, "\n");
     }
     BuildLightGrid();
+    LightGridLights(fl);
+}
+
+void Device::LightGridLights(FrameLights* fl)
+{
+    if (m_lightGridTexFrame != m_frameNumber) {   // (once a frame: the frame's lights are the last frame's, fixed)
+        m_lightGridTexFrame = m_frameNumber;
+        m_lightGridTexValid = false;
+        const uint32_t cells = m_lightGridW * m_lightGridH;
+        if (cells && cells <= kLightGridMaxCells) {
+            const uint32_t rows = (cells + kLightGridTexCells - 1) / kLightGridTexCells;
+            if (!m_lightGridTex)
+                m_lightGridTex = CreateTexture(2 * kLightGridTexCells, kLightGridMaxCells / kLightGridTexCells,
+                                               Format::A8R8G8B8, 1);
+            if (m_lightGridTex) {
+                std::vector<uint32_t> texels(size_t(rows) * 2 * kLightGridTexCells, 0u);
+                for (uint32_t i = 0; i < cells; ++i) {
+                    texels[size_t(i) * 2] = uint32_t(m_lightGrid[i]);
+                    texels[size_t(i) * 2 + 1] = uint32_t(m_lightGrid[i] >> 32);
+                }
+                UpdateTexture(m_lightGridTex, 0, 0, 0, 2 * kLightGridTexCells, rows, texels.data(),
+                              2 * kLightGridTexCells * 4);
+                m_lightGridTexValid = true;
+            }
+        }
+    }
+    if (!m_lightGridTexValid || !m_lightGridTex)
+        return;
+    const uint32_t image = BindlessImage(m_lightGridTex), sampler = FixedSamplerSlot(2, m_linearSampler);   // (texelFetch)
+    if (image == ~0u || image >= (1u << 20) - 1 || sampler >= 256)
+        return;
+    const uint32_t slot = (image + 1) | sampler << 20, lo = uint32_t(m_lightGridAlways), hi = uint32_t(m_lightGridAlways >> 32);
+    std::memcpy(&fl->pick[1], &slot, 4);
+    std::memcpy(&fl->pick[2], &lo, 4);
+    std::memcpy(&fl->pick[3], &hi, 4);
+    fl->lightGrid[0] = float(m_lightGridX0) * kLightGridCell;
+    fl->lightGrid[1] = float(m_lightGridZ0) * kLightGridCell;
+    fl->lightGrid[2] = float(m_lightGridW);
+    fl->lightGrid[3] = float(m_lightGridH);
 }
 
 // Identity of a ground chunk within a frame: its sizes, its vertices - a static snapshot's serial and place, else a
@@ -2628,7 +2672,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_pickActive && !m_external && (vertices || m_pickSkinned) && (m_textures[0] || m_drawVisual) &&
         (m_target == m_scene || m_target == m_main) && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ &&
         m_rs[d3d::RS_ZENABLE])
-        PickDraw(primitive, layout, vertices ? vertices : m_pickSkinned, vertexCount, indices, indexCount);
+        PickDraw(primitive, layout, vertices ? vertices : m_pickSkinned, vertexCount, indices, indexCount, IsTerrain(fvf));
     // ... and solid objects lying on the ground keep it off where they are (not characters, effects, the sky, plants
     // or anything see-through; grass.cpp CaptureCover).
     if (m_grassOn && !m_external && vertices && !IsTerrain(fvf) && m_target == m_scene &&
@@ -3728,7 +3772,7 @@ namespace rvk {
 // Texture picking (RequestPick): the draw's triangles in clip space against the picked point, in the viewport's
 // coordinates; the nearest hit (depth) so far keeps its stage 0 texture. One frame, on the CPU.
 void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const void* vertices, uint32_t vertexCount,
-                      const uint16_t* indices, uint32_t indexCount)
+                      const uint16_t* indices, uint32_t indexCount, bool terrain)
 {
     if ((primitive != d3d::TriangleList && primitive != d3d::TriangleStrip && primitive != d3d::TriangleFan) ||
         layout.offset[0] < 0 || !m_target || !m_viewport.width || !m_viewport.height)
@@ -3788,7 +3832,19 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
         m_pickBestVertices = vertexCount;
         m_pickBestIndices = indexCount;
         m_pickBestTriangleCount = 0;
+        m_pickBestTerrain = terrain;
         hit = t;
+    }
+    // (The ground: where the point lies in the world, for its cell's tile - EndFrame.)
+    if (hit != ~0u && terrain) {
+        d3d::Matrix inverse;
+        if (InvertMatrix(MulMatrix(m_view, m_proj), &inverse)) {
+            float w[4];
+            for (int k = 0; k < 4; ++k)
+                w[k] = px * inverse.m[0][k] + py * inverse.m[1][k] + m_pickDepth * inverse.m[2][k] + inverse.m[3][k];
+            if (std::fabs(w[3]) > 1e-9f)
+                for (int k = 0; k < 3; ++k) m_pickBestWorld[k] = w[k] / w[3];
+        }
     }
     // A dungeon room hit (VisualKind::Room): the hit triangle and those joined to it by shared vertices - the room's
     // vertices aren't shared between the tile pieces placed in it, so that is the piece's sub-mesh as placed.

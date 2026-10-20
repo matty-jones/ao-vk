@@ -189,6 +189,11 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float sand2[4];                // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSmooth); y the
                                    // footprints' map (sand_prints.cpp): its bindless image + 1 | sampler << 20 (the
                                    // float's bits; 0 = none), z, w its corner (world x, z)
+    float pick[4];                 // texture picking (Ctrl+Shift+I): x the native ground's tile flashing + 1 (0: none);
+                                   // y the light grid's bindless image + 1 | sampler << 20 (the float's bits; 0 none),
+                                   // z, w the lights too large for it (mask: low, high word's bits)
+    float sand3[4];                // the sand, more: x its ripples' depth in the march (RVK_RippleDepth); y, z, w unused
+    float lightGrid[4];            // the frame lights' grid (Device::LightGridLights): its corner x, z, cells across, down
     GpuLight lights[kFrameLights];
 };
 

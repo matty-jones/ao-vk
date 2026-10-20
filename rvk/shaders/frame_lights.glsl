@@ -97,6 +97,11 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 sand2;                 // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSmooth); y the
                                 // footprints' map (rvk sand_prints.cpp): its bindless image + 1 | sampler << 20 (the
                                 // float's bits; 0 = none), z, w its corner (world x, z)
+    vec4 pick;                  // texture picking (Ctrl+Shift+I): x the native ground's tile flashing + 1 (0: none);
+                                // y the light grid's bindless image + 1 | sampler << 20 (the float's bits; 0 none),
+                                // z, w the lights too large for it (mask: low, high word's bits)
+    vec4 sand3;                 // the sand, more: x its ripples' depth in the march (RVK_RippleDepth); y, z, w unused
+    vec4 lightGrid;             // the frame lights' grid (rvk Device::LightGridLights): its corner x, z, cells across, down
     Light lights[64];
 } FL;
 

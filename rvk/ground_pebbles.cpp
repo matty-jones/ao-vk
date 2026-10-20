@@ -185,6 +185,9 @@ std::shared_ptr<const Device::PebbleTable> Device::MakePebbleTable()
         if (t->m_line < 0.0f) { v.what = "unmeasured"; return v; }
         if (t->m_line > 0.3f || t->m_edge > 1.2f) { v.what = "slabs"; return v; }
         if (sat < 0.12f && (t->m_grain < 15.0f || (sat < 0.08f && lum > 150.0f))) { v.what = "smooth grey"; return v; }
+        // Paved: a cool grey (bluer than it is red) - asphalt, a city square. Natural ground is warm (earth, gravel, sand);
+        // Borealis's blue-grey square was dirt and strewn with stones (the user, 2026-10-19).
+        if (b > r * 1.05f && sat < 0.25f) { v.what = "paved"; return v; }
         if (t->m_grain > 50.0f) { v.density = 0.3f; v.what = "straw"; return v; }
         // Sand: warm, saturated, bright, fine - the orange dune sand. The deserts' pale ground (Newland Desert's paths,
         // the Wastelands' flats) is packed hard, not loose: it gets no ripples and keeps the dirt's pebbles.

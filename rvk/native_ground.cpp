@@ -234,6 +234,7 @@ void Device::MakeNativeCodes()
         if (*t) { DestroyTexture(*t); *t = nullptr; }
     std::vector<uint32_t> image(g.tiles.size(), BindlessImage(nullptr)), normal(g.tiles.size(), 0xFFFFu),
         orm(g.tiles.size(), 0xFFFFu);
+    std::vector<bool> height(g.tiles.size(), false);   // (its normal map has a height: the code's alpha 0x7F)
     bool anyNormal = false;
     m_native.anyOrm = nullptr;
     m_native.anyHeight = false;
@@ -246,6 +247,7 @@ void Device::MakeNativeCodes()
             normal[t] = BindlessImage(tex->m_normalMap) & 0xFFFFu;
             anyNormal = true;
             m_native.anyHeight = m_native.anyHeight || tex->m_normalMap->m_alphaHeight;
+            height[t] = tex->m_normalMap->m_alphaHeight;
         }
         if (tex->m_ormMap && m_pbr.enabled && m_pixelLighting) {
             orm[t] = BindlessImage(tex->m_ormMap) & 0xFFFFu;
@@ -268,7 +270,8 @@ void Device::MakeNativeCodes()
         const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
         const uint32_t t = tile < image.size() ? tile : 0;
         const uint32_t img = image.empty() ? 0u : image[t];
-        codes[k] = 0xFF000000u | (img & 0xFFu) << 16 | ((img >> 8) & 0xFFu) << 8 | turn;
+        codes[k] = (t < height.size() && height[t] ? 0x7F000000u : 0xFF000000u) | (img & 0xFFu) << 16 |
+                   ((img >> 8) & 0xFFu) << 8 | turn;
         means[k] = mean.empty() ? 0x00808080u : mean[t];
         if (anyMaps) {
             const uint32_t nm = normal.empty() ? 0xFFFFu : normal[t], om = orm.empty() ? 0xFFFFu : orm[t];

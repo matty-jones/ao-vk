@@ -905,7 +905,12 @@ void main()
     }
     vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
     if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
-    if (terrainBasePass && TerrainNative()) t0.rgb = SandRippleTone(TerrainGrain(t0.rgb, terrain, vPosW), ground, terrain.uv[0]);
+    if (terrainBasePass && TerrainNative()) {
+        // (The grit where the parallax met the ground: its cells' coordinates moved, the world point with them.)
+        const vec3 at = vPosW + vec3((terrain.uv[0] - ground.cell).x, 0.0, (terrain.uv[0] - ground.cell).y) / max(D.terrain.x, 1e-6);
+        t0.rgb = SandRippleTone(TerrainGrain(t0.rgb, terrain, ground.tiles || ground.sand > 0.0 ? at : vPosW), ground,
+                                terrain.uv[0]);
+    }
 #ifdef RVK_GLOW
     // The surface's own colour, for the indirect light it reflects: lit draws through the stages under white light,
     // unlit ones as they are (the ground's base pass is its bare texture; its lightmap pass keeps this). A
@@ -1109,7 +1114,9 @@ void main()
         current.rgb = mix(current.rgb, tint, 0.45);
     }
     // Texture picking (Ctrl+Shift+I): the picked texture's draws in yellow for a few seconds.
-    if ((D.mat.z & MAT_PICKED) != 0u)
+    // (The ground drawn natively: the cells laid with the picked tile.)
+    if ((D.mat.z & MAT_PICKED) != 0u ||
+        (FL.pick.x > 0.5 && terrainMapped && TerrainNative() && !terrain.clutter && NativeCell(terrain.uv[0]).x + 1u == uint(FL.pick.x + 0.5)))
         current.rgb = mix(current.rgb, vec3(1.0, 0.85, 0.1) * max(dot(current.rgb, vec3(0.3, 0.59, 0.11)), 0.35) * 2.0, 0.7);
     // PBR debug views (RVK_PbrDebug). 7: the scene, tinted where surfaces have maps - green a PBR material (lit with
     // it), blue only a normal map, magenta an albedo map (any draw), orange where an emissive map gives off light.

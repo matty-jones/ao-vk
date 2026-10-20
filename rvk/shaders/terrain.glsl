@@ -157,6 +157,15 @@ uvec2 NativeCell(vec2 cell)
     return uvec2(b.r | b.g << 8, b.b);
 }
 
+// Whether the cell's tile has a height (its normal map's alpha: parallax) - the code's alpha 0x7F (native_ground.cpp).
+bool NativeCellHeight(vec2 cell)
+{
+    const uint codes = floatBitsToUint(D.terrain.y) - 1u;
+    const ivec2 size = textureSize(sampler2D(texImages[codes], bindlessSamplers[D.sampIdx.w]), 0);
+    return texelFetch(sampler2D(texImages[codes], bindlessSamplers[D.sampIdx.w]), clamp(ivec2(floor(cell)), ivec2(0), size - 1),
+                      0).a < 0.75;
+}
+
 // Within a cell (a along x, b along z, 0..1) its tile's coordinates as the game lays them, by the turn
 // (docs/ground-format.md): 0 (a, 1 - b), 1 (1 - b, 1 - a), 2 (1 - a, b), 3 (b, a). And a step's.
 vec2 NativeTurn(vec2 f, uint turn)
@@ -493,9 +502,12 @@ float TerrainGrit(vec2 uv, vec2 dx, vec2 dy)
 
 vec3 TerrainGrain(vec3 c, TerrainMap m, vec3 posW)
 {
-    // (Not on loose sand: its ripples are its detail - parallax.glsl.)
+    // (Not on loose sand: its ripples are its detail - parallax.glsl. Nor on a tile with maps of its own - a texture
+    // pack's, made for it: the rock's grit lay over it as faint scratches, and over one drawn in depth it didn't move
+    // with the relief - the user's athens tile. posW: where the parallax met the ground, so it would.)
     const float k = FL.terrain2.w * m.w.x * (1.0 - NativeSand(m.uv[0]) * clamp(FL.sand.x, 0.0, 1.0));
     if (k <= 0.002 || !TerrainRockOn() || m.clutter) return c;
+    if (TerrainNativeMaps() && NativeNormalImage(m.uv[0]) != 0xFFFFu) return c;
     const mat2 turn = mat2(0.8, 0.6, -0.6, 0.8);
     const vec2 a = posW.xz / 0.9, adx = m.px.xz / 0.9, ady = m.py.xz / 0.9;
     const float fade = 1.0 - smoothstep(0.012, 0.04, max(length(adx), length(ady)));

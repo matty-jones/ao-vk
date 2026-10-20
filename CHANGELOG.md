@@ -46,8 +46,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   sun the far land near the horizon shimmers in the heat (`RVK_HeatShimmer`, 0.5; 0 for none).
 - Texture packs and side-loaded materials can give a texture a height map (`_h.png`): up close its relief is drawn in
   depth, bricks and stones standing out of the surface with shadows between them (`RVK_Parallax`, 1, under normal maps;
-  0 for flat). This works on buildings and on ground tiles alike, and sets the depth of the sand's ripples: at 1 or
-  more, looking along a dune the ripples' crests hide the troughs behind them, out to about 45 units. How finely the
+  0 for flat). This works on buildings and on ground tiles alike. The sand's ripples have their own depth
+  (`RVK_RippleDepth`, 1, up to 3): looking along a dune their crests hide the troughs behind them, out to about 45 units. How finely the
   depth is traced is its own setting (`RVK_ParallaxSteps`, 1; down to 0.5 for speed, up to 3 for sharper edges when
   looking along the ground).
 - Different ground textures side by side (gravel beside dirt, where the game has no transition tile) blend into each
@@ -115,6 +115,15 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   default: under the new sky they showed as coarse streaks; 1 to try them).
 
 ### Fixed
+- With `RVK_LightOver` on, lamps and characters' lights cost much less in busy places (Newland City has some 60):
+  each spot of ground or wall now works out only the lights that reach it, not every light near the whole surface.
+- In cities, rocks and boulders no longer lie on paving or against shop fronts (Borealis): ramps in the ground under
+  buildings and steps were taken for cliffs.
+- Paved city ground of a cool grey (Borealis's square) is no longer taken for dirt and strewn with pebbles.
+- Ground textures from a texture pack (with their own normal map) no longer get the fine rock grit of
+  `RVK_GroundGrain` laid over them: it showed as faint scratches that didn't follow a texture drawn in depth.
+- Texture picking (Ctrl+Shift+I) on the ground drawn by ao-vk picks the ground texture under the mouse and flashes
+  just its tiles, instead of lighting up the whole ground and naming nothing the workbench could open.
 - With the ground drawn by ao-vk and a low sun, shadows (a rock's, your character's) no longer stop dead with a hard
   edge where the ground turns away from the sun, leaving lit sand inside them: ground facing away from the sun is in
   shade, and stays so as the sun sets (also in its last few degrees, where they had turned a pale grey as bright as

@@ -255,6 +255,10 @@ struct GroundRelief {
     vec2 cell;        // the pixel's cell coordinates (before the parallax moves them)
     vec2 xz;          // ... its world x, z
     float prints;     // how much the footprints show here (0: none; sand only)
+    // The pixel's cell's tile, for the march (NativeTileHeight): its height map's image (0xFFFF none) and turn, looked
+    // up once - a pixel's march seldom leaves its 4-unit cell, and two table reads a step were half its cost.
+    vec2 tileCell;
+    uint tileImg, tileTurn;
     SandRipples rip;  // the ripples round the pixel (when sand)
 };
 
@@ -267,6 +271,13 @@ GroundRelief GroundReliefAt(TerrainMap m, vec3 posW, vec3 n)
     r.fade = vec2(0.0);
     r.tiles = FL.terrain3.y > 0.0 && FL.terrain3.w > 0.5 && TerrainNativeMaps();
     r.cell = m.uv[0];
+    r.tileCell = floor(m.uv[0]);
+    r.tileImg = r.tiles ? NativeNormalImage(m.uv[0]) : 0xFFFFu;
+    r.tileTurn = r.tiles && r.tileImg != 0xFFFFu ? NativeCell(m.uv[0]).y : 0u;
+    // (No march where the pixel's own tile has no height: any other tile in the playfield with one had every ground
+    // pixel step through heights of 1. A height a march reaches over a cell's edge from one without is lost - rarely
+    // seen, the steps being centimetres.)
+    if (r.tiles && (r.tileImg == 0xFFFFu || !NativeCellHeight(m.uv[0]))) r.tiles = false;
     r.xz = posW.xz;
     r.prints = r.sand > 0.0 && SandPrintsAt(posW.xz) ? smoothstep(0.1, 0.5, r.sand) : 0.0;
     r.rip.smallDepth = r.rip.bigDepth = 0.0;
@@ -277,11 +288,12 @@ GroundRelief GroundReliefAt(TerrainMap m, vec3 posW, vec3 n)
 }
 
 // The cell's tile's height at cell coordinates c (1 its surface, 0 FL.terrain3.y of a repeat below; 1 without one).
-float NativeTileHeight(vec2 c, vec2 dx, vec2 dy)
+float NativeTileHeight(GroundRelief r, vec2 c, vec2 dx, vec2 dy)
 {
-    const uint img = NativeNormalImage(c);
+    const bool same = all(equal(floor(c), r.tileCell));   // (the pixel's own cell: its tile as looked up once)
+    const uint img = same ? r.tileImg : NativeNormalImage(c);
     if (img == 0xFFFFu) return 1.0;
-    const uint turn = NativeCell(c).y;
+    const uint turn = same ? r.tileTurn : NativeCell(c).y;
     return textureGrad(sampler2D(texImages[nonuniformEXT(img)], bindlessSamplers[D.sampIdx.w]), NativeTurn(fract(c), turn),
                        NativeTurnStep(dx, turn), NativeTurnStep(dy, turn)).a;
 }
@@ -290,7 +302,7 @@ float NativeTileHeight(vec2 c, vec2 dx, vec2 dy)
 float GroundDepth(GroundRelief r, vec2 c, vec2 dx, vec2 dy, float tileDepthW, float cellSize, float fine)
 {
     float d = 0.0;
-    if (tileDepthW > 0.0) d += (1.0 - NativeTileHeight(c, dx, dy)) * tileDepthW;
+    if (tileDepthW > 0.0) d += (1.0 - NativeTileHeight(r, c, dx, dy)) * tileDepthW;
     if (r.rip.smallDepth > 0.0 || r.prints > 0.0) {
         float sand = r.rip.smallDepth > 0.0 ? SandRippleDepth(r.rip, (c - r.cell) * cellSize, false) : 0.0;
         // (In a print the ripples pressed flat to its floor, a rim round it.)
@@ -305,7 +317,7 @@ float GroundDepth(GroundRelief r, vec2 c, vec2 dx, vec2 dy, float tileDepthW, fl
 
 // The native ground's parallax: m.uv[0] (its cells' coordinates from above) moved to where the eye's ray meets the
 // relief; returns how much of the sun reaches that point past the relief (1 lit). Not on its rocks, pebbles or faces.
-// The ripples' depth is RVK_Parallax's too (FL.terrain3.y, 0.04 at 1), and it is followed farther out than the tiles':
+// The ripples' depth is RVK_RippleDepth's (FL.sand3.x), and it is followed farther out than the tiles':
 // a trough hides behind its crest only where the eye looks along the ground flatter than the crest's lee (about 23
 // degrees at 1), which from the game's camera is past about 12 units - the tiles' 22 left almost nothing of it, and
 // in game the ripples showed no depth at all (the user's rvk-frame-153557).
@@ -316,7 +328,9 @@ float GroundParallax(inout TerrainMap m, GroundRelief r, vec3 posW, vec3 n)
     const float near = r.tiles ? 1.0 - smoothstep(kParallaxNear, kParallaxFar, dist) : 0.0;
     const float ripNear = r.rip.smallDepth > 0.0 || r.prints > 0.0 ? 1.0 - smoothstep(kRippleParallaxNear, kRippleParallaxFar, dist)
                                                                      : 0.0;
-    const float ripW = ripNear * FL.terrain3.y / 0.04;   // (x RVK_Parallax)
+    // (x RVK_RippleDepth, FL.sand3.x - their own, not RVK_Parallax's: textures' height maps drawn shallow left the
+    // dunes flat, the user, 2026-10-19.)
+    const float ripW = ripNear * FL.sand3.x;
     if (near <= 0.0 && ripW <= 0.0) return 1.0;
     n = normalize(n);
     const float cellSize = 1.0 / max(D.terrain.x, 1e-6);

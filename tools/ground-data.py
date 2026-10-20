@@ -153,6 +153,8 @@ def verdict(mean, line, edge, grain):
         return "slabs", 0.0
     if sat < 0.12 and (grain < 15 or (sat < 0.08 and lum > 150)):
         return "smooth grey", 0.0
+    if b > r * 1.05 and sat < 0.25:            # (paved: a cool grey - natural ground is warm)
+        return "paved", 0.0
     if grain > 50:
         return "straw", 0.3
     r, g, b = mean

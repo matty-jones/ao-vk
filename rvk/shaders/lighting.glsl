@@ -116,9 +116,27 @@ void AccumulateLights(vec3 posW, vec3 normalW, float sunScale, float localScale,
         AccumulateLight(C.lights[i], posW, normalW, toEye, sunScale, localScale, ambient, diff, spec);
     // Only the frame lights whose range reaches the draw's bounding box (the CPU's mask): most draws have none or a
     // few of the 64.
+    // ... and of those, only the ones reaching the pixel's own cell of the frame's light grid (rvk LightGridLights): a
+    // big draw's box takes in most of the lights.
+    uvec2 cellMask = uvec2(0xFFFFFFFFu);
+    const uint gridSlot = floatBitsToUint(FL.pick.y);
+    if ((C.flags.x & F_LIGHTOVERRIDE) != 0u && (gridSlot & 0xFFFFFu) != 0u) {
+        cellMask = uvec2(floatBitsToUint(FL.pick.z), floatBitsToUint(FL.pick.w));   // (too large for it: everywhere)
+        const ivec2 cell = ivec2(floor((posW.xz - FL.lightGrid.xy) / 16.0));
+        if (all(greaterThanEqual(cell, ivec2(0))) && all(lessThan(cell, ivec2(FL.lightGrid.zw)))) {
+            const int i = cell.y * int(FL.lightGrid.z) + cell.x;
+            const ivec2 at = ivec2((i % 256) * 2, i / 256);
+            for (int w = 0; w < 2; ++w) {
+                const uvec4 b = uvec4(texelFetch(sampler2D(texImages[(gridSlot & 0xFFFFFu) - 1u],
+                                                           bindlessSamplers[(gridSlot >> 20) & 0xFFu]),
+                                                 at + ivec2(w, 0), 0) * 255.0 + 0.5);
+                cellMask[w] |= b.b | b.g << 8 | b.r << 16 | b.a << 24;
+            }
+        }
+    }
     if ((C.flags.x & F_LIGHTOVERRIDE) != 0u)
         for (uint word = 0u; word < 2u; ++word) {
-            uint mask = D.lightMask[word];
+            uint mask = D.lightMask[word] & cellMask[word];
             while (mask != 0u) {
                 uint i = word * 32u + uint(findLSB(mask));
                 mask &= mask - 1u;

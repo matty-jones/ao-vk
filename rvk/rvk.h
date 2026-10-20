@@ -324,7 +324,11 @@ public:
         }
         return r;
     }
-    void SetPickHighlight(Texture* t) { if (m_pickHighlight != t) { m_pickHighlight = t; m_constantsDirty = true; } }
+    void SetPickHighlight(Texture* t)
+    {
+        if (m_pickHighlight != t) { m_pickHighlight = t; m_constantsDirty = true; }
+        m_pickHighlightTile = t ? m_pickTile : 0;   // (a ground tile picked: its cells flash - FillFrameLights)
+    }
     // PBR lighting: on/off, direct specular strength, ambient (environment) specular strength, how much smooth
     // surfaces feed the screen-space reflections, the occlusion map's strength, debug view (0 off, 1 albedo,
     // 2 roughness, 3 metallic, 4 occlusion, 5 normal, 6 specular only, 7 which surfaces have maps, 8 emission);
@@ -637,6 +641,7 @@ public:
         float parallaxSteps = 1.0f;              // RVK_ParallaxSteps: its marches' step counts, x
         float ripple = 1.0f, dune = 0.6f, glint = 0.5f;   // the sand: RVK_SandRipple, RVK_DuneLight, RVK_SandGlint
         float smooth = 0.3f;                     // ... RVK_RippleSmooth
+        float rippleDepth = 1.0f;                // ... RVK_RippleDepth: their depth up close, x
         float prints = 1.0f;                     // ... RVK_SandPrints: footprints' depth, x (sand_prints.cpp)
     };
     void SetTerrain(const TerrainSettings& s) { m_terrainSettings = s; m_frameLightsDirty = true; }
@@ -1180,8 +1185,14 @@ private:
     const void* m_pickSkinned = nullptr;         // a GPU-skinned draw's CPU-skinned vertices, for the pick (DrawSkinned)
     std::atomic<uint32_t> m_pickSerial{0};
     Texture* m_pickHighlight = nullptr;
+    // The ground drawn natively (native_ground.cpp): a hit on the game's ground draws there (a stand-in texture, the
+    // lightmap) is the tile of the cell under the point - the nearest hit's world point; and the tile flashed.
+    bool m_pickBestTerrain = false;
+    float m_pickBestWorld[3] = {};
+    uint32_t m_pickTile = 0;                     // the picked cell's tile + 1 (0: none)
+    uint32_t m_pickHighlightTile = 0;            // ... the one flashing (FL.pick.x)
     void PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const void* vertices, uint32_t vertexCount,
-                  const uint16_t* indices, uint32_t indexCount);
+                  const uint16_t* indices, uint32_t indexCount, bool terrain);
     Texture* m_constantsBumpBase = nullptr;
     bool m_drawTerrainBase = false;              // the current draw is the ground's unlit base pass (Draw)
     bool m_drawTerrainLight = false;             // ... or its multiplying lightmap pass
@@ -2800,6 +2811,15 @@ private:
     uint32_t m_lightGridW = 0, m_lightGridH = 0;
     uint64_t m_lightGridAlways = 0;              // lights too large for the grid: tested by every draw
     void BuildLightGrid();
+    // ... the grid for the shaders too (FL.lightGrid, FL.pick.yzw): each pixel loops over only the lights reaching its
+    // own cell, not every light reaching its draw's box - a ground patch's box is 256 units, and with RVK_LightOver
+    // on, Newland City's 57 lights cost every ground pixel 57 tests (+5 ms). Two A8R8G8B8 texels a cell (the mask's
+    // low and high words), 256 cells a row; uploaded once a frame.
+    static constexpr uint32_t kLightGridTexCells = 256;   // cells a texture row
+    Texture* m_lightGridTex = nullptr;
+    uint64_t m_lightGridTexFrame = ~0ull;
+    bool m_lightGridTexValid = false;
+    void LightGridLights(detail::FrameLights* fl);
     int m_lightMaskVerify = -1;                  // RANDYVK_LIGHTMASK_VERIFY: check the grid against every light
     uint32_t m_lightMaskDiff = 0;
     void Wind(float out[4]) const;               // direction x, z, time, strength

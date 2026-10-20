@@ -66,7 +66,8 @@ native ground on) shows these problems:
 - The noise is read once a pixel, with its gradient. Over the few centimetres a march looks round a pixel, the
   ripples' phase is that value plus the gradient times the step, so each step is a `fract`, not four noise reads. This
   took the cost from +0.9 ms to +0.25 ms at 2560 x 1440 on Newland Desert.
-- Up close, the parallax marches them in both passes (to about 45 units, their depth there x `RVK_Parallax`; 3-10
+- Up close, the parallax marches them in both passes (to about 45 units, their depth there x `RVK_RippleDepth`, Terrain,
+  1, 0..3 - at first `RVK_Parallax`'s, but bricks drawn shallow left the dunes flat; 3-10
   steps by how many wavelengths the ray crosses, rays followed to 83 degrees off the normal: a trough only hides behind
   its crest where the eye looks flatter than the crest's ~23-degree lee, past ~12 units from the game's camera, and
   the first build's 22 units, steeper rays and the setting ignored left no depth to see in game, the user's

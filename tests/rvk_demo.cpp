@@ -913,6 +913,7 @@ bool g_pbrRoom = false;       // --pbr-room: unlit coloured walls around (red le
 // floor_n.png, floor_h.png, floor_ao.png / floor_r.png / floor_m.png (separate) and floor_d.png; the bottom row's middle ball
 // ball_n.png and ball_orm.png (packed). Missing files are skipped.
 std::string g_pbrMaps;
+float g_floorRepeats = 8.0f;        // --floor-repeats N: the PBR scene's floor texture's repeats across it (16 units)
 
 template <typename D>
 void AttachFileMaps(D& dev, Texture* tex, const std::string& stem)
@@ -1016,8 +1017,9 @@ void RunPbrTest(D& dev, int frames, const std::string& shot)
          {10, -3, 25, -1, 0, 0, 0xFFFFFFFF, 1, 0}, {10, 12, 25, -1, 0, 0, 0xFFFFFFFF, 1, 1}},
         {{-10, -3, 25, 0, 0, -1, 0xFFFFFFFF, 0, 0}, {-10, 12, 25, 0, 0, -1, 0xFFFFFFFF, 0, 1},
          {10, -3, 25, 0, 0, -1, 0xFFFFFFFF, 1, 0}, {10, 12, 25, 0, 0, -1, 0xFFFFFFFF, 1, 1}}};
-    VtxMesh floorQuad[4] = {{-8, 0, -4, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {8, 0, -4, 0, 1, 0, 0xFFFFFFFF, 8, 0},
-                            {-8, 0, 12, 0, 1, 0, 0xFFFFFFFF, 0, 8}, {8, 0, 12, 0, 1, 0, 0xFFFFFFFF, 8, 8}};
+    const float fr = g_floorRepeats;
+    VtxMesh floorQuad[4] = {{-8, 0, -4, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {8, 0, -4, 0, 1, 0, 0xFFFFFFFF, fr, 0},
+                            {-8, 0, 12, 0, 1, 0, 0xFFFFFFFF, 0, fr}, {8, 0, 12, 0, 1, 0, 0xFFFFFFFF, fr, fr}};
     for (int frame = 0; frame < frames; ++frame) {
         if (frame == frames - 1)
             dev.RequestScreenshot(shot);
@@ -1732,7 +1734,9 @@ float g_duneLight = 0.6f;           // --dune-light X: RVK_DuneLight
 float g_sandGlint = 0.5f;           // --sand-glint X: RVK_SandGlint
 float g_rippleSmooth = 0.3f;        // --ripple-smooth X: RVK_RippleSmooth
 float g_sandPrints = 1.0f;          // --sand-prints X: RVK_SandPrints
-bool g_printWalk = false;           // --print-walk: a walker's footprints laid ahead of the eye (sand_prints.cpp)
+float g_rippleDepth = 1.0f;         // --ripple-depth X: RVK_RippleDepth
+bool g_printWalk = false;
+bool g_groundLight = false;         // --ground-light: a character's light (point, range 6) 2 units over the ground ahead           // --print-walk: a walker's footprints laid ahead of the eye (sand_prints.cpp)
 float g_desertAir = 1.0f;           // --desert-air X: RVK_DesertAir
 float g_groundFog = 0.0f;           // --ground-fog END: the native ground scene fogged as the game does (linear from 0;
                                     // Newland Desert: 1276), its colour the desert's, our sky over it; 0 none
@@ -1827,6 +1831,7 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         t.glint = g_sandGlint;
         t.smooth = g_rippleSmooth;
         t.prints = g_sandPrints;
+        t.rippleDepth = g_rippleDepth;
         dev.SetTerrain(t);
     }
     if (g_grassFieldOn) dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true);   // (--grass-field: the grass on it)
@@ -1878,6 +1883,17 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         dev.SetRenderState(RS_ALPHATESTENABLE, 0);
         Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
         dev.SetMaterial(mat);
+        if (g_groundLight) {                     // (--ground-light: 5 units ahead, a unit under the eye)
+            Light own{};
+            own.type = LIGHT_POINT;
+            own.diffuse = {1.0f, 0.85f, 0.6f, 1};
+            own.position = {eye.x + 5.0f * std::cos(g_viewYaw), eye.y - 1.0f, eye.z + 5.0f * std::sin(g_viewYaw)};
+            own.range = 6.1f;
+            own.attenuation0 = 0.0f;
+            own.attenuation1 = 0.4f;
+            dev.SetLight(1, own);
+            dev.LightEnable(1, true);
+        }
         Light sun{};
         sun.type = LIGHT_DIRECTIONAL;
         sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
@@ -1941,9 +1957,13 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
         // (The game lights its ground's lighting pass without the sun - the lightmap has it - only the ambient and
         // the local lights: the sun's light kept out by a black diffuse here, still the frame's sun.)
+        // (--ground-light: as in game, a white diffuse and the sun's light off - the game's dumps: d 1.00, its lights
+        // the local ones.)
         const Material lightMat{{0, 0, 0, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
-        dev.SetMaterial(lightMat);
+        dev.SetMaterial(g_groundLight ? mat : lightMat);
+        if (g_groundLight) dev.LightEnable(0, false);
         dev.DrawPrimitive(TriangleList, kFvfTerrain, standIn, 3);
+        if (g_groundLight) dev.LightEnable(0, true);
         dev.SetMaterial(mat);
         dev.SetDrawVisual(0, nullptr);
         dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
@@ -4626,7 +4646,9 @@ int main(int argc, char** argv)
         else if (a == "--sand-glint" && i + 1 < argc) g_sandGlint = float(std::atof(argv[++i]));
         else if (a == "--ripple-smooth" && i + 1 < argc) g_rippleSmooth = float(std::atof(argv[++i]));
         else if (a == "--sand-prints" && i + 1 < argc) g_sandPrints = float(std::atof(argv[++i]));
+        else if (a == "--ripple-depth" && i + 1 < argc) g_rippleDepth = float(std::atof(argv[++i]));
         else if (a == "--print-walk") g_printWalk = true;
+        else if (a == "--ground-light") g_groundLight = true;
         else if (a == "--desert-air" && i + 1 < argc) g_desertAir = float(std::atof(argv[++i]));
         else if (a == "--ground-fog" && i + 1 < argc) g_groundFog = float(std::atof(argv[++i]));
         else if (a == "--heat-shimmer" && i + 1 < argc) g_heatShimmer = float(std::atof(argv[++i]));
@@ -4792,6 +4814,7 @@ int main(int argc, char** argv)
         else if (a == "--pbr-test") pbrTest = true;
         else if (a == "--glow-occlude-test") { glowOccludeTest = true; hdr = true; }
         else if (a == "--pbr-maps" && i + 1 < argc) { g_pbrMaps = argv[++i]; pbrTest = true; }
+        else if (a == "--floor-repeats" && i + 1 < argc) g_floorRepeats = float(std::atof(argv[++i]));
         else if (a == "--pbr-off") g_pbrOff = true;
         else if (a == "--pbr-probe" && i + 1 < argc) g_pbrProbe = float(std::atof(argv[++i]));
         else if (a == "--pbr-room") g_pbrRoom = true;

@@ -1521,6 +1521,7 @@ void Device::BeginFrame()
     m_pickActive = m_pickArmed;                  // texture picking (RequestPick): this frame's draws
     m_pickArmed = false;
     m_pickBest = nullptr;
+    m_pickBestTerrain = false;
     m_pickBestVisual = m_pickBestOwner = m_pickBestKind = m_pickBestVertices = m_pickBestIndices = 0;
     m_pickBestTriangleCount = 0;
     m_pickDepth = 2.0f;
@@ -1718,6 +1719,21 @@ void Device::EndFrame()
 {
     if (m_pickActive) {                          // texture picking: the nearest draw's texture, for LastPick
         m_pickActive = false;
+        // The ground drawn natively: its draws' stage 0 is a stand-in or the lightmap - the cell's own tile instead.
+        m_pickTile = 0;
+        if (m_pickBestTerrain && m_native.on && m_native.ground) {
+            const NativeGround& g = *m_native.ground;
+            const int cx = int(std::floor(m_pickBestWorld[0] / g.cellX)), cz = int(std::floor(m_pickBestWorld[2] / g.cellZ));
+            if (cx >= 0 && cz >= 0 && uint32_t(cx) < g.cellsX && uint32_t(cz) < g.cellsZ) {
+                const uint32_t tile = g.codes[size_t(cz) * g.cellsX + uint32_t(cx)] & 0x3FFFu;
+                if (tile < g.tiles.size() && g.tiles[tile]) {
+                    m_pickBest = g.tiles[tile];
+                    m_pickTile = tile + 1;
+                }
+                Log("pick: the native ground's cell %d, %d (world %.1f %.1f): tile %u", cx, cz,
+                    double(m_pickBestWorld[0]), double(m_pickBestWorld[2]), tile);
+            }
+        }
         m_pickPublished.store(m_pickBest, std::memory_order_relaxed);
         m_pickPublishedVisual.store(m_pickBestVisual, std::memory_order_relaxed);
         m_pickPublishedOwner.store(m_pickBestOwner, std::memory_order_relaxed);
