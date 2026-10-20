@@ -1702,10 +1702,7 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     const float storm = StormSky();
     {
         // RVK_CloudNight: by night (as the shaders' Night(): by the sun's true height) their brightness x more.
-        const float l = std::max(std::sqrt(m_trueSunDir[0] * m_trueSunDir[0] + m_trueSunDir[1] * m_trueSunDir[1] +
-                                           m_trueSunDir[2] * m_trueSunDir[2]), 1e-6f);
-        const float t = std::clamp((-m_trueSunDir[1] / l + 0.2f) / 0.23f, 0.0f, 1.0f);
-        const float night = 1.0f - t * t * (3.0f - 2.0f * t);
+        const float night = 1.0f - Smoothstep(-0.2f, 0.03f, SunUp());
         // (A storm darker - by RVK_StormThick: at 2 half as bright, as before; at 1 three quarters.)
         // (And x RVK_Darkness's share at night: darkness.cpp.)
         lf.tint[3] = m_cloudParams.brightness * (1.0f + (m_cloudParams.night - 1.0f) * night) * m_dark.clouds *

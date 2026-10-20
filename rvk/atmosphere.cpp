@@ -331,8 +331,7 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
     push.zone[3] = m_skyFogSet ? std::clamp(m_skyZone, 0.0f, 1.0f) * Smoothstep(-0.07f, 0.05f, h) : 0.0f;
     // Weather: an overcast greys it, a storm darker, in the storm's own colour (StormHue: its green).
     {
-        const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
-        const float cloudy = m_cloudParams.enable ? SkyCloudiness() * vary : 0.0f;
+        const float cloudy = CloudCover();
         const float storm = StormSky();
         float hue[3] = {0.5f + 0.5f * push.zone[0], 0.5f + 0.5f * push.zone[1], 0.5f + 0.5f * push.zone[2]};
         StormHue(hue);

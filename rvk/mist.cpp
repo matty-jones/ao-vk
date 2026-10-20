@@ -55,9 +55,7 @@ void Device::UpdateMist()
     }
     m_mistSamples.clear();
     // The sun's height and whether it is rising (its height a minute ago).
-    const float l = std::max(std::sqrt(m_trueSunDir[0] * m_trueSunDir[0] + m_trueSunDir[1] * m_trueSunDir[1] +
-                                       m_trueSunDir[2] * m_trueSunDir[2]), 1e-6f);
-    const float sunUp = -m_trueSunDir[1] / l;
+    const float sunUp = SunUp();
     // (Against its height 30 seconds before: frame to frame the change is below the numbers' precision.)
     if (first || now - m_mistSunPrevClock >= 30.0) {
         if (!first) m_mistSunTrend = sunUp - m_mistSunPrev;

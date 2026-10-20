@@ -336,8 +336,7 @@ void Device::UpdateSkyModel()
         for (int i = 0; i < 3; ++i) m_skyFog[i] += (fog[i] - m_skyFog[i]) * k;
         m_skyFogSet = true;
     }
-    const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
-    const float cloudy = m_cloudParams.enable ? SkyCloudiness() * vary : 0.0f;
+    const float cloudy = CloudCover();
     // (Only an overcast, storms and rain mute the colours: broken cloud covers the sky behind it itself, and muting
     // for it left a fair evening's sunset at half strength.)
     const float overcast = Smoothstep(0.55f, 0.95f, cloudy);
@@ -455,8 +454,7 @@ void Device::UpdateSkyModel()
 void Device::UpdateNightSky()
 {
     const float h = SunUp();
-    const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
-    const float cloudy = m_cloudParams.enable ? SkyCloudiness() * vary : 0.0f;
+    const float cloudy = CloudCover();
     const float clear = (1.0f - 0.7f * Smoothstep(0.55f, 0.95f, cloudy)) * (1.0f - StormSky());
     // (Without the fade - RVK_StarFade off - still none with the sun well up: none would show, and the field costs.)
     const float dark = !SunKnown() ? 1.0f : !m_starFade ? 1.0f - Smoothstep(0.05f, 0.15f, h)
@@ -632,7 +630,7 @@ void Device::DesertAir(float out[2]) const
     out[0] = out[1] = 0.0f;
     if (m_skyZoneLean > -0.15f)
         return;
-    const float cloudy = m_cloudParams.enable ? SkyCloudiness() * std::clamp(m_cloudParams.vary, 0.0f, 1.0f) : 0.0f;
+    const float cloudy = CloudCover();
     const float fair = (1.0f - Smoothstep(0.4f, 0.9f, cloudy)) * (1.0f - StormSky()) * (1.0f - std::clamp(4.0f * m_sand, 0.0f, 1.0f));
     const float h = SunUp();
     out[0] = std::clamp(m_desertAir, 0.0f, 1.0f) * fair * Smoothstep(-0.05f, 0.15f, h);

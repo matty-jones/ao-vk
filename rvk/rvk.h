@@ -1522,6 +1522,12 @@ private:
     float m_skySheets = 1.0f;                    // the game's sheets' strength by the sky (none when clear)
     double SkyClock() const;
     float SkyCloudiness() const;
+    // The sky's cloud cover as the effects take it (0 clear .. 1 overcast): SkyCloudiness x RVK_SkyVary, none without
+    // our clouds.
+    float CloudCover() const
+    {
+        return m_cloudParams.enable ? SkyCloudiness() * std::clamp(m_cloudParams.vary, 0.0f, 1.0f) : 0.0f;
+    }
     void SkyWind(float out[2]) const;
     void UpdateWind();                           // the frame's shared wind (wind.cpp): direction, strength, gusts, clock
     void UpdateLightning();                      // a strike from the game's glow last frame (rain.cpp)

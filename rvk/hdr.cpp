@@ -744,9 +744,7 @@ void Device::LandHaze(float out[24]) const
         // ~15 up -, half as much round sunset (docs/twilight-plan.md).
         float morning = 0.0f;
         {
-            const float l = std::max(std::sqrt(m_trueSunDir[0] * m_trueSunDir[0] + m_trueSunDir[1] * m_trueSunDir[1] +
-                                               m_trueSunDir[2] * m_trueSunDir[2]), 1e-6f);
-            const float up = -m_trueSunDir[1] / l;
+            const float up = SunUp();
             morning = Smoothstep(-0.1f, -0.02f, up) * (1.0f - Smoothstep(0.1f, 0.26f, up)) *
                       (0.5f + 0.5f * m_sunRising) * std::max(m_mornHaze, 0.0f);
         }
