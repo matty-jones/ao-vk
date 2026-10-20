@@ -1,0 +1,30 @@
+#version 450
+// Whether each smoke volume's box shows (rvk smoke.cpp MeasureSmokeShown): the scene's depth on a 16 x 16 grid over
+// the box's rectangle on the screen - some surface there behind the box's nearest point, and the box may show there.
+// None: hidden behind what is in front of it (a chimney behind the houses), simulated as one out of view. One
+// workgroup a volume; the result read by the CPU when this frame slot comes round again.
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(push_constant) uniform Params {
+    vec4 info;          // xy: the scene's size
+    vec4 rect[6];       // each volume's rectangle on the screen (pixels: x0 y0 x1 y1)
+    vec4 nearest[2];    // each volume's nearest depth (0..1, as the depth buffer), 6 of the 8
+} P;
+layout(binding = 0) uniform sampler2D sceneDepth;
+layout(binding = 1) buffer Out { uint shown[8]; } O;
+
+shared uint s_shown;
+
+void main()
+{
+    const uint k = gl_WorkGroupID.x;
+    if (gl_LocalInvocationIndex == 0u) s_shown = 0u;
+    barrier();
+    const vec4 r = P.rect[k];
+    const vec2 p = mix(r.xy, r.zw, (vec2(gl_LocalInvocationID.xy) + 0.5) / 16.0);
+    const ivec2 at = ivec2(clamp(p, vec2(0.0), P.info.xy - 1.0));
+    if (texelFetch(sceneDepth, at, 0).r > P.nearest[k / 4u][k % 4u])
+        atomicOr(s_shown, 1u);
+    barrier();
+    if (gl_LocalInvocationIndex == 0u)
+        O.shown[k] = s_shown;
+}

@@ -31,6 +31,9 @@ using namespace detail;
 
 namespace {
 
+const uint32_t kSmokeSeenSpirv[] = {           // which volumes' boxes show (MeasureSmokeShown)
+#include "smoke_seen.comp.inc"
+};
 const uint32_t kSmokeSimSpirv[] = {
 #include "smoke_sim.comp.inc"
 };
@@ -596,11 +599,175 @@ bool Device::CreateSmokeResources(std::string* error)
            pipeline(kSmokeVertSpirv, sizeof(kSmokeVertSpirv), kSmokeHalfFragSpirv, sizeof(kSmokeHalfFragSpirv),
                     m_smokeLayout, halfFormats, 2, 2, &m_smokeHalfPipeline) &&
            pipeline(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), kSmokeUpFragSpirv, sizeof(kSmokeUpFragSpirv),
-                    m_smokeUpLayout, sceneFormats, 5, 5, &m_smokeUpPipeline);
+                    m_smokeUpLayout, sceneFormats, 5, 5, &m_smokeUpPipeline) &&
+           (CreateSmokeSeen() || true);   // (not fatal: without it a volume behind the houses counts as in view)
+}
+
+// The test of which volumes show (smoke_seen.comp): its pipeline and a result slot a frame in flight. False: none.
+bool Device::CreateSmokeSeen()
+{
+    const VkShaderStageFlags comp = VK_SHADER_STAGE_COMPUTE_BIT;
+    const VkDescriptorSetLayoutBinding b[2] = {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
+                                               {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, comp, nullptr}};
+    VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    li.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    li.bindingCount = 2;
+    li.pBindings = b;
+    VkPushConstantRange push{comp, 0, 16 * 9};
+    VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    pl.setLayoutCount = 1;
+    pl.pSetLayouts = &m_smokeSeenSetLayout;
+    pl.pushConstantRangeCount = 1;
+    pl.pPushConstantRanges = &push;
+    if (vkCreateDescriptorSetLayout(m_device, &li, nullptr, &m_smokeSeenSetLayout) != VK_SUCCESS ||
+        vkCreatePipelineLayout(m_device, &pl, nullptr, &m_smokeSeenLayout) != VK_SUCCESS)
+        return false;
+    VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    mi.codeSize = sizeof(kSmokeSeenSpirv);
+    mi.pCode = kSmokeSeenSpirv;
+    VkShaderModule module;
+    if (vkCreateShaderModule(m_device, &mi, nullptr, &module) != VK_SUCCESS)
+        return false;
+    VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, module, "main",
+                nullptr};
+    ci.layout = m_smokeSeenLayout;
+    const bool ok = vkCreateComputePipelines(m_device, m_pipelineCache, 1, &ci, nullptr, &m_smokeSeenPipeline) == VK_SUCCESS;
+    vkDestroyShaderModule(m_device, module, nullptr);
+    if (!ok)
+        return false;
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    m_smokeSeenStride = std::max<VkDeviceSize>(256, m_props.limits.minStorageBufferOffsetAlignment);
+    bi.size = m_smokeSeenStride * kFramesInFlight;
+    bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    VmaAllocationCreateInfo ac{};
+    ac.usage = VMA_MEMORY_USAGE_AUTO;
+    ac.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    VmaAllocationInfo info{};
+    if (vmaCreateBuffer(m_allocator, &bi, &ac, &m_smokeSeenBuffer, &m_smokeSeenAllocation, &info) != VK_SUCCESS) {
+        m_smokeSeenBuffer = VK_NULL_HANDLE;
+        return false;
+    }
+    m_smokeSeenCpu = static_cast<uint8_t*>(info.pMappedData);
+    for (uint32_t& c : m_smokeSeenCount) c = 0;
+    return true;
+}
+
+void Device::DestroySmokeSeen()
+{
+    if (m_smokeSeenPipeline) { vkDestroyPipeline(m_device, m_smokeSeenPipeline, nullptr); m_smokeSeenPipeline = VK_NULL_HANDLE; }
+    if (m_smokeSeenLayout) { vkDestroyPipelineLayout(m_device, m_smokeSeenLayout, nullptr); m_smokeSeenLayout = VK_NULL_HANDLE; }
+    if (m_smokeSeenSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_smokeSeenSetLayout, nullptr); m_smokeSeenSetLayout = VK_NULL_HANDLE; }
+    if (m_smokeSeenBuffer) { vmaDestroyBuffer(m_allocator, m_smokeSeenBuffer, m_smokeSeenAllocation); m_smokeSeenBuffer = VK_NULL_HANDLE; }
+    m_smokeSeenCpu = nullptr;
+    for (uint32_t& c : m_smokeSeenCount) c = 0;
+}
+
+// This frame slot's last test, its commands done: which of the volumes it measured showed.
+void Device::ReadSmokeShown()
+{
+    uint32_t& count = m_smokeSeenCount[m_frameIndex];
+    if (!count || !m_smokeSeenCpu)
+        return;
+    vmaInvalidateAllocation(m_allocator, m_smokeSeenAllocation, m_smokeSeenStride * m_frameIndex, 32);
+    const uint32_t* shown = reinterpret_cast<const uint32_t*>(m_smokeSeenCpu + m_smokeSeenStride * m_frameIndex);
+    for (uint32_t k = 0; k < count; ++k) {
+        const uint32_t i = m_smokeSeenIndex[m_frameIndex][k];
+        if (i >= m_smokeVolumes.size() || m_smokeVolumes[i].key != m_smokeSeenKey[m_frameIndex][k])
+            continue;                            // (given back since, or another source's now)
+        SmokeVolume& v = m_smokeVolumes[i];
+        v.shownTested = true;
+        if (shown[k]) v.shownFrame = m_frameNumber;
+    }
+    if (m_frameNumber % 600 == 41) {
+        uint32_t hidden = 0;
+        for (uint32_t k = 0; k < count; ++k) hidden += shown[k] ? 0u : 1u;
+        Log("smoke: %u volumes on the screen, %u of them hidden behind the scene (simulated as out of view)", count, hidden);
+    }
+    count = 0;
+}
+
+// Whether each volume's box shows past what stands in front of it (smoke_seen.comp), the scene's depth readable: its
+// rectangle on the screen and its nearest depth. A box round the camera shows (not tested); the sand's isn't.
+void Device::MeasureSmokeShown(VkCommandBuffer cmd, const std::vector<std::pair<float, SmokeVolume*>>& live, uint32_t sw,
+                               uint32_t sh)
+{
+    if (!m_smokeSeenPipeline || !m_smokeSeenCpu)
+        return;
+    struct Push { float info[4], rect[6][4], nearest[2][4]; } push{};
+    push.info[0] = float(sw);
+    push.info[1] = float(sh);
+    const d3d::Matrix vp = MulMatrix(m_view, m_proj);
+    uint32_t n = 0;
+    for (const auto& [dist, v] : live) {
+        if (n >= 6) break;
+        if (v->key == kSandKey) continue;
+        float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f}, nearest = 1.0f;
+        bool around = false;
+        for (int c = 0; c < 8 && !around; ++c) {
+            const float p[3] = {v->corner[0] + (c & 1 ? v->source.size : 0.0f), v->corner[1] + (c & 2 ? v->source.size : 0.0f),
+                                v->corner[2] + (c & 4 ? v->source.size : 0.0f)};
+            float clip[4];
+            for (int j = 0; j < 4; ++j)
+                clip[j] = p[0] * vp.m[0][j] + p[1] * vp.m[1][j] + p[2] * vp.m[2][j] + vp.m[3][j];
+            if (clip[3] < 0.05f) { around = true; break; }
+            const float x = (clip[0] / clip[3] * 0.5f + 0.5f) * float(sw), y = (0.5f - clip[1] / clip[3] * 0.5f) * float(sh);
+            lo[0] = std::min(lo[0], x); lo[1] = std::min(lo[1], y);
+            hi[0] = std::max(hi[0], x); hi[1] = std::max(hi[1], y);
+            nearest = std::min(nearest, clip[2] / clip[3]);
+        }
+        if (around) {                            // (the camera in or at it: shows)
+            v->shownTested = true;
+            v->shownFrame = m_frameNumber;
+            continue;
+        }
+        lo[0] = std::max(lo[0], 0.0f); lo[1] = std::max(lo[1], 0.0f);
+        hi[0] = std::min(hi[0], float(sw)); hi[1] = std::min(hi[1], float(sh));
+        if (lo[0] >= hi[0] || lo[1] >= hi[1]) continue;   // (off the screen: the frustum's test has it)
+        push.rect[n][0] = lo[0]; push.rect[n][1] = lo[1]; push.rect[n][2] = hi[0]; push.rect[n][3] = hi[1];
+        push.nearest[n / 4][n % 4] = std::max(nearest, 0.0f);
+        m_smokeSeenIndex[m_frameIndex][n] = uint32_t(v - m_smokeVolumes.data());
+        m_smokeSeenKey[m_frameIndex][n] = v->key;
+        ++n;
+    }
+    if (!n)
+        return;
+    VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_smokeSeenPipeline);
+    VkDescriptorImageInfo depthInfo{m_pointSampler, m_depthView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorBufferInfo outInfo{m_smokeSeenBuffer, m_smokeSeenStride * m_frameIndex, 32};
+    VkWriteDescriptorSet wr[2] = {};
+    for (uint32_t i = 0; i < 2; ++i) {
+        wr[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wr[i].dstBinding = i;
+        wr[i].descriptorCount = 1;
+    }
+    wr[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wr[0].pImageInfo = &depthInfo;
+    wr[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    wr[1].pBufferInfo = &outInfo;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_smokeSeenLayout, 0, 2, wr);
+    vkCmdPushConstants(cmd, m_smokeSeenLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+    vkCmdDispatch(cmd, n, 1, 1);
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    m_smokeSeenCount[m_frameIndex] = n;
 }
 
 void Device::DestroySmokeResources()
 {
+    DestroySmokeSeen();
     if (g_residual.buffer) { vmaDestroyBuffer(m_allocator, g_residual.buffer, g_residual.allocation); g_residual = SmokeResidual{}; }
     DestroySmokeImages();
     m_smokeVolumes.clear();
@@ -939,6 +1106,7 @@ void Device::StormSmokeWind(float out[3]) const
 void Device::RenderSmoke(VkCommandBuffer cmd)
 {
     const SmokeParams& P = m_smokeParams;
+    ReadSmokeShown();
     const double now = m_frameClock;
     const float dt = m_smokeLastClock < 0.0 ? 0.0f : float(std::clamp(now - m_smokeLastClock, 0.0, 1.0 / 30.0));
     m_smokeLastClock = now;
@@ -1150,7 +1318,10 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
             for (int i = 0; i < 3; ++i) c[i] = v.corner[i] + 0.5f * v.source.size;
             for (int i = 0; i < 3; ++i) e[i] = c[0] * vm[0][i] + c[1] * vm[1][i] + c[2] * vm[2][i] + vm[3][i];
             const float r = 0.87f * v.source.size;
-            return e[2] > -r && pm[0][0] * std::fabs(e[0]) - e[2] <= r * sx && pm[1][1] * std::fabs(e[1]) - e[2] <= r * sy;
+            // (... and showing past what is in front of it lately - a chimney behind the houses isn't: smoke_seen.comp,
+            // the frames it takes to come back to it allowed for.)
+            const bool shown = !v.shownTested || m_frameNumber - v.shownFrame <= 8;
+            return shown && e[2] > -r && pm[0][0] * std::fabs(e[0]) - e[2] <= r * sx && pm[1][1] * std::fabs(e[1]) - e[2] <= r * sy;
         };
         double demand = 0.0, fixed = 0.0;               // (ms a second: the stretchable, the sand's)
         for (size_t i = 0; i < live.size(); ++i) {
@@ -1506,6 +1677,7 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
     m_depthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    MeasureSmokeShown(cmd, live, m_scene->m_width, m_scene->m_height);   // (for the next steps' periods)
     EnsureRingSpace(live.size() * (sizeof(SmokeFrame) + 256) + sizeof(FrameLights) + 1024);
     if (m_frameLightsDirty || m_frameLightsGeneration != m_ringGeneration)
         WriteFrameLights();

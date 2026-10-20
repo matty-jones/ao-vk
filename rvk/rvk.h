@@ -2684,7 +2684,26 @@ private:
                                                  // the same a step before (RGBA16F, written by the simulation's last stage)
         SmokeImage flow;                         // its velocity for the drawing's wisps: half the cells a side, RGBA8
                                                  // (/ kFlowMax)
+        uint64_t shownFrame = 0;                 // the last frame its box showed past what is in front of it
+        bool shownTested = false;                // ... known (smoke_seen.comp; untested: taken as showing)
     };
+    // Which volumes' boxes show (smoke.cpp MeasureSmokeShown, smoke_seen.comp): a slot a frame in flight, read when it
+    // comes round again; the volumes it measured (their index in m_smokeVolumes, their key).
+    VkPipeline m_smokeSeenPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_smokeSeenLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_smokeSeenSetLayout = VK_NULL_HANDLE;
+    VkBuffer m_smokeSeenBuffer = VK_NULL_HANDLE;
+    VmaAllocation_T* m_smokeSeenAllocation = nullptr;
+    uint8_t* m_smokeSeenCpu = nullptr;
+    VkDeviceSize m_smokeSeenStride = 256;
+    uint32_t m_smokeSeenCount[kFramesInFlight] = {};
+    uint32_t m_smokeSeenIndex[kFramesInFlight][6] = {};
+    uint64_t m_smokeSeenKey[kFramesInFlight][6] = {};
+    void MeasureSmokeShown(VkCommandBuffer cmd, const std::vector<std::pair<float, SmokeVolume*>>& live, uint32_t sw,
+                           uint32_t sh);
+    void ReadSmokeShown();
+    bool CreateSmokeSeen();
+    void DestroySmokeSeen();
     SmokeParams m_smokeParams;
     // Clouds (clouds.cpp).
     struct CloudPuff {

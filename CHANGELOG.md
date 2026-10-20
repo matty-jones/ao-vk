@@ -155,8 +155,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   about once per pixel instead of once per layer (only trees with ao-vk's own leaf art did before). In a demo forest
   the leaves cost about 40% less; their look is unchanged.
 - Faster where water or smoke is near but not in view: water out of the camera's view is no longer drawn (about
-  1.5 ms a frame with a lake behind you), and smoke out of view is simulated a sixth as often, still evolving, still
-  there when you turn round (about half a millisecond with a few chimneys behind you).
+  1.5 ms a frame with a lake behind you), and smoke out of view - or hidden behind the houses in front of it - is simulated a sixth as often, still
+  evolving, still there when you turn round (about half a millisecond with a few chimneys out of sight).
 - Nights are lighter by default (`RVK_Darkness` 0.5): the land and the night sky keep more of the blue hour's light,
   the moon lights a little more, and storms are less dark. Rooms and other places without a sun no longer get the
   night's darkening on top of their own dim light. Set `RVK_Darkness` to 1 for the old look.

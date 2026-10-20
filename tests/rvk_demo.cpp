@@ -2770,6 +2770,7 @@ bool g_hudSprite = false;         // --hud-sprite: after the 3D, a screen sprite
                                   // and an untextured MODULATE(TEXTURE, DIFFUSE) bar below it: 0x8040C0, not black
 bool g_waterPool = false;         // --water-pool: the lake's water only a 6 x 6 pool in front (Jobe's harbour: no water
                                   // may spread beyond it - the rest of the bowl stays dry)
+bool g_smokeWall = false;         // --smoke-wall: an opaque wall right ahead of the lake's camera (hidden smoke)
 bool g_waterWall = false;         // --water-wall: a steep sheet of the water mesh standing in the lake (a fall)
 bool g_waterShelf = false;        // --water-shelf: the mesh terraced - the surface with a lower shore shelf in front
                                   // (as Anarchy Online hangs its aprons), which used to render as a "mountain of water"
@@ -3321,6 +3322,19 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
             dev.SetDrawVisual(uint32_t(VisualKind::Character), "swimmer");
             dev.DrawPrimitive(TriangleList, kFvfMesh, cv.data(), uint32_t(cv.size()));
             dev.SetDrawVisual(0, nullptr);
+        }
+        if (g_smokeWall) {                       // (--smoke-wall: an opaque wall right ahead hides all the smoke)
+            const uint32_t grey = 0xFF707070;
+            const VtxMesh wall[6] = {{-80, -10, -18, 0, 0, -1, grey, 0, 0}, {80, -10, -18, 0, 0, -1, grey, 1, 0},
+                                     {80, 80, -18, 0, 0, -1, grey, 1, 1},   {-80, -10, -18, 0, 0, -1, grey, 0, 0},
+                                     {80, 80, -18, 0, 0, -1, grey, 1, 1},   {-80, 80, -18, 0, 0, -1, grey, 0, 1}};
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+            dev.SetTexture(0, nullptr);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.DrawPrimitive(TriangleList, kFvfMesh, wall, 6);
         }
         // The water, last of the opaque scene (the game draws it from its sorted list after the solid world).
         dev.SetRenderState(RS_LIGHTING, 0);
@@ -4707,6 +4721,7 @@ int main(int argc, char** argv)
         else if (a == "--water-lake") { g_waterScene = 1; hdr = true; }
         else if (a == "--water-coast") { g_waterScene = 2; hdr = true; }
         else if (a == "--water-wall") g_waterWall = true;
+        else if (a == "--smoke-wall") g_smokeWall = true;
         else if (a == "--water-mesh" && i + 1 < argc) g_waterMesh = argv[++i];
         else if (a == "--water-lamp") g_waterLamp = true;
         else if (a == "--smoke") { g_smoke = true; hdr = true; }
