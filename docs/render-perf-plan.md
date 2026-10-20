@@ -340,7 +340,12 @@ wow64 ~17%, GUI.dll 8%, Gamecode.dll 5%, DisplaySystem.dll 5%. No single hot spo
   `Describe` 3.3 -> 1.8% (left: its maps and the attachment walk).
 - `visual::CullLights` 3.2%: the game's loop over every scene light per lit visual. A faster form must keep the
   game's enable / disable order (calllog-ab).
-- The pop-in log (`[Native] PopLog`, a diagnostic) ~1% when on.
+  Second round (fd29145, staged `randy31-gamethread1.dll`): `Describe` keeps each visual's attachment walk while the
+  attachments (now re-indexed only when they change) and its parent stay; `CullLights` asked for no lights among 9+
+  only switches off those on (calllog-ab the same in every scene, `sfxlights` added for it). The full speed-up of
+  `CullLights` would need the lights' positions kept for a frame, but lights carried by characters can move during
+  the render (attractors): decide from its new log line (calls, share asking for none, lights a call).
+- The pop-in log (`[Native] PopLog`, a diagnostic) ~1% when on (the user's ini: off since 2026-10-20).
 - CPU skinning bounds on the game thread (`SkinPositions`, `BoundsOf`) ~1.6%; the mesh-handle map ~0.7%.
 
 ## Phase 5: frame generation (optional, last)
