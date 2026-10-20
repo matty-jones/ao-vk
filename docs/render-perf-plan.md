@@ -328,6 +328,18 @@ The game thread's render lists take 3.9 ms. Native ports (proxy/native) and draw
 are the levers there; this plan doesn't cover them beyond noting when they start to matter: once the `wait for the
 GPU` figure in the `cpu ms` line drops near 0.
 
+### First profile (2026-10-20, outpost by night, 75%, `tools/profile-game.sh 10`)
+
+The game thread is busy all frame (8.0 ms): render lists 4.2, scene update 0.8, interface 0.7, the rest the game's own
+logic. By module: randy31.dll 44% (native ports ~29%, rvk + the proxy ~9%, CRT ~5%), N3.dll 14%, Wine / ntdll /
+wow64 ~17%, GUI.dll 8%, Gamecode.dll 5%, DisplaySystem.dll 5%. No single hot spot; ours, largest first:
+- `scene::Describe` 3.3% (+ `Readable` 0.6% and part of the Wine share): readable checks by `VirtualQuery`, a system
+  call, cleared at every described visual. Fixed in 9652c13 (cached by region); staged `randy31-memcheck1.dll`.
+- `visual::CullLights` 3.2%: the game's loop over every scene light per lit visual. A faster form must keep the
+  game's enable / disable order (calllog-ab).
+- The pop-in log (`[Native] PopLog`, a diagnostic) ~1% when on.
+- CPU skinning bounds on the game thread (`SkinPositions`, `BoundsOf`) ~1.6%; the mesh-handle map ~0.7%.
+
 ## Phase 5: frame generation (optional, last)
 
 Only when Phases 1-3 are done and the user wants more displayed fps:
