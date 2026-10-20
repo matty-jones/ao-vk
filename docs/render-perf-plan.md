@@ -2,7 +2,8 @@
 
 Status: Phase 0 done. Phase 1 (upscaling) built 2026-10-20 on main: `RVK_RenderScale` (default 100) staged as
 `randy31-renderscale1.dll` for the in-game check; 1a-1c and the mip bias are in, 1d's demo checks done (results under
-Phase 1). Phase 2a's night measurement is waiting on the user.
+Phase 1). In game at night 75% gives 101 -> ~125 fps and makes
+the game thread the limit; Phase 2a measured: deferred lights deferred (see 2a result). Next: Phase 4 (CPU).
 
 The goal is a higher frame rate with the same look. This plan covers the GPU work that is left after the October 2026
 performance round, and gives a verdict on each of the rendering techniques the user asked about (deferred lighting,
@@ -158,6 +159,9 @@ Demo, best of 3, RTX 4070 Ti, GPU total in ms:
   are scaled while the scene is the target (`ViewportState`, `SceneRect`). The scene's motion vectors are in scene
   pixels (`FL.screen`). The scene keeps D3D's half-pixel shift in its own pixels, so output pixel i is scene position
   i * scale + jitter (taa.frag `Upscale`).
+- In game (2026-10-20, `randy31-renderscale1.dll`), lamp-lit outpost at night (`timeofday 1`), 1440p, all lights on:
+  100% 101-105 fps (GPU 9.5 ms, waiting for the GPU 3.3 ms a frame); 75% 119-130 fps (GPU 6.3 ms, waiting 0.1 ms).
+  At 75% the game thread is the limit: 8.0 ms a frame, 4.2 of it the game's render lists. No artefacts noticed.
 - Open: frames with no 3D at all (loading screens) draw the interface into the scaled scene, so it is upscaled
   there; in-game fps at the outpost and in a city; whether `RVK_Sharpen` should rise with the scale.
 
@@ -246,6 +250,21 @@ thin-detail shimmer (1d).
   lower now.
 - Decide: if the point lights' share is still above about 2 ms at 1440p (after Phase 1, at the chosen scale), go on
   to 2b. Otherwise stop here and write the result into this plan.
+
+### 2a result (2026-10-20): stop here for now
+
+GPU ms at the outpost by night, 1440p (from the `gpu ms` lines; `lightover` / `pixellight` toggled):
+
+| Render scale | all on | `pixellight 0` | point lights' share |
+| --- | --- | --- | --- |
+| 100 | 9.5 | 6.2 | ~3.3 (per-pixel ~1.9, light override ~1.35) |
+| 75 | 6.3 | 4.4 | ~1.9 |
+| 67 | 5.6 | 3.9-4.8 | ~1.6 |
+
+At the scale worth playing at (75) the share is at the 2 ms line, and the frame is no longer GPU-bound: the game
+thread takes 8 ms while the GPU needs 6.3. A deferred or tiled light pass would lower GPU time without raising the
+frame rate. 2b / 2c wait until the CPU side (Phase 4) brings the game thread under the GPU again, or for players at
+100%.
 
 ### 2b. Screen-tile light lists (clustered, forward)
 

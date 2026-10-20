@@ -694,14 +694,14 @@ void Device::ApplyRenderScale()
     DestroySceneTargets();
     m_renderScale = want;
     if (!CreateSceneTargets() || !EnsureDepth(m_scene->m_width, m_scene->m_height)) {
-        Log("rvk: render scale %u%%: the scene's targets could not be made", want);
+        Log("render scale %u%%: the scene's targets could not be made", want);
         return;
     }
     if (wasScene) m_target = m_scene;
     if (wasMain) m_main = m_scene;
     m_taaFrame = ~0ull;
     m_frameLightsDirty = true;
-    Log("rvk: render scale %u%%: the scene %ux%u of %ux%u", m_renderScale, m_scene->m_width, m_scene->m_height,
+    Log("render scale %u%%: the scene %ux%u of %ux%u", m_renderScale, m_scene->m_width, m_scene->m_height,
         m_width, m_height);
 }
 
