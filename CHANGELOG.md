@@ -191,6 +191,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   2 for the old, nearly black storm) sets how thick and dark they are.
 
 ### Fixed
+- Shiny characters up close (the Kyr'Ozch's armour) showed their shine as flickering speckle: the shine layer is
+  now rounded like the body under it (`RVK_Tess`), so it covers it evenly again.
 - Signs, screens and windows that the game lights itself no longer glow two or three times over when a texture pack
   gives them an emissive map (a clan teleporter's sign came out a blown-out cyan block, its letters lost): the map now
   only says where such a surface glows at night, and `RVK_NightGlow` how much. On other surfaces emissive maps add

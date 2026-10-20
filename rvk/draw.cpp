@@ -914,12 +914,15 @@ bool Device::CharacterDraw(uint32_t fvf, uint32_t vertexCount)
 }
 
 // Phong tessellation of characters (RVK_Tess): the level for this draw, 0 for none. Characters (CharacterDraw) drawn
-// as triangle lists (3-point patches), indexed or not, depth-writing, with normals (the shape follows them), near the
-// camera.
+// as triangle lists (3-point patches), indexed or not, with normals (the shape follows them), near the camera -
+// depth-writing, or a second pass over one with depth EQUAL (the Kyr'Ozch armour's additive shine): left flat, it met
+// the rounded surface under it only here and there, and its shine came out as speckle. The same mesh at the same
+// distance gets the same level and shape.
 float Device::TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount)
 {
+    const bool overPass = !m_rs[d3d::RS_ZWRITEENABLE] && m_rs[d3d::RS_ZFUNC] == d3d::CMP_EQUAL;
     if (m_tessShape <= 0.0f || !m_tessSupported || !m_drawIsCharacter || primitive != d3d::TriangleList ||
-        !m_rs[d3d::RS_ZWRITEENABLE] || !(fvf & d3d::FVF_NORMAL) || vertexCount > 20000)
+        !(m_rs[d3d::RS_ZWRITEENABLE] || overPass) || !(fvf & d3d::FVF_NORMAL) || vertexCount > 20000)
         return 0.0f;
     float c[3], e[3];
     DrawWorldBox(c, e);

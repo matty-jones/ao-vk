@@ -1208,6 +1208,9 @@ bool g_grassFieldOn = false;   // --grass-field: the procedural ground grass (RV
 float g_grassFieldDist = 25.0f;
 float g_grassEven = 1.0f;         // --grass-even E: RVK_GrassEven
 bool g_grassShadow = true;
+int g_shinePass = -1;             // --shine-pass 0|1: the shadow test with a smooth sphere drawn as a character (tessellated
+                                  // with --tess); 1: then an additive red pass over it with depth EQUAL, as the Kyr'Ozch
+                                  // armour's shine
 bool g_uiWindow = false;          // --ui-window: the shadow test with an interface window (the interface layer) and a
                                   // red "mouse pointer" drawn on the frame after it, over the window
 bool g_hideUi = false;            // --hide-ui: the interface hidden (SetHideInterface, Ctrl+Shift+H in game)        // --grass-shadow 0|1: RVK_GrassShadow
@@ -3883,6 +3886,41 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
         dev.SetRenderState(RS_ZWRITEENABLE, 1);
         dev.SetTexture(0, nullptr);
         dev.LightEnable(0, false);
+        if (g_shinePass >= 0) {
+            std::vector<VtxMesh> sv;
+            std::vector<uint16_t> si;
+            const int rings = 16, segs = 24;
+            const float r = 1.6f, cx = -3.0f, cy = 1.8f, cz = -7.0f;
+            for (int i = 0; i <= rings; ++i)
+                for (int j = 0; j <= segs; ++j) {
+                    const float th = kPi * i / rings, ph = 2 * kPi * j / segs;
+                    const float nx = std::sin(th) * std::cos(ph), ny = std::cos(th), nz = std::sin(th) * std::sin(ph);
+                    sv.push_back({cx + r * nx, cy + r * ny, cz + r * nz, nx, ny, nz, 0xFF808080, 0, 0});
+                }
+            for (int i = 0; i < rings; ++i)
+                for (int j = 0; j < segs; ++j) {
+                    const uint16_t a = uint16_t(i * (segs + 1) + j), b = uint16_t(a + segs + 1);
+                    si.insert(si.end(), {a, b, uint16_t(a + 1), uint16_t(a + 1), b, uint16_t(b + 1)});
+                }
+            dev.LightEnable(0, true);                 // (the sun: switched off for what follows)
+            dev.SetDrawVisual(uint32_t(VisualKind::Character), "RCATMesh_t");
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, sv.data(), uint32_t(sv.size()), si.data(), uint32_t(si.size()));
+            if (g_shinePass == 1) {
+                for (VtxMesh& v : sv) v.diffuse = 0xFFFF0000;
+                dev.SetRenderState(RS_ZWRITEENABLE, 0);
+                dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+                dev.SetRenderState(RS_SRCBLEND, BLEND_ONE);
+                dev.SetRenderState(RS_DESTBLEND, BLEND_ONE);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, sv.data(), uint32_t(sv.size()), si.data(), uint32_t(si.size()));
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+                dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+                dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            }
+            dev.SetDrawVisual(0, nullptr);
+            dev.LightEnable(0, false);
+        }
         if (g_uiWindow) {
             // As the game: its windows into the interface layer, then the pointer straight onto the frame.
             dev.SetRenderState(RS_ZENABLE, 0);
@@ -4981,6 +5019,7 @@ int main(int argc, char** argv)
         else if (a == "--upscaler" && i + 1 < argc) upscaler = std::atoi(argv[++i]);
         else if (a == "--frame-gen") frameGen = true;
         else if (a == "--ui-window") g_uiWindow = true;
+        else if (a == "--shine-pass" && i + 1 < argc) g_shinePass = std::atoi(argv[++i]);
         else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
             saturation = float(std::atof(argv[++i])); contrast = float(std::atof(argv[++i]));
