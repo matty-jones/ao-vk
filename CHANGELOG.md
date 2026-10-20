@@ -153,6 +153,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   interface and name labels stay sharp at full size, and loading screens are drawn at full size. It is 75 by default
   and needs TAA on; 100 draws everything at full size as before.
 ### Changed
+- The game's own frame work is lighter in busy places: ao-vk checked memory with a slow system call for nearly every
+  object drawn. At a lamp-lit outpost by night the frame rate went from about 125 to about 140 fps.
 - The ground drawn by ao-vk costs less: it is drawn once instead of in the game's two passes (its texture, then its
   light), with the same look - about 9% of the ground's cost, 0.3-0.4 ms a frame at 1440p where it fills the view.
   `RVK_GroundOne` in randy-vk.ini (1; 0 for the two passes).

@@ -335,6 +335,9 @@ logic. By module: randy31.dll 44% (native ports ~29%, rvk + the proxy ~9%, CRT ~
 wow64 ~17%, GUI.dll 8%, Gamecode.dll 5%, DisplaySystem.dll 5%. No single hot spot; ours, largest first:
 - `scene::Describe` 3.3% (+ `Readable` 0.6% and part of the Wine share): readable checks by `VirtualQuery`, a system
   call, cleared at every described visual. Fixed in 9652c13 (cached by region); staged `randy31-memcheck1.dll`.
+  Result in game, same spot: render lists 4.2 -> 2.4 ms, game thread 8.0 -> 7.2 ms, ~125 -> ~140 fps (the GPU at 6.4
+  ms is nearly the limit again); 115-120 queries a scene update; the Wine share of the game thread 8.1 -> 4.7%,
+  `Describe` 3.3 -> 1.8% (left: its maps and the attachment walk).
 - `visual::CullLights` 3.2%: the game's loop over every scene light per lit visual. A faster form must keep the
   game's enable / disable order (calllog-ab).
 - The pop-in log (`[Native] PopLog`, a diagnostic) ~1% when on.
