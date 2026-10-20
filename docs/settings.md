@@ -95,7 +95,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 
 | Setting | What it does | Values | Default | Notes |
 | --- | --- | --- | --- | --- |
-| `RVK_PbrDebug` | PBR materials: debug view (Ctrl+Shift+K) | 0 / 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 | 0 | ini only; switch `RVK_Pbr` |
+| `RVK_PbrDebug` | PBR materials: debug view (Ctrl+Shift+K) | 0 / 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 | 0 | ini only; switch `RVK_Pbr` |
 | `RVK_ShadowView` | Debug: show the sun shadow map's light (white lit, dark shadowed; tint = cascade) | on / off | off | ini only; knob |
 | `RVK_SceneProf` | Debug: the scene's GPU time and overdraw by kind of draw in the gpu ms log (costs a little; console sceneprof 1) | on / off | off | ini only; knob; was env `RANDYVK_SCENE_PROFILE` |
 | `RVK_Occlusion` | The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws) | on / off | on | ini only |

@@ -109,6 +109,10 @@ void AccumulateLight(Light l, vec3 posW, vec3 normalW, vec3 toEye, float sunScal
     }
 }
 
+// RVK_PbrDebug 11 (ffp_main.glsl): the frame lights the loop below tests at the pixel (after the draw's mask and the
+// light grid's cell) and those whose range reaches it.
+uint gLightsTested = 0u, gLightsReaching = 0u;
+
 // The frame lights (light override) go to diffLocal / specLocal, so they can light beyond the game's clamp.
 void AccumulateLights(vec3 posW, vec3 normalW, float sunScale, float localScale, inout vec3 ambient, inout vec3 diff,
                       inout vec3 spec, inout vec3 diffLocal, inout vec3 specLocal)
@@ -148,6 +152,10 @@ void AccumulateLights(vec3 posW, vec3 normalW, float sunScale, float localScale,
                 // head height a unit or less from the next body, the cube trails it by a frame, and that close the
                 // body's own jaw, arms and wings threw sharp patches across it, jumping as everyone moved.
                 Light l = FL.lights[i];
+                if (FL.pbr2.x > 10.5) {
+                    ++gLightsTested;
+                    if (distance(l.position.xyz, posW) <= l.direction.w) ++gLightsReaching;
+                }
                 if ((C.flags.x & F_CHARACTER) != 0u && l.ambient.w > 0.5) l.spot.z = 0.0;
                 AccumulateLight(l, posW, normalW, toEye, sunScale, localScale, ambient, diffLocal, specLocal);
             }

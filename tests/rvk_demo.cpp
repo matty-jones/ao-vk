@@ -2312,6 +2312,9 @@ bool g_cityNoGrass = false;       // --city-no-grass: without the ground grass (
 bool g_cityNoCull = false;        // --city-no-cull: every object drawn every frame (the game draws what is in view)
 std::string g_cityStatels;        // --city-statels PACK: playfield 790's placed objects (their shadows), the scene moved
                                   // to West Bank's city (1380, 0, 2950) where they stand
+int g_cityLamps = 0;              // --city-lamps N: N lamps more (a lamp-lit outpost has ~90), set each frame as the game
+                                  // sets lights, and handed over as its scene lights: on a jittered grid, 3 to 6 units
+                                  // up, ranges 12-28 (the frame lights' per-pixel cost, docs/render-perf-plan.md)
 
 namespace city {
 struct Vtx { float x, y, z, nx, ny, nz, u, v; };   // FVF 0x112, the game's statics
@@ -2655,6 +2658,33 @@ void RunCityBench(D& dev, int frames, const std::string& shot, const std::string
             l.attenuation1 = 0.1f;
             dev.SetLight(i, l);
             dev.LightEnable(i, true);
+        }
+        if (g_cityLamps > 0) {
+            static std::vector<Device::SceneLight> lamps;
+            if (lamps.empty()) {
+                const int side = int(std::ceil(std::sqrt(float(g_cityLamps))));
+                for (int i = 0; i < g_cityLamps; ++i) {
+                    Light l{};
+                    l.type = LIGHT_POINT;
+                    l.diffuse = {1.0f, 0.8f + 0.1f * Rand(uint32_t(i), 44), 0.55f, 1};
+                    const float gx = (float(i % side) + 0.5f) / float(side) - 0.5f, gz = (float(i / side) + 0.5f) / float(side) - 0.5f;
+                    l.position = {ox + (gx + (Rand(uint32_t(i), 42) - 0.5f) / float(side)) * 120.0f,
+                                  3.0f + 3.0f * Rand(uint32_t(i), 45),
+                                  oz + (gz + (Rand(uint32_t(i), 43) - 0.5f) / float(side)) * 120.0f};
+                    l.range = 12.0f + 16.0f * Rand(uint32_t(i), 46);
+                    l.attenuation0 = 1.0f;
+                    l.attenuation1 = 0.1f;
+                    lamps.push_back({l, 0});
+                }
+            }
+            dev.SetSceneLights(lamps.data(), uint32_t(lamps.size()));
+            // (The frame's lights are the ones the game sets while drawing - rvk CaptureLight: each lamp set once, in
+            // a slot of its own past the 8 the draws use, and switched off again.)
+            for (size_t i = 0; i < lamps.size(); ++i) {
+                dev.SetLight(uint32_t(8 + i), lamps[i].light);
+                dev.LightEnable(uint32_t(8 + i), true);
+                dev.LightEnable(uint32_t(8 + i), false);
+            }
         }
         dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
         dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
@@ -4655,6 +4685,7 @@ int main(int argc, char** argv)
         else if (a == "--bench" && i + 1 < argc) bench = std::atoi(argv[++i]);
         else if (a == "--city-bench") { cityBench = true; hdr = shadows = g_grassFieldOn = true; }
         else if (a == "--city-warm" && i + 1 < argc) g_cityWarm = std::atoi(argv[++i]);
+        else if (a == "--city-lamps" && i + 1 < argc) g_cityLamps = std::atoi(argv[++i]);
         else if (a == "--city-no-grass") g_cityNoGrass = true;
         else if (a == "--city-no-cull") g_cityNoCull = true;
         else if (a == "--city-statels" && i + 1 < argc) g_cityStatels = argv[++i];
@@ -5152,6 +5183,18 @@ int main(int argc, char** argv)
         tdev.SetShadows(shadows);
         tdev.SetHdr(hdr);
         tdev.SetBloom(bloom, 1.0f);
+        // (Only as asked: the bench's baselines were made without.)
+        if (lightOverride) tdev.SetLightOverride(true);
+        if (taa) {
+            tdev.SetTaa(true, sharpen);
+            tdev.SetRenderScale(uint32_t(renderScale));
+        }
+        if (g_pbrDebug) {
+            Device::PbrSettings pbr;
+            pbr.enabled = true;
+            pbr.debug = g_pbrDebug;
+            tdev.SetPbr(pbr);
+        }
         RunCityBench(tdev, frames, shot, dump);
         std::printf("rendered; screenshot %s\n", shot.c_str());
         return 0;

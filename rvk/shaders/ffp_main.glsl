@@ -1186,7 +1186,7 @@ void main()
     // it), blue only a normal map, magenta an albedo map (any draw), orange where an emissive map gives off light.
     // 8: only the emitted light (everything else dark grey). 9: what PBR surfaces reflect (the environment probe
     // or, where it hasn't seen, the analytic sky), at their roughness. 10: two-pass foliage's soft edges (magenta) and
-    // cores (green).
+    // cores (green). 11: the frame lights tested and reaching per pixel.
     uint pbrDebug = uint(FL.pbr2.x + 0.5);
     if (pbrDebug == 7u && (C.vtx.x & 0xEu) != 4u) {
         vec3 tint = gPbrOn ? vec3(0.1, 1.0, 0.2) : (C.flags.x & F_NORMALMAP) != 0u ? vec3(0.15, 0.4, 1.0)
@@ -1195,6 +1195,10 @@ void main()
             tint = vec3(1.0, 0.5, 0.05);
         if (tint.x >= 0.0)
             current.rgb = mix(current.rgb, tint * max(dot(current.rgb, vec3(0.3, 0.59, 0.11)), 0.25) * 1.6, 0.6);
+    } else if (pbrDebug == 11u && (C.flags.x & F_LIGHTING) != 0u) {
+        // 11: the frame lights per pixel (RVK_LightOver) - red how many the loop tests, green how many reach the
+        // pixel, each / 16 (lighting.glsl): red over green is work a tighter light list would save.
+        current.rgb = vec3(float(gLightsTested), float(gLightsReaching), 0.0) / 16.0;
     } else if (pbrDebug == 10u) {
         // 10: two-pass foliage (RVK_FolEdges) - its soft edges, drawn later over the scene, magenta; its cores green;
         // far plants dithered in one pass (RVK_FolDither) cyan.

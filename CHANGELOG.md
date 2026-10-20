@@ -251,6 +251,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ### Diagnostics
+- Debug view 11 (`pbrdebug 11`): how many lamps the lighting tests at each pixel (red) and how many of them reach
+  it (green).
 - A small performance readout in the top left (`RVK_PerfHud`, General; console `perfhud 1`): frames a second, and
   how long the game's thread, the renderer's thread and the GPU each take a frame - the one holding the frame back
   shown in amber.

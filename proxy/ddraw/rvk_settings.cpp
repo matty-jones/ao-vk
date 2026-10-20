@@ -83,7 +83,7 @@ Setting g_settings[] = {
     {"RVK_PbrAo", "Occlusion map strength", "Materials",         Float, 0, 1, 0.1f, 0.1f, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrProbe", "Environment probe", "Materials", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrGlow", "Emissive map brightness", "Materials", Float, 0, 8, 0.25f, 1.75f, nullptr, 0, "RVK_Pbr"},
-    {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 10, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9 10"},
+    {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 11, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9 10 11"},
     {"RVK_Albedo", "Enhanced textures", "Materials",     Bool,  0, 1, 1, 1, nullptr, 0},
 
     {"RVK_GroundOn", "Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0},
