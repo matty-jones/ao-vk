@@ -51,7 +51,14 @@
   scene (`Device::FlushEdges`: when the rendering ends - target switch, copy, flush, scene end - before a clear, and
   before a draw that writes no depth, so effects still come after them). The replay sets each edge's state (cull,
   depth compare, viewport, buffers, per-draw bindings) and goes through `ApplyDynamicState`. With the edges out of the
-  depth, the core is exact for the cut-out pre-pass.
+  depth, the core is exact for the cut-out pre-pass. The edges are depth-tested strictly (LESS), so wherever the
+  plant's own core wrote depth they fail before their shader runs. Past `RVK_FolDither` (20 units; 0 = never), while
+  the TAA is on, such a draw is not split. It is drawn once, with depth (`motion.w` = 3): a pixel is kept, opaque, where
+  its alpha beats a noise value (`FoliageDitherCut`: interleaved gradient noise moved each frame, offset by the
+  pixel's depth so the cards stacked over a pixel don't all keep or drop it together), and the TAA averages the
+  pattern back into the soft edge. The pre-pass uses the same noise, so the crown is lit about once per pixel, not
+  once per layer of edges. Demo forest, 1440p: frame 3.59 ms with every plant two-pass, 3.38 past 30, 3.18 past 15,
+  2.96 with all of them dithered (3.21 with `RVK_FolEdges` off).
 - **Interface refresh rate** (setting `RVK_UiRate`, General; 0 = every frame, the default): GUI.dll's drawing of the
   interface costs the game thread ~1.5 ms a frame (its view tree, and ~1,000 draws). With a rate, the interface is
   drawn only that many times a second into an image of its own, which is put over every frame. `rnative::gui`

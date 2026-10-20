@@ -1046,7 +1046,13 @@ bool Device::SmoothNormalsSkinned(const void* vertices, uint32_t startVertex, ui
 // The current draw is further from the camera than the foliage level of detail's distance (its box's nearest point).
 bool Device::FoliageFar() const
 {
-    if (m_foliageLod <= 0.0f || !m_drawMesh || !m_frameEyeValid || m_target != m_scene)
+    return m_foliageLod > 0.0f && DrawFartherThan(m_foliageLod);
+}
+
+// The current draw's mesh box (its nearest point) is further than `distance` from the camera; false when unknown.
+bool Device::DrawFartherThan(float distance) const
+{
+    if (!m_drawMesh || !m_frameEyeValid || m_target != m_scene)
         return false;
     float c[3], e[3], d2 = 0.0f;
     DrawWorldBox(c, e);
@@ -1054,7 +1060,7 @@ bool Device::FoliageFar() const
         float d = std::max(std::fabs(m_frameEye[j] - c[j]) - e[j], 0.0f);
         d2 += d * d;
     }
-    return d2 > m_foliageLod * m_foliageLod;
+    return d2 > distance * distance;
 }
 
 // The current draw's mesh box in the world: centre and half extents (the model box's centre moved, its half extents
@@ -2260,7 +2266,7 @@ void Device::PushDrawSet(VkCommandBuffer cmd, VkDeviceSize frameLightsOffset, Vk
 
 // Two-pass foliage's second pass: the queued soft edges, drawn now - blended, depth tested, no depth written - over
 // what the scene has become since their cores were drawn. Each is replayed with the state it was drawn with (cull,
-// depth compare, viewport, its buffers and per-draw bindings; its own record, motion.w = 2) through ApplyDynamicState,
+// viewport, its buffers and per-draw bindings; its own record, motion.w = 2) through ApplyDynamicState,
 // which reads that state from the render states and the draw's flags: those are set for it and put back after.
 // The scene's frame-wide bindings (rvk.h): the frame's pushed set - the two arrays (0 = constants, 12 = records) and the
 // shadow maps (5, 6, 9), constant for the frame's command buffer: pushed once, not on every non-extending draw - and
@@ -2319,7 +2325,9 @@ void Device::FlushEdges()
                terrainLight = m_drawTerrainLight;
     m_drawMayDiscard = true;
     m_drawTess = m_drawIsLabel = m_drawBackdrop = m_drawOverbright2x = m_drawTerrainBase = m_drawTerrainLight = false;
-    m_drawPrepassed = true;                      // (LESS as LESSEQUAL: its core's depth may be there)
+    // Depth compared strictly (LESS, whatever the draw had): where the plant's own core wrote its depth the edge has
+    // nothing to draw (alpha from the core up), and fails there before its shader runs rather than after.
+    m_drawPrepassed = false;
     for (const DeferredEdge& e : m_edges) {
         // (Its record in another generation's arena - the ring re-reserved since it was queued: not drawn. And the
         // scene's bindings pushed again if a pass came between - the sky's, the clouds', the interface layer's: the
@@ -2327,7 +2335,7 @@ void Device::FlushEdges()
         // and tables, changing with every interface update - user, 2026-10-19.)
         if (e.ringGeneration != m_ringGeneration)
             continue;
-        const uint32_t values[7] = {e.cull, 1u, 0u, e.zFunc, 1u, d3d::BLEND_SRCALPHA, d3d::BLEND_INVSRCALPHA};
+        const uint32_t values[7] = {e.cull, 1u, 0u, d3d::CMP_LESS, 1u, d3d::BLEND_SRCALPHA, d3d::BLEND_INVSRCALPHA};
         for (int i = 0; i < 7; ++i) m_rs[keys[i]] = values[i];
         m_viewport = e.viewport;
         ApplyDynamicState(e.primitive, e.fvf, e.stride);
@@ -3487,7 +3495,9 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                       (zf == d3d::CMP_LESS || zf == d3d::CMP_LESSEQUAL) && m_rs[d3d::RS_ALPHABLENDENABLE] &&
                       m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_SRCALPHA && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_INVSRCALPHA &&
                       !WaterWritesDepth(fvf);
-        dt.motion[3] = m_drawSplit ? 1.0f : 0.0f;   // its core now (ffp_main.glsl); the edges' record below
+        m_drawDither = m_drawSplit && m_foliageDither > 0.0f && TaaActive() && DrawFartherThan(m_foliageDither);
+        dt.motion[3] = m_drawDither ? 3.0f : m_drawSplit ? 1.0f : 0.0f;   // its core now (ffp_main.glsl); the edges'
+                                                                          // record below
     }
     if (m_drawFoliage) {
         ++m_foliageDraws;
@@ -3726,7 +3736,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         ld.mat[2] &= ~(kMatPbr | kMatAlbedo | kMatEmissive);
         leafRecord = AppendRecord(constIndex, ld);
     }
-    if (m_drawSplit) {                           // the edges, queued: the same draw, its own record (motion.w = 2)
+    if (m_drawSplit && !m_drawDither) {          // the edges, queued: the same draw, its own record (motion.w = 2)
         DrawTransform edge = dt;
         edge.motion[3] = 2.0f;
         DeferredEdge e{};
@@ -3749,7 +3759,6 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         e.smoothBytes = smoothBytes;
         e.viewport = m_viewport;
         e.cull = m_rs[d3d::RS_CULLMODE];
-        e.zFunc = m_rs[d3d::RS_ZFUNC];
         e.ringGeneration = m_ringGeneration;
         m_edges.push_back(e);
     }

@@ -157,6 +157,11 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Faster where water or smoke is near but not in view: water out of the camera's view is no longer drawn (about
   1.5 ms a frame with a lake behind you), and smoke out of view - or hidden behind the houses in front of it - is simulated a sixth as often, still
   evolving, still there when you turn round (about half a millisecond with a few chimneys out of sight).
+- Trees and bushes further than 20 m away cost less. Their leaves are drawn in one pass instead of two: the soft edge
+  of each leaf is a fine dither that the anti-aliasing (TAA) smooths back out, so a crown no longer gets lit once for
+  every layer of leaf edges in it. Closer plants keep the blended edge. In a demo forest the frame cost 10-20% less.
+  `RVK_FolDither` (Plants) sets the distance: 0 never dithers, 1 dithers every plant (cheapest). It has no effect
+  while TAA is off.
 - Nights are lighter by default (`RVK_Darkness` 0.5): the land and the night sky keep more of the blue hour's light,
   the moon lights a little more, and storms are less dark. Rooms and other places without a sun no longer get the
   night's darkening on top of their own dim light. Set `RVK_Darkness` to 1 for the old look.

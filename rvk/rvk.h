@@ -229,6 +229,7 @@ struct DeviceInfo {
     X(GrassPush, m_grassPush, L)                      /* plants bending from characters (0 off) */ \
     X(PlantDetail, m_plantDetail, 0)                  /* plants' big quads split for smooth bending (0 off) */ \
     X(FoliageLod, m_foliageLod, 0)                    /* foliage shaded cheaper past this (units; 0 off) */ \
+    X(FolDither, m_foliageDither, 0)                  /* plants' soft edges dithered past this (units; 0 off) */ \
     X(GrassWidth, m_grassWidth, G)                    /* the grass blades' width, x (baked: rebuilds the tiles) */ \
     X(GrassBright, m_grassBright, 0)                  /* the grass against its ground (1 as bright) */ \
     X(WindStorm, m_windStormScale, 0)                 /* a storm's wind, x (wind.cpp) */ \
@@ -1893,6 +1894,11 @@ private:
     // the cut-out pre-pass too.
     bool m_foliageEdges = true;
     bool m_drawSplit = false;                    // the current draw is two-pass foliage
+    // Two-pass foliage past RVK_FolDither (units from the eye to its box; 0 never), with the TAA on, is drawn once
+    // instead, its soft edges dithered (ffp_main.glsl FoliageDitherCut: the TAA averages them back) - no edges queued.
+    // Close up the soft pass stays: its blend is exact, and the dither's grain could show on a big, near leaf.
+    float m_foliageDither = 20.0f;
+    bool m_drawDither = false;                   // the current two-pass foliage draw is dithered
     struct DeferredEdge {
         uint32_t primitive, fvf, stride, vertexCount, indexCount, record;
         VkDeviceSize vbOffset, ibOffset;
@@ -1900,7 +1906,7 @@ private:
         VkDeviceSize frameLights, prevOffset, prevBytes, smoothOffset, smoothBytes;
         VkBuffer prevBuffer, smoothBuffer;
         d3d::Viewport viewport;
-        uint32_t cull, zFunc;
+        uint32_t cull;
         uint64_t ringGeneration;                 // (its record is in this generation's arena: else dropped)
     };
     std::vector<DeferredEdge> m_edges;
@@ -2970,6 +2976,7 @@ private:
     float m_pointLightScale = 1.0f, m_charLightScale = 1.0f;   // SetPointLightIntensity
     float LightScale(const d3d::Light& l) const;
     bool FoliageFar() const;                  // pieces per 0.3 world units (0 = plants drawn as the game gives them)
+    bool DrawFartherThan(float distance) const;  // the current draw's box beyond `distance` from the camera
     void SubdividePlant(uint32_t& primitive, uint32_t fvf, const detail::FvfLayout& layout, const void*& vertices,
                         uint32_t& vertexCount, const uint16_t*& indices, uint32_t& indexCount);
     float m_drawSway[4] = {};                    // the current draw's sway (for its shadow caster)

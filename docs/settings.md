@@ -15,7 +15,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-321 settings, 154 of them in the settings window.
+322 settings, 155 of them in the settings window.
 
 ## Sections
 
@@ -24,7 +24,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Materials](#materials) (14)
 - [Debug](#debug) (7)
 - [Terrain](#terrain) (22)
-- [Plants](#plants) (37)
+- [Plants](#plants) (38)
 - [Water](#water) (22)
 - [Weather](#weather) (35)
 - [Smoke](#smoke) (12)
@@ -139,6 +139,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PlantDetOn` | Split big plant quads so they bend smoothly | on / off | on | ini only |
 | `RVK_PlantDetail` | Detail (pieces per 0.3 units) | 0.5 .. 2 | 1 | ini only; switch `RVK_PlantDetOn`; game value 0; knob |
 | `RVK_FolEdges` | Soft leaf edges | on / off | on | window; game value off; knob |
+| `RVK_FolDither` | Soft leaf edges dithered (one pass, the TAA smooths them) from this distance (0 never) | 0 .. 150 | 20 | window; switch `RVK_FolEdges`; game value 0; knob |
 | `RVK_FolLodOn` | Cheaper shading of distant foliage | on / off | on | ini only |
 | `RVK_FoliageLod` | From this distance (world units) | 10 .. 150 | 35 | ini only; switch `RVK_FolLodOn`; game value 0; knob |
 | `RVK_GrassOn` | Ground grass | on / off | on | window; game value off |

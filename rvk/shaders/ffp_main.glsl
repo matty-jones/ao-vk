@@ -546,8 +546,19 @@ bool AlphaPass(float a)
 }
 
 // Two-pass foliage (Device::FlushEdges): a blended cut-out is drawn as its core - alpha from here up, with depth - and,
-// later, over the finished scene, its soft edges - below it, without depth (D.motion.w: 1 core, 2 edges, 0 whole).
+// later, over the finished scene, its soft edges - below it, without depth (D.motion.w: 1 core, 2 edges, 0 whole, 3 dithered).
 const float kFoliageCore = 0.95;
+// Far two-pass foliage dithered instead (RVK_FolDither, D.motion.w 3): drawn once, with depth, its soft edges a moving
+// pattern of whole pixels - a pixel kept where its alpha beats the noise there - that the TAA averages back into the
+// soft edge, with no second pass and no layers of edges lit behind each other. The noise is the same in the pre-pass
+// (screen position, the frame's offset) and differs between the cards over a pixel by their depth: else the layers of
+// a crown would all show or all hide together there. Below the plant's cut-out, nothing; from the core up, all.
+float FoliageDitherCut()
+{
+    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + FL.taa.z +
+                    fract(7.31 / gl_FragCoord.w));
+    return max(vCutout, min(n, kFoliageCore));
+}
 
 // Leaves (leaves.cpp; ffp.vert passes vSet0 for a canopy with leaves, D.leaf.w > 0): a leaf is a round sprig - its card
 // fades out towards the rim (vSet0 = where on the card, -1 .. 1), not a square cut through the painted cluster; the
@@ -643,8 +654,8 @@ void main()
     float pa = Cascade(p0, p1, 1.0).a * leafMask;   // (a canopy's thinned cards: none where they are dropped)
     // Where the alpha test passes and, blended (only two-pass foliage's core comes here blended: prepass.cpp), where
     // the core is - its edges write no depth.
-    if (((C.flags.x & F_ALPHATEST) != 0u && !AlphaPass(pa)) ||
-        ((C.flags.x & (F_CUTOUT | F_BLENDED)) != 0u && pa < kFoliageCore))
+    float core = uint(D.motion.w + 0.5) == 3u ? FoliageDitherCut() : kFoliageCore;
+    if (((C.flags.x & F_ALPHATEST) != 0u && !AlphaPass(pa)) || ((C.flags.x & (F_CUTOUT | F_BLENDED)) != 0u && pa < core))
         discard;
 }
 #else
@@ -660,6 +671,7 @@ void main()
         uint split = uint(D.motion.w + 0.5);             // two-pass foliage: the core or the edges only
         if (split == 1u) drop = drop || a < kFoliageCore;
         else if (split == 2u) drop = drop || a >= kFoliageCore;
+        else if (split == 3u) drop = drop || a < FoliageDitherCut();   // (dithered: all of it, once)
     }
     bool q0 = subgroupQuadBroadcast(drop, 0u), q1 = subgroupQuadBroadcast(drop, 1u);
     bool q2 = subgroupQuadBroadcast(drop, 2u), q3 = subgroupQuadBroadcast(drop, 3u);
@@ -1184,10 +1196,12 @@ void main()
         if (tint.x >= 0.0)
             current.rgb = mix(current.rgb, tint * max(dot(current.rgb, vec3(0.3, 0.59, 0.11)), 0.25) * 1.6, 0.6);
     } else if (pbrDebug == 10u) {
-        // 10: two-pass foliage (RVK_FolEdges) - its soft edges, drawn later over the scene, magenta; its cores green.
+        // 10: two-pass foliage (RVK_FolEdges) - its soft edges, drawn later over the scene, magenta; its cores green;
+        // far plants dithered in one pass (RVK_FolDither) cyan.
         uint split = uint(D.motion.w + 0.5);
         if (split == 2u) current.rgb = vec3(1.0, 0.0, 1.0);
         else if (split == 1u) current.rgb = mix(current.rgb, vec3(0.1, 1.0, 0.2), 0.5);
+        else if (split == 3u) current.rgb = mix(current.rgb, vec3(0.1, 0.8, 1.0), 0.5);   // dithered: cyan
     } else if (pbrDebug == 9u && (C.vtx.x & 0xEu) != 4u) {
         current.rgb = gPbrOn ? gPbrEnv : vec3(dot(current.rgb, vec3(0.3, 0.59, 0.11)) * 0.15);
     } else if (pbrDebug == 8u && (C.vtx.x & 0xEu) != 4u) {
@@ -1204,6 +1218,8 @@ void main()
     if ((C.flags.x & F_CUTOUT) != 0u && current.a < vCutout)
         discard;
 #endif
+    if (uint(D.motion.w + 0.5) == 3u)
+        current.a = 1.0;                                  // dithered foliage: what is kept covers (FoliageDitherCut)
     // An additive effect adds what it adds to the scene to the glow too, for the bloom.
 #ifdef RVK_GLOW
     vec3 glow = vec3(0.0);
