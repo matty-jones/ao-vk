@@ -1,4 +1,4 @@
-// The ground drawn from the playfield's own data instead of the game's (docs/native-ground-plan.md, RVK_NativeGround).
+// The ground drawn from the playfield's own data instead of the game's (docs/native-ground-plan.md, RVK_GroundOn).
 //
 // The game's ground (DisplaySystem.dll AnarchyGround_t) rebuilds its triangles on the game's thread as the camera
 // moves and bakes everything past its near ring into blurry pictures. Here the playfield's heights and tiles (handed

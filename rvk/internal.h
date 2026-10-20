@@ -182,12 +182,12 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float terrainLight2[4];        // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
     float terrain3[4];             // ... x: the native ground's tiles blended across their cells' edges
                                    // (RVK_GroundBlend); y the side-loaded height maps' depth, in repeats (RVK_Parallax;
-                                   // 0 off), z its marches' step counts' scale (RVK_ParallaxSteps)
+                                   // 0 off), z its marches' step counts' scale (RVK_DepthSteps)
     float sand[4];                 // the sand (terrain.glsl): x its ripples (RVK_SandRipple), y the dunes lit by the sun
                                    // now (RVK_DuneLight), z its glints (RVK_SandGlint), w the wind's bearing (radians)
     float desert[4];               // a desert's air (Device::DesertAir; tonemap.frag): x its dust (RVK_DesertAir), y the
                                    // heat shimmer (RVK_HeatShimmer), each as much as now; z, w the projection's m00, m11
-    float sand2[4];                // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSmooth); y the
+    float sand2[4];                // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSoft); y the
                                    // footprints' map (sand_prints.cpp): its bindless image + 1 | sampler << 20 (the
                                    // float's bits; 0 = none), z, w its corner (world x, z)
     float pick[4];                 // texture picking (Ctrl+Shift+I): x the native ground's tile flashing + 1 (0: none);

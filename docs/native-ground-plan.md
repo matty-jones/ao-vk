@@ -10,7 +10,7 @@ with its own tile at every distance, geometry built once per playfield, no rebui
 same tiles, turns and light) and on Stret West Bank's real data (its heights, tiles and 6 p.m. lightmap, exported by
 `tools/ground-data.py`: the zone as in game). Not yet run in game. docs/rvk.md, "Native ground".
 
-Setting `RVK_NativeGround` (Terrain; on). Off, or on a playfield it can't read (the `GNDA` format, ground data not as
+Setting `RVK_GroundOn` (Terrain; on). Off, or on a playfield it can't read (the `GNDA` format, ground data not as
 expected), the game's ground draws as before.
 
 ## Approach: the same two passes, from our data

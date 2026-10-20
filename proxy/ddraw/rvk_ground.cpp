@@ -1,4 +1,4 @@
-// The native ground's game side (docs/native-ground-plan.md, RVK_NativeGround): each playfield's ground read from the
+// The native ground's game side (docs/native-ground-plan.md, RVK_GroundOn): each playfield's ground read from the
 // game's own AnarchyGroundData_t when the game first tessellates it (rnative::ground), its tiles' textures made by the
 // game's own loader a few a frame, then handed to rvk (Device::SetNativeGround), which draws it instead of the game's;
 // and the hour's baked lightmap as Gamecode hands it to the ground (AnarchyGround_t::SetShadowMap, its import patched).
@@ -34,7 +34,7 @@ using rvk::NativeGround;
 
 namespace {
 
-bool g_setting = true;              // RVK_NativeGround
+bool g_setting = true;              // RVK_GroundOn
 bool g_shadowHooked = false;
 int g_shadowAttempts = 0;
 
@@ -322,7 +322,7 @@ void GroundFrame()
     }
 }
 
-// RVK_NativeGround.
+// RVK_GroundOn.
 void SetNativeGroundSetting(bool on)
 {
     g_setting = on;

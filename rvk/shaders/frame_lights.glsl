@@ -90,12 +90,12 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 terrainLight2;         // ... xyz b as baked, w how much the slopes follow the sun (RVK_GroundSun; 0 none)
     vec4 terrain3;              // ... x: the native ground's tiles blended across their cells' edges (RVK_GroundBlend);
                                 // y the side-loaded height maps' depth, in repeats (RVK_Parallax; 0 off), z its
-                                // marches' step counts' scale (RVK_ParallaxSteps)
+                                // marches' step counts' scale (RVK_DepthSteps)
     vec4 sand;                  // the sand (terrain.glsl): x its ripples (RVK_SandRipple), y the dunes lit by the sun
                                 // now (RVK_DuneLight), z its glints (RVK_SandGlint), w the wind's bearing (radians)
     vec4 desert;                // a desert's air (rvk Device::DesertAir; tonemap.frag): x its dust (RVK_DesertAir), y
                                 // the heat shimmer (RVK_HeatShimmer), each as much as now; z, w the projection's m00, m11
-    vec4 sand2;                 // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSmooth); y the
+    vec4 sand2;                 // the sand, more (parallax.glsl): x its ripples smoothed (RVK_RippleSoft); y the
                                 // footprints' map (rvk sand_prints.cpp): its bindless image + 1 | sampler << 20 (the
                                 // float's bits; 0 = none), z, w its corner (world x, z)
     vec4 pick;                  // texture picking (Ctrl+Shift+I): x the native ground's tile flashing + 1 (0: none);

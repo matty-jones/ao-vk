@@ -750,7 +750,7 @@ void main()
                 const uint face = terrain.rock ? TerrainRockImage(1) : D.texIdx.w;
                 n = TerrainNormalMap(n, texImages[D.texIdx.w], top, texImages[face], terrain.rock ? FL.terrainRock2.w : top,
                                      terrain);
-                // (On sand the tile's own relief less, by RVK_RippleSmooth: under the ripples its lumps were noise
+                // (On sand the tile's own relief less, by RVK_RippleSoft: under the ripples its lumps were noise
                 // between the crests.)
                 if (ground.sand > 0.0) n = mix(n, unbumped, 0.83 * clamp(FL.sand2.x, 0.0, 1.0) * clamp(ground.sand, 0.0, 1.0));
                 n = SandRippleNormal(n, ground, terrain.uv[0]);   // (the sand's ripples: parallax.glsl)

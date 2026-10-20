@@ -13,7 +13,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - The darkest places no longer go near black: when the land shows darker than `RVK_Darkness` allows (a night
   thunderstorm, a cave, a dim basement), the picture brightens over a couple of seconds, as eyes adapt to the dark.
   At `RVK_Darkness` 2 it never does. `RVK_DarkFloor` in randy-vk.ini (1; 0 for none) sets how much.
-- The ground is drawn by ao-vk itself (`RVK_NativeGround`, on): every patch of land shows its own textures out to the
+- The ground is drawn by ao-vk itself (`RVK_GroundOn`, on): every patch of land shows its own textures out to the
   horizon instead of the game's blurry baked pictures past a short ring, and walking no longer makes the game rebuild
   the ground (no stutter, less memory). Cliffs, rock, shadows, mist and wet ground work on it as before, and texture
   packs' ground maps too. Turn it off to get the game's own ground back.
@@ -30,7 +30,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   rock around them and lit and shadowed like the ground (`RVK_GroundRocks`, 1; 0 for none, up to 2 for twice as
   many). Meadows, roads and towns are left clear.
 - Small loose stones lie on flat dirt, gravel and sand near you, grey on gravel and the colour of the ground on dirt,
-  each its own shade, and grow out of the ground as you walk towards them instead of popping in (`RVK_GroundPebble`,
+  each its own shade, and grow out of the ground as you walk towards them instead of popping in (`RVK_Pebbles`,
   1; 0 for none, up to 2 for twice as many). Grass, roads, trails, slabs and concrete stay clear; which ground gets them can
   be set by hand per playfield in `randy-vk\terrain\pebbles.tsv` (playfield, surface type, how many). On desert
   sand only a few lie about, in the sand's own colour.
@@ -40,7 +40,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   crests wander and break off, up close they have real depth with sand settled in the troughs, and in a low sun each
   crest throws its shadow over the next (`RVK_SandRipple`, 1; 0 for none). The wind's larger ripples carry them out to
   the dunes in the distance, which no longer look like smooth felt. The grit of other ground is left off sand.
-  How smooth they are is its own setting (`RVK_RippleSmooth`, 0.3; 0 for more wobble in their crests and the sand
+  How smooth they are is its own setting (`RVK_RippleSoft`, 0.3; 0 for more wobble in their crests and the sand
   texture's own bumps under them, 1 for the smoothest).
 - Dunes are shaped by the sun as it stands: their far sides fall into shade, a little cooler, even at noon, where the
   game's light left them almost as bright as the sunny side (`RVK_DuneLight`, 0.6; 0 for the game's flat light).
@@ -55,7 +55,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   depth, bricks and stones standing out of the surface with shadows between them (`RVK_Parallax`, 1, under normal maps;
   0 for flat). This works on buildings and on ground tiles alike. The sand's ripples have their own depth
   (`RVK_RippleDepth`, 1, up to 3): looking along a dune their crests hide the troughs behind them, out to about 45 units. How finely the
-  depth is traced is its own setting (`RVK_ParallaxSteps`, 1; down to 0.5 for speed, up to 3 for sharper edges when
+  depth is traced is its own setting (`RVK_DepthSteps`, 1; down to 0.5 for speed, up to 3 for sharper edges when
   looking along the ground).
 - Different ground textures side by side (gravel beside dirt, where the game has no transition tile) blend into each
   other along a ragged edge instead of meeting in a hard straight line along the ground's grid (`RVK_GroundBlend`, 1;

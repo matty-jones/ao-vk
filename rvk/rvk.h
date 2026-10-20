@@ -686,9 +686,9 @@ public:
         float cliff = 1.0f, tiling = 1.0f, variation = 1.0f, round = 0.6f, depth = 0.4f, grain = 0.6f, blend = 1.0f;
         bool rock = true;
         float parallax = 1.0f;                   // RVK_Parallax: side-loaded height maps' depth, x
-        float parallaxSteps = 1.0f;              // RVK_ParallaxSteps: its marches' step counts, x
+        float parallaxSteps = 1.0f;              // RVK_DepthSteps: its marches' step counts, x
         float ripple = 1.0f, dune = 0.6f, glint = 0.5f;   // the sand: RVK_SandRipple, RVK_DuneLight, RVK_SandGlint
-        float smooth = 0.3f;                     // ... RVK_RippleSmooth
+        float smooth = 0.3f;                     // ... RVK_RippleSoft
         float rippleDepth = 1.0f;                // ... RVK_RippleDepth: their depth up close, x
         float prints = 1.0f;                     // ... RVK_SandPrints: footprints' depth, x (sand_prints.cpp)
     };
@@ -696,7 +696,7 @@ public:
     // A footprint at world x, z, heading dx, dz (unit), stamped at the next frame (sand_prints.cpp; the characters'
     // own come from the grass's trail, UpdatePushTrail - this for tests).
     void AddSandPrint(float x, float z, float dx, float dz) { m_printsNew.push_back({x, z, dx, dz}); }
-    // The ground drawn by rvk from the playfield's data instead of the game's (native_ground.cpp, RVK_NativeGround): its
+    // The ground drawn by rvk from the playfield's data instead of the game's (native_ground.cpp, RVK_GroundOn): its
     // data (null: the game's own), the baked lightmap of the hour as the game hands it over (4-bit texels, two to a
     // byte, the high nibble first; (w + 1) / 2 bytes a row) with its shade, and on / off.
     void SetNativeGround(std::shared_ptr<const NativeGround> ground);
@@ -705,7 +705,7 @@ public:
     void SetNativeGroundAo(float strength) { m_native.ao = strength; }
     void SetNativeGroundSun(float strength) { m_native.sun = strength; }
     void SetNativeGroundRocks(float density);
-    // RVK_GroundPebble: pebbles on flat dirt, gravel and sand near the eye (ground_pebbles.cpp; 0 none, 1, 2 twice as
+    // RVK_Pebbles: pebbles on flat dirt, gravel and sand near the eye (ground_pebbles.cpp; 0 none, 1, 2 twice as
     // many); and the hand table of which surface types get them (randy-vk\terrain\pebbles.tsv; null none).
     void SetNativeGroundPebbles(float density);
     void SetPebbleTablePath(const char* path);
@@ -1147,7 +1147,7 @@ private:
         bool clutter = false;                    // the rocks are drawing (ground_clutter.cpp)
         bool tessPatch = false;                  // the patch drawing is near enough to be tessellated (DrawNativeGround)
         uint32_t rocksMade = 0;
-        float pebbles = 1.0f;                    // RVK_GroundPebble
+        float pebbles = 1.0f;                    // RVK_Pebbles
         std::shared_ptr<const PebbleTable> pebbleTable;   // (made once a playfield, its tiles uploaded)
         uint32_t pebbleTries = 0;
         std::unordered_map<uint32_t, PebbleBlock> pebbleBlocks;   // by block (z x blocks across + x)

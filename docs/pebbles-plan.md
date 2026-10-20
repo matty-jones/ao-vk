@@ -78,7 +78,7 @@ and the Perpetual Wastelands use the same tile textures.
    unused coordinate), and the ground's light. Shadows: none for pebbles under ~0.1 (contact shading in the lighting
    pass instead, or nothing), cast for the bigger stones. Grass capture, mist and terrain-sun heights exclude them as
    they exclude the rocks.
-7. **Setting.** `RVK_GroundPebble` (Terrain; 0..2 density, 1 by default; 0 none), hot-reloaded: blocks made again
+7. **Setting.** `RVK_Pebbles` (Terrain; 0..2 density, 1 by default; 0 none), hot-reloaded: blocks made again
    (as `SetNativeGroundRocks`). kVanilla entry 0.
 
 ## Not in this plan

@@ -72,7 +72,7 @@ Setting g_settings[] = {
     {"RVK_NormalMaps", "Normal maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_NormalStr", "Strength", "Materials",         Float, 0.1f, 4, 0.1f, 1, nullptr, 0, "RVK_NormalMaps"},
     {"RVK_Parallax", "Depth: textures with a height map (_h.png) stand out of the surface up close (0 = flat)", "Materials", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_NormalMaps"},
-    {"RVK_ParallaxSteps", "Depth detail: how finely the depth is traced (more: sharper edges at flat views, slower)", "Materials", Float, 0.5f, 3, 0.25f, 1, nullptr, 0, "RVK_NormalMaps"},
+    {"RVK_DepthSteps", "Depth detail: how finely the depth is traced (more: sharper edges at flat views, slower)", "Materials", Float, 0.5f, 3, 0.25f, 1, nullptr, 0, "RVK_NormalMaps"},
     {"RVK_Pbr", "PBR materials", "Materials", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PbrSpec", "Highlights", "Materials",         Float, 0, 2, 0.1f, 0.5f, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrEnv", "Reflections", "Materials",         Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Pbr"},
@@ -83,21 +83,21 @@ Setting g_settings[] = {
     {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 10, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9 10"},
     {"RVK_Albedo", "Enhanced textures", "Materials",     Bool,  0, 1, 1, 1, nullptr, 0},
 
-    {"RVK_NativeGround", "Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0},
-    {"RVK_GroundAo",   "Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none)", "Terrain", Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_GroundSun",  "Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_GroundRocks", "Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_GroundPebble", "Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_SandRipple", "Ground drawn by ao-vk: wind ripples in loose sand, in depth up close (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_SandPrints", "Ground drawn by ao-vk: footprints in loose sand, where characters walk (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_RippleDepth", "Ground drawn by ao-vk: how deep the sand ripples are up close (0 = flat; its own, not Depth's)", "Terrain", Float, 0, 3, 0.1f, 1, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_RippleSmooth", "Ground drawn by ao-vk: the sand ripples smoother - less wobble in their crests, less of the tile's bumps (0 = rough)", "Terrain", Float, 0, 1, 0.1f, 0.3f, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_DuneLight", "Ground drawn by ao-vk: dunes of loose sand shaped by the sun as it stands, their far sides in shade (0 = the game's flat light)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_SandGlint", "Ground drawn by ao-vk: a sparkle of sunlit grains in loose sand near you (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.5f, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_GroundGrain", "Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_GroundBlend", "Ground drawn by ao-vk: neighbouring ground textures blend into each other along a ragged edge instead of meeting in a hard straight line (0 = hard edges)", "Terrain", Float, 0, 1, 0.1f, 1.0f, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_GroundTess", "Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_NativeGround"},
-    {"RVK_CliffDepth", "Ground drawn by ao-vk: cliffs' rock stands out of their faces up close (units; 0 = flat)", "Terrain", Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_NativeGround"},
+    {"RVK_GroundOn", "Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_GroundAo",   "Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none)", "Terrain", Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_GroundSun",  "Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_GroundRocks", "Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_Pebbles", "Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_SandRipple", "Ground drawn by ao-vk: wind ripples in loose sand, in depth up close (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_SandPrints", "Ground drawn by ao-vk: footprints in loose sand, where characters walk (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_RippleDepth", "Ground drawn by ao-vk: how deep the sand ripples are up close (0 = flat; its own, not Depth's)", "Terrain", Float, 0, 3, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_RippleSoft", "Ground drawn by ao-vk: the sand ripples smoother - less wobble in their crests, less of the tile's bumps (0 = rough)", "Terrain", Float, 0, 1, 0.1f, 0.3f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_DuneLight", "Ground drawn by ao-vk: dunes of loose sand shaped by the sun as it stands, their far sides in shade (0 = the game's flat light)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_SandGlint", "Ground drawn by ao-vk: a sparkle of sunlit grains in loose sand near you (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.5f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_GroundGrain", "Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_GroundBlend", "Ground drawn by ao-vk: neighbouring ground textures blend into each other along a ragged edge instead of meeting in a hard straight line (0 = hard edges)", "Terrain", Float, 0, 1, 0.1f, 1.0f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_GroundTess", "Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_CliffDepth", "Ground drawn by ao-vk: cliffs' rock stands out of their faces up close (units; 0 = flat)", "Terrain", Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundFar",  "Ground past that: texture detail (texels a 4 x 4 cell; 8 = the game's, 32 costs a lot of memory)", "Terrain", Choice, 8, 32, 8, 16, nullptr, 0, nullptr, "8 16 32"},
     {"RVK_GroundRange", "Ground drawn at full quality this many times further out (1 = the game's; above 2 the game stutters as you move)", "Terrain", Float, 1, 2.5f, 0.25f, 1.5f, nullptr, 0},
     {"RVK_CliffTex",   "Cliffs: the ground's texture laid on their faces, not stretched down them", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0},
@@ -404,7 +404,7 @@ Setting* Find(const char* name)
 // so switching it back on restores them). Settings not listed here only tune something these switch off.
 struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
-    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_GroundPebble", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
+    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_GroundOn", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_Pebbles", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
@@ -540,6 +540,15 @@ bool ParseIni(const Setting& s, const char* text, float* out)
     *out = v;
     return true;
 }
+
+// Settings renamed (the old name read once if the new one isn't in the ini yet, then dropped from it). Most for the game's
+// option variables, which take at most 15 characters: AOReloaded's settings window leaves a longer name out, so the
+// setting couldn't be changed in game (RVK_NativeGround, the native ground's own switch, among them - 2026-10-20).
+struct Renamed { const char* now; const char* was; };
+const Renamed kRenamed[] = {
+    {"RVK_SmokeThick", "RVK_SmokeDensity"}, {"RVK_GroundOn", "RVK_NativeGround"}, {"RVK_Pebbles", "RVK_GroundPebble"},
+    {"RVK_DepthSteps", "RVK_ParallaxSteps"}, {"RVK_RippleSoft", "RVK_RippleSmooth"},
+};
 
 // randy-vk.ini next to randy31.dll (the client folder).
 void ResolveIniPath()
@@ -761,18 +770,18 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Occlusion")) rnative::occluder::SetHorizonCulling(V(n) != 0.0f);
     else if (is("RVK_DetailRange")) rnative::rings::SetScale(V(n));
     else if (is("RVK_GroundRange")) rnative::ground::SetRange(V(n));
-    else if (is("RVK_NativeGround")) SetNativeGroundSetting(V(n) != 0.0f);
+    else if (is("RVK_GroundOn")) SetNativeGroundSetting(V(n) != 0.0f);
     else if (is("RVK_GroundAo")) { if (g_rvk.device) g_rvk.device->SetNativeGroundAo(V(n)); }
     else if (is("RVK_GroundSun")) { if (g_rvk.device) g_rvk.device->SetNativeGroundSun(V(n)); }
     else if (is("RVK_GroundRocks")) { if (g_rvk.device) g_rvk.device->SetNativeGroundRocks(V(n)); }
-    else if (is("RVK_GroundPebble")) { if (g_rvk.device) g_rvk.device->SetNativeGroundPebbles(V(n)); }
+    else if (is("RVK_Pebbles")) { if (g_rvk.device) g_rvk.device->SetNativeGroundPebbles(V(n)); }
     else if (is("RVK_GroundFar")) rnative::ground::SetFar(int(V(n) + 0.5f));
     else if (is("RVK_ShadowMem")) d->SetShadowMemory(V(n) != 0.0f ? 1u : 0u);
     else if (is("RVK_HillShade")) d->SetHillShade(V(n) != 0.0f);
     else if (is("RVK_CliffTex") || is("RVK_CliffRock") || is("RVK_TileHide") || is("RVK_GroundVary") ||
              is("RVK_GroundTess") || is("RVK_CliffDepth") || is("RVK_GroundGrain") ||
-             is("RVK_GroundBlend") || is("RVK_Parallax") || is("RVK_ParallaxSteps") || is("RVK_SandRipple") ||
-             is("RVK_DuneLight") || is("RVK_SandGlint") || is("RVK_RippleSmooth") || is("RVK_SandPrints") || is("RVK_RippleDepth")) {
+             is("RVK_GroundBlend") || is("RVK_Parallax") || is("RVK_DepthSteps") || is("RVK_SandRipple") ||
+             is("RVK_DuneLight") || is("RVK_SandGlint") || is("RVK_RippleSoft") || is("RVK_SandPrints") || is("RVK_RippleDepth")) {
         rvk::Device::TerrainSettings t;
         t.cliff = V("RVK_CliffTex");
         t.rock = V("RVK_CliffRock") != 0.0f;
@@ -783,11 +792,11 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         t.grain = V("RVK_GroundGrain");
         t.blend = V("RVK_GroundBlend");
         t.parallax = V("RVK_Parallax");
-        t.parallaxSteps = V("RVK_ParallaxSteps");
+        t.parallaxSteps = V("RVK_DepthSteps");
         t.ripple = V("RVK_SandRipple");
         t.dune = V("RVK_DuneLight");
         t.glint = V("RVK_SandGlint");
-        t.smooth = V("RVK_RippleSmooth");
+        t.smooth = V("RVK_RippleSoft");
         t.rippleDepth = V("RVK_RippleDepth");
         t.prints = V("RVK_SandPrints");
         d->SetTerrain(t);
@@ -925,9 +934,10 @@ void Load()
         char buf[64] = "";
         GetPrivateProfileStringA("Renderer", s.name, "", buf, sizeof(buf), g_iniPath);
         inIni.push_back(buf[0] != 0);
-        // (RVK_SmokeThick was RVK_SmokeDensity - 16 characters, one too many for the game's option variables.)
-        if (!buf[0] && std::strcmp(s.name, "RVK_SmokeThick") == 0)
-            GetPrivateProfileStringA("Renderer", "RVK_SmokeDensity", "", buf, sizeof(buf), g_iniPath);
+        // (A setting renamed: its value under the old name, once.)
+        for (const Renamed& r : kRenamed)
+            if (!buf[0] && std::strcmp(s.name, r.now) == 0)
+                GetPrivateProfileStringA("Renderer", r.was, "", buf, sizeof(buf), g_iniPath);
         float read = 0.0f;
         if (buf[0] && !ParseIni(s, buf, &read)) {   // (a NaN a broken slider saved - user, 2026-10-14)
             RvkLog("settings: %s = %s in randy-vk.ini is not a number - its default instead", s.name, buf);
@@ -1008,6 +1018,18 @@ void Load()
     for (Setting& s : g_settings) {
         s.value = Clamp(s, s.value);
         Save(s);                                  // the ini always lists every setting
+    }
+    for (const Renamed& r : kRenamed) {
+        WritePrivateProfileStringA("Renderer", r.was, nullptr, g_iniPath);
+        for (int i = 1; i <= 9; ++i) {           // (and in the presets saved in the ini: AOReloaded's slots)
+            char section[16], text[64] = "";
+            std::snprintf(section, sizeof(section), "Preset %d", i);
+            GetPrivateProfileStringA(section, r.was, "", text, sizeof(text), g_iniPath);
+            if (!text[0])
+                continue;
+            WritePrivateProfileStringA(section, r.now, text, g_iniPath);
+            WritePrivateProfileStringA(section, r.was, nullptr, g_iniPath);
+        }
     }
     g_iniWritten = IniWriteTime();
 }
@@ -1190,7 +1212,7 @@ void LoadLuts(rvk::ThreadedDevice* device)
         device->SetColorLut(i, size[i], size[i] ? data[i].data() : nullptr);
     // The static meshes' ids (ao-assets: python -m aoassets mesh-ids), from the same folder.
     device->LoadMeshIds((dir + "randy-vk\\mesh-ids.bin").c_str());   // (with the material maps: ao-assets writes it there)
-    // Which ground gets pebbles, by hand (RVK_GroundPebble; optional): read when a playfield's ground is classified.
+    // Which ground gets pebbles, by hand (RVK_Pebbles; optional): read when a playfield's ground is classified.
     device->SetPebbleTablePath((dir + "randy-vk\\terrain\\pebbles.tsv").c_str());
 }
 

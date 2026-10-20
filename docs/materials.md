@@ -6,7 +6,7 @@ load):
 | File | What |
 |---|---|
 | `<type>_<id>_n.png` | tangent-space normal map, **OpenGL convention** (+Y = up in the image; Blender's default bake) |
-| `<type>_<id>_h.png` | height map, greyscale (white high): drawn with **parallax** up close - the surface's relief seen in depth, stones and bricks standing out of it with their own shadows (`RVK_Parallax`, 1: the full 0..1 is 4% of a texture repeat deep, 0 off). Kept in the normal map's alpha; without an `_n.png` the normals are made from it. `RVK_ParallaxSteps` (1, 0.5..3) scales the steps it is traced in |
+| `<type>_<id>_h.png` | height map, greyscale (white high): drawn with **parallax** up close - the surface's relief seen in depth, stones and bricks standing out of it with their own shadows (`RVK_Parallax`, 1: the full 0..1 is 4% of a texture repeat deep, 0 off). Kept in the normal map's alpha; without an `_n.png` the normals are made from it. `RVK_DepthSteps` (1, 0.5..3) scales the steps it is traced in |
 | `<type>_<id>_orm.png` | PBR material, glTF packing: **R occlusion, G roughness, B metallic** |
 | `<type>_<id>_r.png`, `_m.png`, `_ao.png` | ... or separate greyscale roughness / metallic / occlusion maps, packed on load (a missing one is roughness 1, metallic 0, occlusion 1); ignored when there is an `_orm.png` |
 | `<type>_<id>_d.png` | albedo (diffuse colour): drawn **instead of** the game's texture wherever it is used, alpha included (cut-outs and shadows use its alpha) |

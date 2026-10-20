@@ -32,7 +32,7 @@ vec2 ParallaxUvStep(vec3 offsetW, vec3 px, vec3 py, vec2 ux, vec2 uy)
 const float kParallaxNear = 14.0, kParallaxFar = 22.0;
 const float kRippleParallaxNear = 30.0, kRippleParallaxFar = 45.0;   // (the sand's ripples: see GroundParallax)
 
-// A march's step count n times RVK_ParallaxSteps (FL.terrain3.z): more is finer - edges sharper at flat views, no
+// A march's step count n times RVK_DepthSteps (FL.terrain3.z): more is finer - edges sharper at flat views, no
 // stepped bands - and slower. At least 2.
 int ParallaxSteps(float n)
 {
@@ -159,7 +159,7 @@ SandRipples SandRipplesAt(vec2 xz, float sand, vec3 px, vec3 py, out vec2 fade)
     // Small: warped by noise at two sizes; broken off in patches.
     const vec2 s1 = vec2(0.6, 0.35);
     const vec3 n1 = RippleNoiseD(q * s1), n2 = RippleNoiseD(q * 2.1 + 7.3), nb = RippleNoiseD(q * 0.11 + 3.1);
-    // (The finer warp less as RVK_RippleSmooth is more - FL.sand2.x: near the ripples' own spacing, at 0.18 it kinked
+    // (The finer warp less as RVK_RippleSoft is more - FL.sand2.x: near the ripples' own spacing, at 0.18 it kinked
     // their crests, noisy - the user's rvk-frame-163429.)
     const float fine = 0.18 * (1.0 - clamp(FL.sand2.x, 0.0, 1.0));
     r.small = q.x + 0.55 * n1.z + fine * n2.z;

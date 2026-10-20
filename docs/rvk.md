@@ -64,7 +64,7 @@
   alpha-blended and additive interface draws; an unblended one keeps its texture's alpha as coverage, one multiplying
   the frame is approximated. Hooks are only made with a rate set; the two entries' code is checked (MSVC's exception
   prologue calling GUI.dll's `_EH_prolog`), so another GUI.dll build is left alone (logged).
-- **Native ground** (setting `RVK_NativeGround`, Terrain; on; `rvk/native_ground.cpp`, `proxy/ddraw/rvk_ground.cpp`,
+- **Native ground** (setting `RVK_GroundOn`, Terrain; on; `rvk/native_ground.cpp`, `proxy/ddraw/rvk_ground.cpp`,
   docs/native-ground-plan.md, docs/ground-format.md): rvk draws the playfield's ground itself, from the game's own
   data, instead of the game's `AnarchyGround_t`. The first time the game tessellates or updates a ground
   (`rnative::ground`'s hooks of `Tesselate` and N3's `n3GroundRenderer_t::RunFunction`, which runs each frame - its
@@ -129,7 +129,7 @@
   times their tops - and with the shadow map their only shading, a low sun's self-shadowing showed hard facets.
   The ground's slopes' turn, too, fades out in a baked shadow). They cast sun shadows (`IsShadowCaster`), aren't tessellated nor seen by
   the grass. Made on worker threads (5-8 ms a patch), 2 patches at a time, within 200 units; small ones drawn within
-  90, dropped past 450. Pebbles (`rvk/ground_pebbles.cpp`, `RVK_GroundPebble`, 1; docs/pebbles-plan.md): on the
+  90, dropped past 450. Pebbles (`rvk/ground_pebbles.cpp`, `RVK_Pebbles`, 1; docs/pebbles-plan.md): on the
   tiles whose surface type (`NativeGround::types`, tile_type_data) is dirt, gravel or sand by its base tile's look
   (`Texture::m_line`, `m_edge`, `m_grain`, measured at upload: straight joints, grain; green and smooth grey none;
   `randy-vk\terrain\pebbles.tsv` sets a playfield's type by hand), and only on the texels of a tile that are that

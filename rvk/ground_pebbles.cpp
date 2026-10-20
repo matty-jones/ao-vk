@@ -1,4 +1,4 @@
-// Pebbles on the native ground (RVK_GroundPebble; docs/pebbles-plan.md): small loose stones on the flat ground that is
+// Pebbles on the native ground (RVK_Pebbles; docs/pebbles-plan.md): small loose stones on the flat ground that is
 // dirt, gravel or sand, near the eye - the rocks (ground_clutter.cpp) lie only where the heights say rock fell.
 //
 // Which ground gets them is read from the tiles' surface types (NativeGround::types, tile_type_data): each type's base
@@ -38,7 +38,7 @@ constexpr float kRange = kPebbleRange;         // world units: pebbles drawn wit
 constexpr float kMake = 44.0f;                 // ... blocks made within this (a block's box)
 constexpr float kDrop = 52.0f;                 // ... and dropped beyond this
 constexpr int kMakeAtOnce = 4;                 // blocks made at a time (on workers) at most
-constexpr float kPerCell = 70.0f;              // pebbles a cell at density 1 (the coarsest gravel), RVK_GroundPebble 1
+constexpr float kPerCell = 70.0f;              // pebbles a cell at density 1 (the coarsest gravel), RVK_Pebbles 1
 // Three sizes, each drawn only as far as it shows (and sunk into the ground over the last quarter of that): grit to
 // 16 units, small stones to 28, the bigger ones to kRange. Drawn out to kRange all, the far grit was a pixel or two of
 // the scene's most expensive shading a stone.
@@ -522,7 +522,7 @@ void Device::DrawNativePebbles(const d3d::Matrix& vp)
     m_native.clutter = false;
 }
 
-// RVK_GroundPebble: how many (0 none, 1 as classified, 2 twice); every block made again.
+// RVK_Pebbles: how many (0 none, 1 as classified, 2 twice); every block made again.
 void Device::SetNativeGroundPebbles(float density)
 {
     if (density == m_native.pebbles) return;

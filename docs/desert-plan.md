@@ -37,7 +37,7 @@ native ground on) shows these problems:
 - `<type>_<id>_h.png` (greyscale, white high) is a new side-loaded map. It is kept in the normal map's alpha (the
   per-draw record has no free slot), and without an `_n.png` the normals are made from the height. A draw whose
   normal map has one is marked `MAT_HEIGHT`.
-- `RVK_ParallaxSteps` (Materials, 1, 0.5..3; `FL.terrain3.z`) scales every march's step count (meshes, tiles,
+- `RVK_DepthSteps` (Materials, 1, 0.5..3; `FL.terrain3.z`) scales every march's step count (meshes, tiles,
   ripples, and their walks towards the sun): fewer for speed, more for sharper edges at flat views.
 - `RVK_Parallax` (Materials, 1) scales the depth: the full 0..1 of the height is 4% of a texture repeat deep. A
   `_h.txt` per texture for its own depth, as first planned, is left for later; one depth for all is enough until a
@@ -58,7 +58,7 @@ native ground on) shows these problems:
   minute; ripples are laid by the winds of months):
   - small ripples 0.36 units apart and 2.8 cm deep (0.7 to 1 of it in patches: down to 0.3, the shallow patches read
     as the ripples' shadows switching off, `rvk-frame-162907`), wandering and forking (warped noise; its finer warp
-    and the tile's own relief on sand both scaled down by `RVK_RippleSmooth`, Terrain, 0.3, `FL.sand2.x`: at 0 both
+    and the tile's own relief on sand both scaled down by `RVK_RippleSoft`, Terrain, 0.3, `FL.sand2.x`: at 0 both
     read as noise, `rvk-frame-163429`), with
     a gentle side into the wind and a steep one away from it;
   - the wind's larger ripples, 5.5 units apart and 6 cm deep, only in patches (a hillside of them in rows read as

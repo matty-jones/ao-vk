@@ -945,7 +945,6 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
         const uint32_t n = g_sandReadback.n;
         const uint16_t* px = static_cast<const uint16_t*>(g_sandReadback.cpu);
         std::string bands;
-        double total = 0.0;
         float most = 0.0f;
         for (uint32_t y = 0; y < n; y += n / 8) {
             double sum = 0.0;
@@ -955,7 +954,6 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
                     sum += d;
                     most = std::max(most, d);
                 }
-            total += sum;
             char b[32];
             std::snprintf(b, sizeof(b), " %.4f", sum / double(n * n));
             bands += b;

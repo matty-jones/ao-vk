@@ -68,7 +68,7 @@ built only after the previous one has been checked in game.
   ground in rvk from that data, on the GPU - every cell its own tile at every distance, no stutter, and the real
   heights for Phase 2's light and Phase 4's clutter. Its plan: docs/native-ground-plan.md.
 - Next, the deserts: loose sand with ripples, dunes lit by the sun now, and the air over them - docs/desert-plan.md.
-- Done: the native ground (`RVK_NativeGround`; docs/native-ground-plan.md) - checked in rvk_demo on synthetic and real
+- Done: the native ground (`RVK_GroundOn`; docs/native-ground-plan.md) - checked in rvk_demo on synthetic and real
   data, not yet in game. Phase 2 (the terrain's light) now builds on its real heights.
 
 ## Phase 0: measure first (a short diagnostic, before writing shaders)

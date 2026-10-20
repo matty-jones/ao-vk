@@ -628,7 +628,7 @@ void Device::AddCoverMesh(uint64_t key, const CachedCaster& e, const void* verti
     for (size_t t = 0; t < triangles; ++t) {
         const size_t base = e.primitive == 4 ? t * 3 : t;
         const size_t before = c.tri.size();
-        if (!(put(base) & put(base + 1) & put(base + 2)))
+        if (!(put(base) && put(base + 1) && put(base + 2)))
             c.tri.resize(before);                // (an index out of range: left out)
     }
     if (c.tri.empty())
