@@ -2490,6 +2490,10 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         DrawPendingGroundBase();
     if (m_native.ground && NativeGroundReplaces(fvf))
         return;
+    // RVK_FrameGen: a 2D draw on the frame after the interface (the mouse pointer) goes on top of the overlay.
+    if (m_fgUiLayer && m_target == m_main && !m_fgTopActive && !m_uiLayerActive && !m_external &&
+        m_interfaceEndFrame == m_frameNumber && IsInterfaceDraw(fvf))
+        FgTopBegin();
     m_drawObject = nullptr;                      // (found below for a static mesh)
     struct ObjectScope {                         // ... and none once the draw is done (DrawWorldBox, FrameLightMask
         Device* d;                               // read it: outside a draw they must work from the matrix)
@@ -2728,7 +2732,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // The interface hidden (screenshots): its draws - pre-transformed, onto the frame or into the interface layer,
     // not while the 3D scene is still being drawn - and the names over characters.
     if (m_hideInterface && !m_external &&
-        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer) &&
+        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer || m_target == m_fgTop) &&
                            !(m_scenePhase && m_target == m_scene))))
         return;
     // A name label in the scene: held back, drawn after the post passes (DrawHeldLabels).

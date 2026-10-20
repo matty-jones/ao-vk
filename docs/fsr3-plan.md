@@ -21,7 +21,11 @@ the console and readout went under the game's interface and were interpolated to
 present). Now one overlay goes to the swapchain: the labels (a layer of their own, drawn as the interface is), the
 interface, the console - with the SDK's double buffering, as it lays the overlay over a generated frame while the
 next is being drawn. Screenshots and the game's Lock read the frame with the labels and interface laid back over
-(`FgComposedFrame`). Staged `randy31-framegen3.dll`.
+(`FgComposedFrame`). Staged `randy31-framegen3.dll`. The overlay first kept the interface pass's alpha (0): the
+interface came out brighter and see-through - its own pass (blend 4) since (`randy31-framegen4.dll`). The mouse
+pointer is drawn on the frame after the interface: it went under the overlay. 2D draws on the frame after the
+interface go into a top layer, over the console (`FgTopBegin`; demo `--shadow-test --ui-window`; staged
+`randy31-framegen5.dll`).
 
 The user asked for FSR 3.1 after FSR 2.2 went in (`RVK_Upscaler` 1, `rvk/fsr2.cpp`, `third_party/fsr2`). FSR 3.1 is
 two things:

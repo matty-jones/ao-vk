@@ -259,6 +259,33 @@ void Device::FgLabelsEnd()
     BeginRenderingOn(m_ldrMain);
 }
 
+// The overlay's top (Draw: the first 2D draw on the frame after the interface), cleared; the draws to the frame go
+// into it to the frame's end (SetRenderTarget, EndFrame), drawn as into the interface layer. False: none (into the
+// frame, as without frame generation).
+bool Device::FgTopBegin()
+{
+    const uint32_t w = m_main->m_width, h = m_main->m_height;
+    if (m_main->m_format != Format::A8R8G8B8)
+        return false;
+    if (!m_fgTop || m_fgTop->m_width != w || m_fgTop->m_height != h) {
+        if (m_fgTop) DestroyTexture(m_fgTop);
+        m_fgTop = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+        if (!m_fgTop)
+            return false;
+    }
+    m_renderEndCause = kEndTarget;
+    EndRendering();
+    m_target = m_fgTop;
+    m_fgTopActive = true;
+    m_cache = StateCache{};                      // (the layer's blend equations differ)
+    BeginRenderingOn(m_fgTop);
+    VkClearAttachment clear{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
+    clear.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkClearRect rect{{{0, 0}, {w, h}}, 0, 1};
+    vkCmdClearAttachments(m_frames[m_frameIndex].main, 1, &clear, 1, &rect);
+    return true;
+}
+
 // An image cleared to transparent black (a render target, left as a colour attachment).
 void Device::ClearImage(VkCommandBuffer cmd, Texture* t)
 {
@@ -290,7 +317,8 @@ Texture* Device::FgComposedFrame(VkCommandBuffer cmd)
                            m_uiLayer->m_width == w && m_uiLayer->m_height == h;
     const bool labels = m_fgLabels && m_fgLabelsFrame == m_frameNumber && m_fgLabels->m_width == w &&
                         m_fgLabels->m_height == h;
-    if (!interface && !labels)
+    const bool top = m_fgTop && m_fgTopFrame == m_frameNumber && m_fgTop->m_width == w && m_fgTop->m_height == h;
+    if (!interface && !labels && !top)
         return nullptr;
     if (!m_fgShot || m_fgShot->m_width != w || m_fgShot->m_height != h) {
         if (m_fgShot) DestroyTexture(m_fgShot);
@@ -306,7 +334,7 @@ Texture* Device::FgComposedFrame(VkCommandBuffer cmd)
     vkCmdCopyImage(cmd, m_main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_fgShot->m_image,
                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     const float none[4] = {};
-    for (Texture* layer : {labels ? m_fgLabels : nullptr, interface ? m_uiLayer : nullptr}) {
+    for (Texture* layer : {labels ? m_fgLabels : nullptr, interface ? m_uiLayer : nullptr, top ? m_fgTop : nullptr}) {
         if (!layer) continue;
         Transition(cmd, layer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         FullscreenPass(cmd, m_fgShot, m_uiCompositePipeline, layer->m_view, layer->m_view, m_pointSampler, none,
@@ -336,16 +364,18 @@ void Device::FgBeforePresent(VkCommandBuffer cmd)
         ffxFsr3ConfigureFrameGeneration(&s.context, &config);
     }
     // The overlay: the interface layer alone when nothing else is over the frame, otherwise put together - the name
-    // labels, the interface, the console - in an image of its own. The swapchain copies it at present (double
+    // labels, the interface, the console, what the game drew after the interface (the mouse pointer) - in an image of
+    // its own. The swapchain copies it at present (double
     // buffering: it lays it over a generated frame later, while the next frame is being drawn into ours).
     const uint32_t w = m_ldrMain->m_width, h = m_ldrMain->m_height;
     const bool interface = m_uiLayer && m_uiLayerReady.load(std::memory_order_relaxed) && !m_hideInterface &&
                            m_uiLayer->m_width == w && m_uiLayer->m_height == h;
     const bool labels = m_fgLabels && m_fgLabelsFrame == m_frameNumber && m_fgLabels->m_width == w &&
                         m_fgLabels->m_height == h;
+    const bool top = m_fgTop && m_fgTopFrame == m_frameNumber && m_fgTop->m_width == w && m_fgTop->m_height == h;
     const bool console = m_consoleH && m_consoleW == w && m_consoleH <= h && m_uiOverlayPipeline;
     Texture* overlay = interface ? m_uiLayer : nullptr;
-    if (labels || console) {
+    if (labels || console || top) {
         if (!m_fgOverlay || m_fgOverlay->m_width != w || m_fgOverlay->m_height != h) {
             if (m_fgOverlay) DestroyTexture(m_fgOverlay);
             m_fgOverlay = CreateImage(w, h, Format::A8R8G8B8, 1, true);
@@ -362,6 +392,11 @@ void Device::FgBeforePresent(VkCommandBuffer cmd)
             }
             if (console)
                 DrawConsole(cmd, m_fgOverlay);
+            if (top) {
+                Transition(cmd, m_fgTop, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                FullscreenPass(cmd, m_fgOverlay, m_uiOverlayPipeline, m_fgTop->m_view, m_fgTop->m_view, m_pointSampler,
+                               none, sizeof(none), true);
+            }
         }
     }
     FfxResource ui{};

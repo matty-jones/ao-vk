@@ -1208,6 +1208,8 @@ bool g_grassFieldOn = false;   // --grass-field: the procedural ground grass (RV
 float g_grassFieldDist = 25.0f;
 float g_grassEven = 1.0f;         // --grass-even E: RVK_GrassEven
 bool g_grassShadow = true;
+bool g_uiWindow = false;          // --ui-window: the shadow test with an interface window (the interface layer) and a
+                                  // red "mouse pointer" drawn on the frame after it, over the window
 bool g_hideUi = false;            // --hide-ui: the interface hidden (SetHideInterface, Ctrl+Shift+H in game)        // --grass-shadow 0|1: RVK_GrassShadow
 float g_grassStyle[5] = {1, 1, 1, 1, 1};   // --grass-style V,F,G,U,T: variety, flowers, glow, gusts, trails (SetGrassStyle)
 float g_grassBenchYaw = 0.0f;  // --grass-bench-yaw R: the bench's camera turned R radians (pi: into the sun)
@@ -3881,6 +3883,26 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
         dev.SetRenderState(RS_ZWRITEENABLE, 1);
         dev.SetTexture(0, nullptr);
         dev.LightEnable(0, false);
+        if (g_uiWindow) {
+            // As the game: its windows into the interface layer, then the pointer straight onto the frame.
+            dev.SetRenderState(RS_ZENABLE, 0);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+            dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+            dev.InterfaceBegin(true);
+            VtxRhwDiffuse window[4] = {{300, 200, 0, 1, 0xE0304060}, {700, 200, 0, 1, 0xE0304060},
+                                       {300, 450, 0, 1, 0xE0304060}, {700, 450, 0, 1, 0xE0304060}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, window, 4);
+            dev.InterfaceEnd();
+            VtxRhwDiffuse pointer[4] = {{480, 300, 0, 1, 0xFFFF2020}, {520, 300, 0, 1, 0xFFFF2020},
+                                        {480, 340, 0, 1, 0xFFFF2020}, {520, 340, 0, 1, 0xFFFF2020}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, pointer, 4);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZENABLE, 1);
+        }
         dev.EndFrame();
         if (frameMs > 0)
             Sleep(DWORD(frameMs));
@@ -4958,6 +4980,7 @@ int main(int argc, char** argv)
         else if (a == "--render-scale" && i + 1 < argc) renderScale = std::atoi(argv[++i]);
         else if (a == "--upscaler" && i + 1 < argc) upscaler = std::atoi(argv[++i]);
         else if (a == "--frame-gen") frameGen = true;
+        else if (a == "--ui-window") g_uiWindow = true;
         else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
             saturation = float(std::atof(argv[++i])); contrast = float(std::atof(argv[++i]));

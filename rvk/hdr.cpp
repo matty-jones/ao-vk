@@ -391,6 +391,7 @@ void Device::DestroyHdrResources()
     if (m_fgLabels) { DestroyTextureNow(m_fgLabels); m_fgLabels = nullptr; }
     if (m_fgOverlay) { DestroyTextureNow(m_fgOverlay); m_fgOverlay = nullptr; }
     if (m_fgShot) { DestroyTextureNow(m_fgShot); m_fgShot = nullptr; }
+    if (m_fgTop) { DestroyTextureNow(m_fgTop); m_fgTop = nullptr; }
     m_uiLayerReady.store(false, std::memory_order_relaxed);
     for (Texture*& t : m_motionTiles)
         if (t) { DestroyTextureNow(t); t = nullptr; }

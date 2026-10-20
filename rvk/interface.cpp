@@ -66,6 +66,7 @@ void Device::InterfaceEnd()
     if (!m_inFrame || !m_uiLayerOpen)
         return;
     m_uiLayerOpen = false;
+    m_interfaceEndFrame = m_frameNumber;
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     if (m_uiLayerActive) {
         m_uiLayerActive = false;

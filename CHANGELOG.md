@@ -157,8 +157,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   50%; FSR 3.1 keeps rain best - at a little more GPU time. ao-vk's own (0) by default.
 - Frame generation (`RVK_FrameGen`, Anti-aliasing, under TAA; console `framegen 1`): AMD FSR 3.1 puts a frame of its
   own between each two the game draws, for about twice the frames on screen, at the cost of a little more delay
-  between your input and the picture. The interface, the names over characters, the console and the performance
-  readout are laid over every frame as they are, so text doesn't smear or wobble (the names keep the drawn frames'
+  between your input and the picture. The interface, the names over characters, the mouse pointer, the console and
+  the performance readout are laid over every frame as they are, so text doesn't smear or wobble (the names keep the drawn frames'
   places). Screenshots show them as before. It works with any `RVK_Upscaler` and render scale. Off by default.
 ### Changed
 - The game's own frame work is lighter in busy places: ao-vk checked memory with a slow system call for nearly every

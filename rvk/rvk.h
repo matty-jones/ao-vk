@@ -1868,7 +1868,8 @@ private:
     // as coverage (draw.cpp).
     bool InLayer() const
     {
-        return (m_uiLayerActive && m_target == m_uiLayer) || (m_fgLabelsActive && m_target == m_fgLabels);
+        return (m_uiLayerActive && m_target == m_uiLayer) || (m_fgLabelsActive && m_target == m_fgLabels) ||
+               (m_fgTopActive && m_target == m_fgTop);
     }
     bool m_sceneSaw3D = false;
     uint32_t m_sceneEndDraw = 0, m_sceneEndFvf = 0;   // frame dumps: where the scene phase ended
@@ -3105,6 +3106,13 @@ private:
     Texture* m_fgOverlay = nullptr;
     bool FgLabelsBegin();
     void FgLabelsEnd();
+    // What the game draws on the frame after its interface - the mouse pointer - into a layer of its own, the overlay's
+    // top (FgTopBegin from Draw; it lasts to the frame's end): drawn into the frame it came out under the interface.
+    Texture* m_fgTop = nullptr;
+    bool m_fgTopActive = false;
+    uint64_t m_fgTopFrame = ~0ull;               // the frame it was drawn in
+    uint64_t m_interfaceEndFrame = ~0ull;        // the frame the interface layer was last ended in (InterfaceEnd)
+    bool FgTopBegin();
     void ClearImage(VkCommandBuffer cmd, Texture* t);
     Texture* m_fgShot = nullptr;
     Texture* FgComposedFrame(VkCommandBuffer cmd);   // the frame as seen, for reading back (null: m_main is)

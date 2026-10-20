@@ -1583,6 +1583,8 @@ void Device::SetRenderTarget(Texture* target)
         target = m_main;
     if (m_uiLayerActive && target == m_main && m_uiLayer)
         target = m_uiLayer;                      // the interface is being drawn into its layer
+    else if (m_fgTopActive && target == m_main && m_fgTop)
+        target = m_fgTop;                        // (frame generation: the overlay's top, to the frame's end)
     if (!target->m_renderTarget || !target->m_image) {
         Log("SetRenderTarget: not a (usable) render target\n");
         return;
@@ -1861,6 +1863,11 @@ void Device::EndFrame()
     Frame& f = m_frames[m_frameIndex];
     m_renderEndCause = kEndScene;
     EndRendering();
+    if (m_fgTopActive) {                         // (frame generation's top layer: done, for the overlay)
+        m_fgTopActive = false;
+        m_fgTopFrame = m_frameNumber;
+        m_target = m_main;
+    }
     ProfileMark("interface");
     double cpu = ProfileCpu();
     UpdateEnvironment(f.main);                   // (the time of day and the weather's light: sky.cpp)
