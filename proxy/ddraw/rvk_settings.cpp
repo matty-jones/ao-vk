@@ -684,16 +684,18 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     auto is = [n](const char* a) { return std::strcmp(n, a) == 0; };
     // Static meshes the game culls cast anyway within the shadows' reach (native mesh.cpp; as the renderer's memory of
     // casters: 1.4 x the shadow distance), meshes under a unit across left out.
+    // The plain settings (rvk.h RVK_FLOAT_KNOBS, RVK_BOOL_KNOBS): one value each, set by name.
+    if (const int knob = rvk::KnobByName(n); knob >= 0) {
+        d->SetKnob(rvk::Knob(knob), V(n));
+        return;
+    }
     if (is("RVK_Enhance")) {                     // every enhancement at its own value or the game's
         for (const Setting& other : g_settings)
             if (&other != &s) Apply(other, d);
     }
-    else if (is("RVK_Prepass")) d->SetDepthPrepass(V(n) != 0.0f);
     else if (is("RVK_UiRate")) SetInterfaceRate(V(n));
-    else if (is("RVK_FolEdges")) d->SetFoliageEdges(V(n) != 0.0f);
     else if (is("RVK_PixelLight")) d->SetPixelLighting(V(n) != 0.0f);
     else if (is("RVK_LightOver")) d->SetLightOverride(V(n) != 0.0f);
-    else if (is("RVK_OwnLight")) d->SetCarrierLit(V(n) != 0.0f);
     else if (is("RVK_Bump")) d->SetBump(V(n));
     else if (is("RVK_NormalMaps") || is("RVK_NormalStr")) d->SetNormalMaps(V("RVK_NormalMaps") != 0.0f, V("RVK_NormalStr"));
     else if (is("RVK_Pbr") || is("RVK_PbrSpec") || is("RVK_PbrEnv") || is("RVK_PbrSsr") || is("RVK_PbrAo") ||
@@ -711,7 +713,6 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         p.albedoMaps = V("RVK_Albedo") != 0.0f;
         d->SetPbr(p);
     }
-    else if (is("RVK_Headroom")) d->SetLightHeadroom(V(n));
     else if (is("RVK_Aniso")) d->SetAnisotropy(uint32_t(V(n)));
     else if (is("RVK_Tess") || is("RVK_TessLevel") || is("RVK_TessDist"))
         d->SetTessellation(V("RVK_Tess"), V("RVK_TessDist"), uint32_t(V("RVK_TessLevel")));
@@ -729,19 +730,10 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_HdrRoom")) d->SetHdrHeadroom(V(n));
     else if (is("RVK_Bloom") || is("RVK_BloomThr")) d->SetBloom(V("RVK_Bloom"), V("RVK_BloomThr"));
     else if (is("RVK_BloomFx")) d->SetEffectGlow(V(n));
-    else if (is("RVK_BloomOcc")) d->SetBloomOverNearer(V(n));
-    else if (is("RVK_BloomWide")) d->SetBloomWide(V(n));
-    else if (is("RVK_NeonSat")) d->SetNeonSat(V(n));
-    else if (is("RVK_Sway")) d->SetSway(V(n));
-    else if (is("RVK_GrassPush")) d->SetGrassPush(V(n));
-    else if (is("RVK_PlantDetail")) d->SetPlantDetail(V(n));
-    else if (is("RVK_FoliageLod")) d->SetFoliageLod(V(n));
     else if (is("RVK_GrassOn") || is("RVK_GrassTex") || is("RVK_GrassDist") || is("RVK_GrassBlades") ||
              is("RVK_GrassHeight"))
         d->SetGrassField(V("RVK_GrassOn") != 0.0f, V("RVK_GrassDist"), V("RVK_GrassBlades"), V("RVK_GrassHeight"),
                          V("RVK_GrassTex") != 0.0f);
-    else if (is("RVK_GrassWidth")) d->SetGrassWidth(V(n));
-    else if (is("RVK_GrassBright")) d->SetGrassBrightness(V(n));
     else if (is("RVK_GrassVary") || is("RVK_GrassFlower") || is("RVK_GrassGlow") || is("RVK_GrassGusts") ||
              is("RVK_GrassTrail"))
         d->SetGrassStyle(V("RVK_GrassVary"), V("RVK_GrassFlower"), V("RVK_GrassGlow"), V("RVK_GrassGusts"),
@@ -771,49 +763,17 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         d->SetLeaves(l);
     }
     else if (is("RVK_Taa") || is("RVK_Sharpen")) d->SetTaa(V("RVK_Taa") != 0.0f, V("RVK_Sharpen"));
-    else if (is("RVK_Fxaa")) d->SetFxaa(V(n) != 0.0f);
-    else if (is("RVK_WindStorm")) d->SetWindStorm(V(n));
-    else if (is("RVK_StormTint")) d->SetStormTint(V(n) != 0.0f);
-    else if (is("RVK_StormFlash")) d->SetStormFlash(V(n) != 0.0f);
-    else if (is("RVK_Lightning")) d->SetLightning(V(n));
     else if (is("RVK_HeatFlash")) d->SetHeatFlash(V(n));
-    else if (is("RVK_RainFog")) d->SetRainFog(V(n));
-    else if (is("RVK_StormGreen")) d->SetStormGreen(V(n));
-    else if (is("RVK_StormThick")) d->SetStormThick(V(n));
-    else if (is("RVK_RainVeils")) d->SetRainVeils(V(n));
-    else if (is("RVK_StormDark")) d->SetStormDark(V(n));
-    else if (is("RVK_RainWet")) d->SetRainWet(V(n));
-    else if (is("RVK_StormBolt")) d->SetStormBolt(V(n));
-    else if (is("RVK_StormDebris")) d->SetStormDebris(V(n));
-    else if (is("RVK_SandHaze")) d->SetSandHaze(V(n));
-    else if (is("RVK_SandBlow")) d->SetSandBlow(V(n));
-    else if (is("RVK_SandProc")) d->SetSandProcedural(V(n) != 0.0f);
-    else if (is("RVK_SandContrast")) d->SetSandContrast(V(n));
-    else if (is("RVK_SandClear")) d->SetSandClear(V(n));
-    else if (is("RVK_SandGusts")) d->SetSandGusts(V(n));
-    else if (is("RVK_SandFog")) d->SetSandFog(V(n));
-    else if (is("RVK_SandSun")) d->SetSandSun(V(n));
-    else if (is("RVK_SandTint")) d->SetSandTint(V(n));
     else if (is("RVK_SandForce") || is("RVK_SandAsh")) d->SetSandForce(V("RVK_SandForce"), V("RVK_SandAsh") != 0.0f);
     else if (is("RVK_Saturation") || is("RVK_Contrast") || is("RVK_Warmth") || is("RVK_NightTint") ||
              is("RVK_Vignette") || is("RVK_LutAmount"))
         d->SetGrading(V("RVK_Saturation"), V("RVK_Contrast"), V("RVK_Warmth"), V("RVK_LutAmount"), V("RVK_NightTint"),
                       V("RVK_Vignette"));
     else if (is("RVK_NeonNight")) rvk_settings::LoadLuts(d);
-    else if (is("RVK_SunSoft")) d->SetSunSoftness(V(n));
     else if (is("RVK_LeafLightOn") || is("RVK_LeafLight")) d->SetLeafLight(V("RVK_LeafLight"));
-    else if (is("RVK_CrownShade")) d->SetCrownShade(V(n));
-    else if (is("RVK_NightGlow")) d->SetNightGlow(V(n));
-    else if (is("RVK_MoonLight")) d->SetMoonLight(V(n));
     else if (is("RVK_Darkness") || is("RVK_DarkFloor")) d->SetDarkness(V("RVK_Darkness"), V("RVK_DarkFloor"));
-    else if (is("RVK_Atmos")) d->SetAtmos(V(n) != 0.0f);
-    else if (is("RVK_Mist")) d->SetMist(V(n));
     else if (is("RVK_FogBanks")) d->SetFogBanks(V(n));
-    else if (is("RVK_MornHaze")) d->SetMornHaze(V(n));
-    else if (is("RVK_DawnLight")) d->SetDawnLight(V(n));
-    else if (is("RVK_Afterglow")) d->SetAfterglow(V(n));
     else if (is("RVK_StarFade")) d->SetStarFade(V(n) > 0.5f);
-    else if (is("RVK_DuskRays")) d->SetDuskRays(V(n));
     else if (is("RVK_HeapCheck")) d->SetHeapCheck(int(V(n) + 0.5f));
     else if (is("RVK_ViewRange")) {
         d->SetViewRange(V(n));
@@ -837,19 +797,14 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Rainbow")) d->SetRainbow(V(n));
     else if (s.type == Colour)                    // (the sky's colour keys)
         d->SetSkyColours(SkyColoursNow());
-    else if (is("RVK_GoldenHour")) d->SetGoldenHour(V(n));
     else if (is("RVK_DesertAir") || is("RVK_HeatShimmer")) d->SetDesertAir(V("RVK_DesertAir"), V("RVK_HeatShimmer"));
     // The game's sun sprites: with RVK_GameSun, or whenever our suns are off (HDR off, RVK_Sun 0) - never no sun.
     else if (is("RVK_Sun") || is("RVK_GameSun")) {
         d->SetSun(V("RVK_Sun"));
         d->SetGameSun(V("RVK_GameSun") != 0.0f || V("RVK_Sun") == 0.0f);
     }
-    else if (is("RVK_SunSize")) d->SetSunSize(V(n));
-    else if (is("RVK_SunBleed")) d->SetSunBleed(V(n));
     else if (is("RVK_Twilight") || is("RVK_SkyGlow") || is("RVK_BlueHour"))
         d->SetTwilight(V("RVK_Twilight"), V("RVK_SkyGlow"), V("RVK_BlueHour"));
-    else if (is("RVK_ShadowView")) d->SetShadowView(V(n) != 0.0f);
-    else if (is("RVK_AlienMap")) d->SetAlienMap(V(n) != 0.0f);
     else if (is("RVK_Occlusion")) rnative::occluder::SetHorizonCulling(V(n) != 0.0f);
     else if (is("RVK_DetailRange")) rnative::rings::SetScale(V(n));
     else if (is("RVK_GroundRange")) rnative::ground::SetRange(V(n));
@@ -860,7 +815,6 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_Pebbles")) { if (g_rvk.device) g_rvk.device->SetNativeGroundPebbles(V(n)); }
     else if (is("RVK_GroundFar")) rnative::ground::SetFar(int(V(n) + 0.5f));
     else if (is("RVK_ShadowMem")) d->SetShadowMemory(V(n) != 0.0f ? 1u : 0u);
-    else if (is("RVK_HillShade")) d->SetHillShade(V(n) != 0.0f);
     else if (is("RVK_CliffTex") || is("RVK_CliffRock") || is("RVK_TileHide") || is("RVK_GroundVary") ||
              is("RVK_GroundTess") || is("RVK_CliffDepth") || is("RVK_GroundGrain") ||
              is("RVK_GroundBlend") || is("RVK_Parallax") || is("RVK_DepthSteps") || is("RVK_SandRipple") ||
@@ -884,7 +838,6 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         t.prints = V("RVK_SandPrints");
         d->SetTerrain(t);
     }
-    else if (is("RVK_Contact")) d->SetContactShadows(V(n));
     else if (is("RVK_Ao") || is("RVK_AoRadius")) d->SetAo(V("RVK_Ao"), V("RVK_AoRadius"));
     else if (is("RVK_Gi") || is("RVK_GiRadius")) d->SetGi(V("RVK_Gi"), V("RVK_GiRadius"));
     else if (std::strncmp(n, "RVK_Ssr", 7) == 0)

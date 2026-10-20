@@ -216,8 +216,77 @@ struct DeviceInfo {
     uint32_t apiVersion = 0;
 };
 
+// The renderer's plain settings (knobs.cpp; docs/audit-2026-10.md §5): each one value a feature reads as it is, set
+// through one path - Device::SetKnob, ThreadedDevice::SetKnob and, from the settings table by name, KnobByName - in
+// place of a setter, a forwarding method and an apply branch each. A new one is a line here: its setting (RVK_ and
+// this name), the member it sets, and what a change must refresh (C the draws' constants, L the frame lights, G the
+// ground grass's tiles).
+#define RVK_FLOAT_KNOBS(X) \
+    X(BloomOcc, m_bloomOverNearer, 0)                 /* the bloom over objects in front of its light (1 unchanged) */ \
+    X(BloomWide, m_bloomWide, 0)                      /* the bloom's wide haze round its core (0 even) */ \
+    X(NeonSat, m_neonSat, L)                          /* coloured light keeps its colour (0: to white) */ \
+    X(Sway, m_sway, C|L)                              /* wind in small plants (0 still) */ \
+    X(GrassPush, m_grassPush, L)                      /* plants bending from characters (0 off) */ \
+    X(PlantDetail, m_plantDetail, 0)                  /* plants' big quads split for smooth bending (0 off) */ \
+    X(FoliageLod, m_foliageLod, 0)                    /* foliage shaded cheaper past this (units; 0 off) */ \
+    X(GrassWidth, m_grassWidth, G)                    /* the grass blades' width, x (baked: rebuilds the tiles) */ \
+    X(GrassBright, m_grassBright, 0)                  /* the grass against its ground (1 as bright) */ \
+    X(WindStorm, m_windStormScale, 0)                 /* a storm's wind, x (wind.cpp) */ \
+    X(Lightning, m_lightning, 0)                      /* our lightning's flash, x (rain.cpp) */ \
+    X(RainFog, m_rainFog, 0)                          /* the rain's mist, x */ \
+    X(StormGreen, m_stormGreen, 0)                    /* a thunderstorm's green cast (0..1) */ \
+    X(StormThick, m_stormThick, 0)                    /* storm clouds' thickness (0.25..2) */ \
+    X(RainVeils, m_rainVeils, 0)                      /* rain veils under the clouds, x */ \
+    X(StormDark, m_stormDark, 0)                      /* a storm hiding the sun from the land, x */ \
+    X(RainWet, m_rainWet, 0)                          /* the ground soaked by rain, x */ \
+    X(StormBolt, m_stormBolt, 0)                      /* our bolts, x (0: the game's) */ \
+    X(StormDebris, m_stormDebris, 0)                  /* a storm's blown debris, x */ \
+    X(SandHaze, m_sandHaze, 0)                        /* a sandstorm's haze, x */ \
+    X(SandBlow, m_sandBlow, 0)                        /* the blowing sand's volume, x */ \
+    X(SandContrast, m_sandContrast, 0)                /* the blowing sand's contrast */ \
+    X(SandClear, m_sandClear, 0)                      /* clear air round the camera in sand (units) */ \
+    X(SandGusts, m_sandGusts, 0)                      /* a sandstorm's distant gusts, x */ \
+    X(SandFog, m_sandFog, 0)                          /* a sandstorm's air as a lit volume (0: a flat haze) */ \
+    X(SandSun, m_sandSun, 0)                          /* the sun through a sandstorm, x */ \
+    X(SandTint, m_sandTint, 0)                        /* the land tinted by a sandstorm's light, x */ \
+    X(SunSoft, m_sunSoftness, L)                      /* sun shadows' softening with distance (0 hard) */ \
+    X(CrownShade, m_crownShade, L)                    /* tree crowns lit as one rounded mass (0..1) */ \
+    X(NightGlow, m_nightGlow, C|L)                    /* windows, signs and screens glowing at night, x */ \
+    X(MoonLight, m_moonLight, C|L)                    /* the moon's light, x (night.cpp) */ \
+    X(Mist, m_mist, 0)                                /* valley mist, x (mist.cpp) */ \
+    X(MornHaze, m_mornHaze, 0)                        /* the haze round sunrise, x (half round sunset) */ \
+    X(DawnLight, m_dawnLight, 0)                      /* a low sun's warm light, cool shade (0: the game's) */ \
+    X(Afterglow, m_afterglow, 0)                      /* the clouds' sunset colours, x */ \
+    X(DuskRays, m_duskRays, 0)                        /* sunset rays, x */ \
+    X(GoldenHour, m_goldenHour, 0)                    /* the golden hour's grade (0 none) */ \
+    X(SunSize, m_sunSize, 0)                          /* the suns' size, x the game's sprites */ \
+    X(SunBleed, m_sunBleed, 0)                        /* the suns' glow through thick cloud (0..1) */ \
+    X(Contact, m_contact, C)                          /* contact shadows' strength */ \
+    X(Headroom, m_lightHeadroom, C|L)                 /* how bright local lights may make a surface (1..2) */
+#define RVK_BOOL_KNOBS(X) \
+    X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
+    X(FolEdges, m_foliageEdges, 0)                    /* plants' soft edges in a second pass */ \
+    X(OwnLight, m_carrierLit, C)                      /* a character's own light lights the character */ \
+    X(Fxaa, m_fxaa, 0)                                /* FXAA while TAA is off */ \
+    X(StormTint, m_stormTint, 0)                      /* the game's storm sheet drawn */ \
+    X(StormFlash, m_stormFlash, 0)                    /* the game's lightning glow drawn */ \
+    X(SandProc, m_sandProcedural, 0)                  /* procedural blowing sand */ \
+    X(Atmos, m_atmos, 0)                              /* the air's scattering (off: the plain land haze) */ \
+    X(ShadowView, m_shadowViewDebug, L)               /* debug: the sun shadow map's light shown */ \
+    X(AlienMap, m_alienMap, 0)                        /* AI missions' map on green */ \
+    X(HillShade, m_hillShade, 0)                      /* the terrain shaded from a low sun */
+enum class Knob : uint32_t {
+#define RVK_KNOB_NAME(name, member, refresh) name,
+    RVK_FLOAT_KNOBS(RVK_KNOB_NAME) RVK_BOOL_KNOBS(RVK_KNOB_NAME)
+#undef RVK_KNOB_NAME
+    Count
+};
+int KnobByName(const char* setting);             // "RVK_Mist" -> Knob::Mist; -1: not a knob
+
 class Device {
 public:
+    // One of the plain settings (Knob, above): a bool knob takes value != 0.
+    void SetKnob(Knob knob, float value);
     Device();
     ~Device();
     Device(const Device&) = delete;
@@ -273,8 +342,6 @@ public:
     // Enhancement, with per-pixel lighting: every lit draw gets the frame's active point / spot lights nearest
     // the camera instead of the (at most 8) the game enabled for it. Directional lights stay as the game set them.
     void SetLightOverride(bool enable) { if (m_lightOverride != enable) { m_lightOverride = enable; m_constantsDirty = true; } }
-    // A character's own light (at head height) lights the character too; it never shadows it either way.
-    void SetCarrierLit(bool enable) { if (m_carrierLit != enable) { m_carrierLit = enable; m_constantsDirty = true; } }
     bool LightOverride() const { return m_lightOverride; }
     // Enhancement: sun shadows (shadow.cpp). strength = how much of the light a shadow takes away (0..1);
     // range = half the width of the shadowed square around the camera, in world units.
@@ -407,12 +474,6 @@ public:
     // With HDR: screen-space reflections - strength (0 = off), reflectivity of water, glossy surfaces, wet ground.
     void SetSsr(float strength, float water, float gloss, float wet)
     { m_ssr = strength; m_ssrWater = water; m_ssrGloss = gloss; m_ssrWet = wet; m_constantsDirty = true; }
-    void SetBloomOverNearer(float keep) { m_bloomOverNearer = keep; }
-    // With HDR, the neon look: how much saturated light above white keeps its colour in the tone mapping (and the
-    // bloom's halo a little more saturated; 0 = to white as before); how much the bloom's wide levels weigh against
-    // its core (0 = all alike as before, 1 = a wide haze - wider still in rain and storms at night).
-    void SetNeonSat(float s) { m_neonSat = s; m_frameLightsDirty = true; }
-    void SetBloomWide(float w) { m_bloomWide = w; }
     // With HDR: colour grading after the tone mapping (grading.cpp). Neutral: 1, 1, 0, any, 0, 0.
     void SetGrading(float saturation, float contrast, float warmth, float lutAmount, float nightTint, float vignette)
     { m_saturation = saturation; m_contrast = contrast; m_warmth = warmth; m_lutAmount = lutAmount;
@@ -427,18 +488,7 @@ public:
     // placement is confirmed against the game's draws, 2 always.
     bool LoadStatels(const char* path, uint32_t playfield);
     void SetStatelMode(uint32_t mode);
-    // Wind for small plants (grass, bushes, flowers): 0 = still.
-    void SetSway(float strength) { m_sway = strength; m_constantsDirty = true; m_frameLightsDirty = true; }
-    void SetWindStorm(float scale) { m_windStormScale = scale; }   // RVK_WindStorm (wind.cpp)
-    void SetStormTint(bool on) { m_stormTint = on; }               // RVK_StormTint (Draw: the game's storm sheet)
-    void SetStormFlash(bool on) { m_stormFlash = on; }             // RVK_StormFlash (Draw: the game's lightning glow)
-    void SetLightning(float s) { m_lightning = s; }                // RVK_Lightning (rain.cpp: our flash, x)
     void TriggerLightning(const float pos[3]);                     // a strike there now (the game's, or a test's)
-    void SetSandHaze(float amount) { m_sandHaze = amount; }        // RVK_SandHaze (wind.cpp)
-    void SetSandBlow(float amount) { m_sandBlow = amount; }        // RVK_SandBlow (smoke.cpp: the sand volume)
-    void SetSandProcedural(bool on) { m_sandProcedural = on; }     // RVK_SandProc (smoke_sim.comp stage 12)
-    void SetSandContrast(float k) { m_sandContrast = k; }          // RVK_SandContrast (smoke.frag)
-    void SetSandClear(float d) { m_sandClear = d; }                // RVK_SandClear (smoke.frag)
     void SetSandForce(float amount, bool ash) { m_sandForce = amount; m_sandAsh = ash; }   // RVK_SandForce, RVK_SandAsh
     // A free camera for debugging (Ctrl+Shift+C, the proxy's keys and mouse; draw.cpp): once a frame, before its draws.
     // On, it starts where the game's camera is; every view the game sets is re-expressed about it.
@@ -452,24 +502,12 @@ public:
     void SetFreeCam(const FreeCamInput& in);
     void SandHaze(float out[8]) const;                             // the tone mapping's sand: dust, dust2
     void SandGusts(float out[16]) const;                           // ... its distant gusts: gust0..3
-    void SetSandGusts(float s) { m_sandGusts = s; }                // RVK_SandGusts
-    void SetSandFog(float s) { m_sandFog = s; }                    // RVK_SandFog (sand_fog.frag, the default; 0: the flat haze)
-    void SetSandSun(float s) { m_sandSun = s; }                    // RVK_SandSun (sand_fog.frag)
-    void SetSandTint(float s) { m_sandTint = s; }                  // RVK_SandTint (tonemap.frag)
     float SandFogThrough(const float eye[3], const float p[3]) const;   // (smoke.cpp)
     // The storm's air in the fog (sand_fog.frag): a sand or ash storm's dust, a thunderstorm's rain mist (RVK_RainFog),
     // or both - how thick at the ground (per unit), the dust's share, the thick layer's scale height, the share of the
     // tall column above (scale height upperHeight). (wind.cpp)
     struct StormAir { float sigma = 0.0f, sandShare = 1.0f, height = 120.0f, upper = 0.3f, upperHeight = 1500.0f; };
     StormAir StormAirNow() const;
-    void SetRainFog(float s) { m_rainFog = s; }                    // RVK_RainFog (x; 0: none)
-    void SetStormGreen(float s) { m_stormGreen = s; }              // RVK_StormGreen (0..1)
-    void SetStormThick(float s) { m_stormThick = s; }              // RVK_StormThick (0.25..2; 1 the default)
-    void SetRainVeils(float s) { m_rainVeils = s; }                // RVK_RainVeils (x; clouds.cpp, cloud_layer.frag Veils)
-    void SetStormDark(float s) { m_stormDark = s; }                // RVK_StormDark (x)
-    void SetRainWet(float s) { m_rainWet = s; }                    // RVK_RainWet (x)
-    void SetStormBolt(float s) { m_stormBolt = s; }                // RVK_StormBolt (x; 0: the game's bolts)
-    void SetStormDebris(float s) { m_stormDebris = s; }            // RVK_StormDebris (x)
     void SetWetNow(float wet, float puddles) { m_wetness = wet; m_puddles = puddles; }   // (tests: soaked already)
     float StormOvercast() const;
     float StormSky() const { return std::clamp(m_stormSky, 0.0f, 1.0f); }   // how much a storm's sky (rain.cpp)
@@ -488,22 +526,6 @@ public:
     void StormGreen(float out[3]) const;
     bool SandFogOn() const { return m_sandFog > 0.0f && ((m_sand > 0.01f && m_sandHaze > 0.0f) || (m_rain + 0.3f * m_stormSky) * m_rainFog > 0.01f); }
     bool SmokeCoverValid() const { return m_smokeHalf && m_smokeHalfFrame == m_frameNumber; }
-    // Grass and plants bending out of the way of characters walking through them (0 = off; scales reach and bend).
-    void SetGrassPush(float strength) { m_grassPush = strength; m_frameLightsDirty = true; }
-    // Plants' big quads split into pieces for smooth bending (0 = off; 1 = pieces about 0.3 units across).
-    void SetPlantDetail(float detail) { m_plantDetail = detail; }
-    // Procedural ground grass (RVK_GrassOn, grass.cpp): blades generated over the terrain near the camera. off by
-    // default; distance is the radius (world units), density the blades per patch, height the blade height.
-    // The blades' width as a multiplier (1 = the built-in width). Baked, so a change rebuilds the tiles.
-    void SetGrassWidth(float width)
-    {
-        if (width != m_grassWidth) {
-            m_grassWidth = width;
-            m_grassDirty = true;
-        }
-    }
-    // The grass's brightness against its ground (1 = as bright as the ground it grows on); per frame, no rebuild.
-    void SetGrassBrightness(float brightness) { m_grassBright = brightness; }
     // The grass's look: variety (clumps, dry and tall patches, colour jitter; baked), flowers (wildflowers, seed heads
     // and broad blades, a multiplier on how many; baked), glow (sunlight through and along the blades: backlit tips,
     // the sheen, the blades' rounded shading), gusts (gusts of wind visible as they sweep the field) and trails
@@ -548,9 +570,6 @@ public:
         m_leaf = s;
         m_frameLightsDirty = true;
     }
-    // RVK_CrownShade: tree and shrub canopies (the game's cards) lit as one rounded crown - their normals bent out from
-    // its centre, darker inside and under, each tree's colour a little its own (ffp.vert), with the leaves off too.
-    void SetCrownShade(float amount) { m_crownShade = amount; m_frameLightsDirty = true; }
     float m_crownShade = 1.0f;
     // RVK_GrassShadow: the blades cast the sun's shadow (into its nearest cascade: onto the ground and each other).
     void SetGrassShadows(bool on) { m_grassShadows = on; }
@@ -582,10 +601,6 @@ public:
         m_shadowSizeWanted = std::clamp<uint32_t>(sun, 512, 8192);
         m_pointShadowSizeWanted = std::clamp<uint32_t>(point, 128, 2048);
     }
-    // Foliage beyond this distance (world units) is shaded more cheaply (0 = off).
-    void SetFoliageLod(float distance) { m_foliageLod = distance; }
-    // Depth pre-pass (prepass.cpp): the scene's opaque draws' depth first, so each pixel is shaded about once.
-    void SetDepthPrepass(bool on) { m_prepassOn = on; }
     // Phong tessellation of characters: shape (0 = off, 1 = fully round), distance, the level up close.
     void SetTessellation(float shape, float distance, uint32_t level)
     {
@@ -603,14 +618,8 @@ public:
     }
     // With HDR: temporal anti-aliasing (jittered scene, resolved against the last frame) and sharpening after it.
     void SetTaa(bool enable, float sharpen) { m_taa = enable; m_sharpen = sharpen; m_frameLightsDirty = true; }
-    void SetFxaa(bool enable) { m_fxaa = enable; }   // FXAA: the anti-aliasing while TAA is off (fxaa.frag)
-    // Sun shadow penumbra growth with blocker distance (0 = hard), sunlight through leaves, night glow of bright
-    // texels on unlit / self-lit surfaces, contact shadows (screen-space, against the sun).
-    void SetSunSoftness(float s) { m_sunSoftness = s; m_frameLightsDirty = true; }
+    // Sunlight through leaves (RVK_LeafLight).
     void SetLeafLight(float s) { m_leafLight = s; m_frameLightsDirty = true; }
-    void SetNightGlow(float s) { m_nightGlow = s; m_frameLightsDirty = true; m_constantsDirty = true; }
-    // The moon's light at night (night.cpp; 0 = none, 1 = as planned).
-    void SetMoonLight(float s) { m_moonLight = s; m_frameLightsDirty = true; m_constantsDirty = true; }
     // How dark nights, storms and dim places get (darkness.cpp; docs/darkness-plan.md): RVK_Darkness (0 lightest,
     // 1 the old nights, 2 very dark) and RVK_DarkFloor, the brightness floor's share (0: no floor).
     void SetDarkness(float d, float floorScale)
@@ -620,10 +629,6 @@ public:
         m_frameLightsDirty = true;
         m_constantsDirty = true;
     }
-    // The air's light scattering over distance (tonemap.frag Air; RVK_Atmos; off: the plain land haze).
-    void SetAtmos(bool on) { m_atmos = on; }
-    // Valley mist's amount (mist.cpp; 0 none, 1 as planned).
-    void SetMist(float s) { m_mist = s; }
     // Fog banks (mist.cpp; docs/weather-events-plan.md): thick drifting banks in the low ground at dawn and after rain,
     // most in wet zones (RVK_FogBanks x; force: that strength now - tests; < 0 by the weather).
     void SetFogBanks(float s, float force = -1.0f) { m_fogBanks = s; m_fogBankForce = force; }
@@ -632,9 +637,6 @@ public:
     void SetHeatFlash(float s, bool force = false) { m_heatFlash = s; m_heatForce = force; }
     // The sun's disc (sun.cpp; 0 none, 1 as planned: its brightness).
     void SetSun(float s) { m_sun = s; }
-    // Their size (x the game's sun sprites) and the share of their glow over the clouds (sun.cpp).
-    void SetSunSize(float s) { m_sunSize = s; }
-    void SetSunBleed(float s) { m_sunBleed = s; }
     // The sky's twilight (0: the game's sky; 1: the twilight palette in its place) and the glow round the sun, x
     // (sky.cpp).
     void SetTwilight(float twilight, float glow, float blueHour = 1.0f)
@@ -643,13 +645,7 @@ public:
         m_skyGlow = glow;
         m_blueHour = blueHour;
     }
-    // The haze round sunrise thicker (hdr.cpp LandHaze; 0 none, 1 as planned; half of it round sunset).
-    void SetMornHaze(float s) { m_mornHaze = s; }
-    // A low sun's light warm on the land and things, their shade cool (sky.cpp; 0 the game's colours, 1 as planned).
-    void SetDawnLight(float s) { m_dawnLight = s; }
-    void SetAfterglow(float s) { m_afterglow = s; }
     void SetStarFade(bool on) { m_starFade = on; }
-    void SetDuskRays(float s) { m_duskRays = s; }
     void SetHeapCheck(int level) { m_heapCheck = level; }
     // RVK_ViewRange: the game's fog distances x this (its cull goes out with it: rnative::camera::SetViewRange); not 1:
     // fog by true distance, as the cull.
@@ -666,8 +662,6 @@ public:
     // Rainbows after rain (docs/sky-plan.md §5; RVK_Rainbow x, 0 none); force: one of that strength now (tests; < 0 by
     // the weather).
     void SetRainbow(float s, float force = -1.0f) { m_rainbowSetting = s; m_rainbowForce = force; }
-    // The golden hour's grade round sunrise and sunset (tonemap.frag Grade; 0 none).
-    void SetGoldenHour(float s) { m_goldenHour = s; }
     // A desert's air (docs/desert-plan.md phase 4): its dust - the far land paler and warmer, a pale band along the
     // horizon - (RVK_DesertAir) and the heat shimmer over its distant sand (RVK_HeatShimmer), each 0..1.
     void SetDesertAir(float air, float shimmer)
@@ -682,7 +676,6 @@ public:
     // (0 off, 1 on, 2 on without the remembered sway, 3 only big things, 4 drawn solid; switched: the churn trace and a few seconds of
     // the shadow items' counts anew - finding a blinking shadow)
     void SetShadowMemory(uint32_t mode) { m_shadowMemory = mode; m_cacheTraceLines = 0; m_memoryTraceFrames = 240; }
-    void SetHillShade(bool on) { m_hillShade = on; }
     // The ground's own texturing (terrain.cpp, terrain.glsl), each 0..1: its texture laid on the faces of cliffs
     // instead of stretched down them (RVK_CliffTex), the faces' repeats hidden (RVK_TileHide), large-scale variation
     // in its colour (RVK_GroundVary); rock on the faces instead of the ground's tile (RVK_CliffRock).
@@ -716,15 +709,12 @@ public:
     void SetNativeGroundPebbles(float density);
     void SetPebbleTablePath(const char* path);
     bool NativeGroundDrawing() const { return m_native.drawing; }
-    void SetShadowView(bool on) { m_shadowViewDebug = on; m_frameLightsDirty = true; }   // (debug: RVK_ShadowView)
-    void SetAlienMap(bool on) { m_alienMap = on; }   // RVK_AlienMap: AI missions' PF map on green (draw.cpp)
     // The game's own sun sprites (its glow, VisualSunRays_t), shown or not.
     void SetGameSun(bool on) { m_gameSun = on; }
     // Tests: the sky weather's clock (seconds, as UTC; < 0 the wall clock).
     void SetSkyTime(double t) { m_skyTime = t; }
     // The playfield the game is in (its resource id; 0 none): its climate leans the sky (sky.cpp SkyZoneLean).
     void SetSkyPlayfield(uint32_t playfield);
-    void SetContactShadows(float s) { m_contact = s; m_constantsDirty = true; }
     void SetEffectGlow(float gain) { if (m_effectGlow != gain) { m_effectGlow = gain; m_constantsDirty = true; } }
     float EffectGlow() const { return m_effectGlow; }
     float BloomStrength() const { return m_bloomStrength; }
@@ -734,8 +724,6 @@ public:
     // Enhancement, with the light override: how bright the frame's lights may make a surface (1 = D3D's clamp, up to
     // 2). The game's own lighting stays clamped at 1; local lights add on top of it, so they (and their shadows) show
     // on surfaces the sun already lights fully.
-    void SetLightHeadroom(float headroom) { headroom = headroom < 1.0f ? 1.0f : headroom > 2.0f ? 2.0f : headroom;
-                                            if (m_lightHeadroom != headroom) { m_lightHeadroom = headroom; m_constantsDirty = true; m_frameLightsDirty = true; } }
     float LightHeadroom() const { return m_lightHeadroom; }
     // Enhancement: GPU particles (particles.cpp). A game sprite effect announces itself with ParticleEmitter before it
     // draws: its identity (stable while the effect exists) and its sprites in world space. Each live sprite sheds tiny
@@ -1907,7 +1895,6 @@ private:
     void PushDrawSet(VkCommandBuffer cmd, VkDeviceSize frameLightsOffset, VkBuffer prevBuffer, VkDeviceSize prevOffset,
                      VkDeviceSize prevBytes, VkBuffer smoothBuffer, VkDeviceSize smoothOffset, VkDeviceSize smoothBytes);
 public:
-    void SetFoliageEdges(bool on) { m_foliageEdges = on; }
 private:
     uint64_t m_noCutDraws = 0;                   // draws that took the no-discard pipeline (early-Z; logged)
     // Depth pre-pass (prepass.cpp). Armed at the scene's depth clear (the frame's main commands split there: Frame);

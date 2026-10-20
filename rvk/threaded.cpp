@@ -707,11 +707,6 @@ void ThreadedDevice::SetLightOverride(bool enable)
     Enqueue([this, enable](const uint8_t*) { m_device.SetLightOverride(enable); });
 }
 
-void ThreadedDevice::SetCarrierLit(bool enable)
-{
-    Enqueue([this, enable](const uint8_t*) { m_device.SetCarrierLit(enable); });
-}
-
 void ThreadedDevice::SetShadows(bool enable)
 {
     m_shadows = enable;
@@ -817,11 +812,6 @@ void ThreadedDevice::SetFreeCam(const Device::FreeCamInput& in)
     Enqueue([this, in](const uint8_t*) { m_device.SetFreeCam(in); });
 }
 
-void ThreadedDevice::SetCrownShade(float amount)
-{
-    Enqueue([this, amount](const uint8_t*) { m_device.SetCrownShade(amount); });
-}
-
 void ThreadedDevice::SetLeafArt(Texture* texture, Texture* atlas, Texture* normal)
 {
     Enqueue([this, texture, atlas, normal](const uint8_t*) { m_device.SetLeafArt(texture, atlas, normal); });
@@ -863,39 +853,19 @@ void ThreadedDevice::SetSsr(float strength, float water, float gloss, float wet)
     Enqueue([this, strength, water, gloss, wet](const uint8_t*) { m_device.SetSsr(strength, water, gloss, wet); });
 }
 
-void ThreadedDevice::SetSunSoftness(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetSunSoftness(s); });
-}
-
 void ThreadedDevice::SetLeafLight(float s)
 {
     Enqueue([this, s](const uint8_t*) { m_device.SetLeafLight(s); });
 }
 
-void ThreadedDevice::SetNightGlow(float s)
+void ThreadedDevice::SetKnob(Knob knob, float value)
 {
-    Enqueue([this, s](const uint8_t*) { m_device.SetNightGlow(s); });
-}
-
-void ThreadedDevice::SetMoonLight(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetMoonLight(s); });
+    Enqueue([this, knob, value](const uint8_t*) { m_device.SetKnob(knob, value); });
 }
 
 void ThreadedDevice::SetDarkness(float d, float floorScale)
 {
     Enqueue([this, d, floorScale](const uint8_t*) { m_device.SetDarkness(d, floorScale); });
-}
-
-void ThreadedDevice::SetAtmos(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetAtmos(on); });
-}
-
-void ThreadedDevice::SetMist(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetMist(s); });
 }
 
 void ThreadedDevice::SetSun(float s)
@@ -908,24 +878,9 @@ void ThreadedDevice::SetGameSun(bool on)
     Enqueue([this, on](const uint8_t*) { m_device.SetGameSun(on); });
 }
 
-void ThreadedDevice::SetSunSize(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetSunSize(s); });
-}
-
-void ThreadedDevice::SetSunBleed(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetSunBleed(s); });
-}
-
 void ThreadedDevice::SetTwilight(float twilight, float glow, float blueHour)
 {
     Enqueue([this, twilight, glow, blueHour](const uint8_t*) { m_device.SetTwilight(twilight, glow, blueHour); });
-}
-
-void ThreadedDevice::SetMornHaze(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetMornHaze(s); });
 }
 
 void ThreadedDevice::SetProcSky(bool on, float zone, float bright)
@@ -958,29 +913,9 @@ void ThreadedDevice::SetHeapCheck(int level)
     Enqueue([this, level](const uint8_t*) { m_device.SetHeapCheck(level); });
 }
 
-void ThreadedDevice::SetDuskRays(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetDuskRays(s); });
-}
-
 void ThreadedDevice::SetStarFade(bool on)
 {
     Enqueue([this, on](const uint8_t*) { m_device.SetStarFade(on); });
-}
-
-void ThreadedDevice::SetAfterglow(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetAfterglow(s); });
-}
-
-void ThreadedDevice::SetDawnLight(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetDawnLight(s); });
-}
-
-void ThreadedDevice::SetGoldenHour(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetGoldenHour(s); });
 }
 
 void ThreadedDevice::SetDesertAir(float air, float shimmer)
@@ -991,11 +926,6 @@ void ThreadedDevice::SetDesertAir(float air, float shimmer)
 void ThreadedDevice::SetShadowMemory(uint32_t mode)
 {
     Enqueue([this, mode](const uint8_t*) { m_device.SetShadowMemory(mode); });
-}
-
-void ThreadedDevice::SetHillShade(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetHillShade(on); });
 }
 
 void ThreadedDevice::SetTerrain(const Device::TerrainSettings& s)
@@ -1042,21 +972,6 @@ void ThreadedDevice::SetNativeGroundPebbles(float density)
 void ThreadedDevice::SetPebbleTablePath(const char* path)
 {
     Enqueue([this, p = std::string(path ? path : "")](const uint8_t*) { m_device.SetPebbleTablePath(p.c_str()); });
-}
-
-void ThreadedDevice::SetAlienMap(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetAlienMap(on); });
-}
-
-void ThreadedDevice::SetShadowView(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetShadowView(on); });
-}
-
-void ThreadedDevice::SetContactShadows(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetContactShadows(s); });
 }
 
 void ThreadedDevice::SetGrading(float saturation, float contrast, float warmth, float lutAmount, float nightTint,
@@ -1111,56 +1026,6 @@ void ThreadedDevice::SetTaa(bool enable, float sharpen)
     Enqueue([this, enable, sharpen](const uint8_t*) { m_device.SetTaa(enable, sharpen); });
 }
 
-void ThreadedDevice::SetFxaa(bool enable)
-{
-    Enqueue([this, enable](const uint8_t*) { m_device.SetFxaa(enable); });
-}
-
-void ThreadedDevice::SetWindStorm(float scale)
-{
-    Enqueue([this, scale](const uint8_t*) { m_device.SetWindStorm(scale); });
-}
-
-void ThreadedDevice::SetStormFlash(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetStormFlash(on); });
-}
-
-void ThreadedDevice::SetStormDebris(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetStormDebris(s); });
-}
-
-void ThreadedDevice::SetStormBolt(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetStormBolt(s); });
-}
-
-void ThreadedDevice::SetRainWet(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetRainWet(s); });
-}
-
-void ThreadedDevice::SetStormDark(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetStormDark(s); });
-}
-
-void ThreadedDevice::SetRainVeils(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetRainVeils(s); });
-}
-
-void ThreadedDevice::SetStormGreen(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetStormGreen(s); });
-}
-
-void ThreadedDevice::SetStormThick(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetStormThick(s); });
-}
-
 void ThreadedDevice::SetFogBanks(float s, float force)
 {
     Enqueue([this, s, force](const uint8_t*) { m_device.SetFogBanks(s, force); });
@@ -1171,89 +1036,9 @@ void ThreadedDevice::SetHeatFlash(float s, bool force)
     Enqueue([this, s, force](const uint8_t*) { m_device.SetHeatFlash(s, force); });
 }
 
-void ThreadedDevice::SetRainFog(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetRainFog(s); });
-}
-
-void ThreadedDevice::SetLightning(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetLightning(s); });
-}
-
-void ThreadedDevice::SetStormTint(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetStormTint(on); });
-}
-
-void ThreadedDevice::SetSandHaze(float amount)
-{
-    Enqueue([this, amount](const uint8_t*) { m_device.SetSandHaze(amount); });
-}
-
 void ThreadedDevice::SetSandForce(float amount, bool ash)
 {
     Enqueue([this, amount, ash](const uint8_t*) { m_device.SetSandForce(amount, ash); });
-}
-
-void ThreadedDevice::SetSandGusts(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetSandGusts(s); });
-}
-
-void ThreadedDevice::SetSandFog(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetSandFog(s); });
-}
-
-void ThreadedDevice::SetSandSun(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetSandSun(s); });
-}
-
-void ThreadedDevice::SetSandTint(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetSandTint(s); });
-}
-
-void ThreadedDevice::SetSandClear(float d)
-{
-    Enqueue([this, d](const uint8_t*) { m_device.SetSandClear(d); });
-}
-
-void ThreadedDevice::SetSandContrast(float k)
-{
-    Enqueue([this, k](const uint8_t*) { m_device.SetSandContrast(k); });
-}
-
-void ThreadedDevice::SetSandProcedural(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetSandProcedural(on); });
-}
-
-void ThreadedDevice::SetSandBlow(float amount)
-{
-    Enqueue([this, amount](const uint8_t*) { m_device.SetSandBlow(amount); });
-}
-
-void ThreadedDevice::SetSway(float strength)
-{
-    Enqueue([this, strength](const uint8_t*) { m_device.SetSway(strength); });
-}
-
-void ThreadedDevice::SetGrassPush(float strength)
-{
-    Enqueue([this, strength](const uint8_t*) { m_device.SetGrassPush(strength); });
-}
-
-void ThreadedDevice::SetPlantDetail(float detail)
-{
-    Enqueue([this, detail](const uint8_t*) { m_device.SetPlantDetail(detail); });
-}
-
-void ThreadedDevice::SetFoliageEdges(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetFoliageEdges(on); });
 }
 
 void ThreadedDevice::OverlayBegin()
@@ -1271,31 +1056,11 @@ void ThreadedDevice::InterfaceEnd()
     Enqueue([this](const uint8_t*) { m_device.InterfaceEnd(); });
 }
 
-void ThreadedDevice::SetDepthPrepass(bool on)
-{
-    Enqueue([this, on](const uint8_t*) { m_device.SetDepthPrepass(on); });
-}
-
-void ThreadedDevice::SetFoliageLod(float distance)
-{
-    Enqueue([this, distance](const uint8_t*) { m_device.SetFoliageLod(distance); });
-}
-
 void ThreadedDevice::SetGrassField(bool on, float distance, float density, float height, bool texOnly)
 {
     Enqueue([this, on, distance, density, height, texOnly](const uint8_t*) {
         m_device.SetGrassField(on, distance, density, height, texOnly);
     });
-}
-
-void ThreadedDevice::SetGrassWidth(float width)
-{
-    Enqueue([this, width](const uint8_t*) { m_device.SetGrassWidth(width); });
-}
-
-void ThreadedDevice::SetGrassBrightness(float brightness)
-{
-    Enqueue([this, brightness](const uint8_t*) { m_device.SetGrassBrightness(brightness); });
 }
 
 void ThreadedDevice::SetGrassTrailLook(float seconds, float shade)
@@ -1340,21 +1105,6 @@ void ThreadedDevice::SetTessellation(float shape, float distance, uint32_t level
     Enqueue([this, shape, distance, level](const uint8_t*) { m_device.SetTessellation(shape, distance, level); });
 }
 
-void ThreadedDevice::SetBloomOverNearer(float keep)
-{
-    Enqueue([this, keep](const uint8_t*) { m_device.SetBloomOverNearer(keep); });
-}
-
-void ThreadedDevice::SetNeonSat(float s)
-{
-    Enqueue([this, s](const uint8_t*) { m_device.SetNeonSat(s); });
-}
-
-void ThreadedDevice::SetBloomWide(float w)
-{
-    Enqueue([this, w](const uint8_t*) { m_device.SetBloomWide(w); });
-}
-
 void ThreadedDevice::SetEffectGlow(float gain)
 {
     m_effectGlow = gain < 0.0f ? 0.0f : gain;
@@ -1370,11 +1120,6 @@ void ThreadedDevice::SetHdrHeadroom(float headroom)
 void ThreadedDevice::SetTonemap(float knee, float exposure)
 {
     Enqueue([this, knee, exposure](const uint8_t*) { m_device.SetTonemap(knee, exposure); });
-}
-
-void ThreadedDevice::SetLightHeadroom(float headroom)
-{
-    Enqueue([this, headroom](const uint8_t*) { m_device.SetLightHeadroom(headroom); });
 }
 
 void ThreadedDevice::SetTexture(uint32_t stage, Texture* texture)

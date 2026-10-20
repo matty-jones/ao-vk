@@ -3099,7 +3099,7 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
     wp.quality = uint32_t(g_waterQuality);
     dev.SetWaterParams(wp);
     if (g_waterNoPrepass)
-        dev.SetDepthPrepass(false);
+        dev.SetKnob(rvk::Knob::Prepass, false);
     const uint32_t sky = g_waterNight ? 0xFF101828u : 0xFF8FB0CCu;
     if (g_sweepSteps > 0)
         frames = g_sweepSteps * g_sweepHold;
@@ -4230,7 +4230,7 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
     auto groundPixels = Checker(64, 8, 0xFF4A6A30, 0xFF42602A);
     Texture* ground = dev.CreateTexture(64, 64, groundPixels.data());
     dev.SetLeaves(g_leafSettings);
-    dev.SetCrownShade(g_crownShade);
+    dev.SetKnob(rvk::Knob::CrownShade, g_crownShade);
     for (int frame = 0; frame < frames; ++frame) {
         if (frame == frames - 1) {
             dev.RequestScreenshot(shot);
@@ -4931,7 +4931,7 @@ int main(int argc, char** argv)
     dev.SetHideInterface(g_hideUi);
     dev.SetLightOverride(lightOverride);
     dev.SetShadows(shadows);
-    dev.SetLightHeadroom(headroom);
+    dev.SetKnob(rvk::Knob::Headroom, headroom);
     dev.SetHdr(hdr);
     if (!g_meshIds.empty())
         dev.LoadMeshIds(g_meshIds.c_str());
@@ -4983,52 +4983,52 @@ int main(int argc, char** argv)
         if (g_wetNow >= 0.0f) dev.SetWetNow(g_wetNow, g_wetNow);
         dev.SetWeatherParams(weather);
     }
-    dev.SetStormThick(g_stormThick);
+    dev.SetKnob(rvk::Knob::StormThick, g_stormThick);
     dev.SetFogBanks(1.0f, g_fogBankForce);
     dev.SetHeatFlash(1.0f, g_heatForce);
-    dev.SetSandBlow(g_sandBlow);
-    dev.SetSandProcedural(!g_sandSim);
-    dev.SetSandContrast(g_sandContrast);
-    dev.SetSandClear(g_sandClear);
-    dev.SetSandGusts(g_sandGusts);
-    dev.SetSandFog(g_sandFog);
-    dev.SetWindStorm(g_windStorm);
+    dev.SetKnob(rvk::Knob::SandBlow, g_sandBlow);
+    dev.SetKnob(rvk::Knob::SandProc, !g_sandSim);
+    dev.SetKnob(rvk::Knob::SandContrast, g_sandContrast);
+    dev.SetKnob(rvk::Knob::SandClear, g_sandClear);
+    dev.SetKnob(rvk::Knob::SandGusts, g_sandGusts);
+    dev.SetKnob(rvk::Knob::SandFog, g_sandFog);
+    dev.SetKnob(rvk::Knob::WindStorm, g_windStorm);
     dev.SetSandForce(g_sandForce, g_sandAsh);
     dev.SetTonemap(knee, 1.0f);
     dev.SetBloom(bloom, 1.0f);
     dev.SetEffectGlow(effectGlow);
-    dev.SetBloomOverNearer(bloomOcc);
-    dev.SetNeonSat(neonSat);
-    dev.SetBloomWide(bloomWide);
-    dev.SetSunSoftness(sunSoft);
+    dev.SetKnob(rvk::Knob::BloomOcc, bloomOcc);
+    dev.SetKnob(rvk::Knob::NeonSat, neonSat);
+    dev.SetKnob(rvk::Knob::BloomWide, bloomWide);
+    dev.SetKnob(rvk::Knob::SunSoft, sunSoft);
     dev.SetLeafLight(leaf);
-    dev.SetNightGlow(nightGlow);
-    dev.SetMoonLight(g_moonLight);
+    dev.SetKnob(rvk::Knob::NightGlow, nightGlow);
+    dev.SetKnob(rvk::Knob::MoonLight, g_moonLight);
     dev.SetDarkness(g_darkness, g_darkFloor);
-    dev.SetAtmos(g_atmos);
+    dev.SetKnob(rvk::Knob::Atmos, g_atmos);
     dev.SetTwilight(g_twilight, g_skyGlow);
-    dev.SetDuskRays(g_duskRays);
+    dev.SetKnob(rvk::Knob::DuskRays, g_duskRays);
     dev.SetProcSky(g_procSky, g_skyZoneHint, 1.0f);
     dev.SetSkyColours(g_skyColours);
     dev.SetNightSky(g_nightSky);
     dev.SetRainbow(1.0f, g_rainbowForce);
-    dev.SetDawnLight(g_dawnLight);
-    dev.SetMist(g_mist);
-    dev.SetContactShadows(contact);
-    dev.SetSway(sway);
-    dev.SetGrassPush(grassPush);
+    dev.SetKnob(rvk::Knob::DawnLight, g_dawnLight);
+    dev.SetKnob(rvk::Knob::Mist, g_mist);
+    dev.SetKnob(rvk::Knob::Contact, contact);
+    dev.SetKnob(rvk::Knob::Sway, sway);
+    dev.SetKnob(rvk::Knob::GrassPush, grassPush);
     dev.SetGrassStyle(g_grassStyle[0], g_grassStyle[1], g_grassStyle[2], g_grassStyle[3], g_grassStyle[4] != 0.0f);
     dev.SetGrassEven(g_grassEven);
     dev.SetGrassShadows(g_grassShadow);
-    dev.SetPlantDetail(plantDetail);
-    dev.SetFoliageLod(foliageLod);
+    dev.SetKnob(rvk::Knob::PlantDetail, plantDetail);
+    dev.SetKnob(rvk::Knob::FoliageLod, foliageLod);
     if (g_grassFieldOn)                  // --grass-field: the procedural ground grass (needs HDR: its pass draws into the scene)
         dev.SetGrassField(true, g_grassFieldDist, 3.0f, 0.5f, g_grassFieldTex);
     dev.SetShadowResolution(uint32_t(sunRes), uint32_t(ptRes));
     dev.SetPointLightIntensity(ptLight, ptLight);
     dev.SetTessellation(tess, 20.0f, uint32_t(tessLevel));
     dev.SetTaa(taa, sharpen);
-    dev.SetFxaa(fxaa);
+    dev.SetKnob(rvk::Knob::Fxaa, fxaa);
     dev.SetGrading(saturation, contrast, warmth, 1.0f, nightTint, vignette);
     if (lutSepia) {                      // --lut-sepia: a 16^3 sepia lookup table in the day slot (the 3D LUT path)
         const uint32_t n = 16;

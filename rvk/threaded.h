@@ -79,7 +79,6 @@ public:
     bool HideInterface() const { return m_hideInterface; }
     void SetConsoleImage(uint32_t width, uint32_t height, const void* pixels);   // copied
     void SetLightOverride(bool enable);
-    void SetCarrierLit(bool enable);
     bool LightOverride() const { return m_lightOverride; }
     void SetShadows(bool enable);
     bool Shadows() const { return m_shadows; }
@@ -87,36 +86,24 @@ public:
     void SetPointShadows(uint32_t count);
     uint32_t PointShadows() const { return m_pointShadows; }
     void SetPointShadowStrength(float strength, float dayFactor);
-    void SetLightHeadroom(float headroom);
     void SetHdr(bool enable);
     bool Hdr() const { return m_hdr; }
     void SetTonemap(float knee, float exposure);
     void SetHdrHeadroom(float headroom);
     void SetBloom(float strength, float threshold);
     void SetEffectGlow(float gain);
-    void SetBloomOverNearer(float keep);
-    void SetNeonSat(float s);
-    void SetBloomWide(float w);
     void SetGrading(float saturation, float contrast, float warmth, float lutAmount, float nightTint, float vignette);
     void SetColorLut(uint32_t slot, uint32_t size, const uint8_t* rgba);   // copied
     void LoadMeshIds(const char* path);                                       // (the path copied)
     void LoadStatels(const char* path, uint32_t playfield);                   // (the path copied)
     void SetStatelMode(uint32_t mode);
     void SetSkyPlayfield(uint32_t playfield);
-    void SetSway(float strength);
-    void SetGrassPush(float strength);
-    void SetPlantDetail(float detail);
-    void SetFoliageLod(float distance);
     void SetGrassField(bool on, float distance, float density, float height, bool texOnly);
-    void SetGrassWidth(float width);
-    void SetGrassBrightness(float brightness);
     void SetGrassStyle(float variety, float flowers, float glow, float gusts, bool trails);
     void SetGrassTrailLook(float seconds, float shade);
     void SetGrassEven(float even);
     void SetLeaves(const Device::LeafSettings& s);
     void SetGrassShadows(bool on);
-    void SetDepthPrepass(bool on);
-    void SetFoliageEdges(bool on);
     // The interface layer (Device::InterfaceBegin / InterfaceEnd).
     void InterfaceBegin(bool redraw);
     void InterfaceEnd();
@@ -126,60 +113,26 @@ public:
     void SetPointLightIntensity(float lights, float characters);
     void SetTessellation(float shape, float distance, uint32_t level);
     void SetTaa(bool enable, float sharpen);
-    void SetFxaa(bool enable);
-    void SetWindStorm(float scale);
-    void SetStormTint(bool on);
-    void SetStormFlash(bool on);
-    void SetLightning(float s);
-    void SetRainFog(float s);
-    void SetStormGreen(float s);
-    void SetStormThick(float s);
     void SetFogBanks(float s, float force = -1.0f);
     void SetHeatFlash(float s, bool force = false);
-    void SetRainVeils(float s);
-    void SetStormDark(float s);
-    void SetRainWet(float s);
-    void SetStormBolt(float s);
-    void SetStormDebris(float s);
-    void SetSandHaze(float amount);
-    void SetSandBlow(float amount);
-    void SetSandProcedural(bool on);
-    void SetSandContrast(float k);
-    void SetSandClear(float d);
-    void SetSandGusts(float s);
-    void SetSandFog(float s);
-    void SetSandSun(float s);
-    void SetSandTint(float s);
     void SetSandForce(float amount, bool ash);
     void ProfileWindow(bool start, const std::string& label);
     void ProfileManualEnd();
-    void SetSunSoftness(float s);
     void SetLeafLight(float s);
-    void SetNightGlow(float s);
-    void SetMoonLight(float s);
     void SetDarkness(float d, float floorScale);
-    void SetAtmos(bool on);
-    void SetMist(float s);
+    void SetKnob(Knob knob, float value);         // a plain setting (rvk.h RVK_FLOAT_KNOBS, RVK_BOOL_KNOBS)
     void SetSun(float s);
     void SetGameSun(bool on);
-    void SetSunSize(float s);
-    void SetSunBleed(float s);
     void SetTwilight(float twilight, float glow, float blueHour);
-    void SetMornHaze(float s);
-    void SetDawnLight(float s);
-    void SetAfterglow(float s);
     void SetStarFade(bool on);
-    void SetDuskRays(float s);
     void SetHeapCheck(int level);
     void SetViewRange(float range);
     void SetProcSky(bool on, float zone, float bright);
     void SetSkyColours(const SkyColours& c);
     void SetNightSky(const NightSky& n);
     void SetRainbow(float s, float force = -1.0f);
-    void SetGoldenHour(float s);
     void SetDesertAir(float air, float shimmer);
     void SetShadowMemory(uint32_t mode);
-    void SetHillShade(bool on);
     void SetTerrain(const Device::TerrainSettings& s);
     void SetNativeGround(std::shared_ptr<const NativeGround> ground);
     void SetNativeGroundLightmap(std::shared_ptr<const std::vector<uint8_t>> packed, uint32_t w, uint32_t h, float shade);
@@ -189,9 +142,6 @@ public:
     void SetNativeGroundRocks(float density);
     void SetNativeGroundPebbles(float density);
     void SetPebbleTablePath(const char* path);
-    void SetShadowView(bool on);
-    void SetAlienMap(bool on);
-    void SetContactShadows(float s);
     void SetAo(float strength, float radius);
     void SetGi(float strength, float radius);
     void SetVolume(float strength, float haze, float shafts, float rays = 1.0f, float land = 0.4f);
@@ -203,7 +153,6 @@ public:
     void SetTextureRdbId(Texture* texture, uint32_t id);
     void SetEmissiveMap(Texture* texture, Texture* emissive);               // ... and this
     void SetLeafArt(Texture* texture, Texture* atlas, Texture* normal);     // ... and these
-    void SetCrownShade(float amount);
     void SetFreeCam(const Device::FreeCamInput& in);
     void RequestPick(float x, float y);
     Device::PickResult LastPick() const { return m_device.LastPick(); }   // (thread-safe)
