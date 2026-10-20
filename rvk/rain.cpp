@@ -27,6 +27,9 @@ const uint32_t kRainVertSpirv[] = {
 const uint32_t kRainFragSpirv[] = {
 #include "rain.frag.inc"
 };
+const uint32_t kRainNearFragSpirv[] = {        // (the near rain's layer: its one target)
+#include "rain_near.frag.inc"
+};
 const uint32_t kSplashVertSpirv[] = {
 #include "splash.vert.inc"
 };
@@ -228,7 +231,7 @@ bool Device::CreateRainResources(std::string* error)
     return ok;
     };
     return make(kRainVertSpirv, sizeof(kRainVertSpirv), kRainFragSpirv, sizeof(kRainFragSpirv), true, &m_rainPipeline) &&
-           make(kRainVertSpirv, sizeof(kRainVertSpirv), kRainFragSpirv, sizeof(kRainFragSpirv), true, &m_rainNearPipeline, 1) &&
+           make(kRainVertSpirv, sizeof(kRainVertSpirv), kRainNearFragSpirv, sizeof(kRainNearFragSpirv), true, &m_rainNearPipeline, 1) &&
            make(kBoltVertSpirv, sizeof(kBoltVertSpirv), kBoltFragSpirv, sizeof(kBoltFragSpirv), true, &m_boltPipeline, 1) &&
            make(kDebrisVertSpirv, sizeof(kDebrisVertSpirv), kDebrisFragSpirv, sizeof(kDebrisFragSpirv), true, &m_debrisPipeline, 5, true) &&
            make(kSplashVertSpirv, sizeof(kSplashVertSpirv), kSplashFragSpirv, sizeof(kSplashFragSpirv), false,

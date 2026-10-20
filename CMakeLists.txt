@@ -67,7 +67,7 @@ foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag 
 endforeach()
 
 # Variants built from another shader with a define: output name, source, define.
-foreach(entry "leaf.vert|ffp.vert|RVK_LEAF" "leaf_shadow.vert|shadow.vert|RVK_LEAF" "smoke_half.frag|smoke.frag|RVK_SMOKE_HALF" "cloud_half.frag|cloud.frag|RVK_CLOUD_HALF" "cloud_layer_shadow.frag|cloud_layer.frag|RVK_CLOUD_SHADOW" "cloud_layer_sunray.frag|cloud_layer.frag|RVK_CLOUD_SUNRAY")
+foreach(entry "leaf.vert|ffp.vert|RVK_LEAF" "leaf_shadow.vert|shadow.vert|RVK_LEAF" "smoke_half.frag|smoke.frag|RVK_SMOKE_HALF" "cloud_half.frag|cloud.frag|RVK_CLOUD_HALF" "cloud_layer_shadow.frag|cloud_layer.frag|RVK_CLOUD_SHADOW" "cloud_layer_sunray.frag|cloud_layer.frag|RVK_CLOUD_SUNRAY" "rain_near.frag|rain.frag|RVK_RAIN_NEAR")
     string(REPLACE "|" ";" variant "${entry}")
     list(GET variant 0 name)
     list(GET variant 1 shader)
@@ -89,6 +89,7 @@ foreach(entry "leaf.vert|ffp.vert|RVK_LEAF" "leaf_shadow.vert|shadow.vert|RVK_LE
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/cloud_light.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/sky_common.glsl"
                 "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/atmos_common.glsl"
+                "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/rain_common.glsl"
         COMMENT "glslc ${name}")
     list(APPEND RVK_SHADER_INCS "${out}")
 endforeach()

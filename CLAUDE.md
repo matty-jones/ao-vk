@@ -32,6 +32,10 @@ Everything runs under Wine (`WINEPREFIX` defaults to `~/.wine-prk`). There is no
 
 - `tools/rvk-demo.sh [out-dir] [args]`: rvk alone, headless, with the Khronos validation layer; writes a PNG and
   `validation.log`. Scene flags are in `tests/rvk_demo.cpp` (`--shadow-test`, `--grass-walk X`, `--tess 0.75`, ...).
+- `tools/look-check.py [scene...]`: a few fixed rvk_demo scenes (dusk sweep, nights at three darkness levels, storm,
+  the native ground) reduced to region averages and compared with `tests/look-baseline.tsv`; flags any region that
+  moved and any validation message besides the known shutdown leaks. Run it after any change that shouldn't alter the
+  look; after one that should, `--update` and commit the new baseline with it.
 - `tools/native-check.sh`: each native replacement vs. the original function on the same synthetic input
   (`tests/native_check.cpp`), against the test client's `randy31_orig.dll`.
 - `tools/calllog-ab.sh <Mode> [scene...]`: runs `randy_harness` scenes with `[Native] <Mode>=off` and `=on` and
