@@ -60,6 +60,8 @@ constexpr uint32_t kJacobi = 24;                // pressure steps, from 0 (even:
 constexpr float kWarmUp = 2.0f, kWarmSpeed = 3.0f;
 constexpr float kSimStep = 1.0f / 60.0f;         // a volume steps about this often (s), whatever the frame rate - drawn
 constexpr float kSimFar = 40.0f;                // between its last two states; beyond this (world) half as often
+constexpr float kSimSmall = 0.12f;              // ... and as its box gets this small on the screen (its share of the
+constexpr float kSimTiny = 0.05f;               // height); this small, a third as often
 constexpr uint32_t kNoiseSize = 64;             // the wisps' noise image (cells a side)
 constexpr float kFlowMax = 4.0f;                // the flow image's range (world / s; smoke_common.glsl kSmokeFlowMax)
 constexpr float kSandFlowMax = 16.0f;           // ... the sand volume's (a storm's wind; kSandFlowMax there)
@@ -1330,7 +1332,10 @@ void Device::RenderSmoke(VkCommandBuffer cmd)
             warmingNow[i] = v.age < kWarmUp;
             jacobiOf[i] = !sandV && live[i].first > kSimFar ? kJacobiFar : kJacobi;
             float t = warmingNow[i] ? 0.5f * kSimStep : kSimStep;
-            if (!sandV && live[i].first > kSimFar) t *= 2.0f;
+            // Far, or small on the screen (its box under kSimSmall of the screen's height; under kSimTiny, a third as
+            // often): what a step adds there is motion too fine to see, and the drawing blends the last two states.
+            const float tall = v.source.size * pm[1][1] / (2.0f * std::max(live[i].first, 1.0f));
+            if (!sandV) t *= tall < kSimTiny ? 3.0f : live[i].first > kSimFar || tall < kSimSmall ? 2.0f : 1.0f;
             if (!sandV && !warmingNow[i] && !inView(v)) t *= kOutOfView;
             period[i] = t;
             (sandV ? fixed : demand) += StepCost(v.n, jacobiOf[i]) / std::max(double(t), double(dt));

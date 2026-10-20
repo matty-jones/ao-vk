@@ -474,13 +474,32 @@ vec3 TerrainPatches(vec2 p)    // tone, saturation (-0.5 .. 0.5)
     return vec3(0.65 * big + 0.35 * mid, TerrainNoise(p / 113.0 + 77.1) - 0.5, 0.0);
 }
 
+// The patches at a point, kept for the fragment (k: 0 the top, 1 the faces along x, 2 along z): the one-pass ground
+// varies the same point's colour twice - its base, and its material maps' albedo - and each is 3 noises of 4 hashes,
+// up to 3 times over on the faces (the profiling sweep: the variation 0.28 ms of a 6.9 ms frame, 2026-10-20).
+vec3 gPatches[3];
+vec3 gPatchesAt = vec3(3.0e38);
+uint gPatchesHave = 0u;
+vec3 TerrainPatchesAt(int k, vec3 posW)
+{
+    if (posW != gPatchesAt) {
+        gPatchesAt = posW;
+        gPatchesHave = 0u;
+    }
+    if ((gPatchesHave & (1u << k)) == 0u) {
+        gPatchesHave |= 1u << k;
+        gPatches[k] = TerrainPatches(k == 0 ? posW.xz : k == 1 ? vec2(posW.x, -posW.y) : vec2(posW.z, -posW.y));
+    }
+    return gPatches[k];
+}
+
 vec3 TerrainVariation(vec3 c, vec3 posW, TerrainMap m)
 {
     float k = FL.terrain.z;
     if (k <= 0.0) return c;
-    vec3 v = TerrainPatches(posW.xz) * m.w.x;
-    if (m.w.y > 0.002) v += TerrainPatches(vec2(posW.x, -posW.y)) * m.w.y;
-    if (m.w.z > 0.002) v += TerrainPatches(vec2(posW.z, -posW.y)) * m.w.z;
+    vec3 v = TerrainPatchesAt(0, posW) * m.w.x;
+    if (m.w.y > 0.002) v += TerrainPatchesAt(1, posW) * m.w.y;
+    if (m.w.z > 0.002) v += TerrainPatchesAt(2, posW) * m.w.z;
     float l = Luma(c);
     c = mix(vec3(l), c, clamp(1.0 + 0.35 * k * v.y, 0.0, 2.0));
     return c * clamp(1.0 + 0.26 * k * v.x, 0.5, 1.5);

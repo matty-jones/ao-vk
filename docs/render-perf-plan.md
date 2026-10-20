@@ -322,6 +322,21 @@ Each is measure first, then a fix:
 
   Measure first with `pbrdebug` and RVK_GroundTess, RVK_NormalMaps toggles.
 
+### The sweep at the outpost by night (2026-10-20, 75%, `randy31-groundsweep1.dll`)
+
+Baseline 6.87 ms GPU (135 fps), 6.90 at the end. GPU ms each step saves (switched off): per-pixel lighting 1.97 (light
+override 0.91 of it), native ground 0.64, PBR 0.62, smoke 0.46, point shadows 0.44, normal maps 0.44, GI 0.39,
+parallax 0.37, ground grass 0.35, ground variation 0.28, clouds 0.28, motion blur 0.22, atmosphere 0.21, the
+ground's slopes' sun 0.18 / tile blending 0.16 / sky visibility 0.15 / repeats hidden 0.13 / grain 0.10, bloom
+0.10. Render scale 100: 101 fps (no GPU line: the switch restarts the profile's window). Rocks, pebbles and sand
+ripples off read 35-80 fps: the switch rebuilds the ground's data - not a steady cost. Cheaper on than off: the
+depth pre-pass, TAA, HDR, plant soft edges, our sky, cliff depth and rock.
+
+First changes from it (staged `randy31-groundsmoke1.dll`):
+- The ground's variation computed once a fragment (the one-pass ground with material maps varied the same point
+  twice); bit-identical in the demo.
+- Smoke small on the screen steps less often (under 12% of the screen's height half as often, under 5% a third).
+
 ## Phase 4: CPU side (after the GPU is under about 7 ms)
 
 The game thread's render lists take 3.9 ms. Native ports (proxy/native) and draw batching (docs/render-batching-plan.md)
