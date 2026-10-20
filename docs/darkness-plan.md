@@ -40,7 +40,7 @@ night should feel like that, a little darker.
 
 ### One setting: `RVK_Darkness`
 
-`RVK_Darkness` (0..2, default 0.5), in the Lighting section of the settings window, first entry: "Darkness: how dark
+`RVK_Darkness` (0..2, default 0.5 as planned; 0 since 0.7.0, the user's choice), in the Lighting section of the settings window, first entry: "Darkness: how dark
 nights, storms and dim places get". The scale:
 
 - 0: the lightest. No night darkening of ours, nights as light as the blue hour, storms half as dark.

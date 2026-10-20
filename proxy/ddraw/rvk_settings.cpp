@@ -52,7 +52,7 @@ Setting g_settings[] = {
     {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
     {"RVK_ViewRange",   "How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws)", "General", Float, 1, 3, 0.25f, 1.5f, nullptr, 0},
 
-    {"RVK_Darkness",   "Darkness: how dark nights, storms and dim places get (0 lightest, as the blue hour after sunset; 1 ao-vk's earlier nights; 2 very dark)", "Lighting", Float, 0, 2, 0.05f, 0.5f, nullptr, 0, "RVK_Hdr"},
+    {"RVK_Darkness",   "Darkness: how dark nights, storms and dim places get (0 lightest, as the blue hour after sunset; 1 ao-vk's earlier nights; 2 very dark)", "Lighting", Float, 0, 2, 0.05f, 0, nullptr, 0, "RVK_Hdr"},
     {"RVK_DarkFloor",  "Darkness: the floor under the land's brightness, x (the exposure raised in the darkest places, as eyes adapt; 0 none)", "Lighting", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_PixelLight", "Per-pixel lighting",                                       "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_PIXEL_LIGHTING", 0},
     {"RVK_LightOver",  "All nearby lights (light override)",   "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_LIGHT_OVERRIDE", 0},
@@ -70,11 +70,11 @@ Setting g_settings[] = {
     {"RVK_Aniso", "Texture filtering (anisotropic; 1 = off)", "Lighting",         Choice, 1, 16, 1, 16, "RANDYVK_ANISOTROPY", 0, nullptr, "1 2 4 8 16"},
 
     {"RVK_HillShade",   "The terrain's shade from a low sun (valleys under mountains)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
-    {"RVK_BumpOn", "Generated bump maps", "Materials",         Bool,  0, 1, 1, 0, nullptr, 0},
+    {"RVK_BumpOn", "Generated bump maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Bump", "Strength", "Materials",         Float, 0.25f, 4, 0.25f, 0.25f, "RANDYVK_BUMP", 0, "RVK_BumpOn"},
     {"RVK_NormalMaps", "Normal maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_NormalStr", "Strength", "Materials",         Float, 0.1f, 4, 0.1f, 1, nullptr, 0, "RVK_NormalMaps"},
-    {"RVK_Parallax", "Depth: textures with a height map (_h.png) stand out of the surface up close (0 = flat)", "Materials", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_NormalMaps"},
+    {"RVK_Parallax", "Depth: textures with a height map (_h.png) stand out of the surface up close (0 = flat)", "Materials", Float, 0, 2, 0.1f, 0.3f, nullptr, 0, "RVK_NormalMaps"},
     {"RVK_DepthSteps", "Depth detail: how finely the depth is traced (more: sharper edges at flat views, slower)", "Materials", Float, 0.5f, 3, 0.25f, 1, nullptr, 0, "RVK_NormalMaps"},
     {"RVK_Pbr", "PBR materials", "Materials", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PbrSpec", "Highlights", "Materials",         Float, 0, 2, 0.1f, 0.5f, nullptr, 0, "RVK_Pbr"},
@@ -82,7 +82,7 @@ Setting g_settings[] = {
     {"RVK_PbrSsr", "Screen-space reflections", "Materials", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrAo", "Occlusion map strength", "Materials",         Float, 0, 1, 0.1f, 0.1f, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrProbe", "Environment probe", "Materials", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_Pbr"},
-    {"RVK_PbrGlow", "Emissive map brightness", "Materials", Float, 0, 8, 0.25f, 1.75f, nullptr, 0, "RVK_Pbr"},
+    {"RVK_PbrGlow", "Emissive map brightness", "Materials", Float, 0, 8, 0.25f, 1, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 11, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9 10 11"},
     {"RVK_Albedo", "Enhanced textures", "Materials",     Bool,  0, 1, 1, 1, nullptr, 0},
 
@@ -91,19 +91,19 @@ Setting g_settings[] = {
     {"RVK_GroundAo",   "Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none)", "Terrain", Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundSun",  "Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundRocks", "Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_GroundOn"},
-    {"RVK_Pebbles", "Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_Pebbles", "Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many)", "Terrain", Float, 0, 2, 0.25f, 2, nullptr, 0, "RVK_GroundOn"},
     {"RVK_SandRipple", "Ground drawn by ao-vk: wind ripples in loose sand, in depth up close (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
     {"RVK_SandPrints", "Ground drawn by ao-vk: footprints in loose sand, where characters walk (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
-    {"RVK_RippleDepth", "Ground drawn by ao-vk: how deep the sand ripples are up close (0 = flat; its own, not Depth's)", "Terrain", Float, 0, 3, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_RippleDepth", "Ground drawn by ao-vk: how deep the sand ripples are up close (0 = flat; its own, not Depth's)", "Terrain", Float, 0, 3, 0.1f, 2, nullptr, 0, "RVK_GroundOn"},
     {"RVK_RippleSoft", "Ground drawn by ao-vk: the sand ripples smoother - less wobble in their crests, less of the tile's bumps (0 = rough)", "Terrain", Float, 0, 1, 0.1f, 0.3f, nullptr, 0, "RVK_GroundOn"},
-    {"RVK_DuneLight", "Ground drawn by ao-vk: dunes of loose sand shaped by the sun as it stands, their far sides in shade (0 = the game's flat light)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_DuneLight", "Ground drawn by ao-vk: dunes of loose sand shaped by the sun as it stands, their far sides in shade (0 = the game's flat light)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
     {"RVK_SandGlint", "Ground drawn by ao-vk: a sparkle of sunlit grains in loose sand near you (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.5f, nullptr, 0, "RVK_GroundOn"},
-    {"RVK_GroundGrain", "Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_GroundGrain", "Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundBlend", "Ground drawn by ao-vk: neighbouring ground textures blend into each other along a ragged edge instead of meeting in a hard straight line (0 = hard edges)", "Terrain", Float, 0, 1, 0.1f, 1.0f, nullptr, 0, "RVK_GroundOn"},
-    {"RVK_GroundTess", "Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes)", "Terrain", Float, 0, 1, 0.1f, 0.6f, nullptr, 0, "RVK_GroundOn"},
+    {"RVK_GroundTess", "Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes)", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_GroundOn"},
     {"RVK_CliffDepth", "Ground drawn by ao-vk: cliffs' rock stands out of their faces up close (units; 0 = flat)", "Terrain", Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_GroundOn"},
     {"RVK_GroundFar",  "Ground past that: texture detail (texels a 4 x 4 cell; 8 = the game's, 32 costs a lot of memory)", "Terrain", Choice, 8, 32, 8, 16, nullptr, 0, nullptr, "8 16 32"},
-    {"RVK_GroundRange", "Ground drawn at full quality this many times further out (1 = the game's; above 2 the game stutters as you move)", "Terrain", Float, 1, 2.5f, 0.25f, 1.5f, nullptr, 0},
+    {"RVK_GroundRange", "Ground drawn at full quality this many times further out (1 = the game's; above 2 the game stutters as you move)", "Terrain", Float, 1, 2.5f, 0.25f, 1, nullptr, 0},
     {"RVK_CliffTex",   "Cliffs: the ground's texture laid on their faces, not stretched down them", "Terrain", Float, 0, 1, 0.1f, 1, nullptr, 0},
     {"RVK_CliffRock",  "Cliffs: rock laid on their faces, in the colour of the ground", "Terrain",       Bool,  0, 1, 1, 1, nullptr, 0, "RVK_CliffTex"},
     {"RVK_TileHide",   "Cliffs: the same tile not repeated in rows down their faces", "Terrain",       Float, 0, 1, 0.1f, 1, nullptr, 0},
@@ -246,15 +246,15 @@ Setting g_settings[] = {
     RVK_SKY_KEY("RVK_SkyNightTop", "Sky colour: at night, overhead", kSkyNightTop)
     RVK_SKY_KEY("RVK_SkyNightLow", "Sky colour: at night, low", kSkyNightLow)
 #undef RVK_SKY_KEY
-    {"RVK_Twilight",    "Sky: sunrise and sunset colours - orange and red towards the sun, pink above, the pink band opposite (0: the game's sky; above 1 more vivid)", "Sky", Float, 0, 1.5f, 0.05f, 0.85f, nullptr, 0, "RVK_Hdr"},
+    {"RVK_Twilight",    "Sky: sunrise and sunset colours - orange and red towards the sun, pink above, the pink band opposite (0: the game's sky; above 1 more vivid)", "Sky", Float, 0, 1.5f, 0.05f, 0.5f, nullptr, 0, "RVK_Hdr"},
     {"RVK_BlueHour",    "Sky: the blue hour after sunset and before sunrise - a deep blue sky going over to the night's (0: none)", "Sky", Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_Hdr"},
-    {"RVK_SkyGlow",     "Sky: the glow round the sun and along the horizon under it (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
+    {"RVK_SkyGlow",     "Sky: the glow round the sun and along the horizon under it (0: none)", "Sky", Float, 0, 2, 0.1f, 0.25f, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyZones",    "Clouds: each zone its own skies - deserts clearer, coasts and forests cloudier (0: the same everywhere)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_Afterglow",   "Clouds: how strongly they take the sunset's colours - gold, orange, red, pink undersides after the sun has set (0: the game's hues)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_StarFade",    "Sky: the stars come out slowly as the sky darkens after sunset, and fade before sunrise (off: as the game shows them)", "Sky", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Stars",       "Sky: our own stars - thousands, in their colours, wheeling through the night, twinkling low (0: the game's)", "Sky", Choice, 0, 1, 1, 1, nullptr, 0, "RVK_ProcSky", "0 1"},
-    {"RVK_StarBright",  "Sky: the stars' brightness, x", "Sky", Float, 0.25f, 3, 0.05f, 1, nullptr, 0, "RVK_ProcSky"},
-    {"RVK_Twinkle",     "Sky: how much the stars twinkle (most low in the sky; 0 steady)", "Sky", Float, 0, 1, 0.05f, 0.5f, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_StarBright",  "Sky: the stars' brightness, x", "Sky", Float, 0.25f, 3, 0.05f, 3, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_Twinkle",     "Sky: how much the stars twinkle (most low in the sky; 0 steady)", "Sky", Float, 0, 1, 0.05f, 0.2f, nullptr, 0, "RVK_ProcSky"},
     {"RVK_Galaxy",      "Sky: the galaxy's band across the night sky, x (0 none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_ProcSky"},
     {"RVK_Meteors",     "Sky: shooting stars on clear nights, how often x (0 none)", "Sky", Float, 0, 3, 0.25f, 1, nullptr, 0, "RVK_ProcSky"},
     {"RVK_Aurora",      "Sky: auroras on some clear nights, how often and how strong x (0 none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_ProcSky"},
@@ -271,7 +271,7 @@ Setting g_settings[] = {
     {"RVK_CloudHeight", "Clouds: the layer's height",                              "Sky",     Float, 200, 3000, 50, 900, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudShade",  "Clouds: contrast (light and shade; 1 as lit)",            "Sky",     Float, 0.5f, 3, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudLow",    "Clouds: low grey deck on overcast days, x (0 none)",      "Sky",     Float, 0, 2, 0.1f, 0, nullptr, 0, "RVK_CloudsOn"},
-    {"RVK_CloudQual",   "Clouds: quality - less noise, more cost (0 low .. 3 ultra)", "Sky",   Choice, 0, 3, 1, 2, nullptr, 0, "RVK_CloudsOn", "0 1 2 3"},
+    {"RVK_CloudQual",   "Clouds: quality - less noise, more cost (0 low .. 3 ultra)", "Sky",   Choice, 0, 3, 1, 3, nullptr, 0, "RVK_CloudsOn", "0 1 2 3"},
     {"RVK_CloudMorph",  "Clouds: how fast they churn and change shape, x (0 still)", "Sky",   Float, 0, 3, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudSheet",  "Clouds: the game's flat sheets behind them, x (0 none)",  "Sky",     Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_SmokeGame",  "Smoke: the game's smoke sprites too",                     "Smoke",     Bool,  0, 1, 1, 0, nullptr, 0, "RVK_SmokeOn"},
@@ -296,7 +296,7 @@ Setting g_settings[] = {
     {"RVK_HdrRoom", "Local light headroom", "Tone mapping",  Float, 1, 4, 0.25f, 1.5f, "RANDYVK_HDR_HEADROOM", 0, "RVK_Hdr"},
     {"RVK_BloomOn", "Bloom", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Bloom", "Strength", "Effects",  Float, 0.25f, 5, 0.25f, 1, "RANDYVK_BLOOM", 0, "RVK_BloomOn"},
-    {"RVK_BloomThr", "Threshold (1 = above white)", "Effects",  Float, 0.5f, 2, 0.05f, 1, "RANDYVK_BLOOM_THRESHOLD", 0, "RVK_BloomOn"},
+    {"RVK_BloomThr", "Threshold (1 = above white)", "Effects",  Float, 0.5f, 2, 0.05f, 0.5f, "RANDYVK_BLOOM_THRESHOLD", 0, "RVK_BloomOn"},
     {"RVK_BloomOcc", "Over objects in front of its light (1 = unchanged)", "Effects",  Float, 0, 1, 0.05f, 0.15f, nullptr, 0, "RVK_BloomOn"},
     {"RVK_BloomWide", "Wide haze round its core (0 = even; wider in rain by night)", "Effects",  Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_BloomOn"},
     {"RVK_NeonSat", "Bright coloured lights keep their colour (0 = they go white)", "Effects",  Float, 0, 1, 0.05f, 0.6f, nullptr, 0, "RVK_Hdr"},
@@ -310,7 +310,7 @@ Setting g_settings[] = {
     {"RVK_Ao", "Strength", "Effects",  Float, 0.25f, 3, 0.25f, 1, "RANDYVK_AO", 0, "RVK_AoOn"},
     {"RVK_AoRadius", "Radius (world units)", "Effects",  Float, 0.25f, 4, 0.25f, 1, "RANDYVK_AO_RADIUS", 0, "RVK_AoOn"},
     {"RVK_GiOn", "Indirect light (bounce light from the lit scene)", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
-    {"RVK_Gi", "Strength", "Effects",  Float, 0.25f, 3, 0.25f, 1.75f, nullptr, 0, "RVK_GiOn"},
+    {"RVK_Gi", "Strength", "Effects",  Float, 0.25f, 3, 0.25f, 1, nullptr, 0, "RVK_GiOn"},
     {"RVK_GiRadius", "Reach (world units)", "Effects",  Float, 1, 12, 0.5f, 4, nullptr, 0, "RVK_GiOn"},
     {"RVK_VolOn", "Volumetric light (sun shafts)", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Volume", "Strength", "Effects",  Float, 0.25f, 4, 0.25f, 0.5f, nullptr, 0, "RVK_VolOn"},
@@ -331,18 +331,18 @@ Setting g_settings[] = {
     {"RVK_MornHaze", "Morning haze: the air thicker round sunrise, half as much round sunset (0: none)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Atmos"},
     {"RVK_GameSun", "The game's own sun glow sprites (off: only the suns above)", "Effects", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_SsrOn", "Reflections (screen-space)", "Effects",  Bool,  0, 1, 1, 0, nullptr, 0},
-    {"RVK_Ssr", "Strength", "Effects",  Float, 0.25f, 2, 0.25f, 1, nullptr, 0, "RVK_SsrOn"},
+    {"RVK_Ssr", "Strength", "Effects",  Float, 0.25f, 2, 0.25f, 0.25f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrWater", "Water", "Effects",  Float, 0, 1, 0.05f, 0.25f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrGloss", "Glossy surfaces", "Effects",  Float, 0, 1, 0.05f, 0.3f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrWet", "Wet look of floors and ground (0 = dry)", "Effects",  Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_SsrOn"},
-    {"RVK_MBlurOn", "Motion blur", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
+    {"RVK_MBlurOn", "Motion blur", "Effects",  Bool,  0, 1, 1, 0, nullptr, 0},
     {"RVK_MBlurObj", "Per-object (off = camera only)", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0, "RVK_MBlurOn"},
     {"RVK_MBlur", "Amount", "Effects",  Float, 0.05f, 2, 0.05f, 0.15f, "RANDYVK_MOTION_BLUR", 0, "RVK_MBlurOn"},
     {"RVK_MBlurNear", "Camera blur: sharp nearer than (world units)", "Effects",  Float, 2, 20, 0.5f, 8, "RANDYVK_MOTION_BLUR_NEAR", 0, "RVK_MBlurOn"},
 
     {"RVK_Taa",        "Temporal anti-aliasing",                                   "Anti-aliasing",    Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Sharpen", "Sharpening (0 = none)", "Anti-aliasing",    Float, 0, 1, 0.05f, 0.4f, nullptr, 0, "RVK_Taa"},
-    {"RVK_RenderScale", "Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster)", "Anti-aliasing", Choice, 50, 100, 1, 75, nullptr, 0, "RVK_Taa", "100 85 75 67 50"},
+    {"RVK_RenderScale", "Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster)", "Anti-aliasing", Choice, 50, 100, 1, 100, nullptr, 0, "RVK_Taa", "100 85 75 67 50"},
     {"RVK_FrameGen", "Frame generation (AMD FSR 3.1): a frame interpolated between each two - about twice the frames shown, a little more latency", "Anti-aliasing", Bool, 0, 1, 1, 0, nullptr, 0, "RVK_Taa"},
     {"RVK_Upscaler", "Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2, 2: AMD FSR 3.1)", "Anti-aliasing", Choice, 0, 2, 1, 0, nullptr, 0, "RVK_Taa", "0 1 2"},
     {"RVK_Fxaa",       "FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer)", "Anti-aliasing", Bool, 0, 1, 1, 0, nullptr, 0},
@@ -568,8 +568,15 @@ const Migration kMigrations[] = {
     {"RippleSoft", "RVK_RippleSoft", "RVK_RippleSmooth", kKeep},
     // (One setting for how dark the game gets, lighter by default: docs/darkness-plan.md.)
     {"Darkness", "RVK_Darkness", "RVK_NightDark", 1.0f},
-    // (The 3D world drawn at 75% and upscaled by the TAA: about a third less GPU work, 2026-10-20.)
-    {"RenderScale75", "RVK_RenderScale", "RVK_RenderScale", 100.0f},
+    // (0.7.0's defaults: the user's own setup, 2026-10-20 - render scale, upscaler and frame generation left off.
+    // The settings 0.6.1 had already; the newer ones come with their new defaults.)
+    {"BloomThr070", "RVK_BloomThr", "RVK_BloomThr", 1.0f},
+    {"Gi070", "RVK_Gi", "RVK_Gi", 1.75f},
+    {"Ssr070", "RVK_Ssr", "RVK_Ssr", 1.0f},
+    {"BumpOn070", "RVK_BumpOn", "RVK_BumpOn", 0.0f},
+    {"MBlurOn070", "RVK_MBlurOn", "RVK_MBlurOn", 1.0f},
+    {"PbrGlow070", "RVK_PbrGlow", "RVK_PbrGlow", 1.75f},
+    {"CloudQual070", "RVK_CloudQual", "RVK_CloudQual", 2.0f},
 };
 
 // A key in randy-vk.ini's [Renderer] twice (a hand edit): only the first counts - an edit to the other did nothing
@@ -1237,8 +1244,8 @@ void LogAll()
 
 // ---- Presets ----
 // Original: every enhancement off; Classic+: the game's look, lit and shadowed better; Modern: the defaults (the
-// user's own look, 2026-10-16, its heaviest quality one step down); Ultra: that look with its quality up (the user's
-// setup). A preset holds every setting except the General ones (performance switches a preset shouldn't
+// user's own setup, 2026-10-20, with render scale 100 and neither upscaler nor frame generation); Ultra: that look
+// with its quality up. A preset holds every setting except the General ones (performance switches a preset shouldn't
 // change), with RVK_Enhance on; Original is RVK_Enhance off alone (the stored values stay for switching back). Players
 // keep a setup of their own by backing up randy-vk.ini.
 namespace {

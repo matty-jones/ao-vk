@@ -152,8 +152,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Render scale (`RVK_RenderScale`, Anti-aliasing, under TAA; console `renderscale`): the 3D world can be drawn at
   85, 75, 67 or 50% of the screen's size and brought back up to full size by the TAA, for a higher frame rate. At 75%
   the world costs the GPU about a third less (at a lamp-lit outpost by night, about 102 fps went to about 125); the
-  interface and name labels stay sharp at full size, and loading screens are drawn at full size. It is 75 by default
-  and needs TAA on; 100 draws everything at full size as before.
+  interface and name labels stay sharp at full size, and loading screens are drawn at full size. It needs TAA on;
+  100 (the default) draws everything at full size as before, 75 is a good balance.
 - AMD FSR 2.2 and FSR 3.1 as upscalers for the render scale (`RVK_Upscaler`, Anti-aliasing; console `upscaler 1` for
   FSR 2.2, `upscaler 2` for FSR 3.1): a sharper picture at the same scale than ao-vk's own upscaler, most of all at
   50%; FSR 3.1 keeps rain best - at a little more GPU time. ao-vk's own (0) by default.
@@ -185,9 +185,17 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   every layer of leaf edges in it. Closer plants keep the blended edge. In a demo forest the frame cost 10-20% less.
   `RVK_FolDither` (Plants) sets the distance: 0 never dithers, 1 dithers every plant (cheapest). It has no effect
   while TAA is off.
-- Nights are lighter by default (`RVK_Darkness` 0.5): the land and the night sky keep more of the blue hour's light,
-  the moon lights a little more, and storms are less dark. Rooms and other places without a sun no longer get the
-  night's darkening on top of their own dim light. Set `RVK_Darkness` to 1 for the old look.
+- Nights are lighter by default (`RVK_Darkness` 0): the land and the night sky keep the blue hour's light, the moon
+  lights a little more, and storms are less dark. Rooms and other places without a sun no longer get the night's
+  darkening on top of their own dim light. Set `RVK_Darkness` to 1 for the old look.
+- New defaults, and so a new Modern preset (Classic+ and Ultra build on it): bloom from a lower brightness
+  (`RVK_BloomThr` 0.5), softer indirect light (`RVK_Gi` 1) and emissive glow (`RVK_PbrGlow` 1), fainter screen-space
+  reflections (`RVK_Ssr` 0.25), generated bump on (`RVK_BumpOn`), motion blur off (`RVK_MBlurOn`), finer clouds
+  (`RVK_CloudQual` 3), gentler sunsets and sun glow (`RVK_Twilight` 0.5, `RVK_SkyGlow` 0.25), brighter stars that
+  twinkle less (`RVK_StarBright` 3, `RVK_Twinkle` 0.2), and on the ground more grit, rounding, pebbles and ripple
+  depth (`RVK_GroundGrain` 1, `RVK_GroundTess` 1, `RVK_Pebbles` 2, `RVK_RippleDepth` 2), the dunes' light at full
+  (`RVK_DuneLight` 1), shallower height maps (`RVK_Parallax` 0.3) and the game's detail range for the ground's
+  textures (`RVK_GroundRange` 1). Settings you changed yourself stay as you set them.
 - Thunderstorm clouds are no longer one dark, shapeless mass: heavy masses and thinner stretches show between them,
   light comes through the thinner parts, their undersides are lumpy and their edges ragged. `RVK_StormThick` (1; up to
   2 for the old, nearly black storm) sets how thick and dark they are.

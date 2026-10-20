@@ -165,7 +165,7 @@ Spell effects with GPU particles, and depth of field.
 - The suns drawn anew in the game's style (a white-hot core, a soft glow, rays), dimmed by cloud in front of them;
   low suns bigger and spread along the horizon. Dawn and dusk in the game's colours.
 - Nights lit by the moon, with lamps and windows glowing. How dark nights, storms and dim places get is one setting,
-  `RVK_Darkness` (0 lightest, 0.5 the default, 1 darker, 2 very dark); the darkest places brighten as eyes adapt.
+  `RVK_Darkness` (0 lightest and the default, 1 darker, 2 very dark); the darkest places brighten as eyes adapt.
 - The ships over the cities hazed into the distance instead of cut off.
 
 **Clouds, rain and smoke** (on by default; sections Sky, Weather and Smoke)
@@ -257,9 +257,9 @@ ao-vk spends that idle graphics card on its effects, and takes work off the game
 And it can draw the 3D world at less than the screen's size and bring it back up, or put frames of its own between
 the game's:
 
-- **Render scale** (`RVK_RenderScale`, 75% by default; console `renderscale`): the world drawn at 85, 75, 67 or 50%
+- **Render scale** (`RVK_RenderScale`, 100% by default; console `renderscale`): the world drawn at 85, 75, 67 or 50%
   of the screen's size and brought up to full size by the TAA. At 75% the world costs the graphics card about a
-  third less; the interface and the names over characters stay sharp at full size. 100 draws everything at full size.
+  third less; the interface and the names over characters stay sharp at full size.
 - **Upscalers** (`RVK_Upscaler`): ao-vk's own TAA (0), or AMD FSR 2.2 (1) or FSR 3.1 (2), sharper at the same scale -
   most of all at 50% - for a little more graphics-card time.
 - **Frame generation** (`RVK_FrameGen`, off by default; console `framegen 1`): AMD FSR 3.1 puts a frame of its own
