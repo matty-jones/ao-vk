@@ -1473,18 +1473,6 @@ void Device::DrawShadowItem(VkCommandBuffer cmd, ShadowBind& bind, ShadowItem& i
 void Device::RenderShadowMap(VkCommandBuffer cmd)
 {
     bool haveSun = m_sunLuminance > 0.0f && m_sunDir[1] < -0.05f;   // below the horizon / grazing: none
-    // The sun's true direction (FrameLights sunTrue), kept: frame lights written before this frame's sun is seen
-    // read it (the cloud layer's: with the shadow light's direction - the moon's, above the horizon - it took night for
-    // day and its clouds went dark).
-    // (Eased over real time, with the dusk's phases from its height: sky.cpp UpdateSunClock.)
-    UpdateSunClock();
-    UpdateDarkness();                            // (RVK_Darkness: how dark this frame may get - darkness.cpp)
-    // With the sun down, the moon's light (night.cpp) - the map drawn from it. The valley mist (mist.cpp).
-    UpdateMoon();
-    UpdateMist();
-    UpdateSkyModel();                            // (the sky's twilight and glow: sky.cpp)
-    UpdateAtmosphere(cmd);                       // (our own sky's tables, for the next frame: atmosphere.cpp)
-    UpdateTerrainSun(cmd);                       // (the terrain's shade from a low sun: terrain_sun.cpp)
     // Low (under ~3 degrees, still above the horizon): no shadows (too long, too ragged), but the game's light stays
     // the frame's sun for our effects - clouds, leaves, air - fading in from the horizon: at dawn and dusk the game
     // lights its world in gold, and with the sun off ours stayed in the night's colours (user, 2026-10-13).

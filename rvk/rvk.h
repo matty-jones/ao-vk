@@ -1463,6 +1463,7 @@ private:
     bool CreateDarknessResources(std::string* error);
     void DestroyDarknessResources();
     void UpdateDarkness();
+    void UpdateEnvironment(VkCommandBuffer cmd);
     void MeasureSceneLuma(VkCommandBuffer cmd);
     bool m_atmos = true;                         // RVK_Atmos
     // Valley mist (mist.cpp, RVK_Mist).

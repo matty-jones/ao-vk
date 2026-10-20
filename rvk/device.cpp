@@ -1759,6 +1759,7 @@ void Device::EndFrame()
     EndRendering();
     ProfileMark("interface");
     double cpu = ProfileCpu();
+    UpdateEnvironment(f.main);                   // (the time of day and the weather's light: sky.cpp)
     RenderShadowMap(f.main);
     ProfileCpuAdd("sun shadows", cpu);
     ProfileMark("sun shadows");

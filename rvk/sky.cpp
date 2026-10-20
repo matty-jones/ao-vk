@@ -193,6 +193,23 @@ V3 SkyTwilightCpu(const float dir[3], const float* s0, const float* s1, const fl
 
 }  // namespace
 
+// Once a frame, at its end (before the shadow map, which is drawn from the sun or the moon these find): the time of
+// day and the weather's light, in order - each reads what the ones before it set.
+void Device::UpdateEnvironment(VkCommandBuffer cmd)
+{
+    // The sun's true direction (FrameLights sunTrue), kept: frame lights written before this frame's sun is seen
+    // read it (the cloud layer's: with the shadow light's direction - the moon's, above the horizon - it took night for
+    // day and its clouds went dark). Eased over real time, with the dusk's phases from its height.
+    UpdateSunClock();
+    UpdateDarkness();                            // (RVK_Darkness: how dark this frame may get - darkness.cpp)
+    // With the sun down, the moon's light (night.cpp) - the shadow map drawn from it. The valley mist (mist.cpp).
+    UpdateMoon();
+    UpdateMist();
+    UpdateSkyModel();                            // (the sky's twilight and glow)
+    UpdateAtmosphere(cmd);                       // (our own sky's tables, for the next frame: atmosphere.cpp)
+    UpdateTerrainSun(cmd);                       // (the terrain's shade from a low sun: terrain_sun.cpp)
+}
+
 // The sun's clock (docs/dusk-plan.md), once a frame before the moon and the sky's model: the true sun - the game's
 // brightest directional light, which by night points up from under the ground - eased over about a second of real
 // time (a step in the game's light becomes a sweep), held through frames without it; and from its height the dusk's
