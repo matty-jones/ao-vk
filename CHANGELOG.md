@@ -5,6 +5,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+## 0.7.0 - 2026-10-20
+
 ### New
 - One setting for how dark the game gets: `RVK_Darkness` (Lighting, first in the list). It sets nights, the night sky
   and clouds, the moon's light and thunderstorms together: 0 is the lightest (nights about as light as the blue hour
