@@ -146,6 +146,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   2 for the old, nearly black storm) sets how thick and dark they are.
 
 ### Fixed
+- The volumetric clouds no longer stand as a ring of heavy cloud round the horizon in every sky: clouds far off are
+  as broken up as the ones overhead.
 - Dark and coloured blobs on floors round tables, plants and characters (indoors most), flickering and changing as
   the interface updated, are gone: a few broken pixels in normal-mapped floors were spread into blobs by the indirect
   light and the anti-aliasing. (Also: the soft edges of plants and cut-out textures, `RVK_FolEdges`, could be drawn

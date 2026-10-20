@@ -171,8 +171,18 @@ float Density(vec3 p, bool detail)
     float body = Remap(n.r, fbm - 1.0, 1.0, 0.0, 1.0) * Profile(hb, w.g);
     // Coverage eats into the body from its thin parts: little cover, only the cores remain.
     float d = clamp(Remap(body, 1.0 - cover, 1.0, 0.0, 1.0), 0.0, 1.0) * cover;
-    if (d <= 0.0 || !detail)                     // (the detail below only takes away)
+    if (d <= 0.0)
+        return 0.0;
+    if (!detail) {
+        // (Far off - no detail: too small to see, half the cost - what the billows and the erosion below take away on
+        // average taken away all the same: the uncarved bodies stood fuller and more solid than the near clouds, a
+        // ring of heavy cloud round the horizon past ~8 km in every sky - user, 2026-10-19.)
+        float billowMean = mix(0.15, 0.35, clamp(h * 2.0, 0.0, 1.0)) * 0.5 * clamp(L.shape.z / 0.65, 0.3, 1.5);
+        float bodyFar = Remap(body, billowMean, 1.0, 0.0, 1.0);
+        d = clamp(Remap(bodyFar, 1.0 - cover, 1.0, 0.0, 1.0), 0.0, 1.0) * cover;
+        d = clamp(Remap(d, 0.5 * L.shape.z, 1.0, 0.0, 1.0), 0.0, 1.0);
         return d * w.b;
+    }
     // Billows: the body bumped by its own cells three times finer (cauliflower tops rather than smooth blobs) - more
     // towards the top, where cumulus heap up.
     float billow = ShapeSmooth(q * 3.1 + 0.17).g;
