@@ -913,6 +913,9 @@ bool g_pbrRoom = false;       // --pbr-room: unlit coloured walls around (red le
 // floor_n.png, floor_h.png, floor_ao.png / floor_r.png / floor_m.png (separate) and floor_d.png; the bottom row's middle ball
 // ball_n.png and ball_orm.png (packed). Missing files are skipped.
 std::string g_pbrMaps;
+bool g_pbrSelfLit = false;          // --pbr-selflit: the emissive map's ball drawn with an emissive (self-lit) material
+extern float g_sunDir[3];               // (--sun-dir, below: also the PBR scene's sun - from under the ground, night)
+extern bool g_sunDirSet;
 float g_floorRepeats = 8.0f;        // --floor-repeats N: the PBR scene's floor texture's repeats across it (16 units)
 
 template <typename D>
@@ -1061,6 +1064,7 @@ void RunPbrTest(D& dev, int frames, const std::string& shot)
         sun.diffuse = {1.0f, 0.95f, 0.85f, 1};
         sun.specular = {1, 1, 1, 1};
         sun.direction = {0.5f, -0.6f, 0.6f};
+        if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};   // (--sun-dir: up from under the ground is night)
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         Light lamp{};
@@ -1106,6 +1110,13 @@ void RunPbrTest(D& dev, int frames, const std::string& shot)
             for (int col = 0; col < 5; ++col) {
                 bool legacy = row == 0 && col < 4;
                 dev.SetMaterial(legacy ? glossy : plain);
+                // (--pbr-selflit: the emissive map's ball self-lit, as the game's signs - an emissive material: the map
+                // only says where the night glow goes, no light of its own.)
+                if (g_pbrSelfLit && row == 0 && col == 2) {
+                    Material lit = glossy;
+                    lit.emissive = {1, 1, 1, 1};
+                    dev.SetMaterial(lit);
+                }
                 dev.SetRenderState(RS_SPECULARENABLE, legacy ? 1 : 0);
                 dev.SetTexture(0, tex[row][col]);
                 dev.SetTransform(World, Translate((col - 2) * 1.1f, 1.45f - row * 1.1f, 0));
@@ -4841,6 +4852,7 @@ int main(int argc, char** argv)
         else if (a == "--bump" && i + 1 < argc) bump = float(std::atof(argv[++i]));
         else if (a == "--normal-map-test") normalMapTest = true;
         else if (a == "--pbr-test") pbrTest = true;
+        else if (a == "--pbr-selflit") { g_pbrSelfLit = true; pbrTest = true; }
         else if (a == "--glow-occlude-test") { glowOccludeTest = true; hdr = true; }
         else if (a == "--pbr-maps" && i + 1 < argc) { g_pbrMaps = argv[++i]; pbrTest = true; }
         else if (a == "--floor-repeats" && i + 1 < argc) g_floorRepeats = float(std::atof(argv[++i]));

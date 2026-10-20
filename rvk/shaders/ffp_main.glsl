@@ -997,18 +997,26 @@ void main()
             }
         }
     }
-    // Night glow: on self-lit surfaces (windows, signs, screens), bright texels shine beyond white, for the bloom.
-    if ((C.flags.x & F_EMISSIVE) != 0u && FL.effects.y > 0.0) {
-        float glow = smoothstep(0.55, 0.9, max(t0.r, max(t0.g, t0.b))) * FL.effects.y;
+    // One glow per surface. On a surface the game lights itself (F_EMISSIVE: drawn unlit, or an emissive material -
+    // signs, windows, screens) the night glow alone: by night its bright texels shine beyond white, for the bloom
+    // (FL.effects.y, RVK_NightGlow), and an emissive map, when it has one, only says where - in place of "bright" -
+    // adding no light of its own: the game shows such a surface at its full colour already. (Both added on top of it
+    // made a lit sign ~3x its colour and bloomed its letters away - user, 2026-10-20.) Elsewhere the emissive map
+    // (D.mat.z & MAT_EMISSIVE) adds the light the surface gives off, whatever lights it, x RVK_PbrGlow (FL.pbr2.z) -
+    // beyond white with HDR, for the bloom.
+    const bool selfLit = (C.flags.x & F_EMISSIVE) != 0u, hasMap = (D.mat.z & MAT_EMISSIVE) != 0u;
+    vec3 emitted = vec3(0.0), map = vec3(0.0);
+    if (hasMap && (selfLit ? FL.effects.y > 0.0 : FL.pbr2.z > 0.0))
+        map = (gParallax ? textureGrad(EMISSIVETEX, gUv0, gUv0Dx, gUv0Dy) : texture(EMISSIVETEX, vTex0.xy)).rgb;
+    if (selfLit && FL.effects.y > 0.0) {
+        float glow = (hasMap ? max(map.r, max(map.g, map.b)) : smoothstep(0.55, 0.9, max(t0.r, max(t0.g, t0.b)))) *
+                     FL.effects.y;
+        vec3 before = current.rgb;
         if ((C.flags.x & F_LIGHTING) != 0u) current.rgb += t0.rgb * vMatEmissive * glow;
         else current.rgb *= 1.0 + glow;
-    }
-    // Emissive map (D.mat.z & MAT_EMISSIVE): the light the surface gives off, added whatever lights it - beyond white
-    // with HDR, for the bloom.
-    vec3 emitted = vec3(0.0);
-    if ((D.mat.z & MAT_EMISSIVE) != 0u && FL.pbr2.z > 0.0) {
-        emitted = (gParallax ? textureGrad(EMISSIVETEX, gUv0, gUv0Dx, gUv0Dy) : texture(EMISSIVETEX, vTex0.xy)).rgb *
-                  FL.pbr2.z;
+        if (hasMap) emitted = current.rgb - before;   // (the debug views: what the map made glow)
+    } else if (hasMap && !selfLit && FL.pbr2.z > 0.0) {
+        emitted = map * FL.pbr2.z;
         current.rgb += emitted;
         if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
     }

@@ -3319,11 +3319,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_INVSRCALPHA)
         flags |= F_BLENDED;                      // (the cut-out pre-pass: such a pixel hides what is behind at alpha 1)
     m_drawMayDiscard = (flags & (F_ALPHATEST | F_CUTOUT)) != 0u;   // else the no-discard pipeline keeps early-Z
-    // Night glow candidates: opaque 3D surfaces drawn unlit (self-lit, like windows and signs) or with an emissive
-    // material - not effects, the sky, the ground or lighting passes.
+    // Self-lit surfaces: opaque 3D surfaces drawn unlit (like windows and signs) or with an emissive material - not
+    // effects, the sky, the ground or lighting passes. The night glow's (by night their bright texels glow), and an
+    // emissive map on one only says where it glows (ffp_main: one glow per surface) - so marked with the night glow
+    // off too.
     bool additive = m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE;
     float emissive = std::max(std::max(m_material.emissive.r, m_material.emissive.g), m_material.emissive.b);
-    if (m_nightGlow > 0.0f && hdrTarget && solid3d && !additive && !IsMultiplyPass() &&
+    if (hdrTarget && solid3d && !additive && !IsMultiplyPass() &&
         (!(flags & F_LIGHTING) || emissive > 0.05f))
         flags |= F_EMISSIVE;
     // A character's body and parts: the lights characters carry don't shadow them (lighting.glsl).

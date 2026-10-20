@@ -113,8 +113,14 @@ debug view colours the scene the probe keeps what it had. `RVK_PbrProbe` (streng
 
 **Emissive maps**: `Device::SetEmissiveMap(texture, emissive)`. A draw whose stage 0 texture (plain coordinates, not
 the ground's passes nor screen-space draws) has one carries it in the record (`D.mat.w`, sampled with `D.mat.y`;
-`MAT_EMISSIVE`); ffp_main.glsl adds map x `RVK_PbrGlow` (`FL.pbr2.z`) after the texture stages and night glow,
-before the fog - lit or not, PBR material or not. Clamped to white without HDR.
+`MAT_EMISSIVE`); ffp_main.glsl adds map x `RVK_PbrGlow` (`FL.pbr2.z`) after the texture stages, before the fog - PBR
+material or not. Clamped to white without HDR. One glow per surface: on a surface the game lights itself (drawn
+unlit, or with an emissive material - its signs, screens and windows: `F_EMISSIVE`) the map adds no light. The game
+shows such a surface at full colour already, and the night glow (`RVK_NightGlow`) makes it shine by night; the map
+then only says where it glows, in place of the night glow's "bright texels". Both added on top of the game's own
+light made a lit sign about 3x its colour. So a map for a self-lit texture is a mask: white where it should glow at
+night, black where not; how much is `RVK_NightGlow`. Demo: `--pbr-test --pbr-selflit --sun-dir 0.5 0.6 0.6
+--night-glow 1` (the emissive map's ball self-lit, by night).
 
 **Albedo maps** replace the texture's image in the draw's record (stage 0, stage 1 and the ground's base) and for
 shadow casters' alpha. The game's own uploads still go to the original texture.

@@ -156,6 +156,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   2 for the old, nearly black storm) sets how thick and dark they are.
 
 ### Fixed
+- Signs, screens and windows that the game lights itself no longer glow two or three times over when a texture pack
+  gives them an emissive map (a clan teleporter's sign came out a blown-out cyan block, its letters lost): the map now
+  only says where such a surface glows at night, and `RVK_NightGlow` how much. On other surfaces emissive maps add
+  their light as before (`RVK_PbrGlow`).
 - The volumetric clouds no longer stand as a ring of heavy cloud round the horizon in every sky: clouds far off are
   as broken up as the ones overhead.
 - Dark and coloured blobs on floors round tables, plants and characters (indoors most), flickering and changing as
