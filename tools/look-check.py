@@ -22,6 +22,9 @@ TOLERANCE = 0.006
 GROUND = os.path.join(ROOT, "build", "pf790.gnd")
 
 GRADE = ["--grade", "1", "1", "0.75", "0.25", "0"]
+# The sky's clock pinned: it runs on the wall clock (rvk sky.cpp SkyClock) and drives the cloud cover, the stars and
+# the auroras over hours - unpinned, the night scenes drifted with the time of day.
+CLOCK = ["--sky-time", "1000"]
 SCENES = {
     # Day to night over a lake, our own sky (the darkness, the dusk's phases, the sky's adaptation).
     "dusk": ["--water-lake", "--sky-dome", "8FB0CC", "--proc-sky", "1", "--atmos", "1", "--fixed-clock", "33",
@@ -62,7 +65,7 @@ def run(scene):
     if scene == "ground" and not os.path.exists(GROUND):
         print(f"{scene}: skipped ({GROUND} missing: tools/ground-data.py 790 --export {GROUND})")
         return None
-    subprocess.run([os.path.join(ROOT, "tools", "rvk-demo.sh"), out, *SCENES[scene]], stdout=subprocess.DEVNULL,
+    subprocess.run([os.path.join(ROOT, "tools", "rvk-demo.sh"), out, *SCENES[scene], *CLOCK], stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL, check=False)
     log = os.path.join(out, "validation.log")
     if os.path.exists(log):
