@@ -148,6 +148,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   clear ground between, deeper the wetter it has been and most in wet country (`RVK_FogBanks`, 1; 0 for none).
 
 ### Changed
+- Trees cost less up close: every tree's leaves now go into the depth pre-pass, so a crown many leaves deep is lit
+  about once per pixel instead of once per layer (only trees with ao-vk's own leaf art did before). In a demo forest
+  the leaves cost about 40% less; their look is unchanged.
 - Faster where water or smoke is near but not in view: water out of the camera's view is no longer drawn (about
   1.5 ms a frame with a lake behind you), and smoke out of view is simulated a sixth as often, still evolving, still
   there when you turn round (about half a millisecond with a few chimneys behind you).

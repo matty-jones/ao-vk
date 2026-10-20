@@ -721,17 +721,25 @@ void Device::DrawLeaves(VkCommandBuffer cmd, uint32_t recordIndex, uint32_t prim
     vkCmdSetPrimitiveTopology(cmd, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     PushDrawSet(cmd, frameLightsOffset, prevBuffer, prevOffset, prevBytes, m_leafPool, 0,
                 VkDeviceSize(m_leafPoolLeaves) * sizeof(LeafRecord));
-    // Our own canopy (dense: several layers of sprigs) in the depth pre-pass, their solid middles: here they test
-    // against it without writing - each pixel shaded about once (the soft edges blend over what is behind).
-    const bool prepassed = set.art && !m_drawLeafFall &&
-                           PrepassLeaves(recordIndex, set.first, m_drawLeafCount, frameLightsOffset, prevBuffer,
+    // A canopy's sprigs (several layers deep) in the depth pre-pass, their solid middles: here they test against it
+    // without writing - each pixel shaded about once (the soft edges blend over what is behind). Every canopy's, not
+    // only our own's (leaf art): the game's textures' sprigs, without it, were each lit in full layer upon layer - ~16k
+    // a frame round a tree-lined outpost, none pre-passed (the user's sweep, 2026-10-20). Its falling leaves - moving,
+    // not in the pre-pass - drawn after, with the canopy's own depth writes.
+    const bool prepassed = PrepassLeaves(recordIndex, set.first, m_drawLeafCount, frameLightsOffset, prevBuffer,
                                          prevOffset, prevBytes);
     if (prepassed) {
         vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
         c.depthWrite = ~0u;                      // (the canopy's own state again below)
         ++m_leafPrepassed;
+        vkCmdDraw(cmd, m_drawLeafCount * 6u, 1, set.first * 6u, recordIndex);
+        if (m_drawLeafFall) {
+            vkCmdSetDepthWriteEnable(cmd, m_rs[d3d::RS_ZWRITEENABLE] ? VK_TRUE : VK_FALSE);
+            vkCmdDraw(cmd, m_drawLeafFall * 6u, 1, (set.first + m_drawLeafCount) * 6u, recordIndex);
+        }
+    } else {
+        vkCmdDraw(cmd, (m_drawLeafCount + m_drawLeafFall) * 6u, 1, set.first * 6u, recordIndex);
     }
-    vkCmdDraw(cmd, (m_drawLeafCount + m_drawLeafFall) * 6u, 1, set.first * 6u, recordIndex);
     ++m_leafDraws;
     m_leafDrawn += m_drawLeafCount;
     // The canopy's own state again.

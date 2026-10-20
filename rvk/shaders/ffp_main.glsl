@@ -79,7 +79,9 @@ bool gPbrOn = false, gPbrBase = false;
 vec3 gPbrAlbedo = vec3(0.0), gPbrNormal = vec3(0.0, 0.0, 1.0), gPbrSpec = vec3(0.0);
 float gPbrAo = 1.0, gPbrRough = 1.0, gPbrMetal = 0.0;
 
+#ifndef RVK_PREPASS_CUTOUT                       // (the pre-pass: depth only, no colour attachment)
 layout(location = 0) out vec4 outColor;
+#endif
 #ifdef RVK_GLOW
 layout(location = 1) out vec4 outGlow;     // HDR scene only: the glow attachment (F_GLOW)
 layout(location = 2) out vec4 outLocal;    // HDR scene only: local lights' fraction of the colour, reflectivity, sun's share
