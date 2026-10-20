@@ -61,7 +61,8 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 cover;                 // the rain's cover map (rvk sand_map.cpp RainCoverMap): corner x, z, 1 / size, bindless
                                 // image + 1 | sampler << 20 (the float's bits; 0 = none)
     vec4 neon;                  // the tone mapping's neon look: x how much saturated light keeps its colour
-                                // (RVK_NeonSat), y the lens streaks' strength (RVK_Streaks), z, w unused
+                                // (RVK_NeonSat); yzw a rainbow: towards the point opposite the sun in the world
+                                // camera's view, its length how strong (0: none; rvk sky.cpp UpdateRainbow)
     vec4 sky[4];                // the sky's model (rvk sky.cpp UpdateSkyModel; sky_common.glsl s0..s3)
     vec4 skyView[3];            // the world camera's rotation: dot(skyView[i].xyz, a view-space direction) = its world
                                 // part i
@@ -100,10 +101,18 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 pick;                  // texture picking (Ctrl+Shift+I): x the native ground's tile flashing + 1 (0: none);
                                 // y the light grid's bindless image + 1 | sampler << 20 (the float's bits; 0 none),
                                 // z, w the lights too large for it (mask: low, high word's bits)
-    vec4 sand3;                 // the sand, more: x its ripples' depth in the march (RVK_RippleDepth); y, z, w unused
+    vec4 sand3;                 // the sand, more: x its ripples' depth in the march (RVK_RippleDepth); y the sun the
+                                // clouds let through (its glints); z, w unused
+    vec4 fogBanks;              // fog banks (rvk mist.cpp FogBankParams): their noise at the eye (world x, z, drifted), how
+                                // deep they stand over the low ground (world units), how much (0: none)
     vec4 lightGrid;             // the frame lights' grid (rvk Device::LightGridLights): its corner x, z, cells across, down
     Light lights[64];
 } FL;
+
+// How much of the sun's direct light a thunderstorm's deck takes at its fullest (FL.rainNear.y 1; rvk draw.cpp the
+// same): a tenth or so left, the rest of it soft (lighting.glsl). (0.65 left rocks facing the hidden sun light under a
+// black storm sky - user, 2026-10-19.)
+const float kStormSunTaken = 0.9;
 
 // Things' shadows' strength at a point `dist` from the eye (FL.shadowParams.y is the setting's, unfaded). As the light
 // nears the horizon their shadows lie hundreds of metres down the slopes facing it, in the far cascades' coarse texels

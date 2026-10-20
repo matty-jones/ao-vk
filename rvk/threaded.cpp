@@ -933,6 +933,21 @@ void ThreadedDevice::SetProcSky(bool on, float zone, float bright)
     Enqueue([this, on, zone, bright](const uint8_t*) { m_device.SetProcSky(on, zone, bright); });
 }
 
+void ThreadedDevice::SetSkyColours(const SkyColours& c)
+{
+    Enqueue([this, c](const uint8_t*) { m_device.SetSkyColours(c); });
+}
+
+void ThreadedDevice::SetNightSky(const NightSky& n)
+{
+    Enqueue([this, n](const uint8_t*) { m_device.SetNightSky(n); });
+}
+
+void ThreadedDevice::SetRainbow(float s, float force)
+{
+    Enqueue([this, s, force](const uint8_t*) { m_device.SetRainbow(s, force); });
+}
+
 void ThreadedDevice::SetViewRange(float range)
 {
     Enqueue([this, range](const uint8_t*) { m_device.SetViewRange(range); });
@@ -1139,6 +1154,21 @@ void ThreadedDevice::SetRainVeils(float s)
 void ThreadedDevice::SetStormGreen(float s)
 {
     Enqueue([this, s](const uint8_t*) { m_device.SetStormGreen(s); });
+}
+
+void ThreadedDevice::SetStormThick(float s)
+{
+    Enqueue([this, s](const uint8_t*) { m_device.SetStormThick(s); });
+}
+
+void ThreadedDevice::SetFogBanks(float s, float force)
+{
+    Enqueue([this, s, force](const uint8_t*) { m_device.SetFogBanks(s, force); });
+}
+
+void ThreadedDevice::SetHeatFlash(float s, bool force)
+{
+    Enqueue([this, s, force](const uint8_t*) { m_device.SetHeatFlash(s, force); });
 }
 
 void ThreadedDevice::SetRainFog(float s)

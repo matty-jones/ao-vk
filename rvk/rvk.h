@@ -40,6 +40,35 @@ enum class VisualKind : uint32_t {
 class Device;
 class Texture;
 
+// Our own sky's colours (docs/sky-plan.md §1; RVK_Sky* colour settings, RRGGBB): nine keys - by day, at dusk, in the
+// blue hour and at night, overhead and low (at dusk low towards the sun and away from it). Each recolours the
+// physical sky as the ratio of its colour to its reference here - what the physical sky shows there with the default
+// settings - so at the references the sky is as the physics gives it.
+enum SkyKey : uint32_t {
+    kSkyDayTop, kSkyDayLow, kSkyDuskSun, kSkyDuskAway, kSkyDuskTop, kSkyBlueTop, kSkyBlueLow, kSkyNightTop,
+    kSkyNightLow, kSkyKeyCount
+};
+// (Measured in the demo - the lake, a sky dome of 8FB0CC, the sun held at 30, -1, -9 and -18 degrees: the "sky: keys"
+// log, 2026-10-19.)
+inline constexpr uint32_t kSkyKeyRef[kSkyKeyCount] = {
+    0x404F71, 0x8EA4B6, 0xDB8862, 0x79475D, 0x424361, 0x222A3C, 0x535455, 0x171B25, 0x25292E,
+};
+// Our own night sky (docs/sky-plan.md §2-4; drawn by the sky pass under RVK_ProcSky).
+struct NightSky {
+    bool stars = true;                     // RVK_Stars: ours in place of the game's points
+    float bright = 1.0f;                   // RVK_StarBright, x
+    float twinkle = 0.5f;                  // RVK_Twinkle: 0 steady .. 1
+    float galaxy = 1.0f;                   // RVK_Galaxy: the band of the galaxy, x (0 none)
+    float meteors = 1.0f;                  // RVK_Meteors: shooting stars, how often x (0 none)
+    float aurora = 1.0f;                   // RVK_Aurora: how often and how strong x (0 none)
+    uint32_t auroraColour = 0x40FF90;      // RVK_AuroraCol: its green, RRGGBB
+    float auroraForce = -1.0f;             // RVK_AuroraForce: an aurora of this strength every night (< 0: by chance)
+};
+struct SkyColours {
+    uint32_t keys[kSkyKeyCount] = {kSkyKeyRef[0], kSkyKeyRef[1], kSkyKeyRef[2], kSkyKeyRef[3], kSkyKeyRef[4],
+                                   kSkyKeyRef[5], kSkyKeyRef[6], kSkyKeyRef[7], kSkyKeyRef[8]};
+};
+
 // A playfield's ground, for rvk to draw itself (native_ground.cpp, docs/native-ground-plan.md): read from the game's
 // AnarchyGroundData_t (proxy rvk_ground.cpp; the format: docs/ground-format.md).
 struct NativeGround {
@@ -435,6 +464,7 @@ public:
     StormAir StormAirNow() const;
     void SetRainFog(float s) { m_rainFog = s; }                    // RVK_RainFog (x; 0: none)
     void SetStormGreen(float s) { m_stormGreen = s; }              // RVK_StormGreen (0..1)
+    void SetStormThick(float s) { m_stormThick = s; }              // RVK_StormThick (0.25..2; 1 the default)
     void SetRainVeils(float s) { m_rainVeils = s; }                // RVK_RainVeils (x; clouds.cpp, cloud_layer.frag Veils)
     void SetStormDark(float s) { m_stormDark = s; }                // RVK_StormDark (x)
     void SetRainWet(float s) { m_rainWet = s; }                    // RVK_RainWet (x)
@@ -581,6 +611,12 @@ public:
     void SetAtmos(bool on) { m_atmos = on; }
     // Valley mist's amount (mist.cpp; 0 none, 1 as planned).
     void SetMist(float s) { m_mist = s; }
+    // Fog banks (mist.cpp; docs/weather-events-plan.md): thick drifting banks in the low ground at dawn and after rain,
+    // most in wet zones (RVK_FogBanks x; force: that strength now - tests; < 0 by the weather).
+    void SetFogBanks(float s, float force = -1.0f) { m_fogBanks = s; m_fogBankForce = force; }
+    // Heat lightning (rain.cpp): on some warm dry nights, silent flashes in far-off clouds (RVK_HeatFlash x; force:
+    // tonight whatever the chance - tests).
+    void SetHeatFlash(float s, bool force = false) { m_heatFlash = s; m_heatForce = force; }
     // The sun's disc (sun.cpp; 0 none, 1 as planned: its brightness).
     void SetSun(float s) { m_sun = s; }
     // Their size (x the game's sun sprites) and the share of their glow over the clouds (sun.cpp).
@@ -612,6 +648,11 @@ public:
         m_skyZone = zone;
         m_skyBright = bright;
     }
+    void SetSkyColours(const SkyColours& c) { m_skyColours = c; }
+    void SetNightSky(const NightSky& n) { m_nightSky = n; }
+    // Rainbows after rain (docs/sky-plan.md §5; RVK_Rainbow x, 0 none); force: one of that strength now (tests; < 0 by
+    // the weather).
+    void SetRainbow(float s, float force = -1.0f) { m_rainbowSetting = s; m_rainbowForce = force; }
     // The golden hour's grade round sunrise and sunset (tonemap.frag Grade; 0 none).
     void SetGoldenHour(float s) { m_goldenHour = s; }
     // A desert's air (docs/desert-plan.md phase 4): its dust - the far land paler and warmer, a pale band along the
@@ -1029,6 +1070,7 @@ private:
     VkSampler m_normalSampler = VK_NULL_HANDLE;
     Texture* m_constantsNormalMap = nullptr;
     bool m_constantsSkyScenery = false;
+    bool m_constantsDecal = false;
     // The last constant block's light list (draw.cpp): reused while the lights (a generation: SetLight / LightEnable
     // changing one), the frame and the list's kind stay. (GpuLight bytes: the type is internal.h's.)
     uint64_t m_lightsGen = 1, m_lightListGen = 0, m_lightListFrame = ~0ull;
@@ -1426,6 +1468,10 @@ private:
     void NoteTerrainHeights(uint32_t fvf, const void* vertices, uint32_t vertexCount);
     void UpdateMist();
     void MistParams(float out[2]) const;
+    void FogBankParams(float out[4]) const;
+    float m_fogBanks = 1.0f, m_fogBankForce = -1.0f;   // RVK_FogBanks; a test's strength (< 0: none)
+    float m_fogBankAmount = 0.0f, m_fogBankDepth = 0.0f;   // the banks now: how much, how deep (world units; eased)
+    float m_fogBankDrift[2] = {};                // how far they have drifted (world x, z)
     float m_moonSeenDir[3] = {}, m_moonSeenSize = 0.0f;   // this frame's biggest moon in the sky (towards it)
     uint64_t m_moonSeenFrame = ~0ull, m_skySeenFrame = ~0ull;
     float m_moonPos[3] = {0.0f, 1.0f, 0.0f};     // towards the moon (eased)
@@ -1444,6 +1490,13 @@ private:
     void SkyWind(float out[2]) const;
     void UpdateWind();                           // the frame's shared wind (wind.cpp): direction, strength, gusts, clock
     void UpdateLightning();                      // a strike from the game's glow last frame (rain.cpp)
+    void UpdateHeatLightning();
+    float m_heatFlash = 1.0f;                    // RVK_HeatFlash, x (0: none)
+    bool m_heatForce = false;                    // (tests: tonight whatever the chance)
+    double m_heatStart = -1e9, m_heatNext = 0.0; // the last far flash; the next (m_frameClock)
+    float m_heatPos[3] = {}, m_heatGain = 0.0f;  // where, how bright
+    uint32_t m_heatSeed = 0;
+    float m_heatTonight = 0.0f;                  // how much of a heat-lightning night it is (logged when it changes)
     void Lightning(float flash[4], float view[4], float proj[4], float world[4]) const;   // this frame's flash (FrameLights)
     float Gusts() const { return std::max(m_grassGusts, 0.0f) * m_windGusts; }   // RVK_GrassGusts x the storm's
     float m_cloudWindSpeed = 8.0f;               // the clouds' drift (world units a second), eased (UpdateCloudDrift)
@@ -1500,6 +1553,29 @@ private:
     bool m_atmosRingWritten[kFramesInFlight] = {};
     float m_skyRing[8][4] = {};                  // rgb, w 1 when known
     float m_skyUp[4] = {};                       // the sky over the land (overhead, 35 degrees up), w 1 when known
+    // The sky's colours (docs/sky-plan.md §1): the settings; the ratios to the physics this frame (overhead, 35
+    // degrees up, low towards the sun, low away from it) and those each frame slot's table was made with (to take
+    // them back out of its readback); the physical sky there, so read back (w 1 when known).
+    SkyColours m_skyColours;
+    // Our night sky (docs/sky-plan.md §2-4: sky.cpp DrawSkyGlow, sky_glow.frag): its settings; how much of it the dark
+    // shows (UpdateSunClock); the game's points left out (logged once); the shooting star and the aurora now.
+    NightSky m_nightSky;
+    float m_starsDark = 0.0f;
+    bool m_starsSkipLogged = false;
+    // The shooting star now (sky_glow.frag Meteor): its start (xyz) and how far its head is along its path (rad); the
+    // axis the path turns about (xyz) and where it burns out (rad; < 0 none); how fast its train fades (rad of the
+    // head's travel), its width (pixels), brightness, a seed; its colour.
+    float m_meteor[4][4] = {};
+    float m_auroraNow = 0.0f;
+    void UpdateNightSky();
+    // A rainbow (UpdateRainbow; tonemap.frag Rainbow): the setting; how strong now (eased); when it last rained.
+    float m_rainbowSetting = 1.0f, m_rainbowForce = -1.0f, m_rainbow = 0.0f;
+    double m_rainbowRainClock = -1e9;
+    void UpdateRainbow();
+    float m_skyKeyRatio[4][3] = {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}};
+    float m_skyKeyApplied[kFramesInFlight][4][3] = {};
+    float m_skyPhys[4][4] = {};
+    void SkyKeyRatios(float out[4][3]) const;
     // RANDYVK_HEAPCHECK (grass.cpp): the heap walked at points, the first broken one logged.
     int HeapCheckLevel() const { return m_heapCheck; }
     void HeapCheck(const char* where, int level);
@@ -1680,6 +1756,7 @@ private:
     bool IsMultiplyPass() const;
     bool m_terrainLitPassCur = false, m_terrainLitPassPrev = false;   // the ground had a lightmap + lights pass
     bool IsBlobShadow(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount, uint32_t indexCount) const;
+    bool BlobShadowShape(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount, uint32_t indexCount) const;
     void RenderShadowMap(VkCommandBuffer cmd);
 
     // HDR (hdr.cpp): during the scene phase m_main is m_scene (float); EndScene tone maps it into m_ldrMain, which is
@@ -1714,6 +1791,8 @@ private:
     float TessellateDraw(uint32_t primitive, uint32_t fvf, uint32_t vertexCount);   // the level (0 = none)
     bool CharacterDraw(uint32_t fvf, uint32_t vertexCount);   // the current draw is a character's (body or part)
     bool m_drawIsCharacter = false;
+    bool m_drawIsBlobShadow = false;             // the game's blob shadow (drawn: indoors, or no sun shadows) - its colour
+                                                 // only, the surface's other targets left as they are
     struct TessCharacter { float x, z, minY, maxY; };
     std::vector<TessCharacter> m_tessChars, m_tessCharsPrev;   // animated characters' boxes: this / last frame
     bool SmoothNormals(const void* vertices, uint32_t vertexCount, const detail::FvfLayout& layout);
@@ -1748,8 +1827,12 @@ private:
         VkBuffer prevBuffer, smoothBuffer;
         d3d::Viewport viewport;
         uint32_t cull, zFunc;
+        uint64_t ringGeneration;                 // (its record is in this generation's arena: else dropped)
     };
     std::vector<DeferredEdge> m_edges;
+    // The scene's frame-wide bindings - set 0's arena (constants, records, shadow maps) and set 1's bindless table -
+    // pushed if a pass with another layout came between (the draws, FlushEdges).
+    void BindSceneArena(VkCommandBuffer cmd);
     uint64_t m_edgeFlushes = 0, m_edgeDraws = 0;   // logged with the pre-pass (PrepassLog)
     void FlushEdges();                           // the queued edges, drawn now (in the current rendering)
     // The main pass's per-draw push (bindings 4, 8, 10), skipped when it equals the last one (StateCache).
@@ -2429,6 +2512,8 @@ private:
     float m_rainFog = 1.0f;                      // RVK_RainFog: a thunderstorm's rain mist in the fog, x
     float m_stormDark = 1.0f;                    // RVK_StormDark: a thunderstorm hides the sun from the land, x
     float m_stormGreen = 0.6f;                   // RVK_StormGreen: its clouds and mist cast green (0: grey)
+    float m_stormThick = 1.0f;                   // RVK_StormThick: how dense and dark a storm's clouds (2: ~as before
+                                                 // 2026-10-19, nearly black)
     float m_rainVeils = 1.0f;                    // RVK_RainVeils: a storm's grey rain veils under its far clouds, x
     float m_sandFog = 1.0f;                      // RVK_SandFog: the storm's air a lit volume (docs/sand-fog-plan.md)
     float m_sandSun = 0.9f;                      // RVK_SandSun: how clearly the sun shows through the fog (0 .. 1)
@@ -3375,6 +3460,7 @@ private:
     std::vector<d3d::Light> m_dumpedLights;
     std::vector<const Texture*> m_dumpGroundTextures;   // the ground's base textures drawn (the dump's -ground.bmp)
     void DumpGroundTextures(const std::string& path);
+    void DumpTargets(const std::string& base);   // the frame's in-between images (diag.cpp; EndScene, with a dump)
     struct DumpedLightmap { const Texture* texture; float u[4], v[4]; };   // (the dump's -lightmaps.bin)
     std::vector<DumpedLightmap> m_dumpLightmaps;
     void DumpLightmaps(const std::string& path);

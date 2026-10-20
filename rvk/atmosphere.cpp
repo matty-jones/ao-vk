@@ -79,7 +79,93 @@ float Ramp(float a, float b, float x)
     return t * t * (3.0f - 2.0f * t);
 }
 
+// The sky's colours (docs/sky-plan.md §1): how much of each time of day's keys by the sun's height - night, the blue
+// hour, dusk (and dawn), day - each full at its knot and eased into the next, so they always add up to 1.
+void KeyPhases(float sunUpSine, float w[4])
+{
+    static const float kKnot[4] = {-16.0f, -9.0f, -1.0f, 12.0f};   // (degrees: night, blue hour, dusk, day)
+    const float e = std::asin(std::clamp(sunUpSine, -1.0f, 1.0f)) * 57.29578f;
+    float n[4] = {};
+    if (e <= kKnot[0]) n[0] = 1.0f;
+    else if (e >= kKnot[3]) n[3] = 1.0f;
+    else
+        for (int i = 0; i < 3; ++i)
+            if (e <= kKnot[i + 1]) {
+                const float t = Ramp(kKnot[i], kKnot[i + 1], e);
+                n[i] = 1.0f - t;
+                n[i + 1] = t;
+                break;
+            }
+    w[0] = n[3];                                  // (day, dusk, blue hour, night: the keys' order)
+    w[1] = n[2];
+    w[2] = n[1];
+    w[3] = n[0];
+}
+
+// A key colour's ratio to its reference: both RRGGBB as seen on screen (gamma 2.2 - the sky's light shows about so:
+// the physical 0C132B overhead by day shows as about 3D476D, user dump 2026-10-19), the ratio of their light. (A
+// channel at 0 taken as half a step: a black key darkens, and no reference divides by 0.)
+void KeyRatio(uint32_t key, uint32_t ref, float out[3])
+{
+    for (int c = 0; c < 3; ++c) {
+        const int shift = 16 - 8 * c;
+        out[c] = std::pow((float((key >> shift) & 0xFFu) + 0.5f) / (float((ref >> shift) & 0xFFu) + 0.5f), 2.2f);
+    }
+}
+
+// The ratio in a direction (y up, a 0 away from the sun .. 1 towards it): atmos_view.frag KeyRatio.
+void KeyRatioAt(const float r[4][3], float y, float a, float out[3])
+{
+    const float mid = Ramp(0.05f, 0.57f, y), top = Ramp(0.57f, 1.0f, y);
+    for (int c = 0; c < 3; ++c) {
+        const float low = r[3][c] + (r[2][c] - r[3][c]) * a;
+        const float m = low + (r[1][c] - low) * mid;
+        out[c] = m + (r[0][c] - m) * top;
+    }
+}
+
+// The sky's light as an RRGGBB key (gamma 2.2, as KeyRatio reads them).
+uint32_t Hex(const float rgb[3])
+{
+    uint32_t h = 0;
+    for (int c = 0; c < 3; ++c)
+        h = (h << 8) | uint32_t(std::pow(std::clamp(rgb[c], 0.0f, 1.0f), 1.0f / 2.2f) * 255.0f + 0.5f);
+    return h;
+}
+
 }  // namespace
+
+// The sky's colours this frame as ratios to the physics (atmos_view.frag KeyRatio): overhead, 35 degrees up, low
+// towards the sun, low away from it - the keys of the times of day the sun's height is between, blended.
+void Device::SkyKeyRatios(float out[4][3]) const
+{
+    for (int i = 0; i < 4; ++i) out[i][0] = out[i][1] = out[i][2] = 1.0f;
+    float w[4];
+    KeyPhases(SunUp(), w);
+    const uint32_t* k = m_skyColours.keys;
+    // (Each time of day's keys: overhead, low towards the sun, low away - only dusk tells the two sides apart.)
+    static const uint32_t kKeys[4][3] = {{kSkyDayTop, kSkyDayLow, kSkyDayLow},
+                                         {kSkyDuskTop, kSkyDuskSun, kSkyDuskAway},
+                                         {kSkyBlueTop, kSkyBlueLow, kSkyBlueLow},
+                                         {kSkyNightTop, kSkyNightLow, kSkyNightLow}};
+    float top[3] = {}, sun[3] = {}, away[3] = {};
+    for (int p = 0; p < 4; ++p) {
+        float r[3][3];
+        for (int j = 0; j < 3; ++j) KeyRatio(k[kKeys[p][j]], kSkyKeyRef[kKeys[p][j]], r[j]);
+        for (int c = 0; c < 3; ++c) {
+            top[c] += w[p] * r[0][c];
+            sun[c] += w[p] * r[1][c];
+            away[c] += w[p] * r[2][c];
+        }
+    }
+    // (35 degrees up: between overhead and the low sky's mean, as the ratios go - geometrically.)
+    for (int c = 0; c < 3; ++c) {
+        out[0][c] = top[c];
+        out[1][c] = std::sqrt(std::max(top[c] * 0.5f * (sun[c] + away[c]), 0.0f));
+        out[2][c] = sun[c];
+        out[3][c] = away[c];
+    }
+}
 
 // The sun's light through the air at a height (the sine of its elevation; atmos_common.glsl's air, the column over
 // the ground x the Kasten-Young air mass): its colour at unit brightness, softened (a third of the reddening, in the
@@ -162,6 +248,25 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
             for (int c = 0; c < 3; ++c) m_skyUp[c] = std::max((2.0f * zen[c] + up[c]) / (3.0f * float(kViewW)), 0.0f);
             m_skyUp[3] = 1.0f;
         }
+        // The sky as the physics made it there (the sky's colours this slot's table was made with taken out): the
+        // keys' references are measured from it (the "sky: keys" log).
+        float (&applied)[4][3] = m_skyKeyApplied[m_frameIndex];
+        if (applied[0][0] > 0.0f) {
+            for (int c = 0; c < 3; ++c) {
+                float up = 0.0f, zen = 0.0f;
+                const uint16_t* rowUp = px + kViewW * 4, *rowZen = px + kViewW * 8;
+                for (uint32_t x = 0; x < kViewW; ++x) {
+                    up += HalfToFloat(rowUp[x * 4 + c]);
+                    zen += HalfToFloat(rowZen[x * 4 + c]);
+                }
+                m_skyPhys[0][c] = std::max(zen / float(kViewW), 0.0f) / std::max(applied[0][c], 1e-3f);
+                m_skyPhys[1][c] = std::max(up / float(kViewW), 0.0f) / std::max(applied[1][c], 1e-3f);
+            }
+            m_skyPhys[0][3] = m_skyPhys[1][3] = 1.0f;
+        }
+        const float sunH[2] = {-m_trueSunDir[0], -m_trueSunDir[2]};
+        const float sunHL = std::sqrt(sunH[0] * sunH[0] + sunH[1] * sunH[1]);
+        float nearest = -2.0f, farthest = 2.0f;
         // (The table's x: the azimuth -pi..pi, atan(z, x); sector k centred at k * 45 degrees.)
         for (int k = 0; k < 8; ++k) {
             float sum[3] = {};
@@ -175,6 +280,19 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
             }
             for (int c = 0; c < 3; ++c) m_skyRing[k][c] = std::max(sum[c] / float(n), 0.0f);
             m_skyRing[k][3] = 1.0f;
+            // (The low sky towards the sun and away from it, physical: the sectors nearest and farthest from it.)
+            const float cosA = sunHL > 1e-4f ? (std::cos(float(k) * 0.785398f) * sunH[0] +
+                                                std::sin(float(k) * 0.785398f) * sunH[1]) / sunHL : 0.0f;
+            if (applied[0][0] > 0.0f && (cosA > nearest || cosA < farthest)) {
+                float r[3];
+                KeyRatioAt(applied, 0.039f, 0.5f + 0.5f * cosA, r);   // (the ring's row: ~2 degrees up)
+                for (int s = 0; s < 2; ++s) {
+                    if (s == 0 ? cosA <= nearest : cosA >= farthest) continue;
+                    (s == 0 ? nearest : farthest) = cosA;
+                    for (int c = 0; c < 3; ++c) m_skyPhys[2 + s][c] = m_skyRing[k][c] / std::max(r[c], 1e-3f);
+                    m_skyPhys[2 + s][3] = 1.0f;
+                }
+            }
         }
         // (The sectors towards the sun hold its glow - the haze has its own glow towards it: as the air's colour they
         // washed the land and the clouds out. Each no brighter than 1.3 x the ring's median, its hue kept.)
@@ -196,8 +314,8 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
     const float h = SunUp();
     if (m_skyFogSet && h > 0.2f)
         m_skyDayFogL += (fogL - m_skyDayFogL) * (1.0f - std::exp(-m_frameDt / 10.0f));
-    struct Push { float size[4], sun[4], moon[4], scale[4], zone[4], weather[4], night[4], dust[4]; } push{};
-    static_assert(sizeof(Push) == 128, "atmos_view.frag's push constants");
+    struct Push { float size[4], sun[4], moon[4], scale[4], zone[4], weather[4], night[4], dust[4], key[4][4]; } push{};
+    static_assert(sizeof(Push) == 192, "atmos_view.frag's push constants");
     push.size[0] = float(kViewW);
     push.size[1] = float(kViewH);
     push.size[2] = tune[0];
@@ -242,6 +360,14 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
         for (int i = 0; i < 3; ++i) push.dust[i] = dusty[i];
         push.dust[3] = desert[0];
     }
+    // The sky's colours (docs/sky-plan.md §1: RVK_Sky*), as ratios to the physics; kept with this frame slot to take
+    // them back out of its readback.
+    SkyKeyRatios(m_skyKeyRatio);
+    for (int i = 0; i < 4; ++i)
+        for (int c = 0; c < 3; ++c) {
+            push.key[i][c] = m_skyKeyRatio[i][c];
+            m_skyKeyApplied[m_frameIndex][i][c] = m_skyKeyRatio[i][c];
+        }
     FullscreenPass(cmd, m_atmosView, m_atmosViewPipeline, m_atmosTrans->m_view, m_atmosMulti->m_view, m_linearSampler,
                    &push.size[0], sizeof(push), false);
     // Its horizon row copied for the CPU (read back when this frame slot comes round again).
@@ -292,6 +418,15 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
             double(0.3f * m_skyRing[5][0] + 0.59f * m_skyRing[5][1] + 0.11f * m_skyRing[5][2]),
             double(0.3f * m_skyRing[6][0] + 0.59f * m_skyRing[6][1] + 0.11f * m_skyRing[6][2]),
             double(0.3f * m_skyRing[7][0] + 0.59f * m_skyRing[7][1] + 0.11f * m_skyRing[7][2]), double(fogL));
+    if ((m_frameNumber % 600 == 13 || (m_frameNumber % 60 == 13 && std::getenv("RVK_SKY_LOG"))) && m_skyPhys[0][3] > 0.5f) {
+        float w[4];
+        KeyPhases(h, w);
+        Log("sky: keys (sun %.1f deg; day %.2f dusk %.2f blue %.2f night %.2f): physical top %06X mid %06X low sun-side "
+            "%06X away %06X; ratios top %.2f %.2f %.2f low %.2f %.2f %.2f", double(std::asin(std::clamp(h, -1.0f, 1.0f)) * 57.29578f),
+            double(w[0]), double(w[1]), double(w[2]), double(w[3]), Hex(m_skyPhys[0]), Hex(m_skyPhys[1]), Hex(m_skyPhys[2]),
+            Hex(m_skyPhys[3]), double(m_skyKeyRatio[0][0]), double(m_skyKeyRatio[0][1]), double(m_skyKeyRatio[0][2]),
+            double(m_skyKeyRatio[2][0]), double(m_skyKeyRatio[2][1]), double(m_skyKeyRatio[2][2]));
+    }
     if (m_frameNumber % 600 == 13)
         Log("sky: ours (sun up %.3f; brightness x%.0f, adapted x%.1f - the game's sky by day %.2f; zone %.2f; weather %.2f; "
             "moon %.4f)", double(h), double(scale), double(adapt), double(m_skyDayFogL), double(push.zone[3]), double(push.weather[3]),
@@ -313,3 +448,4 @@ void Device::DestroyAtmosphere()
 }
 
 }  // namespace rvk
+

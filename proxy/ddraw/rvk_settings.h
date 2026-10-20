@@ -4,6 +4,9 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace rvk {
 class ThreadedDevice;
@@ -50,6 +53,19 @@ uint32_t PresetCount();
 const char* PresetName(uint32_t i);
 bool PresetApply(uint32_t i);
 int PresetCurrent();
+// The settings RVK_Enhance off returns to the game's look, with those values (the console's bisect).
+uint32_t VanillaCount();
+const char* VanillaName(uint32_t i);
+float VanillaValue(uint32_t i);
+// These values in effect together, not saved (the console's bisect: applied one at a time, a setting applied with its
+// partners would take back an earlier one's); RestoreAll: every saved value in effect again.
+void ApplyTemporarySet(const std::vector<std::pair<std::string, float>>& values);
+void RestoreAll();
+// The sky's colour presets (docs/sky-plan.md §1; the console's skypreset): each sets the nine RVK_Sky* colours.
+uint32_t SkyPresetCount();
+const char* SkyPresetName(uint32_t i);
+bool SkyPresetApply(uint32_t i);
+int SkyPresetCurrent();                             // -1: colours of your own
 // The console (rvk_console.cpp): every setting by index (table order), the hidden ones too (`hidden`: the settings
 // window leaves it out); `parent` null where the feature can't be switched off.
 uint32_t Count();

@@ -539,6 +539,9 @@ void Device::EndScene()
                            sizeof(motion), false);
     }
     ProfileMark("motion blur");
+    // (A frame dump: the in-between images too - not every frame of a run.)
+    if (m_dumpFile && m_dumpBurstIndex == 0 && !m_dumpOpenPath.empty())
+        DumpTargets(m_dumpOpenPath.substr(0, m_dumpOpenPath.rfind('.')));
     ProfileCpuAdd("post passes", cpu);
     m_cache = StateCache{};                      // pipeline, viewport and scissor changed
     // The post passes pushed set 0 with their own pipeline layouts, so the scene's pushed draw bindings are no

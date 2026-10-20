@@ -114,7 +114,7 @@ float DustDepth(vec2 uv, float z)
 }
 
 // The valley mist (rvk mist.cpp) along the view ray V (view space, length dist): a layer up to P.fog.z over the eye,
-// fading over ~8 units above. phase: the air's glow towards the sun (Air).
+// fading over ~8 units above, and the fog banks (FogBanks). phase: the air's glow towards the sun (Air).
 // The twilight's difference to the game's fog colour along the horizon towards a view-space direction
 // (sky_common.glsl SkyHorizonDelta): the game's far fog, the haze and the mist in the sky's colours.
 vec3 gSkyDelta = vec3(0.0);
@@ -137,11 +137,50 @@ vec3 HazeColour()
     return P.haze.rgb + gSkyDelta;
 }
 
+// Value noise on the ground's plane (the fog banks' shapes).
+float BankHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float BankNoise(vec2 p)
+{
+    vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(BankHash(i), BankHash(i + vec2(1.0, 0.0)), u.x), mix(BankHash(i + vec2(0.0, 1.0)), BankHash(i + 1.0), u.x),
+               u.y);
+}
+
+// Fog banks (rvk mist.cpp; FL.fogBanks): the mist gathered into banks ~700 units across with clear ground between,
+// each standing up to FL.fogBanks.z over the low ground (the heavier, the taller), soft at its top, drifting with the
+// wind - their optical depth along the view ray V (view space, length dist), marched in 10 steps over its first 1500
+// units (growing; offset per pixel, so no bands).
+float FogBanks(vec3 V, float dist)
+{
+    float len = min(dist, 1500.0);
+    vec3 Vn = V / max(dist, 1e-4);
+    vec3 w = vec3(dot(FL.skyView[0].xyz, Vn), dot(FL.skyView[1].xyz, Vn), dot(FL.skyView[2].xyz, Vn));
+    float lowGround = P.fog.z - 25.0;            // (the low ground under the eye, against the eye: mist.cpp kMistDepth)
+    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    const int kSteps = 10;
+    float tau = 0.0, t0 = 0.0;
+    for (int i = 0; i < kSteps; ++i) {
+        float t1 = len * pow((float(i) + 1.0) / float(kSteps), 1.6);
+        float t = mix(t0, t1, jitter);
+        vec3 r = w * t;
+        float h = r.y - lowGround;               // (over the low ground)
+        if (h < FL.fogBanks.z + 10.0) {
+            vec2 q = (FL.fogBanks.xy + r.xz) / 700.0;
+            float n = 0.65 * BankNoise(q) + 0.35 * BankNoise(q * 2.3 + 17.0);
+            float cover = smoothstep(0.42, 0.68, n);
+            float top = FL.fogBanks.z * (0.45 + 0.55 * cover);
+            tau += cover * (1.0 - smoothstep(top - 18.0, top + 6.0, h)) * (t1 - t0);
+        }
+        t0 = t1;
+    }
+    return tau * 0.02 * FL.fogBanks.w;
+}
+
 vec3 Mist(vec3 c, vec3 V, float dist, float phase)
 {
-    // Its depth along the ray: the density's integral over the heights the ray crosses, over how fast it climbs.
-    // Lit as the air - the zone's colour, paler - and the sun's (moon's) glow.
-    if (P.fog.w > 0.0) {
+    // Its depth along the ray: the density's integral over the heights the ray crosses, over how fast it climbs - and
+    // the fog banks'. Lit as the air - the zone's colour, paler - and the sun's (moon's) glow.
+    if (P.fog.w > 0.0 || FL.fogBanks.w > 0.0) {
         float h0 = 0.0, h1 = dot(V, P.air1.xyz), top = P.fog.z;
         float tauM;
         if (abs(h1 - h0) < 0.5) {
@@ -154,6 +193,7 @@ vec3 Mist(vec3 c, vec3 V, float dist, float phase)
             #undef MIST_G
         }
         tauM *= P.fog.w;
+        if (FL.fogBanks.w > 0.0) tauM += FogBanks(V, dist);
         float m = 1.0 - exp(-tauM);
         vec3 air = HazeColour();
         float l = dot(air, vec3(0.3, 0.59, 0.11));
@@ -161,6 +201,46 @@ vec3 Mist(vec3 c, vec3 V, float dist, float phase)
         c = mix(c, mist, m);
     }
     return c;
+}
+
+// A rainbow (rvk sky.cpp UpdateRainbow; FL.neon.yzw: towards the point opposite the sun, x its strength) over the sky
+// and the clouds - not the land: the bow round that point, the primary from 40.6 (violet, inside) to 42.4 degrees
+// (red), the secondary from 50.4 (red) to 53.4 (violet) at ~40%, Alexander's dark band between them a little darker
+// and the sky inside the primary a little lighter; fading into the haze towards the horizon. Its light scales with
+// what is behind it (as bright as the sunlit rain), at least a little over dark clouds.
+// The rainbow's colours by where in the bow (0 violet .. 1 red).
+vec3 Spectrum(float t)
+{
+    float r = smoothstep(0.45, 0.8, t) + 0.35 * (1.0 - smoothstep(0.0, 0.18, t));
+    float g = clamp(1.0 - abs(t - 0.5) * 2.6, 0.0, 1.0);
+    float b = 1.0 - smoothstep(0.15, 0.55, t);
+    return vec3(r, g, b);
+}
+
+vec3 Rainbow(vec3 c)
+{
+    float strength = length(FL.neon.yzw);
+    if (strength < 1e-3 || FL.desert.z <= 0.0 || FL.desert.w <= 0.0)
+        return c;
+    vec2 uv = gl_FragCoord.xy / vec2(textureSize(scene, 0));
+    vec3 ray = normalize(vec3((uv.x * 2.0 - 1.0) / FL.desert.z, (1.0 - uv.y * 2.0) / FL.desert.w, 1.0));
+    float up = dot(FL.skyView[1].xyz, ray);
+    float low = smoothstep(0.0, 0.08, up);
+    if (low <= 0.0)
+        return c;
+    float a = degrees(acos(clamp(dot(ray, FL.neon.yzw / strength), -1.0, 1.0)));
+    if (a < 25.0 || a > 58.0)
+        return c;
+    float l = dot(c, vec3(0.3, 0.59, 0.11));
+    float t1 = (a - 40.6) / 1.8, t2 = (53.4 - a) / 3.0;   // (each 0 violet .. 1 red)
+    float e1 = smoothstep(-0.3, 0.1, t1) * (1.0 - smoothstep(0.9, 1.3, t1));
+    float e2 = smoothstep(-0.3, 0.1, t2) * (1.0 - smoothstep(0.9, 1.3, t2));
+    vec3 bow = Spectrum(clamp(t1, 0.0, 1.0)) * e1 + Spectrum(clamp(t2, 0.0, 1.0)) * e2 * 0.4;
+    float inside = a < 40.6 ? 0.05 * smoothstep(25.0, 34.0, a) : 0.0;
+    float band = smoothstep(42.0, 43.0, a) * (1.0 - smoothstep(49.8, 50.8, a));
+    float k = min(strength, 2.0) * low;
+    c *= 1.0 - 0.1 * band * k;
+    return c + (bow * (0.12 + 0.55 * l) + vec3(inside * l)) * k;
 }
 
 // The pixel's view ray out to view depth z: V (its length dist) and the air's glow towards the sun along it.
@@ -294,7 +374,7 @@ void main()
                 c = mix(c, P.haze.rgb, P.haze.w * air * (1.0 - gameFog));
             }
         }
-    } else if (P.haze.w > 0.0 && P.fog.y > P.fog.x && P.air0.z > 0.0 && P.fog.w > 0.0) {
+    } else if (P.haze.w > 0.0 && P.fog.y > P.fog.x && P.air0.z > 0.0 && (P.fog.w > 0.0 || FL.fogBanks.w > 0.0)) {
         // The sky through the valley mist too, as far as the game's fog end: else a mist over the land stopped at
         // the hilltops in a hard line against the sky (ao-vk #14). Level rays stay in the layer, rising ones leave it.
         vec3 V;
@@ -372,6 +452,9 @@ void main()
         // through - else a darker, greyer band of "sky" over a storm that covers it.
         far *= through;
     }
+    // A rainbow after rain over the sky and the clouds (not the land: the sky's depth).
+    if (d >= 1.0 && (int(P.proj.w) & 16) != 0)
+        c = Rainbow(c);
     // Water: a drop hides a little of what is behind it, gives some back focused (a lens: brighter), and adds the light
     // it reflects - clear, lighter streaks, not painted ones (the user: as our water).
     float rainA = clamp(rain.a, 0.0, 1.0);

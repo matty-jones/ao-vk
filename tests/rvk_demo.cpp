@@ -1226,6 +1226,9 @@ float g_sandForce = 0.0f;         // --sand-force X: RVK_SandForce
 float g_rainSpeed = 15.0f, g_rainLength = 0.45f;   // --rain-speed S, --rain-length L: RVK_RainSpeed, RVK_RainLength
 float g_wetNow = -1.0f;           // --wet W: the ground soaked (and its puddles) this much from the start
 float g_stormForce = 0.0f;        // --storm F: RVK_StormForce (a thunderstorm: rain, wind, our own strikes)
+float g_stormThick = 1.0f;        // --storm-thick X: RVK_StormThick
+float g_fogBankForce = -1.0f;     // --fog-banks X: fog banks of that strength now (RVK_FogBanks)
+bool g_heatForce = false;         // --heat-flash: a heat-lightning night (RVK_HeatFlash)
 float g_strikeRate = 6.0f;        // --strike-rate R: RVK_StrikeRate (strikes a minute)
 int g_lightningAt = -1;           // --lightning-at N: a strike ahead of the camera at frame N (the grass bench)
 bool g_sandAsh = false;           // --sand-ash: RVK_SandAsh
@@ -2785,6 +2788,11 @@ float g_duskRays = 1.0f;                      // --dusk-rays X: RVK_DuskRays
 uint32_t g_skyDome = 0;
 bool g_procSky = true;                        // --proc-sky 0|1: RVK_ProcSky
 float g_skyZoneHint = 0.25f;                  // --sky-zone-hint X: RVK_SkyZone
+rvk::SkyColours g_skyColours;                 // --sky-key I RRGGBB: the sky's colour key I (rvk::SkyKey)
+float g_rainbowForce = -1.0f;                 // --rainbow X: a rainbow of that strength now (RVK_Rainbow)
+bool g_profileWindow = false;                 // --profile-window: the water scenes' second half's GPU passes timed
+rvk::NightSky g_nightSky;                     // --stars 0|1, --star-bright X, --galaxy X, --meteors X, --aurora X
+                                              // (forced now: its strength), --twinkle X
 float g_dawnLight = 1.0f;         // --dawn-light X: RVK_DawnLight
 int g_textureFlood = 0;                         // --texture-flood: textures alive before the shadow test's label
 float g_mist = 1.0f;              // --mist X: RVK_Mist
@@ -3095,6 +3103,9 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
     if (g_sweepSteps > 0)
         frames = g_sweepSteps * g_sweepHold;
     for (int frame = 0; frame < frames; ++frame) {
+        // --profile-window: the GPU's passes timed over the second half of the run ("window: gpu ms ...").
+        if (g_profileWindow && frame == frames / 2) dev.ProfileWindow(true, "");
+        if (g_profileWindow && frame == frames - 1) dev.ProfileWindow(false, "window: ");
         float sweepDir[3] = {}, sweepDim = 1.0f;
         uint32_t skyNow = sky;
         if (g_sweepSteps > 0) {
@@ -4701,6 +4712,9 @@ int main(int argc, char** argv)
         else if (a == "--rain-length" && i + 1 < argc) g_rainLength = float(std::atof(argv[++i]));
         else if (a == "--wet" && i + 1 < argc) g_wetNow = float(std::atof(argv[++i]));
         else if (a == "--storm" && i + 1 < argc) { g_stormForce = float(std::atof(argv[++i])); hdr = true; }
+        else if (a == "--storm-thick" && i + 1 < argc) g_stormThick = float(std::atof(argv[++i]));
+        else if (a == "--fog-banks" && i + 1 < argc) g_fogBankForce = float(std::atof(argv[++i]));
+        else if (a == "--heat-flash") g_heatForce = true;
         else if (a == "--strike-rate" && i + 1 < argc) g_strikeRate = float(std::atof(argv[++i]));
         else if (a == "--water-mesh-at" && i + 3 < argc) { for (float& x : g_waterMeshAt) x = float(std::atof(argv[++i])); }
         else if (a == "--water-eye" && i + 3 < argc) { for (float& x : g_waterEye) x = float(std::atof(argv[++i])); g_waterEyeSet = true; }
@@ -4730,6 +4744,19 @@ int main(int argc, char** argv)
         else if (a == "--dusk-rays" && i + 1 < argc) g_duskRays = float(std::atof(argv[++i]));
         else if (a == "--sky-dome" && i + 1 < argc) g_skyDome = 0xFF000000u | uint32_t(std::strtoul(argv[++i], nullptr, 16));
         else if (a == "--proc-sky" && i + 1 < argc) g_procSky = std::atoi(argv[++i]) != 0;
+        else if (a == "--stars" && i + 1 < argc) g_nightSky.stars = std::atoi(argv[++i]) != 0;
+        else if (a == "--star-bright" && i + 1 < argc) g_nightSky.bright = float(std::atof(argv[++i]));
+        else if (a == "--galaxy" && i + 1 < argc) g_nightSky.galaxy = float(std::atof(argv[++i]));
+        else if (a == "--meteors" && i + 1 < argc) g_nightSky.meteors = float(std::atof(argv[++i]));
+        else if (a == "--aurora" && i + 1 < argc) g_nightSky.auroraForce = float(std::atof(argv[++i]));
+        else if (a == "--profile-window") g_profileWindow = true;
+        else if (a == "--rainbow" && i + 1 < argc) g_rainbowForce = float(std::atof(argv[++i]));
+        else if (a == "--twinkle" && i + 1 < argc) g_nightSky.twinkle = float(std::atof(argv[++i]));
+        else if (a == "--sky-key" && i + 2 < argc) {
+            const int k = std::atoi(argv[++i]);
+            const uint32_t v = uint32_t(std::strtoul(argv[++i], nullptr, 16)) & 0xFFFFFFu;
+            if (k >= 0 && k < int(rvk::kSkyKeyCount)) g_skyColours.keys[k] = v;
+        }
         else if (a == "--sky-zone-hint" && i + 1 < argc) g_skyZoneHint = float(std::atof(argv[++i]));
         else if (a == "--mist" && i + 1 < argc) g_mist = float(std::atof(argv[++i]));
         else if (a == "--water-z" && i + 1 < argc) g_waterZ = float(std::atof(argv[++i]));
@@ -4954,6 +4981,9 @@ int main(int argc, char** argv)
         if (g_wetNow >= 0.0f) dev.SetWetNow(g_wetNow, g_wetNow);
         dev.SetWeatherParams(weather);
     }
+    dev.SetStormThick(g_stormThick);
+    dev.SetFogBanks(1.0f, g_fogBankForce);
+    dev.SetHeatFlash(1.0f, g_heatForce);
     dev.SetSandBlow(g_sandBlow);
     dev.SetSandProcedural(!g_sandSim);
     dev.SetSandContrast(g_sandContrast);
@@ -4977,6 +5007,9 @@ int main(int argc, char** argv)
     dev.SetTwilight(g_twilight, g_skyGlow);
     dev.SetDuskRays(g_duskRays);
     dev.SetProcSky(g_procSky, g_skyZoneHint, 1.0f);
+    dev.SetSkyColours(g_skyColours);
+    dev.SetNightSky(g_nightSky);
+    dev.SetRainbow(1.0f, g_rainbowForce);
     dev.SetDawnLight(g_dawnLight);
     dev.SetMist(g_mist);
     dev.SetContactShadows(contact);

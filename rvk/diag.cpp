@@ -6,9 +6,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace rvk {
 
+using namespace vk;
 using namespace detail;
 
 void Device::RequestFrameDump(const std::string& path, int frames)
@@ -521,6 +523,13 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
                          t->m_view ? "" : " NO-VIEW", t->m_albedoMap ? " albedo" : "", uint32_t(t->m_format));
         }
     if (m_rs[d3d::RS_ALPHABLENDENABLE]) std::fprintf(f, " | blend %u/%u", m_rs[d3d::RS_SRCBLEND], m_rs[d3d::RS_DESTBLEND]);
+    // (Fog: its colour and range - the game's sky takes most of its colour from it.)
+    if (m_rs[d3d::RS_FOGENABLE]) {
+        float range[2];
+        std::memcpy(&range[0], &m_rs[d3d::RS_FOGSTART], 4);
+        std::memcpy(&range[1], &m_rs[d3d::RS_FOGEND], 4);
+        std::fprintf(f, " | fog %06X %.0f-%.0f", m_rs[d3d::RS_FOGCOLOR] & 0xFFFFFFu, double(range[0]), double(range[1]));
+    }
     std::fprintf(f, " | z %u/%u/%u | at (%.1f %.1f %.1f)", m_rs[d3d::RS_ZENABLE], m_rs[d3d::RS_ZWRITEENABLE],
                  m_rs[d3d::RS_ZFUNC], m_world.m[3][0], m_world.m[3][1], m_world.m[3][2]);
     if (IsShadowCaster(primitive, fvf) || ShadowReceiver(fvf) || ShadowInLightmap(fvf) || ShadowCompensated(fvf))
@@ -574,6 +583,135 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
             std::fprintf(f, "\n");
         }
     }
+}
+
+
+namespace {
+
+float DumpHalf(uint16_t h)
+{
+    const uint32_t s = uint32_t(h & 0x8000u) << 16, e = (h >> 10) & 0x1Fu, m = h & 0x3FFu;
+    if (e == 0) return (h & 0x8000u ? -1.0f : 1.0f) * float(m) / 1024.0f / 16384.0f;
+    uint32_t bits = e == 31 ? (s | 0x7F800000u | (m << 13)) : (s | ((e + 112u) << 23) | (m << 13));
+    float f;
+    std::memcpy(&f, &bits, 4);
+    return f;
+}
+
+// A 24-bit BMP from RGB rows, top row first.
+void DumpBmp(const std::string& path, uint32_t w, uint32_t h, const std::vector<uint8_t>& rgb)
+{
+    FILE* file = std::fopen(path.c_str(), "wb");
+    if (!file) return;
+    const uint32_t rowBytes = w * 3, pad = (4 - rowBytes % 4) % 4, size = (rowBytes + pad) * h;
+    uint8_t header[54] = {'B', 'M'};
+    auto put32 = [&](int at, uint32_t v) { std::memcpy(header + at, &v, 4); };
+    put32(2, 54 + size);
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, w);
+    put32(22, h);
+    header[26] = 1;
+    header[28] = 24;
+    put32(34, size);
+    std::fwrite(header, 1, 54, file);
+    std::vector<uint8_t> row(rowBytes + pad, 0);
+    for (int32_t y = int32_t(h) - 1; y >= 0; --y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            const uint8_t* c = rgb.data() + (size_t(y) * w + x) * 3;
+            row[x * 3] = c[2];
+            row[x * 3 + 1] = c[1];
+            row[x * 3 + 2] = c[0];
+        }
+        std::fwrite(row.data(), 1, row.size(), file);
+    }
+    std::fclose(file);
+}
+
+}  // namespace
+
+// Frame dump: the frame's in-between images next to its picture (<dump>-<name>.bmp), as they stood at the scene's end
+// (EndScene, after the post passes): the HDR scene before them (tone mapped simply: x / (1 + x), gamma 2.2), the
+// scene's other targets (the local lights' share, the surface colour, the glow), the half-size passes' results (ambient
+// occlusion, indirect light, scattered light, contact shadows: their first channel), the environment probe, the
+// reflections - where a fault first shows is where it comes from.
+void Device::DumpTargets(const std::string& base)
+{
+    struct Item { Texture* t; const char* name; };
+    const Item items[] = {{m_scene, "scene"}, {m_localFraction, "local"}, {m_albedo, "albedo"}, {m_glow, "glow"},
+                          {m_aoTex[1], "ao"}, {m_giTex[1], "gi"}, {m_volumeTex[1], "volume"},
+                          {m_contactTex[1], "contact"}, {m_envAtlas, "env"}, {m_ssrTex, "ssr"}};
+    struct Read { const Item* item; uint32_t bpp; VkBuffer buffer; VmaAllocation_T* allocation; const uint8_t* data; };
+    std::vector<Read> reads;
+    VkCommandBuffer cmd = m_frames[m_frameIndex].main;
+    for (const Item& it : items) {
+        Texture* t = it.t;
+        if (!t || !t->m_image || !t->m_renderTarget || t->m_layout == VK_IMAGE_LAYOUT_UNDEFINED)
+            continue;
+        const uint32_t bpp = t->m_format == Format::RGBA16F ? 8u
+                           : (t->m_format == Format::RG16F || t->m_format == Format::RGBA8 || t->m_format == Format::A8R8G8B8) ? 4u
+                           : 0u;
+        if (!bpp)
+            continue;
+        VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bi.size = VkDeviceSize(t->m_width) * t->m_height * bpp;
+        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        VmaAllocationCreateInfo ac{};
+        ac.usage = VMA_MEMORY_USAGE_AUTO;
+        ac.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        Read r{&it, bpp, VK_NULL_HANDLE, nullptr, nullptr};
+        VmaAllocationInfo info{};
+        if (vmaCreateBuffer(m_allocator, &bi, &ac, &r.buffer, &r.allocation, &info) != VK_SUCCESS)
+            continue;
+        r.data = static_cast<const uint8_t*>(info.pMappedData);
+        Transition(cmd, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        VkBufferImageCopy region{};
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent = {t->m_width, t->m_height, 1};
+        vkCmdCopyImageToBuffer(cmd, t->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r.buffer, 1, &region);
+        reads.push_back(r);
+    }
+    if (reads.empty())
+        return;
+    SubmitAndWait();
+    for (const Read& r : reads) {
+        const Texture* t = r.item->t;
+        const uint32_t w = t->m_width, h = t->m_height;
+        std::vector<uint8_t> rgb(size_t(w) * h * 3);
+        auto shown = [](float v) { v = std::max(v, 0.0f); return uint8_t(std::pow(v / (1.0f + v), 1.0f / 2.2f) * 255.0f + 0.5f); };
+        for (size_t p = 0; p < size_t(w) * h; ++p) {
+            uint8_t* o = rgb.data() + p * 3;
+            const uint8_t* s = r.data + p * r.bpp;
+            if (t->m_format == Format::RGBA16F) {
+                uint16_t c[3];
+                std::memcpy(c, s, 6);
+                float v[3];
+                for (int k = 0; k < 3; ++k) v[k] = DumpHalf(c[k]);
+                // (Not a number: magenta; negative: cyan - where the faults are.)
+                if (std::isnan(v[0]) || std::isnan(v[1]) || std::isnan(v[2]) || std::isinf(v[0]) || std::isinf(v[1]) ||
+                    std::isinf(v[2])) {
+                    o[0] = 255; o[1] = 0; o[2] = 255;
+                    continue;
+                }
+                if (v[0] < 0.0f || v[1] < 0.0f || v[2] < 0.0f) {
+                    o[0] = 0; o[1] = 255; o[2] = 255;
+                    continue;
+                }
+                for (int k = 0; k < 3; ++k) o[k] = shown(v[k]);
+            } else if (t->m_format == Format::RG16F) {
+                uint16_t c;
+                std::memcpy(&c, s, 2);
+                o[0] = o[1] = o[2] = uint8_t(std::clamp(DumpHalf(c), 0.0f, 1.0f) * 255.0f + 0.5f);
+            } else if (t->m_format == Format::A8R8G8B8) {   // (B G R A)
+                o[0] = s[2]; o[1] = s[1]; o[2] = s[0];
+            } else {                                        // (R G B A)
+                o[0] = s[0]; o[1] = s[1]; o[2] = s[2];
+            }
+        }
+        DumpBmp(base + "-" + r.item->name + ".bmp", w, h, rgb);
+        vmaDestroyBuffer(m_allocator, r.buffer, r.allocation);
+    }
+    Log("frame dump: %u in-between images (%s-*.bmp)", unsigned(reads.size()), base.c_str());
 }
 
 }  // namespace rvk

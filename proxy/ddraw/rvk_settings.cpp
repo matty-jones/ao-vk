@@ -23,7 +23,8 @@ using namespace rvkproxy;
 
 namespace {
 
-enum Type : uint32_t { Bool = 0, Int = 1, Float = 2, Choice = 3 };   // Choice: an int from `choices`
+enum Type : uint32_t { Bool = 0, Int = 1, Float = 2, Choice = 3, Colour = 4 };   // Choice: an int from `choices`;
+                                                                                // Colour: RRGGBB (hex in the ini)
 
 struct Setting {
     const char* name;           // also the ini key; at most 15 characters (game option variables)
@@ -77,7 +78,7 @@ Setting g_settings[] = {
     {"RVK_PbrAo", "Occlusion map strength", "Materials",         Float, 0, 1, 0.1f, 0.1f, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrProbe", "Environment probe", "Materials", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrGlow", "Emissive map brightness", "Materials", Float, 0, 8, 0.25f, 1.75f, nullptr, 0, "RVK_Pbr"},
-    {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 9, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9"},
+    {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 10, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9 10"},
     {"RVK_Albedo", "Enhanced textures", "Materials",     Bool,  0, 1, 1, 1, nullptr, 0},
 
     {"RVK_NativeGround", "Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0},
@@ -180,9 +181,11 @@ Setting g_settings[] = {
     {"RVK_RainWet",    "Rain: the ground soaked - darker and reflecting - and puddles gathering in hollows; dry under roofs and trees (x; 0: none)", "Weather", Float, 0, 1.5f, 0.05f, 1, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_StormDark",  "Thunderstorms: the land darker as the storm hides the sun - its shadows gone (x; 0: lit as the game lights it)", "Weather", Float, 0, 1.5f, 0.05f, 1, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_StormGreen", "Thunderstorms: their clouds and mist cast green, as the game's storm air (0: grey)", "Weather", Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_WeatherOn"},
+    {"RVK_StormThick", "Thunderstorms: how thick and dark their clouds (1: shapes and light in them; 2: one dark mass)", "Weather", Float, 0.25f, 2, 0.05f, 1, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_RainVeils",  "Thunderstorms: grey rain veils under the far clouds, x (0: none)", "Weather", Float, 0, 3, 0.1f, 1, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_RainFog",    "Thunderstorms: the rain's mist - the distance grey, rain shafts hanging under the storm, lit by lightning (x; 0: none; with RVK_SandFog)", "Weather", Float, 0, 3, 0.1f, 1, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_Lightning",  "Lightning: each of the game's strikes lights the land and the clouds round it with a flash (x; 0: none)", "Weather", Float, 0, 3, 0.1f, 1, nullptr, 0, "RVK_WeatherOn"},
+    {"RVK_HeatFlash", "Heat lightning: on some warm, dry nights silent flashes in far-off clouds (x; 0: none)", "Weather", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_StormFlash", "The game's lightning glow: the sky flashing over the clouds in storms - it flickers (off: left out; the bolts stay)", "Weather", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_SandHaze",   "Sand and ash storms: how thick the storm's air - the fog (or the flat haze), in place of the game's tint, x (0: none)", "Weather", Float, 0, 3, 0.05f, 0.4f, nullptr, 0, "RVK_WeatherOn"},
     {"RVK_SandForce", "Force a sandstorm (1 = full storm; 0 = the game's weather)", "Weather", Float, 0, 2, 0.05f, 0, nullptr, 0, "RVK_WeatherOn"},
@@ -223,12 +226,33 @@ Setting g_settings[] = {
     {"RVK_ProcSky",     "Sky: our own sky in place of the game's - blue by day, sunsets, the blue hour and night from the sun's height (off: the game's sky)", "Sky", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyZone",     "Sky: how much of each zone's own sky colour is kept (0: none, 1: mostly the zone's)", "Sky", Float, 0, 1, 0.05f, 0.25f, nullptr, 0, "RVK_ProcSky"},
     {"RVK_SkyBright",   "Sky: our sky's brightness against the game's (and the far haze's, which takes its colour)", "Sky", Float, 0.25f, 2, 0.05f, 1, nullptr, 0, "RVK_ProcSky"},
+#define RVK_SKY_KEY(name, label, key) \
+    {name, label, "Sky", Colour, 0, 16777215, 1, float(rvk::kSkyKeyRef[rvk::key]), nullptr, 0, "RVK_ProcSky"},
+    RVK_SKY_KEY("RVK_SkyDayTop", "Sky colour: by day, overhead", kSkyDayTop)
+    RVK_SKY_KEY("RVK_SkyDayLow", "Sky colour: by day, low", kSkyDayLow)
+    RVK_SKY_KEY("RVK_SkyDuskSun", "Sky colour: dawn and dusk, low towards the sun", kSkyDuskSun)
+    RVK_SKY_KEY("RVK_SkyDuskAway", "Sky colour: dawn and dusk, low away from the sun", kSkyDuskAway)
+    RVK_SKY_KEY("RVK_SkyDuskTop", "Sky colour: dawn and dusk, overhead", kSkyDuskTop)
+    RVK_SKY_KEY("RVK_SkyBlueTop", "Sky colour: the blue hour, overhead", kSkyBlueTop)
+    RVK_SKY_KEY("RVK_SkyBlueLow", "Sky colour: the blue hour, low", kSkyBlueLow)
+    RVK_SKY_KEY("RVK_SkyNightTop", "Sky colour: at night, overhead", kSkyNightTop)
+    RVK_SKY_KEY("RVK_SkyNightLow", "Sky colour: at night, low", kSkyNightLow)
+#undef RVK_SKY_KEY
     {"RVK_Twilight",    "Sky: sunrise and sunset colours - orange and red towards the sun, pink above, the pink band opposite (0: the game's sky; above 1 more vivid)", "Sky", Float, 0, 1.5f, 0.05f, 0.85f, nullptr, 0, "RVK_Hdr"},
     {"RVK_BlueHour",    "Sky: the blue hour after sunset and before sunrise - a deep blue sky going over to the night's (0: none)", "Sky", Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyGlow",     "Sky: the glow round the sun and along the horizon under it (0: none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SkyZones",    "Clouds: each zone its own skies - deserts clearer, coasts and forests cloudier (0: the same everywhere)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_Afterglow",   "Clouds: how strongly they take the sunset's colours - gold, orange, red, pink undersides after the sun has set (0: the game's hues)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_StarFade",    "Sky: the stars come out slowly as the sky darkens after sunset, and fade before sunrise (off: as the game shows them)", "Sky", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_Stars",       "Sky: our own stars - thousands, in their colours, wheeling through the night, twinkling low (0: the game's)", "Sky", Choice, 0, 1, 1, 1, nullptr, 0, "RVK_ProcSky", "0 1"},
+    {"RVK_StarBright",  "Sky: the stars' brightness, x", "Sky", Float, 0.25f, 3, 0.05f, 1, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_Twinkle",     "Sky: how much the stars twinkle (most low in the sky; 0 steady)", "Sky", Float, 0, 1, 0.05f, 0.5f, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_Galaxy",      "Sky: the galaxy's band across the night sky, x (0 none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_Meteors",     "Sky: shooting stars on clear nights, how often x (0 none)", "Sky", Float, 0, 3, 0.25f, 1, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_Aurora",      "Sky: auroras on some clear nights, how often and how strong x (0 none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_AuroraForce", "Sky: an aurora every night, this strong (0: only some nights, by chance)", "Sky", Float, 0, 2, 0.1f, 0, nullptr, 0, "RVK_ProcSky"},
+    {"RVK_AuroraCol",   "Sky colour: the aurora's glow", "Sky", Colour, 0, 16777215, 1, float(0x40FF90), nullptr, 0, "RVK_ProcSky"},
+    {"RVK_Rainbow",     "Sky: rainbows after rain, with the sun low behind you, x (0 none)", "Sky", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_Cirrus",      "Clouds: thin high wisps, most on clear days - pink and gold round sunrise and sunset (0: none; off by default: under our own sky they showed as coarse streaks)", "Sky", Float, 0, 2, 0.1f, 0, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudDetail", "Clouds: billows and wisps (0 smooth)",                    "Sky",     Float, 0, 2, 0.1f, 2, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudHalf",   "Clouds: drawn at half resolution (much cheaper)",         "Sky",     Bool,  0, 1, 1, 1, nullptr, 0, "RVK_CloudsOn"},
@@ -295,6 +319,7 @@ Setting g_settings[] = {
     {"RVK_SunBleed", "How much of the suns' glow shows through thick cloud (0 none)", "Effects", Float, 0, 1, 0.05f, 0.3f, nullptr, 0, "RVK_Sun"},
     {"RVK_Atmos", "Atmospheric haze", "Effects", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Mist", "Valley mist (night and dawn)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Atmos"},
+    {"RVK_FogBanks", "Fog banks: thick mist drifting through the low ground at dawn and after rain, most in wet country (x; 0: none)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Atmos"},
     {"RVK_DawnLight", "Low sun's light: golden on what faces it, the shade cooler, round sunrise and sunset (0: the game's colours)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_MornHaze", "Morning haze: the air thicker round sunrise, half as much round sunset (0: none)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Atmos"},
     {"RVK_GameSun", "The game's own sun glow sprites (off: only the suns above)", "Effects", Bool, 0, 1, 1, 0, nullptr, 0},
@@ -380,12 +405,12 @@ struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
     {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_GroundPebble", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
-    {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
+    {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
-    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_ViewRange", 1},
+    {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_Rainbow", 0}, {"RVK_ViewRange", 1},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -414,6 +439,9 @@ const char* const kHidden[] = {
     // clouds
     "RVK_CloudThick", "RVK_CloudBright", "RVK_CloudNight", "RVK_SkyVary", "RVK_SkyZones", "RVK_CloudDetail",
     "RVK_CloudHalf", "RVK_CloudLayer", "RVK_CloudHeight", "RVK_CloudShade", "RVK_CloudLow", "RVK_CloudSheet",
+    // the sky's colours (RRGGBB: tinkered with in the ini or the console - the window has no colour control)
+    "RVK_SkyDayTop", "RVK_SkyDayLow", "RVK_SkyDuskSun", "RVK_SkyDuskAway", "RVK_SkyDuskTop",
+    "RVK_SkyBlueTop", "RVK_SkyBlueLow", "RVK_SkyNightTop", "RVK_SkyNightLow", "RVK_Twinkle", "RVK_AuroraCol",
     // the Advanced tab: tuning past what most players change
     "RVK_CrownShade", "RVK_TessLevel", "RVK_TessDist", "RVK_PbrSsr", "RVK_PbrAo", "RVK_PbrProbe", "RVK_PbrGlow",
     "RVK_GrassWidth", "RVK_GrassVary", "RVK_GrassGlow", "RVK_GrassGusts", "RVK_TrailTime", "RVK_TrailShade",
@@ -492,6 +520,25 @@ float Clamp(const Setting& s, float v)
     return v;
 }
 
+// A value as written in randy-vk.ini: a number - or, for a colour, RRGGBB (# or 0x before it allowed). False: not one.
+bool ParseIni(const Setting& s, const char* text, float* out)
+{
+    while (*text == ' ' || *text == '\t') ++text;
+    char* end = nullptr;
+    if (s.type == Colour) {
+        if (*text == '#') ++text;
+        else if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) text += 2;
+        const unsigned long v = std::strtoul(text, &end, 16);
+        if (end == text || end - text > 6) return false;
+        *out = float(v & 0xFFFFFFul);
+        return true;
+    }
+    const float v = std::strtof(text, &end);
+    if (end == text || !std::isfinite(v)) return false;
+    *out = v;
+    return true;
+}
+
 // randy-vk.ini next to randy31.dll (the client folder).
 void ResolveIniPath()
 {
@@ -508,12 +555,24 @@ void Save(const Setting& s)
 {
     char buf[32];
     if (s.type == Float) std::snprintf(buf, sizeof(buf), "%g", s.value);
+    else if (s.type == Colour) std::snprintf(buf, sizeof(buf), "%06X", unsigned(s.value) & 0xFFFFFFu);
     else std::snprintf(buf, sizeof(buf), "%d", int(s.value));
     WritePrivateProfileStringA("Renderer", s.name, buf, g_iniPath);
     g_iniWritten = IniWriteTime();              // (our own write: PollIni mustn't take it for an edit)
 }
 
 void ApplyOne(const Setting& s, rvk::ThreadedDevice* d);
+
+// Our sky's colours (docs/sky-plan.md §1): the nine RRGGBB keys.
+rvk::SkyColours SkyColoursNow()
+{
+    static const char* const kKeys[rvk::kSkyKeyCount] = {
+        "RVK_SkyDayTop", "RVK_SkyDayLow", "RVK_SkyDuskSun", "RVK_SkyDuskAway", "RVK_SkyDuskTop", "RVK_SkyBlueTop",
+        "RVK_SkyBlueLow", "RVK_SkyNightTop", "RVK_SkyNightLow"};
+    rvk::SkyColours c;
+    for (uint32_t i = 0; i < rvk::kSkyKeyCount; ++i) c.keys[i] = uint32_t(V(kKeys[i])) & 0xFFFFFFu;
+    return c;
+}
 
 // Puts a setting into effect - and, for a feature's on / off setting, the settings it switches.
 void Apply(const Setting& s, rvk::ThreadedDevice* d)
@@ -623,8 +682,10 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_StormTint")) d->SetStormTint(V(n) != 0.0f);
     else if (is("RVK_StormFlash")) d->SetStormFlash(V(n) != 0.0f);
     else if (is("RVK_Lightning")) d->SetLightning(V(n));
+    else if (is("RVK_HeatFlash")) d->SetHeatFlash(V(n));
     else if (is("RVK_RainFog")) d->SetRainFog(V(n));
     else if (is("RVK_StormGreen")) d->SetStormGreen(V(n));
+    else if (is("RVK_StormThick")) d->SetStormThick(V(n));
     else if (is("RVK_RainVeils")) d->SetRainVeils(V(n));
     else if (is("RVK_StormDark")) d->SetStormDark(V(n));
     else if (is("RVK_RainWet")) d->SetRainWet(V(n));
@@ -653,6 +714,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_NightDark")) d->SetNightDark(V(n));
     else if (is("RVK_Atmos")) d->SetAtmos(V(n) != 0.0f);
     else if (is("RVK_Mist")) d->SetMist(V(n));
+    else if (is("RVK_FogBanks")) d->SetFogBanks(V(n));
     else if (is("RVK_MornHaze")) d->SetMornHaze(V(n));
     else if (is("RVK_DawnLight")) d->SetDawnLight(V(n));
     else if (is("RVK_Afterglow")) d->SetAfterglow(V(n));
@@ -665,6 +727,22 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     }
     else if (is("RVK_ProcSky") || is("RVK_SkyZone") || is("RVK_SkyBright"))
         d->SetProcSky(V("RVK_ProcSky") > 0.5f, V("RVK_SkyZone"), V("RVK_SkyBright"));
+    else if (is("RVK_Stars") || is("RVK_StarBright") || is("RVK_Twinkle") || is("RVK_Galaxy") || is("RVK_Meteors") ||
+             is("RVK_Aurora") || is("RVK_AuroraCol") || is("RVK_AuroraForce")) {
+        rvk::NightSky n;
+        n.stars = V("RVK_Stars") > 0.5f;
+        n.bright = V("RVK_StarBright");
+        n.twinkle = V("RVK_Twinkle");
+        n.galaxy = V("RVK_Galaxy");
+        n.meteors = V("RVK_Meteors");
+        n.aurora = V("RVK_Aurora");
+        n.auroraColour = uint32_t(V("RVK_AuroraCol")) & 0xFFFFFFu;
+        n.auroraForce = V("RVK_AuroraForce") > 0.0f ? V("RVK_AuroraForce") : -1.0f;
+        d->SetNightSky(n);
+    }
+    else if (is("RVK_Rainbow")) d->SetRainbow(V(n));
+    else if (s.type == Colour)                    // (the sky's colour keys)
+        d->SetSkyColours(SkyColoursNow());
     else if (is("RVK_GoldenHour")) d->SetGoldenHour(V(n));
     else if (is("RVK_DesertAir") || is("RVK_HeatShimmer")) d->SetDesertAir(V("RVK_DesertAir"), V("RVK_HeatShimmer"));
     // The game's sun sprites: with RVK_GameSun, or whenever our suns are off (HDR off, RVK_Sun 0) - never no sun.
@@ -848,13 +926,14 @@ void Load()
         // (RVK_SmokeThick was RVK_SmokeDensity - 16 characters, one too many for the game's option variables.)
         if (!buf[0] && std::strcmp(s.name, "RVK_SmokeThick") == 0)
             GetPrivateProfileStringA("Renderer", "RVK_SmokeDensity", "", buf, sizeof(buf), g_iniPath);
-        if (buf[0] && !std::isfinite(std::atof(buf))) {   // (a NaN a broken slider saved - user, 2026-10-14)
+        float read = 0.0f;
+        if (buf[0] && !ParseIni(s, buf, &read)) {   // (a NaN a broken slider saved - user, 2026-10-14)
             RvkLog("settings: %s = %s in randy-vk.ini is not a number - its default instead", s.name, buf);
             buf[0] = 0;
         }
         inIni.back() = buf[0] != 0;
         if (buf[0]) {
-            s.value = float(std::atof(buf));
+            s.value = read;
         } else if (s.legacyEnv && GetEnvironmentVariableA(s.legacyEnv, buf, sizeof(buf)) && buf[0]) {
             s.value = float(std::atof(buf));      // first run: take over the old ao-wine.sh setting
         } else if (std::strcmp(s.name, "RVK_MBlurObj") == 0 &&
@@ -962,9 +1041,8 @@ void PollIni(rvk::ThreadedDevice* device)
     for (Setting& s : g_settings) {
         char buf[64] = "";
         GetPrivateProfileStringA("Renderer", s.name, "", buf, sizeof(buf), g_iniPath);
-        char* end = nullptr;
-        const float read = std::strtof(buf, &end);
-        if (!buf[0] || end == buf || !std::isfinite(read))
+        float read = 0.0f;
+        if (!buf[0] || !ParseIni(s, buf, &read))
             continue;
         const float v = Clamp(s, read);
         if (v == s.value)
@@ -1124,6 +1202,7 @@ constexpr uint32_t kPresetCount = 4;
 bool InPresets(const Setting& s)
 {
     if (std::strcmp(s.section, "Debug") == 0) return false;   // (debug switches: randy-vk.ini only)
+    if (s.type == Colour) return false;            // (the sky's colours: their own presets - console skypreset)
     return std::strcmp(s.section, "General") != 0 || std::strcmp(s.name, "RVK_Enhance") == 0;
 }
 
@@ -1177,6 +1256,72 @@ bool PresetApply(uint32_t i)
         if (InPresets(g_settings[k])) Set(g_settings[k].name, v[k]);
     RvkLog("preset %s applied", kPresetNames[i]);
     return true;
+}
+
+// ---- The sky's colour presets ----
+// earth: the physical sky's own colours (the keys' references); rubika: teal days, violet dusks, green-black nights;
+// alien: magenta dusks, a cyan blue hour, violet nights; noir: the colour drained, the nights deep.
+namespace {
+const char* const kSkyKeyNames[rvk::kSkyKeyCount] = {
+    "RVK_SkyDayTop", "RVK_SkyDayLow", "RVK_SkyDuskSun", "RVK_SkyDuskAway", "RVK_SkyDuskTop", "RVK_SkyBlueTop",
+    "RVK_SkyBlueLow", "RVK_SkyNightTop", "RVK_SkyNightLow"};
+struct SkyPreset { const char* name; uint32_t keys[rvk::kSkyKeyCount]; };
+const SkyPreset kSkyPresets[] = {
+    {"earth", {rvk::kSkyKeyRef[0], rvk::kSkyKeyRef[1], rvk::kSkyKeyRef[2], rvk::kSkyKeyRef[3], rvk::kSkyKeyRef[4],
+               rvk::kSkyKeyRef[5], rvk::kSkyKeyRef[6], rvk::kSkyKeyRef[7], rvk::kSkyKeyRef[8]}},
+    {"rubika", {0x2E6E78, 0x8CC8C0, 0xE07850, 0x8A5A8C, 0x4A3C6E, 0x1E2A4A, 0x4A4A6A, 0x0E1A1A, 0x1C2A28}},
+    {"alien", {0x5A4A8C, 0xB4A0C8, 0xF05A8C, 0x6A3C8C, 0x3C2864, 0x104050, 0x307880, 0x140A20, 0x28142E}},
+    {"noir", {0x50555C, 0xA0A2A4, 0xB49682, 0x6E6670, 0x3C3C46, 0x1E2228, 0x4A4C50, 0x08090B, 0x121315}},
+};
+constexpr uint32_t kSkyPresetCount = sizeof(kSkyPresets) / sizeof(kSkyPresets[0]);
+}  // namespace
+
+uint32_t SkyPresetCount() { return kSkyPresetCount; }
+const char* SkyPresetName(uint32_t i) { return i < kSkyPresetCount ? kSkyPresets[i].name : ""; }
+
+bool SkyPresetApply(uint32_t i)
+{
+    Load();
+    if (i >= kSkyPresetCount) return false;
+    for (uint32_t k = 0; k < rvk::kSkyKeyCount; ++k) Set(kSkyKeyNames[k], float(kSkyPresets[i].keys[k]));
+    RvkLog("sky preset %s applied", kSkyPresets[i].name);
+    return true;
+}
+
+int SkyPresetCurrent()
+{
+    Load();
+    for (uint32_t i = 0; i < kSkyPresetCount; ++i) {
+        bool same = true;
+        for (uint32_t k = 0; k < rvk::kSkyKeyCount && same; ++k)
+            same = uint32_t(Stored(kSkyKeyNames[k])) == kSkyPresets[i].keys[k];
+        if (same) return int(i);
+    }
+    return -1;
+}
+
+uint32_t VanillaCount() { return uint32_t(sizeof(kVanilla) / sizeof(kVanilla[0])); }
+const char* VanillaName(uint32_t i) { return i < VanillaCount() ? kVanilla[i].name : ""; }
+float VanillaValue(uint32_t i) { return i < VanillaCount() ? kVanilla[i].value : 0.0f; }
+
+void ApplyTemporarySet(const std::vector<std::pair<std::string, float>>& values)
+{
+    Load();
+    if (!g_rvk.device) return;
+    std::vector<std::pair<Setting*, float>> stored;
+    for (const auto& [name, value] : values)
+        if (Setting* s = Find(name.c_str())) {
+            stored.push_back({s, s->value});
+            s->value = value;
+        }
+    for (const auto& [s, v] : stored) Apply(*s, g_rvk.device);
+    for (const auto& [s, v] : stored) s->value = v;
+}
+
+void RestoreAll()
+{
+    Load();
+    if (g_rvk.device) ApplyAll(g_rvk.device);
 }
 
 uint32_t PresetCount() { return kPresetCount; }

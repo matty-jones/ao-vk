@@ -840,11 +840,11 @@ void main()
         if (dot(FL.sunColor.rgb, FL.sunColor.rgb) > 0.0 && len2 > 0.0) {
             float ndl = max(dot(normalize(n), -normalize(FL.sunDir.xyz)), 0.0);
             if ((C.flags.x & F_SHADOWTEX) != 0u) {
-                gSunShare = 0.6 * ndl * texShade * (1.0 - FL.windFrame.z) * (1.0 - 0.65 * FL.rainNear.y);
+                gSunShare = 0.6 * ndl * texShade * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y);
             } else {
                 const vec3 kLuma = vec3(0.3, 0.59, 0.11);
                 float sunPart = dot(vDiffuse.rgb * FL.sunColor.rgb, kLuma) * ndl * sunScale;
-                gSunShare = clamp(sunPart * (1.0 - FL.windFrame.z) * (1.0 - 0.65 * FL.rainNear.y) / max(dot(lit + local, kLuma), 1e-3), 0.0, 1.0);
+                gSunShare = clamp(sunPart * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y) / max(dot(lit + local, kLuma), 1e-3), 0.0, 1.0);
             }
         }
         if ((C.flags.x & F_OVERBRIGHT) != 0u) {
@@ -964,8 +964,10 @@ void main()
     // multiplies the base pass's - so they shine white, not the sand's orange. Only where the sun itself reaches: a
     // glint is the sun's image, and a shadow's shade keeps the sky's share of the light - the glints in it had stayed
     // a third as bright, many times the sand's own.
-    const float glintSun = gSunVisibilityValid ? gCasterVisibility * gGroundAway * gTerrainVisibility * gCloudVisibility
-                                               : 1.0;
+    // (... and as much as the clouds let the sun through - a glint needs the sun's disc: under a storm's deck, none.)
+    const float glintSun = (gSunVisibilityValid ? gCasterVisibility * gGroundAway * gTerrainVisibility * gCloudVisibility
+                                                : 1.0) *
+                           FL.sand3.y * (1.0 - FL.rainNear.y);
     if (glintSun > 0.0 && any(greaterThan(sandGlint, vec3(0.0)))) {
         current.rgb += sandGlint * glintSun / max(NativeMean(terrain.uv[0]), vec3(0.08));
         if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
@@ -1121,7 +1123,8 @@ void main()
     // PBR debug views (RVK_PbrDebug). 7: the scene, tinted where surfaces have maps - green a PBR material (lit with
     // it), blue only a normal map, magenta an albedo map (any draw), orange where an emissive map gives off light.
     // 8: only the emitted light (everything else dark grey). 9: what PBR surfaces reflect (the environment probe
-    // or, where it hasn't seen, the analytic sky), at their roughness.
+    // or, where it hasn't seen, the analytic sky), at their roughness. 10: two-pass foliage's soft edges (magenta) and
+    // cores (green).
     uint pbrDebug = uint(FL.pbr2.x + 0.5);
     if (pbrDebug == 7u && (C.vtx.x & 0xEu) != 4u) {
         vec3 tint = gPbrOn ? vec3(0.1, 1.0, 0.2) : (C.flags.x & F_NORMALMAP) != 0u ? vec3(0.15, 0.4, 1.0)
@@ -1130,6 +1133,11 @@ void main()
             tint = vec3(1.0, 0.5, 0.05);
         if (tint.x >= 0.0)
             current.rgb = mix(current.rgb, tint * max(dot(current.rgb, vec3(0.3, 0.59, 0.11)), 0.25) * 1.6, 0.6);
+    } else if (pbrDebug == 10u) {
+        // 10: two-pass foliage (RVK_FolEdges) - its soft edges, drawn later over the scene, magenta; its cores green.
+        uint split = uint(D.motion.w + 0.5);
+        if (split == 2u) current.rgb = vec3(1.0, 0.0, 1.0);
+        else if (split == 1u) current.rgb = mix(current.rgb, vec3(0.1, 1.0, 0.2), 0.5);
     } else if (pbrDebug == 9u && (C.vtx.x & 0xEu) != 4u) {
         current.rgb = gPbrOn ? gPbrEnv : vec3(dot(current.rgb, vec3(0.3, 0.59, 0.11)) * 0.15);
     } else if (pbrDebug == 8u && (C.vtx.x & 0xEu) != 4u) {
@@ -1173,6 +1181,15 @@ void main()
     // Blended with this fragment's alpha like the colour (kept by multiplying and additive passes, see the blend state).
     // (Its alpha read by the indirect light only: the native ground's pebbles mark themselves 0.5 there - gi.frag.)
     outAlbedo = vec4(clamp(albedo, 0.0, 1.0), terrainMapped && terrain.pebble ? 0.5 : current.a);
+    // The game's blob shadow (drawn: indoors, no sun shadows to replace it): a shade laid on the surface - its colour
+    // darkened, nothing else of it changed (blended by alpha 0: kept). Its own lamp share, surface colour and glow
+    // stamped the floor round every table and character with patches the later passes lit wrongly - coloured, hard-
+    // edged, changing - user, 2026-10-19.
+    if ((C.flags.w & 1024u) != 0u) {
+        outGlow = vec4(0.0);                     // (all zero: kept whether a target blends by alpha or premultiplied)
+        outLocal = vec4(0.0);
+        outAlbedo = vec4(0.0);
+    }
 #endif
     if ((C.flags.x & F_OVERBRIGHT2X) != 0u)
         current.rgb *= 0.5;                               // blended as dst * src * 2
@@ -1189,6 +1206,12 @@ void main()
         float vis = gSunVisibilityValid ? gCasterVisibility : 0.6;
         current.rgb = tint * mix(0.08, 1.0, vis);
     }
+    // Never a negative or not-a-number colour into the scene: one such pixel (a degenerate normal, a zero-length
+    // vector somewhere in the lighting) is invisible alone, but the indirect light gathers it over its reach and
+    // the temporal anti-aliasing spreads it - dark and coloured blobs jumping about the floor round it (the subway,
+    // user 2026-10-19: in its tiles' grooves). Black instead, that pixel only.
+    if (any(isnan(current)) || any(isinf(current))) current = vec4(0.0, 0.0, 0.0, any(isnan(current.aaaa)) ? 1.0 : current.a);
+    current.rgb = max(current.rgb, vec3(0.0));
     outColor = current;
 }
 #endif

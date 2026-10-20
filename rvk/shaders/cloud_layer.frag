@@ -177,8 +177,8 @@ float Density(vec3 p, bool detail)
     // towards the top, where cumulus heap up.
     float billow = ShapeSmooth(q * 3.1 + 0.17).g;
     // (As much as the edges' erosion: the weather's detail - storms smoother.)
-    // (A storm's underside without them: they made its even bulbs.)
-    float billowAmount = mix(0.15, 0.35, clamp(h * 2.0, 0.0, 1.0)) * mix(1.0, 0.35 + 0.65 * smoothstep(0.05, 0.3, hb), storm);
+    // (A storm's underside with fewer of them: all of them made its even bulbs; none, one smooth mass.)
+    float billowAmount = mix(0.15, 0.35, clamp(h * 2.0, 0.0, 1.0)) * mix(1.0, 0.6 + 0.4 * smoothstep(0.05, 0.3, hb), storm);
     body = Remap(body, (1.0 - billow) * billowAmount * clamp(L.shape.z / 0.65, 0.3, 1.5), 1.0, 0.0, 1.0);
     d = clamp(Remap(body, 1.0 - cover, 1.0, 0.0, 1.0), 0.0, 1.0) * cover;
     if (d <= 0.0)
@@ -641,7 +641,8 @@ void main()
         }
         // By day the light bounced about deep inside (more orders, all ways): undersides and the side away from the sun
         // not dark grey against a bright sky (user: lighter by day).
-        sun += 0.3 * exp(-od * 0.06) * day;
+        // (In a storm more of it, from deeper: its thick cloud a dim glow, not black - user, 2026-10-19.)
+        sun += mix(0.3, 0.55, L.ambient.w) * exp(-od * mix(0.06, 0.03, L.ambient.w)) * day;
         // Powder: an edge facing the sun is darker than the inside it lights (light enters, doesn't come back out).
         float powder = 1.0 - 0.5 * exp(-d * sigma * gThick * 0.08);
         float h = Height(p);

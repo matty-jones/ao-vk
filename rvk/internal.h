@@ -157,7 +157,8 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float cover[4];                // the rain's cover map (sand_map.cpp RainCoverMap): corner x, z, 1 / size, bindless
                                    // image + 1 | sampler << 20 (the float's bits; 0 = none)
     float neon[4];                 // the tone mapping's neon look (tonemap.frag): x how much saturated light keeps
-                                   // its colour (RVK_NeonSat), y the lens streaks' strength (RVK_Streaks), z, w unused
+                                   // its colour (RVK_NeonSat); yzw a rainbow (towards the point opposite the sun,
+                                   // world camera view, x its strength: sky.cpp UpdateRainbow)
     float sky[4][4];               // the sky's model (sky.cpp UpdateSkyModel; sky_common.glsl s0..s3)
     float skyView[3][4];           // the world camera's rotation: row i . a view-space direction = its world part i
     float dawn[2][4];              // low sun's light (sky.cpp): the sun's tint (rgb), w how much; the sky's (shade)
@@ -192,7 +193,9 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float pick[4];                 // texture picking (Ctrl+Shift+I): x the native ground's tile flashing + 1 (0: none);
                                    // y the light grid's bindless image + 1 | sampler << 20 (the float's bits; 0 none),
                                    // z, w the lights too large for it (mask: low, high word's bits)
-    float sand3[4];                // the sand, more: x its ripples' depth in the march (RVK_RippleDepth); y, z, w unused
+    float sand3[4];                // the sand, more: x its ripples' depth in the march (RVK_RippleDepth); y the sun the
+                                   // clouds let through (its glints); z, w unused
+    float fogBanks[4];             // fog banks (mist.cpp FogBankParams): their noise at the eye (x, z), how deep, how much
     float lightGrid[4];            // the frame lights' grid (Device::LightGridLights): its corner x, z, cells across, down
     GpuLight lights[kFrameLights];
 };

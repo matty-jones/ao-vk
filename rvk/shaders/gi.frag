@@ -63,7 +63,9 @@ void main()
             if (qs || len2 < 1e-6 || len2 > radius * radius) continue;
             float h = dot(n, v) * inversesqrt(len2);
             if (h <= horizon) continue;
+            // (Cleaned: a negative or not-a-number scene pixel gathered here spread over the reach as a dark blob.)
             vec3 radiance = texelFetch(scene, ivec2(q), 0).rgb;
+            radiance = any(isnan(radiance)) || any(isinf(radiance)) ? vec3(0.0) : max(radiance, vec3(0.0));
             light += radiance * (h - horizon) * (1.0 - len2 / (radius * radius));
             horizon = h;
         }

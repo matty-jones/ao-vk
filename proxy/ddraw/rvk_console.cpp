@@ -198,6 +198,11 @@ struct State {
     uint32_t width = 0, height = 0;
     // try: values in effect but not saved (name -> the value tried).
     std::map<std::string, float> tried;
+    // bisect: the settings still suspected of a fault RVK_Enhance off takes away, and the half of them at the game's
+    // value now (step: which step).
+    std::vector<std::string> suspects;
+    size_t bisectHalf = 0;
+    int bisectStep = 0;
     bool charsSeen = false;                      // a WM_CHAR came (if keys come without: the game doesn't translate)
     int keysWithoutChars = 0;
 } g;
@@ -358,6 +363,7 @@ std::string FormatValue(const RvkSettingInfo& s, float v)
     char buf[48];
     if (s.type == 0) return v != 0.0f ? "on" : "off";
     if (s.type == 2) std::snprintf(buf, sizeof(buf), "%g", double(std::round(v * 1000.0f) / 1000.0f));
+    else if (s.type == 4) std::snprintf(buf, sizeof(buf), "%06X", unsigned(std::lround(v)) & 0xFFFFFFu);
     else std::snprintf(buf, sizeof(buf), "%d", int(std::lround(v)));
     return buf;
 }
@@ -366,6 +372,7 @@ std::string Range(const RvkSettingInfo& s)
 {
     if (s.type == 0) return "on / off";
     if (s.type == 3 && s.choices) return std::string("one of ") + s.choices;
+    if (s.type == 4) return "a colour, RRGGBB";
     char buf[64];
     if (s.type == 2) std::snprintf(buf, sizeof(buf), "%g .. %g", double(s.min), double(s.max));
     else std::snprintf(buf, sizeof(buf), "%d .. %d", int(s.min), int(s.max));
@@ -415,6 +422,16 @@ bool ParseValue(const RvkSettingInfo& s, const std::string& word, float* out)
     if (w == "off" || w == "false" || w == "no") { *out = s.type == 0 ? 0.0f : s.min; return true; }
     if (w == "toggle") { *out = s.value != 0.0f ? 0.0f : 1.0f; return s.type == 0; }
     if (w == "reset" || w == "default") { *out = s.defaultValue; return true; }
+    if (s.type == 4) {                            // a colour: RRGGBB, # or 0x before it allowed
+        const char* h = w.c_str();
+        if (*h == '#') ++h;
+        else if (h[0] == '0' && h[1] == 'x') h += 2;
+        char* hexEnd = nullptr;
+        const unsigned long v = std::strtoul(h, &hexEnd, 16);
+        if (hexEnd == h || *hexEnd || hexEnd - h > 6) return false;
+        *out = float(v);
+        return true;
+    }
     char* end = nullptr;
     const float v = std::strtof(w.c_str(), &end);
     if (end == w.c_str() || *end || !std::isfinite(v)) return false;
@@ -423,7 +440,7 @@ bool ParseValue(const RvkSettingInfo& s, const std::string& word, float* out)
 }
 
 // ---------------------------------------------------------------- commands
-enum Arg { aNone, aSetting, aSection, aPreset, aCommand, aText, aAction };
+enum Arg { aNone, aSetting, aSection, aPreset, aSkyPreset, aCommand, aText, aAction };
 struct Command {
     const char* name;
     const char* args;
@@ -438,8 +455,10 @@ const Command kCommands[] = {
     {"reset", "<setting>", "a setting back to its default", aSetting},
     {"toggle", "<setting>", "an on / off setting switched", aSetting},
     {"try", "<setting> <value>", "a value in effect but not saved (gone at the next start, or with untry)", aSetting},
+    {"bisect", "[gone|still|stop]", "find which setting causes a fault enhance off takes away: half of them at the game's value at a time, nothing saved", aText},
     {"untry", "[setting]", "the saved value back (none: every tried one)", aSetting},
     {"preset", "[name]", "a preset applied (none: the presets)", aPreset},
+    {"skypreset", "[name]", "the sky's colours from a preset (none: the presets)", aSkyPreset},
     {"hideui", "", "hide / show the game's interface (Ctrl+Shift+H)", aAction},
     {"freecam", "", "the free camera on / off (Ctrl+Shift+C)", aAction},
     {"dump", "", "the next frame's draws + a screenshot next to the log (Ctrl+Shift+F9)", aAction},
@@ -480,6 +499,93 @@ void SetValue(const SettingRef& r, float v)
     const std::string why = NoEffect(now.info);
     if (!why.empty()) t += C(cWarn) + "   no effect while " + why;
     Print(t);
+}
+
+// bisect: a fault RVK_Enhance off takes away - which of the settings it returns to the game's value is it? Half the
+// suspects at the game's value (together, nothing saved), the player says whether the fault is gone, the half that
+// answers stays suspected - about seven steps for the hundred or so. (Each step the saved values first, then the half.)
+void BisectApply()
+{
+    rvk_settings::RestoreAll();
+    g.bisectHalf = (g.suspects.size() + 1) / 2;
+    std::vector<std::pair<std::string, float>> values;
+    for (size_t i = 0; i < g.bisectHalf; ++i)
+        for (uint32_t k = 0; k < rvk_settings::VanillaCount(); ++k)
+            if (g.suspects[i] == rvk_settings::VanillaName(k)) values.push_back({g.suspects[i], rvk_settings::VanillaValue(k)});
+    rvk_settings::ApplyTemporarySet(values);
+    ++g.bisectStep;
+    std::string names;
+    for (size_t i = 0; i < g.bisectHalf && i < 6; ++i) names += (i ? ", " : "") + g.suspects[i];
+    if (g.bisectHalf > 6) names += ", ...";
+    Print(C(cText) + "bisect step " + std::to_string(g.bisectStep) + ": " + C(cValue) + std::to_string(g.bisectHalf) +
+          C(cText) + " of " + C(cValue) + std::to_string(g.suspects.size()) + C(cText) + " suspects at the game's value (" +
+          C(cDim) + names + C(cText) + "). Is the fault there? " + C(cName) + "bisect gone" + C(cText) + " / " + C(cName) +
+          "bisect still");
+    RvkLog("console: bisect step %d: %u of %u suspects at the game's value", g.bisectStep, unsigned(g.bisectHalf),
+           unsigned(g.suspects.size()));
+    for (size_t i = 0; i < g.bisectHalf; ++i) RvkLog("console: bisect   %s", g.suspects[i].c_str());
+}
+
+void BisectStop(const std::string& why)
+{
+    g.suspects.clear();
+    g.bisectHalf = 0;
+    g.bisectStep = 0;
+    rvk_settings::RestoreAll();
+    Print(C(cText) + why + C(cDim) + " (every saved value back)");
+}
+
+void Bisect(const std::string& answer)
+{
+    if (answer == "stop") {
+        BisectStop("bisect stopped");
+        return;
+    }
+    if (answer.empty() || answer == "start") {
+        g.suspects.clear();
+        g.bisectStep = 0;
+        for (uint32_t k = 0; k < rvk_settings::VanillaCount(); ++k)   // (only those not at the game's value already)
+            if (std::fabs(rvk_settings::Get(rvk_settings::VanillaName(k)) - rvk_settings::VanillaValue(k)) > 1e-4f)
+                g.suspects.push_back(rvk_settings::VanillaName(k));
+        if (g.suspects.empty()) {
+            Print(C(cDim) + "nothing to bisect: every enhancement is at the game's value already");
+            return;
+        }
+        Print(C(cText) + "bisect: " + C(cValue) + std::to_string(g.suspects.size()) + C(cText) +
+              " suspects. Get the fault showing first; after each step look, then answer.");
+        BisectApply();
+        return;
+    }
+    if (g.suspects.empty()) {
+        Print(C(cError) + "no bisect going: " + C(cName) + "bisect" + C(cText) + " starts one");
+        return;
+    }
+    if (answer == "gone") {
+        g.suspects.resize(g.bisectHalf);           // (it's in the half at the game's value)
+    } else if (answer == "still") {
+        g.suspects.erase(g.suspects.begin(), g.suspects.begin() + std::ptrdiff_t(g.bisectHalf));
+        if (g.suspects.empty()) {
+            BisectStop("bisect: not one of them alone - two together, or not a setting");
+            return;
+        }
+    } else {
+        Print(C(cError) + "bisect gone" + C(cText) + " / " + C(cError) + "bisect still" + C(cText) + " / " + C(cError) +
+              "bisect stop");
+        return;
+    }
+    if (g.suspects.size() == 1) {
+        const std::string found = g.suspects[0];
+        rvk_settings::RestoreAll();
+        for (uint32_t k = 0; k < rvk_settings::VanillaCount(); ++k)
+            if (found == rvk_settings::VanillaName(k))
+                rvk_settings::ApplyTemporarySet({{found, rvk_settings::VanillaValue(k)}});
+        Print(C(cText) + "bisect: it is " + C(cName) + found + C(cText) + " - at the game's value now, the rest as saved: "
+              "is the fault gone? (" + C(cName) + "bisect stop" + C(cText) + " puts it back)");
+        RvkLog("console: bisect found %s", found.c_str());
+        g.bisectHalf = 0;
+        return;
+    }
+    BisectApply();
 }
 
 void TryValue(const SettingRef& r, float v)
@@ -591,6 +697,8 @@ void Execute(const std::string& text)
             return;
         }
         TryValue(r, v);
+    } else if (cmd == "bisect") {
+        Bisect(w.size() >= 2 ? Lower(w[1]) : std::string());
     } else if (cmd == "untry") {
         std::vector<std::string> names;
         if (w.size() >= 2) {
@@ -630,6 +738,26 @@ void Execute(const std::string& text)
                 return;
             }
         Print(C(cError) + "no preset " + want);
+    } else if (cmd == "skypreset") {
+        const uint32_t n = rvk_settings::SkyPresetCount();
+        if (w.size() < 2) {
+            const int current = rvk_settings::SkyPresetCurrent();
+            std::string t = C(cText) + "sky presets: ";
+            for (uint32_t i = 0; i < n; ++i)
+                t += (i ? C(cDim) + ", " : "") + (int(i) == current ? C(cValue) : C(cName)) + rvk_settings::SkyPresetName(i);
+            t += C(cDim) + (current < 0 ? "   (now: your own colours)" : "   (now: " + std::string(rvk_settings::SkyPresetName(current)) + ")");
+            Print(t);
+            return;
+        }
+        const std::string want = Lower(w[1]);
+        for (uint32_t i = 0; i < n; ++i)
+            if (IStarts(rvk_settings::SkyPresetName(i), want)) {
+                rvk_settings::SkyPresetApply(i);
+                Print(C(cText) + "sky preset " + C(cValue) + rvk_settings::SkyPresetName(i) + C(cText) +
+                      " applied");
+                return;
+            }
+        Print(C(cError) + "no sky preset " + want);
     } else if (const Command* c = FindCommand(cmd); c && c->arg == aAction) {
         RunAction(c->name);
         Print(C(cDim) + c->help);
@@ -647,6 +775,17 @@ void Execute(const std::string& text)
             Print(C(cError) + r.shortName + " isn't on / off: " + Range(r.info));
             return;
         }
+        // "off" for a strength: its feature's on / off switch off - its lowest value isn't off (gi off left the
+        // indirect light at 0.25, ptshadows off the shadows at one - user, 2026-10-19).
+        const std::string word = Lower(w[1]);
+        SettingRef parent;
+        if ((word == "off" || word == "no" || word == "false") && r.info.type != 0 && r.info.parent &&
+            FindSetting(r.info.parent, &parent) && parent.info.type == 0) {
+            SetValue(parent, 0.0f);
+            return;
+        }
+        if ((word == "off" || word == "no" || word == "false") && r.info.type != 0 && r.info.min > 0.0f)
+            Print(C(cWarn) + r.shortName + " has no off: set to its lowest, " + FormatValue(r.info, v));
         SetValue(r, v);
     } else {
         Print(C(cError) + "no setting or command " + w[0] + C(cDim) + "   (help: what there is)");
@@ -778,6 +917,10 @@ std::vector<Candidate> Complete(const std::string& line, size_t* wordStart, std:
     case aPreset:
         for (uint32_t i = 0; i < rvk_settings::PresetCount(); ++i)
             if (IStarts(rvk_settings::PresetName(i), typed)) out.push_back({rvk_settings::PresetName(i), "", 0, false});
+        break;
+    case aSkyPreset:
+        for (uint32_t i = 0; i < rvk_settings::SkyPresetCount(); ++i)
+            if (IStarts(rvk_settings::SkyPresetName(i), typed)) out.push_back({rvk_settings::SkyPresetName(i), "", 0, false});
         break;
     case aCommand:
         for (const Command& c : kCommands)

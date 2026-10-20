@@ -233,6 +233,16 @@
   clouds' gaps (`RVK_DuskRays`, `volume.frag`). With the sun near the horizon the log gets a `dusk:` line every ~2 s
   (and `time:` with the hour while `RVK_TimeOfDay` / `RVK_TimeSpeed` run the clock). The demo's `--sun-sweep A B N`
   renders a dusk and `tools/sun-sweep.py` makes a contact sheet and flags jumps between shots.
+- **Our sky's colours, its night, rainbows** (`rvk/atmosphere.cpp`, `rvk/sky.cpp`, `shaders/atmos_view.frag`,
+  `sky_glow.frag`, `tonemap.frag` Rainbow; docs/sky-plan.md): the physical sky is recoloured by nine RRGGBB keys
+  (`RVK_SkyDayTop` ... `RVK_SkyNightLow`, read as on screen: gamma 2.2) as ratios to their references
+  (`kSkyKeyRef`, measured with the `sky: keys` log), blended by the sun's height into four ratios a frame -
+  overhead, 35 degrees up, low towards and away from the sun. The CPU reads the sky back with them taken out
+  (`m_skyPhys`). (A mode following the game's own sky colours was tried and taken out: docs/sky-plan.md.) The sky pass
+  draws our night (`RVK_Stars` - the game's points left out -, `RVK_Galaxy`, `RVK_Meteors`, `RVK_Aurora`;
+  `UpdateNightSky`), the tone map a rainbow after rain (`RVK_Rainbow`, `UpdateRainbow`, `FL.neon.yzw`). The console's
+  `skypreset` sets the nine colours. Demo: `--sky-key I RRGGBB`, `--stars`, `--aurora X`,
+  `--rainbow X`, `--profile-window`.
 - **Ground texturing** (`rvk/terrain.cpp`, `shaders/terrain.glsl`; settings `RVK_CliffTex`, `RVK_TileHide`,
   `RVK_GroundVary`, Terrain; docs/terrain-plan.md): the game lays its ground texture from above, so down a cliff it
   stretches into streaks. Its near ground gives each 4 x 4 unit cell its own four vertices and its own copy of a tile

@@ -426,12 +426,119 @@ void Device::UpdateSkyModel()
     // (No fog seen yet: no sky to fit the twilight to - the model off; the low sun's light above needs none.)
     if (!m_skyFogSet)
         std::memset(m_skyModel, 0, sizeof(m_skyModel));
+    UpdateRainbow();
     if (m_frameNumber % 600 == 7)
         Log("sky model: sun up %.2f (%s), disc up %.2f; fog %.2f %.2f %.2f; twilight %.2f, glow %.2f (%.2f %.2f %.2f); "
             "clear %.2f; low sun's light %.2f %.2f %.2f, shade %.2f %.2f %.2f", double(to[1]), m[11] > 0.5f ? "rising" : "setting", double(seen[1]), double(m_skyFog[0]),
             double(m_skyFog[1]), double(m_skyFog[2]), double(m[3]), double(m[7]), double(m[12]), double(m[13]),
             double(m[14]), double(clear), double(m_dawnTint[0][0]), double(m_dawnTint[0][1]), double(m_dawnTint[0][2]),
             double(m_dawnTint[1][0]), double(m_dawnTint[1][1]), double(m_dawnTint[1][2]));
+}
+
+// Our night sky this frame (docs/sky-plan.md §2-4): how much of the stars the dark shows - from the sun ~2 degrees
+// under (the brightest; the sky's own brightness hides the rest, sky_glow.frag) to all by ~14 -, less under an
+// overcast or a storm; a shooting star now and then, from the sky's clock (one every 25 s / RVK_Meteors at most,
+// 15-60 degrees up where you look, falling, each its own speed, length, width, brightness and colour); an aurora on some nights (the clock's 90-minute knots: about one night in six at
+// RVK_Aurora 1, wandering in strength).
+void Device::UpdateNightSky()
+{
+    const float h = SunUp();
+    const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
+    const float cloudy = m_cloudParams.enable ? SkyCloudiness() * vary : 0.0f;
+    const float clear = (1.0f - 0.7f * SmoothRamp(0.55f, 0.95f, cloudy)) * (1.0f - StormSky());
+    // (Without the fade - RVK_StarFade off - still none with the sun well up: none would show, and the field costs.)
+    const float dark = !SunKnown() ? 1.0f : !m_starFade ? 1.0f - SmoothRamp(0.05f, 0.15f, h)
+                                                        : 1.0f - SmoothRamp(-0.24f, -0.03f, h);
+    m_starsDark = dark * clear;
+    const double t = SkyClock();
+    // The shooting star.
+    m_meteor[1][3] = -1.0f;
+    const float rate = std::clamp(m_nightSky.meteors, 0.0f, 3.0f);
+    if (rate > 0.0f && m_starsDark > 0.3f) {
+        // Each its own (the slot's knots): 20-60 degrees a second; burning 0.15-0.6 s, mostly short; its train fading
+        // 0.08-0.25 s behind the head; mostly thin and faint, one in ~12 a fireball - wider, brighter, slower to fade;
+        // blue-white, some orange, some green.
+        const double slot = 25.0 / double(rate);
+        const int64_t i = int64_t(std::floor(t / slot));
+        const float speed = (20.0f + 40.0f * Knot(i, 103u)) / 57.29578f;
+        const float burn = 0.15f + 0.45f * Knot(i, 93u) * Knot(i, 93u);
+        const bool fireball = Knot(i, 105u) < 0.08f;
+        const float fade = fireball ? 0.15f + 0.2f * Knot(i, 107u) : 0.08f + 0.17f * Knot(i, 107u);
+        const double start = double(Knot(i, 91u)) * (slot - 2.0), ph = t - double(i) * slot - start;
+        if (ph >= 0.0 && ph <= double(burn + 4.0f * fade)) {
+            // (Where you look, within ~70 degrees either side: one anywhere in the sky was mostly missed - user,
+            // 2026-10-19.)
+            const float ahead = std::atan2(m_frameForward[2], m_frameForward[0]);
+            const float el = (15.0f + 45.0f * Knot(i, 95u)) / 57.29578f, az = ahead + 2.4f * (Knot(i, 97u) - 0.5f);
+            const float st[3] = {std::cos(el) * std::cos(az), std::sin(el), std::cos(el) * std::sin(az)};
+            // (Its way across the sky: mostly down, up to ~70 degrees to either side.)
+            float east[3] = {st[2], 0.0f, -st[0]};
+            const float el2 = std::sqrt(east[0] * east[0] + east[2] * east[2]);
+            for (float& e : east) e /= std::max(el2, 1e-4f);
+            const float up[3] = {st[1] * east[2] - st[2] * east[1], st[2] * east[0] - st[0] * east[2],
+                                 st[0] * east[1] - st[1] * east[0]};
+            const float th = (Knot(i, 99u) - 0.5f) * 2.4f;
+            float way[3], axis[3];
+            for (int k = 0; k < 3; ++k) way[k] = -std::cos(th) * up[k] + std::sin(th) * east[k];
+            axis[0] = st[1] * way[2] - st[2] * way[1];
+            axis[1] = st[2] * way[0] - st[0] * way[2];
+            axis[2] = st[0] * way[1] - st[1] * way[0];
+            const float al = std::max(std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]), 1e-4f);
+            for (int k = 0; k < 3; ++k) {
+                m_meteor[0][k] = st[k];
+                m_meteor[1][k] = axis[k] / al;
+            }
+            m_meteor[0][3] = speed * float(ph);
+            m_meteor[1][3] = speed * burn;
+            m_meteor[2][0] = speed * fade;
+            m_meteor[2][1] = fireball ? 1.0f + 0.6f * Knot(i, 109u) : 0.55f + 0.45f * Knot(i, 109u);
+            m_meteor[2][2] = fireball ? 2.5f + 1.5f * Knot(i, 111u) : 0.4f + 1.6f * Knot(i, 111u) * Knot(i, 111u);
+            m_meteor[2][3] = Knot(i, 113u);
+            const float hue = Knot(i, 115u);
+            const float colour[3][3] = {{0.85f, 0.95f, 1.0f}, {1.0f, 0.8f, 0.55f}, {0.7f, 1.0f, 0.75f}};
+            const int c = hue < 0.65f ? 0 : hue < 0.85f ? 1 : 2;
+            for (int k = 0; k < 3; ++k) m_meteor[3][k] = colour[c][k];
+        }
+    }
+    // The aurora.
+    const float a = std::clamp(m_nightSky.aurora, 0.0f, 2.0f);
+    float level = 0.0f;
+    if (a > 0.0f) {
+        const float th = 1.0f - 0.22f * a;
+        level = SmoothRamp(th, th + 0.08f, Noise(t, 5400.0, 71u)) * (0.6f + 0.4f * Noise(t, 300.0, 73u)) * std::min(a, 1.0f);
+    }
+    // (RVK_AuroraForce: every night, clear or not - to see one now.)
+    m_auroraNow = m_nightSky.auroraForce > 0.0f ? m_nightSky.auroraForce * m_sunPhase[3] : level * m_sunPhase[3] * clear;
+    if (m_frameNumber % 600 == 17 && (m_starsDark > 0.0f || m_auroraNow > 0.0f))
+        Log("sky: night - stars %.2f, aurora %.2f%s", double(m_starsDark), double(m_auroraNow),
+            m_meteor[1][3] >= 0.0f ? ", a shooting star" : "");
+}
+
+// A rainbow (docs/sky-plan.md §5; tonemap.frag Rainbow): in the minutes after rain - it rained in the last ~3 minutes
+// and now no more than lightly -, with the sun out (the clouds letting it through, no storm) and lower than 42
+// degrees (the bow's top would be under the horizon), the lower the sun the higher the bow and the stronger. In over
+// ~20 s, out over ~2 minutes.
+void Device::UpdateRainbow()
+{
+    if (m_rain > 0.15f)
+        m_rainbowRainClock = m_frameClock;
+    const float up = SunUp();
+    const float since = float(m_frameClock - m_rainbowRainClock);
+    float target = 0.0f;
+    if (m_rainbowSetting > 0.0f && SunKnown()) {
+        const float after = SmoothRamp(0.0f, 10.0f, since) * (1.0f - SmoothRamp(90.0f, 180.0f, since));
+        const float light = (1.0f - SmoothRamp(0.15f, 0.5f, m_rain)) * SmoothRamp(0.5f, 0.8f, m_sunThrough) *
+                            (1.0f - StormSky());
+        const float sun = SmoothRamp(0.0f, 0.05f, up) * (1.0f - SmoothRamp(0.5f, 0.669f, up));
+        target = std::clamp(m_rainbowSetting, 0.0f, 2.0f) * after * light * sun;
+    }
+    if (m_rainbowForce >= 0.0f)
+        target = m_rainbowForce;
+    const float tau = target > m_rainbow ? 20.0f : 120.0f;
+    m_rainbow += (target - m_rainbow) * (m_rainbowForce >= 0.0f ? 1.0f : 1.0f - std::exp(-m_frameDt / tau));
+    if (m_frameNumber % 600 == 19 && m_rainbow > 0.01f)
+        Log("sky: a rainbow, %.2f (rain %.2f, %.0f s since it rained; sun up %.2f, through %.2f)", double(m_rainbow),
+            double(m_rain), double(since), double(up), double(m_sunThrough));
 }
 
 // The sky's twilight and glow drawn over the game's sky (sky_glow.frag): once a frame, after its dome, before the
@@ -447,15 +554,43 @@ void Device::DrawSkyGlow()
         return;
     struct Push {
         d3d::Matrix invViewProj;
-        float view[4], sky[16];
+        float view[4], sky[16], star[3][4], night[4], meteor[2][4], aurora[4];
     } push{};
-    static_assert(sizeof(Push) == 144, "sky_glow.frag's push constants");
+    static_assert(sizeof(Push) == 256, "sky_glow.frag's push constants");
     if (!InvertMatrix(MulMatrix(m_view, m_proj), &push.invViewProj))
         return;
     push.view[0] = float(m_scene->m_width);
     push.view[1] = float(m_scene->m_height);
     push.view[2] = ours ? 1.0f : 0.0f;
     std::memcpy(push.sky, m_skyModel, sizeof(push.sky));
+    // Our night sky (docs/sky-plan.md §2-4): the star frame - turning round a pole 35 degrees up towards +z with the
+    // sun's hour, so the stars wheel through the night with it -, how much shows, the shooting star, the aurora.
+    if (ours && m_nightSky.stars) {
+        UpdateNightSky();
+        const float pole[3] = {0.0f, 0.573576f, 0.819152f}, e1[3] = {1.0f, 0.0f, 0.0f}, e2[3] = {0.0f, 0.819152f, -0.573576f};
+        const float* sd = m_trueSunDir;
+        const float a = std::atan2(-(sd[0] * e2[0] + sd[1] * e2[1] + sd[2] * e2[2]), -(sd[0] * e1[0] + sd[1] * e1[1] + sd[2] * e1[2]));
+        const float ca = std::cos(a), sa = std::sin(a);
+        for (int i = 0; i < 3; ++i) {
+            push.star[0][i] = ca * e1[i] + sa * e2[i];
+            push.star[1][i] = -sa * e1[i] + ca * e2[i];
+            push.star[2][i] = pole[i];
+        }
+        push.star[0][3] = m_starsDark;
+        push.star[1][3] = std::max(m_nightSky.bright, 0.0f);
+        push.star[2][3] = std::clamp(m_nightSky.twinkle, 0.0f, 1.0f);
+        push.night[0] = std::max(m_nightSky.galaxy, 0.0f);
+        push.night[1] = float(std::fmod(m_frameClock, 3600.0));
+        push.night[3] = m_auroraNow;
+        std::memcpy(push.meteor, m_meteor, sizeof(push.meteor));
+        // (The twilight model's slots - unused under our own sky: sky_glow.frag reads them only over the game's - hold
+        // the shooting star's look.)
+        std::memcpy(push.sky, m_meteor[2], 8 * sizeof(float));
+        for (int i = 0; i < 3; ++i)
+            push.aurora[i] = std::pow(float((m_nightSky.auroraColour >> (16 - 8 * i)) & 0xFFu) / 255.0f, 2.2f);
+    } else {
+        push.meteor[1][3] = -1.0f;
+    }
     FlushGroup();
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     const VkViewport full{0.0f, 0.0f, float(m_scene->m_width), float(m_scene->m_height), 0.0f, 1.0f};

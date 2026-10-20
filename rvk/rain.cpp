@@ -746,6 +746,7 @@ void Device::UpdateLightning()
     const double now = m_frameClock;
     const float dt = m_strikeClock < 0.0 ? 0.0f : float(std::clamp(now - m_strikeClock, 0.0, 0.25));
     m_strikeClock = now;
+    UpdateHeatLightning();
     if (m_lightning <= 0.0f || !m_weatherParams.enable)
         return;
     // A forced thunderstorm (RVK_StormForce): strikes of our own, at random (RVK_StrikeRate a minute as the storm
@@ -777,15 +778,21 @@ void Device::UpdateLightning()
 void Device::Lightning(float flash[4], float view[4], float proj[4], float world[4]) const
 {
     for (int i = 0; i < 4; ++i) flash[i] = view[i] = proj[i] = world[i] = 0.0f;
-    const float f = m_lightning > 0.0f ? FlashEnvelope(m_frameClock - m_flashStart, m_flashSeed) * m_lightning : 0.0f;
+    float f = m_lightning > 0.0f ? FlashEnvelope(m_frameClock - m_flashStart, m_flashSeed) * m_lightning : 0.0f;
+    // (No strike now: a heat-lightning flash far off - only its own light, w, round it: the clouds there, the sky
+    // towards it; no light everywhere, rgb - nothing lit near, the land, the rain, the water's sky.)
+    const bool distant = f <= 1e-3f;
+    if (distant)
+        f = m_heatGain > 0.0f ? FlashEnvelope(m_frameClock - m_heatStart, m_heatSeed) * m_heatGain : 0.0f;
     if (f <= 1e-3f || !m_aoProjValid)
         return;
-    for (int i = 0; i < 3; ++i) flash[i] = kFlashLight[i] * f;
+    const float* at = distant ? m_heatPos : m_flashPos;
+    for (int i = 0; i < 3; ++i) flash[i] = distant ? 0.0f : kFlashLight[i] * f;
     flash[3] = 2.5f * f;
     const auto& v = m_aoView.m;                  // world -> view (row vectors)
     float p[3];
     for (int i = 0; i < 3; ++i)
-        p[i] = m_flashPos[0] * v[0][i] + m_flashPos[1] * v[1][i] + m_flashPos[2] * v[2][i] + v[3][i];
+        p[i] = at[0] * v[0][i] + at[1] * v[1][i] + at[2] * v[2][i] + v[3][i];
     const float l = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
     if (l > 1e-3f)
         for (int i = 0; i < 3; ++i) view[i] = p[i] / l;
@@ -794,7 +801,48 @@ void Device::Lightning(float flash[4], float view[4], float proj[4], float world
     proj[1] = m_aoProj.m[1][1];
     proj[2] = m_aoProj.m[2][2];
     proj[3] = m_aoProj.m[3][2];
-    for (int i = 0; i < 3; ++i) world[i] = m_flashPos[i];
+    for (int i = 0; i < 3; ++i) world[i] = at[i];
+}
+
+// Heat lightning (docs/weather-events-plan.md): on some warm, dry nights (no rain here, no storm overhead; the clock's
+// 90-minute knots, about a third of nights at RVK_HeatFlash 1) a storm too far off to hear flickers in the clouds over
+// the horizon - flashes inside the cloud 4-12 km away, in one quarter of the sky for the night, every few seconds in
+// bursts, each a stroke and its return strokes (FlashEnvelope), dimmer than a strike. No bolt, no light here: the
+// flash's own, round it (Lightning: w, not rgb).
+void Device::UpdateHeatLightning()
+{
+    const double now = m_frameClock;
+    const double t = SkyClock();
+    const int64_t night = int64_t(std::floor(t / 5400.0));
+    const uint32_t key = uint32_t(night) * 2654435761u ^ 0x5bd1e995u;
+    const float setting = std::clamp(m_heatFlash, 0.0f, 2.0f);
+    const float chance = 0.33f * setting;
+    const float tonight = setting > 0.0f && (m_heatForce || StrikeHash(key, 41) < chance) ? 1.0f : 0.0f;
+    const float h = SunUp();
+    const float dark = SunKnown() ? 1.0f - std::clamp((h + 0.03f) / 0.1f, 0.0f, 1.0f) : 0.0f;   // (from ~2 degrees under)
+    const float dry = (1.0f - std::clamp((m_rain - 0.05f) / 0.15f, 0.0f, 1.0f)) * (1.0f - StormSky());
+    const float level = tonight * dark * dry * (m_frameEyeValid && !m_indoors ? 1.0f : 0.0f);
+    if ((level > 0.2f) != (m_heatTonight > 0.2f))
+        Log("heat lightning: %s (night %lld, towards %.0f degrees)", level > 0.2f ? "tonight" : "over",
+            static_cast<long long>(night), double(StrikeHash(key, 43) * 360.0f));
+    m_heatTonight = level;
+    if (FlashEnvelope(now - m_heatStart, m_heatSeed) <= 1e-3f)
+        m_heatGain = 0.0f;
+    if (level <= 0.2f || now < m_heatNext)
+        return;
+    // The next flash: in bursts - mostly a few seconds apart, now and then a pause of half a minute.
+    const uint32_t seed = ++m_flashCount * 2246822519u;
+    const float u = std::max(StrikeHash(seed, 51), 1e-3f);
+    m_heatNext = now + (StrikeHash(seed, 52) < 0.15f ? 15.0 + 25.0 * StrikeHash(seed, 53) : -std::log(u) * 4.0 + 0.4);
+    const float az = 6.2831853f * StrikeHash(key, 43) + (StrikeHash(seed, 54) - 0.5f) * 1.4f;
+    const float dist = 4000.0f + 8000.0f * StrikeHash(seed, 55);
+    const float base = m_cloudBase > 1.0f ? m_cloudBase : m_frameEye[1] + 900.0f;
+    m_heatPos[0] = m_frameEye[0] + dist * std::cos(az);
+    m_heatPos[1] = base + 200.0f + 900.0f * StrikeHash(seed, 56);
+    m_heatPos[2] = m_frameEye[2] + dist * std::sin(az);
+    m_heatStart = now;
+    m_heatSeed = seed;
+    m_heatGain = (0.25f + 0.5f * StrikeHash(seed, 57)) * setting * level;
 }
 
 // A thunderstorm's green cast (the game's storms: much of the air green - the user): its clouds and its rain mist

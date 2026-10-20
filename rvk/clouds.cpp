@@ -384,8 +384,8 @@ bool Device::CreateCloudResources(std::string* error)
                       sceneFormats, 5, kDepthFormat, &m_sunPipeline))
             return false;
         // The sky's twilight and glow (sky.cpp DrawSkyGlow): the same, its push constants the sky model too.
+        VkPushConstantRange skyPush{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 256};   // (256: + our night sky)
         // (One image: our sky's view table - atmosphere.cpp.)
-        VkPushConstantRange skyPush{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 144};
         const VkDescriptorSetLayoutBinding skyBinding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
                                                       VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
         VkDescriptorSetLayoutCreateInfo skySet{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
@@ -1530,6 +1530,9 @@ void Device::MakeCloudWeather(VkCommandBuffer cmd, const float eye[3])
     wf.info[1] = m_cloudCloudy;
     wf.storm[0] = smoothstep01(0.1f, 0.7f, rain);   // (cloud_weather.frag: the storm's cover sealed)
     wf.storm[1] = kStormReach;                       // ... out to the horizon: one mass (user - no towers apart)
+    // (... its thinner stretches between the heavy masses this thin: by RVK_StormThick - at 2 as before, 0.78 -
+    // sealed and dark all over, one blob from below: user, 2026-10-19.)
+    wf.storm[2] = std::clamp(0.54f + 0.12f * m_stormThick, 0.5f, 0.8f);
     wf.info[2] = m_cloudType;
     static const float typeOverride = getenv("RANDYVK_CLOUD_TYPE") ? float(atof(getenv("RANDYVK_CLOUD_TYPE"))) : -1.0f;
     if (typeOverride >= 0.0f)
@@ -1629,9 +1632,13 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     // 30% less erosion at full rain, 20% denser; clearer skies crisper, more ragged edges (up to +20%). (Eased: rain
     // and cloudiness are.)
     const float stormNow = StormSky();
-    const float weatherDetail = (1.0f - 0.3f * stormNow) * (1.0f + 0.2f * (1.0f - std::clamp(m_cloudCloudy, 0.0f, 1.0f)));
+    // (A storm by RVK_StormThick: at 2 as before - 30% less erosion, 60% denser: so dense no light came through and
+    // its smooth mass showed no clouds in it, user 2026-10-19; at 1, the default, 10% less erosion, as dense as fair
+    // weather's.)
+    const float thick = std::clamp(m_stormThick, 0.25f, 2.0f);
+    const float weatherDetail = (1.0f - 0.1f * thick * stormNow) * (1.0f + 0.2f * (1.0f - std::clamp(m_cloudCloudy, 0.0f, 1.0f)));
     lf.shape[2] = 0.65f * m_cloudParams.detail * weatherDetail;
-    lf.shape[3] = 0.02f * m_cloudParams.density * (1.0f + 0.6f * stormNow);   // (a storm's: heavy, dark underneath)
+    lf.shape[3] = 0.02f * m_cloudParams.density * (1.0f + 0.6f * (thick - 1.0f) * stormNow);
     // The wind carries the shapes (and they evolve: up through the noise) - UpdateCloudDrift.
     lf.wind[0] = m_cloudDrift[0];
     lf.wind[1] = m_cloudDrift[2];
@@ -1705,7 +1712,9 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
                                            m_trueSunDir[2] * m_trueSunDir[2]), 1e-6f);
         const float t = std::clamp((-m_trueSunDir[1] / l + 0.2f) / 0.23f, 0.0f, 1.0f);
         const float night = 1.0f - t * t * (3.0f - 2.0f * t);
-        lf.tint[3] = m_cloudParams.brightness * (1.0f + (m_cloudParams.night - 1.0f) * night) * (1.0f - 0.5f * storm);
+        // (A storm darker - by RVK_StormThick: at 2 half as bright, as before; at 1 three quarters.)
+        lf.tint[3] = m_cloudParams.brightness * (1.0f + (m_cloudParams.night - 1.0f) * night) *
+                     (1.0f - 0.25f * std::clamp(m_stormThick, 0.25f, 2.0f) * storm);
     }
     // The sky's light: its hue (the haze's, a quarter: whiter clouds), about unit brightness - the tint carries how light.
     const float luma = std::max(0.3f * m_cloudHaze[0] + 0.59f * m_cloudHaze[1] + 0.11f * m_cloudHaze[2], 1e-3f);

@@ -975,14 +975,20 @@ bool Device::ShadowInLightmap(uint32_t fvf) const
 bool Device::IsBlobShadow(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
                           uint32_t indexCount) const
 {
+    return m_shadows && m_shadowValid && BlobShadowShape(primitive, fvf, vertices, vertexCount, indexCount);
+}
+
+// The game's blob shadow, whether ours replace it or not: by its visual (rnative::scene), else by its shape.
+bool Device::BlobShadowShape(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
+                             uint32_t indexCount) const
+{
     // Known from the game's visual (rnative::scene): the blob shadow's own, or something else.
     const auto kind = VisualKind(m_drawVisualKind);
     if (kind == VisualKind::BlobShadow)
-        return m_shadows && m_shadowValid;
+        return true;
     if (kind != VisualKind::Unknown && kind != VisualKind::Other)
         return false;
-    if (!m_shadows || !m_shadowValid || fvf != (d3d::FVF_XYZ | d3d::FVF_DIFFUSE | (1u << 8)) || vertexCount % 2 == 0 ||
-        vertexCount < 7 || vertexCount > 129)
+    if (fvf != (d3d::FVF_XYZ | d3d::FVF_DIFFUSE | (1u << 8)) || vertexCount % 2 == 0 || vertexCount < 7 || vertexCount > 129)
         return false;
     uint32_t n = (vertexCount - 1) / 2;
     if (!((primitive == d3d::TriangleFan && indexCount == n + 2) || (primitive == d3d::TriangleStrip && indexCount == 2 * n + 2)))
@@ -994,6 +1000,8 @@ bool Device::IsBlobShadow(uint32_t primitive, uint32_t fvf, const void* vertices
     if (!t || t->Width() != 8 || t->Height() != 8)
         return false;
     const uint8_t* v = static_cast<const uint8_t*>(vertices);
+    if (!v)
+        return false;
     for (uint32_t i = 0; i < vertexCount; ++i) {                // XYZ, diffuse, uv: 24 bytes
         uint32_t diffuse;
         std::memcpy(&diffuse, v + i * 24 + 12, 4);

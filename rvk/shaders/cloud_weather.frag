@@ -7,8 +7,9 @@ layout(set = 0, binding = 0) uniform WeatherFrame {
     vec4 info;          // x: time (s), y: how cloudy the sky is (0..1), z: the type, w: the density
     vec4 drift;         // xy: how far the field has drifted (world), z: the field's scale (world units a noise tile),
                         // w: RVK_CloudCover (a bias, -1..1)
-    vec4 storm;         // x: a thunderstorm (0..1): the cover sealed - one heavy mass, no gaps - out to y (world units
-                        // from the eye), beyond: its towering cells (cumulonimbus, type 1)
+    vec4 storm;         // x: a thunderstorm (0..1): the cover sealed - heavy masses, no gaps - out to y (world units
+                        // from the eye), beyond: its towering cells (cumulonimbus, type 1); z: the cover of the thinner
+                        // stretches between its masses (RVK_StormThick)
 } W;
 layout(set = 0, binding = 1) uniform sampler3D noiseTexture;   // the layer's shape noise (cloud_layer_noise.comp: r
                                                                 // Perlin-Worley, g b a Worley fbm 4, 8, 16 cells)
@@ -44,7 +45,7 @@ void main()
     // (Its masses at two scales - one ~25 km - heavy dark ones and lighter stretches between, never a hole.)
     float mass = Spread(texture(noiseTexture, vec3(q * 0.37 + 2.3, 0.44 + W.info.x * 0.0002)).r, 0.5, 0.75);
     float heavy = smoothstep(0.2, 0.8, 0.55 * soft + 0.45 * mass);
-    cover = mix(cover, 0.78 + 0.22 * heavy, sealed);
+    cover = mix(cover, W.storm.z + (1.0 - W.storm.z) * heavy, sealed);
     if (cells > 0.0) {
         float c = Spread(texture(noiseTexture, vec3(q * 0.55 + 1.7, 0.33 + W.info.x * 0.0002)).r, 0.5, 0.75);
         float tower = smoothstep(0.5, 0.72, c);

@@ -113,8 +113,50 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_GoldenHour` under Colour grading, 0.5; 0 for none).
 - Thin high wisps of cloud, most on clear days, that catch the light round sunrise and sunset (`RVK_Cirrus`, off by
   default: under the new sky they showed as coarse streaks; 1 to try them).
+- The sky's colours can be changed: nine colours in `randy-vk.ini`, as `RRGGBB` like a colour picker gives them, for
+  overhead and low by day, at dawn and dusk (towards the sun, away from it, overhead), in the blue hour and at night
+  (`RVK_SkyDayTop`, `RVK_SkyDayLow`, `RVK_SkyDuskSun`, `RVK_SkyDuskAway`, `RVK_SkyDuskTop`, `RVK_SkyBlueTop`,
+  `RVK_SkyBlueLow`, `RVK_SkyNightTop`, `RVK_SkyNightLow`). The sky keeps its sunsets, glow and smooth changes
+  between them, and the haze, clouds and land take on the new colours. They can also be set in the console
+  (`skynighttop 05081a`) and take effect at once.
+- Our own night sky in place of the game's few hundred single-pixel stars (`RVK_Stars`, 1; 0 for the game's):
+  thousands of stars, from faint to glaring, white, gold, red and blue-white, turning slowly through the night with
+  the sun's hour, twinkling most near the horizon (`RVK_Twinkle`), dimmer through the thick air low down and hidden by
+  clouds and the moon's glow. The galaxy's band crosses it, with dark dust lanes and a brighter core (`RVK_Galaxy`,
+  1; 0 for none). `RVK_StarBright` sets how bright they are.
+- Shooting stars streak across clear night skies now and then, each its own: most quick, thin and faint, a few long,
+  now and then a bright fireball; their glowing trail fades away behind them (`RVK_Meteors`, 1; 0 for none, 3 for
+  more).
+- Auroras: on some clear nights curtains of green light with violet tops ripple low in the sky towards the north
+  (`RVK_Aurora`, 1; 0 for none, 2 for more and brighter; `RVK_AuroraCol` for its colour). `RVK_AuroraForce` shows one
+  every night, at that strength (0, the default: only some nights).
+- Rainbows: in the minutes after rain, with the sun out and low behind you, a rainbow stands in the sky and over the
+  clouds, a fainter second bow outside it with its colours reversed (`RVK_Rainbow`, 1; 0 for none).
+- Sky colour presets in the console: `skypreset` lists them, `skypreset rubika` (teal days, violet dusks),
+  `alien` (magenta dusks, a cyan blue hour), `noir` (colour drained, deep nights) or `earth` (back to the default)
+  sets all the sky's colours at once.
+- Heat lightning: on some warm, dry nights a storm too far off to hear flickers in the clouds over the horizon -
+  silent flashes lighting up distant cloud in one part of the sky, in bursts (`RVK_HeatFlash`, 1; 0 for none).
+- Fog banks: at dawn and after rain the valley mist gathers into thick banks drifting through the low ground, with
+  clear ground between, deeper the wetter it has been and most in wet country (`RVK_FogBanks`, 1; 0 for none).
+
+### Changed
+- Thunderstorm clouds are no longer one dark, shapeless mass: heavy masses and thinner stretches show between them,
+  light comes through the thinner parts, their undersides are lumpy and their edges ragged. `RVK_StormThick` (1; up to
+  2 for the old, nearly black storm) sets how thick and dark they are.
 
 ### Fixed
+- Dark and coloured blobs on floors round tables, plants and characters (indoors most), flickering and changing as
+  the interface updated, are gone: a few broken pixels in normal-mapped floors were spread into blobs by the indirect
+  light and the anti-aliasing. (Also: the soft edges of plants and cut-out textures, `RVK_FolEdges`, could be drawn
+  with another object's place and textures.)
+- The console's `off` for a strength (`gi off`, `ptshadows off`) now switches its effect off instead of setting it to
+  its lowest value.
+- The valley mist no longer fills rooms, subways and other indoor places at night and dawn.
+- Under a thunderstorm, buildings, rocks and walls no longer stand out light against the dark land and sky: the storm
+  takes nearly all of the sun's direct light and most of the sky's, and they keep about as much of their light as the
+  ground around them, soft, from all round.
+- The sand's glints no longer sparkle under a storm or thick cloud: they shine only as much as the sun gets through.
 - With `RVK_LightOver` on, lamps and characters' lights cost much less in busy places (Newland City has some 60):
   each spot of ground or wall now works out only the lights that reach it, not every light near the whole surface.
 - In cities, rocks and boulders no longer lie on paving or against shop fronts (Borealis): ramps in the ground under
@@ -166,6 +208,11 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ### Diagnostics
+- A frame dump also saves the renderer's in-between images next to it (`-scene`, `-local`, `-albedo`, `-glow`, `-ao`,
+  `-gi`, `-volume`, `-contact`, `-env`, `-ssr`.bmp), so a fault can be traced to the step that makes it.
+- Console `bisect`: finds which setting causes a fault that `enhance off` takes away. Each step puts half of the
+  remaining suspects at the game's value (nothing saved); answer `bisect gone` or `bisect still` - about seven steps.
+  `bisect stop` puts everything back.
 - `RVK_HeapCheck` (in `randy-vk.ini` only): checks the game's memory for corruption at points each frame and logs the
   first place it is found broken - to track down a crash in the ground grass (1 cheap, 2 thorough and slow).
 - With the sun near the horizon, `randy-vk.log` gets a `dusk:` line every couple of seconds (the game's light, ambient,

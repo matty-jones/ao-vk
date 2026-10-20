@@ -133,6 +133,9 @@ public:
     void SetLightning(float s);
     void SetRainFog(float s);
     void SetStormGreen(float s);
+    void SetStormThick(float s);
+    void SetFogBanks(float s, float force = -1.0f);
+    void SetHeatFlash(float s, bool force = false);
     void SetRainVeils(float s);
     void SetStormDark(float s);
     void SetRainWet(float s);
@@ -170,6 +173,9 @@ public:
     void SetHeapCheck(int level);
     void SetViewRange(float range);
     void SetProcSky(bool on, float zone, float bright);
+    void SetSkyColours(const SkyColours& c);
+    void SetNightSky(const NightSky& n);
+    void SetRainbow(float s, float force = -1.0f);
     void SetGoldenHour(float s);
     void SetDesertAir(float air, float shimmer);
     void SetShadowMemory(uint32_t mode);

@@ -4,7 +4,8 @@
 // sky changes fastest: the middle row is the horizon). Marched from the eye to the air's top or the ground: the sun's
 // light scattered once (Rayleigh, Mie) and more (the multiple scattering table), the moon's once, the earth's shadow
 // on the air at dusk. Then the art on top: the brightness fitted to the game's sky, a hint of the zone's colour,
-// weather's grey, the night's floor. Read by the sky pass (sky_glow.frag) and later the haze and clouds.
+// the night's floor, the sky's colours (ours or the game's: RVK_SkyColours), weather's grey. Read by the sky pass
+// (sky_glow.frag) and later the haze and clouds.
 #include "atmos_common.glsl"
 
 layout(set = 0, binding = 0) uniform sampler2D transmittance;
@@ -18,11 +19,26 @@ layout(push_constant) uniform Push {
     vec4 weather;       // rgb: the overcast's hue (unit luma); w how much (0 clear .. 1 a storm's sky)
     vec4 night;         // rgb: the night sky's floor (airglow, starlight); w the halo round the sun (its Mie lobe, x)
     vec4 dust;          // rgb: a desert's dust (unit luma); w how much (RVK_DesertAir: 0 none)
+    vec4 keyTop, keyMid, keyLowSun, keyLowAway;   // rgb: the sky's colours as ratios to the physics (docs/sky-plan.md
+                                                  // §1): overhead, 35 degrees up, low towards the sun / away from it
 } P;
 layout(location = 0) out vec4 outColor;
 
 vec3 Trans(float r, float mu) { return textureLod(transmittance, AtmosTransUv(r, mu), 0.0).rgb; }
 vec3 Multi(float r, float mu) { return textureLod(multiScatter, AtmosMultiUv(r, mu), 0.0).rgb; }
+
+// The sky's colours (RVK_Sky*, or the game's - atmosphere.cpp SkyKeyRatios): the ratio to the physics in a direction
+// - low, then 35 degrees up, then overhead; low, between the sun's side and the far side. (atmosphere.cpp
+// KeyRatioAt the same, to take it back out of the readback.)
+vec3 KeyRatio(vec3 d, vec3 sunDir)
+{
+    float a = 0.5;
+    if (dot(d.xz, d.xz) > 1e-8 && dot(sunDir.xz, sunDir.xz) > 1e-8)
+        a = 0.5 + 0.5 * dot(normalize(d.xz), normalize(sunDir.xz));
+    vec3 r = mix(P.keyLowAway.rgb, P.keyLowSun.rgb, a);
+    r = mix(r, P.keyMid.rgb, smoothstep(0.05, 0.57, d.y));
+    return mix(r, P.keyTop.rgb, smoothstep(0.57, 1.0, d.y));
+}
 
 // The table's direction for its pixel (and the sky pass's inverse: sky_glow.frag SkyViewUv).
 vec3 ViewDir(vec2 uv)
@@ -79,14 +95,16 @@ void main()
     // The zone's colour, a hint: its hue at the same brightness - more low in the sky than overhead.
     float horizon = 1.0 - smoothstep(0.0, 0.6, abs(d.y));
     c = mix(c, l * P.zone.rgb, P.zone.w * mix(0.35, 1.0, horizon));
+    // The night's floor - the sky never quite black -, then the sky's colours (ours or the game's) over it all.
+    c += P.night.rgb;
+    c *= KeyRatio(d, sunDir);
     // A desert's dust (RVK_DesertAir): the lowest sky paler, brighter and warmer, the fine dust the day's heat lifts -
     // a band fading out by ~17 degrees up, most of it in the lowest few; overhead stays blue.
     if (P.dust.w > 0.0) {
         float y = max(d.y, 0.0), band = (1.0 - smoothstep(0.0, 0.3, y)) * (0.6 + 0.4 * (1.0 - smoothstep(0.0, 0.08, y)));
         c = mix(c, dot(c, kLuma) * 1.45 * P.dust.rgb, 0.7 * P.dust.w * band);
     }
-    // The night's floor - the sky never quite black - and weather: an overcast's grey, a storm's darker, its hue.
-    c += P.night.rgb;
+    // Weather: an overcast's grey, a storm's darker, its hue.
     l = dot(c, kLuma);
     c = mix(c, l * P.weather.rgb * (1.0 - 0.35 * P.weather.w), P.weather.w);
     outColor = vec4(c, 1.0);

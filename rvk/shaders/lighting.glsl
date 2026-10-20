@@ -85,10 +85,12 @@ void AccumulateLight(Light l, vec3 posW, vec3 normalW, vec3 toEye, float sunScal
         direct = FL.windFrame.w > 0.5 ? pow(vec3(max(1.0 - k, 1e-4)), vec3(0.8, 1.0, 1.25)) : vec3(1.0 - k);
     }
     // A thunderstorm (FL.rainNear.y): its deck takes most of the sun's direct light, a little of it coming down soft
-    // from all round - the land under a storm dark, no sharp shadows (the user).
+    // from all round - the land under a storm dark, no sharp shadows (the user). (That little a quarter of what it
+    // takes, more on what faces up: with the ambient - the storm's sky, a quarter under a full storm, rvk draw.cpp - a
+    // lit thing keeps about a quarter of its light, as the ground; at a half it stood out light - user, 2026-10-19.)
     if (type == 3u && FL.rainNear.y > 0.0) {
-        float k = 0.65 * FL.rainNear.y;
-        spread += (0.5 * k * max(L.y, 0.0) * (0.6 + 0.4 * max(normalW.y, 0.0))) * l.diffuse.rgb;
+        float k = kStormSunTaken * FL.rainNear.y;
+        spread += (0.25 * k * max(L.y, 0.0) * (0.5 + 0.5 * max(normalW.y, 0.0))) * l.diffuse.rgb;
         direct *= 1.0 - k;
     }
     if (l.spot.z > 0.0 && nl > 0.0 && att > 0.0)
