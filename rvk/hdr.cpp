@@ -747,11 +747,7 @@ void Device::LandHaze(float out[24]) const
             const float l = std::max(std::sqrt(m_trueSunDir[0] * m_trueSunDir[0] + m_trueSunDir[1] * m_trueSunDir[1] +
                                                m_trueSunDir[2] * m_trueSunDir[2]), 1e-6f);
             const float up = -m_trueSunDir[1] / l;
-            auto smooth = [](float a, float b, float x) {
-                const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-                return t * t * (3.0f - 2.0f * t);
-            };
-            morning = smooth(-0.1f, -0.02f, up) * (1.0f - smooth(0.1f, 0.26f, up)) *
+            morning = Smoothstep(-0.1f, -0.02f, up) * (1.0f - Smoothstep(0.1f, 0.26f, up)) *
                       (0.5f + 0.5f * m_sunRising) * std::max(m_mornHaze, 0.0f);
         }
         out[10] = 0.6f / fogParams[1] * weather * (1.0f + morning) * (1.0f + 0.8f * desert[0]);

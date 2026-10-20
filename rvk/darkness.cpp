@@ -20,11 +20,6 @@ const uint32_t kSceneLumaSpirv[] = {
 #include "scene_luma.comp.inc"
 };
 
-float Smooth(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
 
 constexpr float kFloor = 0.12f;                  // the floor at RVK_Darkness 0 (the land's log-average, as shown)
 constexpr float kMaxGain = 2.5f;                 // the most the floor raises the exposure
@@ -103,7 +98,7 @@ void Device::UpdateDarkness()
     // The sky and clouds at night: lighter below 1, darker above (log10 of the sky's factor) - coming in with the night
     // itself, the sun from ~8 to ~14 degrees down: the blue hour before it is the same at every setting.
     const float lift = d <= 1.0f ? 0.3f * (1.0f - d) : -0.25f * (d - 1.0f);
-    const float deep = SunKnown() ? 1.0f - Smooth(-0.24f, -0.14f, SunUp()) : 1.0f;
+    const float deep = SunKnown() ? 1.0f - Smoothstep(-0.24f, -0.14f, SunUp()) : 1.0f;
     f.skyLog = lift * deep;
     f.clouds = std::pow(10.0f, 0.8f * f.skyLog);
     // The moon's light: stronger on a lighter night, weaker on a darker one.

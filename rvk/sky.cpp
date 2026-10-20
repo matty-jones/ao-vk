@@ -137,11 +137,6 @@ const char* Device::SkyName(float c)
 
 namespace {
 
-float SmoothRamp(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
 
 struct V3 { float r, g, b; };
 V3 operator*(V3 a, float k) { return {a.r * k, a.g * k, a.b * k}; }
@@ -162,13 +157,13 @@ V3 SkyTwilightCpu(const float dir[3], const float* s0, const float* s1, const fl
         const float a = std::sqrt(dir[0] * dir[0] + dir[2] * dir[2]), b = std::sqrt(s1[0] * s1[0] + s1[2] * s1[2]);
         if (a > 1e-3f && b > 1e-3f) toward = 0.5f + 0.5f * (dir[0] * s1[0] + dir[2] * s1[2]) / (a * b);
     }
-    const float t2 = toward * toward, away = std::pow(1.0f - toward, 1.5f), high = SmoothRamp(0.0f, 0.8f, v);
-    const float dusk = 1.0f - SmoothRamp(-0.035f, 0.12f, h), after = 1.0f - SmoothRamp(-0.14f, -0.03f, h);
-    const float blue = (1.0f - SmoothRamp(-0.2f, -0.07f, h)) * s3[3];
+    const float t2 = toward * toward, away = std::pow(1.0f - toward, 1.5f), high = Smoothstep(0.0f, 0.8f, v);
+    const float dusk = 1.0f - Smoothstep(-0.035f, 0.12f, h), after = 1.0f - Smoothstep(-0.14f, -0.03f, h);
+    const float blue = (1.0f - Smoothstep(-0.2f, -0.07f, h)) * s3[3];
     const float tall = (0.08f + (0.35f - 0.08f) * t2 * dusk) * (1.0f - 0.75f * after);
     const float band = std::exp(-v / std::max(tall, 0.02f)), line = std::exp(-v / 0.035f);
-    V3 warm = Mix({1.0f, 0.78f, 0.45f}, {1.0f, 0.5f, 0.2f}, SmoothRamp(0.0f, 0.55f, dusk));
-    warm = Mix(warm, {1.0f, 0.32f, 0.14f}, SmoothRamp(0.55f, 1.0f, dusk));
+    V3 warm = Mix({1.0f, 0.78f, 0.45f}, {1.0f, 0.5f, 0.2f}, Smoothstep(0.0f, 0.55f, dusk));
+    warm = Mix(warm, {1.0f, 0.32f, 0.14f}, Smoothstep(0.55f, 1.0f, dusk));
     warm = Mix(warm, {0.9f, 0.26f, 0.16f}, after);
     V3 rose = Mix({1.0f, 0.62f, 0.5f}, {0.98f, 0.5f, 0.58f}, dusk);
     rose = Mix(rose, {0.75f, 0.42f, 0.7f}, after);
@@ -179,10 +174,10 @@ V3 SkyTwilightCpu(const float dir[3], const float* s0, const float* s1, const fl
     c = Mix(c, rose, roseBand * (0.3f + 0.7f * toward) * dusk);
     c = Mix(c, warm, band * t2);
     c = Mix(c, {0.95f, 0.3f, 0.12f}, line * t2 * after * (1.0f - blue));
-    const float nearSun = SmoothRamp(-0.14f, -0.04f, h) * (1.0f - SmoothRamp(0.03f, 0.1f, h));
-    const float belt = SmoothRamp(0.02f, 0.07f, v) * (1.0f - SmoothRamp(0.12f, 0.26f, v));
+    const float nearSun = Smoothstep(-0.14f, -0.04f, h) * (1.0f - Smoothstep(0.03f, 0.1f, h));
+    const float belt = Smoothstep(0.02f, 0.07f, v) * (1.0f - Smoothstep(0.12f, 0.26f, v));
     c = Mix(c, {0.95f, 0.52f, 0.62f}, belt * away * nearSun * 0.85f);
-    c = Mix(c, {0.36f, 0.4f, 0.62f}, (1.0f - SmoothRamp(0.0f, 0.05f, v)) * away * nearSun * 0.7f);
+    c = Mix(c, {0.36f, 0.4f, 0.62f}, (1.0f - Smoothstep(0.0f, 0.05f, v)) * away * nearSun * 0.7f);
     c = Mix(c, Mix({0.3f, 0.38f, 0.75f}, {0.5f, 0.42f, 0.72f}, std::exp(-v / 0.15f)), blue * (1.0f - band * t2 * (1.0f - after)));
     const float peak = std::max(dusk * (1.0f - blue), after * (1.0f - blue));
     c = c * (1.0f / std::max(Luma(c), 1e-3f));
@@ -192,7 +187,7 @@ V3 SkyTwilightCpu(const float dir[3], const float* s0, const float* s1, const fl
     c = Mix({l, l, l}, c, 1.0f + 0.5f * boost);
     c = {std::max(c.r, 0.0f), std::max(c.g, 0.0f), std::max(c.b, 0.0f)};
     const float L = fogL * (0.75f + 0.2f * band + 0.6f * band * t2 - 0.25f * high) *
-                    (0.6f + 0.4f * SmoothRamp(-0.2f, 0.02f, h));
+                    (0.6f + 0.4f * Smoothstep(-0.2f, 0.02f, h));
     return c * (L / std::max(Luma(c), 1e-3f));
 }
 
@@ -229,13 +224,13 @@ void Device::UpdateSunClock()
     }
     const float h = SunUp();
     // The golden hour: the sun from ~15 degrees down to the horizon, and a little under it.
-    m_sunPhase[0] = SmoothRamp(-0.035f, 0.0f, h) * (1.0f - SmoothRamp(0.14f, 0.26f, h));
+    m_sunPhase[0] = Smoothstep(-0.035f, 0.0f, h) * (1.0f - Smoothstep(0.14f, 0.26f, h));
     // The afterglow: the sun from the horizon to ~8 degrees under (most within the first 2).
-    m_sunPhase[1] = SmoothRamp(-0.14f, -0.035f, h) * (1.0f - SmoothRamp(0.0f, 0.035f, h));
+    m_sunPhase[1] = Smoothstep(-0.14f, -0.035f, h) * (1.0f - Smoothstep(0.0f, 0.035f, h));
     // The blue hour: ~2 to ~15 degrees under (all of it from 5 to 11).
-    m_sunPhase[2] = SmoothRamp(-0.26f, -0.19f, h) * (1.0f - SmoothRamp(-0.087f, -0.035f, h));
+    m_sunPhase[2] = Smoothstep(-0.26f, -0.19f, h) * (1.0f - Smoothstep(-0.087f, -0.035f, h));
     // Night: from ~2 degrees under to ~14.
-    m_sunPhase[3] = 1.0f - SmoothRamp(-0.24f, -0.035f, h);
+    m_sunPhase[3] = 1.0f - Smoothstep(-0.24f, -0.035f, h);
     // Rising or setting: the trend over the last half minute (mist.cpp), eased over a minute (the sun hovering near the
     // horizon flips it back and forth).
     {
@@ -246,8 +241,8 @@ void Device::UpdateSunClock()
     // over ~20 s from when the game begins drawing them, should it switch them on at once while the sky is dark.
     m_starsAge = m_duskSkyLast.stars > 0 && m_duskSkyLast.frame + 2 >= m_frameNumber ? m_starsAge + m_frameDt : 0.0f;
     // (No sun known - a zone without one: by the game's own.)
-    const float dark = SunKnown() ? 1.0f - SmoothRamp(-0.24f, -0.105f, h) : 1.0f;
-    m_starsShown = m_starFade ? dark * SmoothRamp(0.0f, 20.0f, m_starsAge) : 1.0f;
+    const float dark = SunKnown() ? 1.0f - Smoothstep(-0.24f, -0.105f, h) : 1.0f;
+    m_starsShown = m_starFade ? dark * Smoothstep(0.0f, 20.0f, m_starsAge) : 1.0f;
     // The grading's night: by the sun's height while it is known, else (indoors) by the game's light and ambient -
     // eased over a few seconds either way.
     const float night = SunKnown() ? m_sunPhase[3] : NightByLight();
@@ -276,7 +271,7 @@ void Device::UpdateSunClock()
 float Device::DuskRaysNow() const
 {
     const float h = SunUp();
-    return std::max(m_duskRays, 0.0f) * SmoothRamp(-0.07f, -0.01f, h) * (1.0f - SmoothRamp(0.1f, 0.18f, h)) *
+    return std::max(m_duskRays, 0.0f) * Smoothstep(-0.07f, -0.01f, h) * (1.0f - Smoothstep(0.1f, 0.18f, h)) *
            (1.0f - StormSky());
 }
 
@@ -328,7 +323,7 @@ void Device::UpdateSkyModel()
     const float cloudy = m_cloudParams.enable ? SkyCloudiness() * vary : 0.0f;
     // (Only an overcast, storms and rain mute the colours: broken cloud covers the sky behind it itself, and muting
     // for it left a fair evening's sunset at half strength.)
-    const float overcast = SmoothRamp(0.55f, 0.95f, cloudy);
+    const float overcast = Smoothstep(0.55f, 0.95f, cloudy);
     const float clear = (1.0f - 0.7f * overcast) * (1.0f - StormSky()) * (1.0f - 0.6f * std::clamp(m_mistWet, 0.0f, 1.0f));
     std::memcpy(m, m_skyFog, sizeof(m_skyFog));
     m[3] = std::clamp(m_twilight, 0.0f, 1.5f) * clear;
@@ -369,11 +364,11 @@ void Device::UpdateSkyModel()
         const float lowT = 1.0f - std::clamp(up / 0.35f, 0.0f, 1.0f), low2 = lowT * lowT;
         // (Gone with the sun ~2 degrees under - before the moon takes the shadow map, whose light high in the sky
         // the ground's tint took for a sun reaching everything: the sand turned orange at once.)
-        const float day = SmoothRamp(-0.033f, 0.03f, up);
+        const float day = Smoothstep(-0.033f, 0.03f, up);
         const float k = std::clamp(m_dawnLight, 0.0f, 2.0f) * low2 * day * clear;
         // The sun's: towards orange at the horizon (more with a vivid sunset, RVK_Twilight), about 85% as bright as
         // the game's light.
-        const float vivid = std::clamp(m[3] / 0.85f, 0.0f, 1.2f) * (1.0f - SmoothRamp(0.04f, 0.2f, up));
+        const float vivid = std::clamp(m[3] / 0.85f, 0.0f, 1.2f) * (1.0f - Smoothstep(0.04f, 0.2f, up));
         float sun[3] = {1.0f, 1.0f - (0.22f + 0.1f * vivid) * k, 1.0f - (0.45f + 0.17f * vivid) * k};
         // (Our own sky: the sun's light through its air instead - atmosphere.cpp SunThroughAir.)
         const bool ours = ProcSkyReady() && m_skyUp[3] > 0.5f;
@@ -417,8 +412,8 @@ void Device::UpdateSkyModel()
         m_dawnTint[0][3] = k;
         // The golden hour's grade (RVK_GoldenHour, tonemap.frag Grade): most with the sun from ~2 degrees under the
         // horizon to ~8 up, gone by ~17; muted by cloud as the light.
-        m_dawnTint[1][3] = std::clamp(m_goldenHour, 0.0f, 1.0f) * SmoothRamp(-0.14f, -0.03f, up) *
-                           (1.0f - SmoothRamp(0.14f, 0.3f, up)) * clear;
+        m_dawnTint[1][3] = std::clamp(m_goldenHour, 0.0f, 1.0f) * Smoothstep(-0.14f, -0.03f, up) *
+                           (1.0f - Smoothstep(0.14f, 0.3f, up)) * clear;
     }
     // The blue hour's grade (tonemap.frag Grade): the picture cooler, its darks greyer - as the sky - between sunset's
     // colours and the night's grade, which comes in under it (NightAmount).
@@ -445,10 +440,10 @@ void Device::UpdateNightSky()
     const float h = SunUp();
     const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
     const float cloudy = m_cloudParams.enable ? SkyCloudiness() * vary : 0.0f;
-    const float clear = (1.0f - 0.7f * SmoothRamp(0.55f, 0.95f, cloudy)) * (1.0f - StormSky());
+    const float clear = (1.0f - 0.7f * Smoothstep(0.55f, 0.95f, cloudy)) * (1.0f - StormSky());
     // (Without the fade - RVK_StarFade off - still none with the sun well up: none would show, and the field costs.)
-    const float dark = !SunKnown() ? 1.0f : !m_starFade ? 1.0f - SmoothRamp(0.05f, 0.15f, h)
-                                                        : 1.0f - SmoothRamp(-0.24f, -0.03f, h);
+    const float dark = !SunKnown() ? 1.0f : !m_starFade ? 1.0f - Smoothstep(0.05f, 0.15f, h)
+                                                        : 1.0f - Smoothstep(-0.24f, -0.03f, h);
     m_starsDark = dark * clear;
     const double t = SkyClock();
     // The shooting star.
@@ -505,7 +500,7 @@ void Device::UpdateNightSky()
     float level = 0.0f;
     if (a > 0.0f) {
         const float th = 1.0f - 0.22f * a;
-        level = SmoothRamp(th, th + 0.08f, Noise(t, 5400.0, 71u)) * (0.6f + 0.4f * Noise(t, 300.0, 73u)) * std::min(a, 1.0f);
+        level = Smoothstep(th, th + 0.08f, Noise(t, 5400.0, 71u)) * (0.6f + 0.4f * Noise(t, 300.0, 73u)) * std::min(a, 1.0f);
     }
     // (RVK_AuroraForce: every night, clear or not - to see one now.)
     m_auroraNow = m_nightSky.auroraForce > 0.0f ? m_nightSky.auroraForce * m_sunPhase[3] : level * m_sunPhase[3] * clear;
@@ -526,10 +521,10 @@ void Device::UpdateRainbow()
     const float since = float(m_frameClock - m_rainbowRainClock);
     float target = 0.0f;
     if (m_rainbowSetting > 0.0f && SunKnown()) {
-        const float after = SmoothRamp(0.0f, 10.0f, since) * (1.0f - SmoothRamp(90.0f, 180.0f, since));
-        const float light = (1.0f - SmoothRamp(0.15f, 0.5f, m_rain)) * SmoothRamp(0.5f, 0.8f, m_sunThrough) *
+        const float after = Smoothstep(0.0f, 10.0f, since) * (1.0f - Smoothstep(90.0f, 180.0f, since));
+        const float light = (1.0f - Smoothstep(0.15f, 0.5f, m_rain)) * Smoothstep(0.5f, 0.8f, m_sunThrough) *
                             (1.0f - StormSky());
-        const float sun = SmoothRamp(0.0f, 0.05f, up) * (1.0f - SmoothRamp(0.5f, 0.669f, up));
+        const float sun = Smoothstep(0.0f, 0.05f, up) * (1.0f - Smoothstep(0.5f, 0.669f, up));
         target = std::clamp(m_rainbowSetting, 0.0f, 2.0f) * after * light * sun;
     }
     if (m_rainbowForce >= 0.0f)
@@ -621,10 +616,10 @@ void Device::DesertAir(float out[2]) const
     if (m_skyZoneLean > -0.15f)
         return;
     const float cloudy = m_cloudParams.enable ? SkyCloudiness() * std::clamp(m_cloudParams.vary, 0.0f, 1.0f) : 0.0f;
-    const float fair = (1.0f - SmoothRamp(0.4f, 0.9f, cloudy)) * (1.0f - StormSky()) * (1.0f - std::clamp(4.0f * m_sand, 0.0f, 1.0f));
+    const float fair = (1.0f - Smoothstep(0.4f, 0.9f, cloudy)) * (1.0f - StormSky()) * (1.0f - std::clamp(4.0f * m_sand, 0.0f, 1.0f));
     const float h = SunUp();
-    out[0] = std::clamp(m_desertAir, 0.0f, 1.0f) * fair * SmoothRamp(-0.05f, 0.15f, h);
-    out[1] = std::clamp(m_heatShimmer, 0.0f, 1.0f) * fair * SmoothRamp(0.3f, 0.55f, h);
+    out[0] = std::clamp(m_desertAir, 0.0f, 1.0f) * fair * Smoothstep(-0.05f, 0.15f, h);
+    out[1] = std::clamp(m_heatShimmer, 0.0f, 1.0f) * fair * Smoothstep(0.3f, 0.55f, h);
 }
 
 }  // namespace rvk

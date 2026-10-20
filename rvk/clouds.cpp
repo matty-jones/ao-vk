@@ -127,12 +127,6 @@ struct ResolveFrame {
 };
 
 // The view-projection of the camera's rotation alone (its translation dropped): directions to clip space.
-float smoothstep01(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
-
 d3d::Matrix RotationViewProj(const d3d::Matrix& view, const d3d::Matrix& proj)
 {
     d3d::Matrix v = view;
@@ -1501,18 +1495,18 @@ void Device::MakeCloudWeather(VkCommandBuffer cmd, const float eye[3])
     // (none on a clear day: user), the layer's cloudiness following it; the game's rain overcast as before.
     const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
     const float sky = SkyCloudiness();
-    const float rainy = smoothstep01(0.0f, 0.2f, rain);
-    m_skySheets = std::max(1.0f + (smoothstep01(0.08f, 0.4f, sky) - 1.0f) * vary, rainy);
+    const float rainy = Smoothstep(0.0f, 0.2f, rain);
+    m_skySheets = std::max(1.0f + (Smoothstep(0.08f, 0.4f, sky) - 1.0f) * vary, rainy);
     const float sheets = CloudSheetsOn() ? std::min(m_cloudParams.sheet, 1.0f) * m_skySheets : 0.0f;
     const float fixedSky = 0.42f + 0.05f * flatShare - 0.09f * sheets;   // (as the game's puffs say: always scattered)
     const float ownSky = 0.95f * sky - 0.06f * sheets;   // (overcast: hardly a gap)
     // A thunderstorm (the rain: the game's, or RVK_StormForce): the sky closed over whatever else says - no open sky.
-    const float sealed = smoothstep01(0.05f, 0.5f, rain);
+    const float sealed = Smoothstep(0.05f, 0.5f, rain);
     const float cloudy = std::max(std::clamp(present * (fixedSky + (ownSky - fixedSky) * vary) + rainy * 0.55f, 0.0f, 1.0f), sealed);
     // (Flat sheets: lumpy layered cloud - stratocumulus - not a thin stratus band, which seen from below at a low
     // angle smears into waves and streaks.)
     const float type = std::clamp(0.5f + 0.5f * rain - 0.12f * flatShare * (1.0f - rain) +
-                                  0.25f * vary * smoothstep01(0.6f, 0.95f, sky), 0.0f, 1.0f);   // (broken, overcast: layered)
+                                  0.25f * vary * Smoothstep(0.6f, 0.95f, sky), 0.0f, 1.0f);   // (broken, overcast: layered)
     {
         const double gap = m_cloudWeatherClock < 0.0 ? 1e9 : m_frameClock - m_cloudWeatherClock;
         const float k = gap > 5.0 ? 1.0f : 1.0f - std::exp(-float(gap) / 8.0f);
@@ -1522,13 +1516,13 @@ void Device::MakeCloudWeather(VkCommandBuffer cmd, const float eye[3])
         // The low deck (stratus): with rain, under the game's flat sheets. (Not by how heavily the game fogs its clouds:
         // its storms 73-77%, but a fair day in a teal-fogged zone 79%.)
         // (In a thunderstorm whatever the game draws: ragged low cloud under the storm's base.)
-        const float deck = std::max(std::clamp(smoothstep01(0.4f, 1.0f, flatShare) * smoothstep01(0.03f, 0.2f, rain), 0.0f, 1.0f),
-                                    0.85f * smoothstep01(0.1f, 0.6f, rain));
+        const float deck = std::max(std::clamp(Smoothstep(0.4f, 1.0f, flatShare) * Smoothstep(0.03f, 0.2f, rain), 0.0f, 1.0f),
+                                    0.85f * Smoothstep(0.1f, 0.6f, rain));
         m_cloudDeck += (deck - m_cloudDeck) * k;
         m_cloudWeatherClock = m_frameClock;
     }
     wf.info[1] = m_cloudCloudy;
-    wf.storm[0] = smoothstep01(0.1f, 0.7f, rain);   // (cloud_weather.frag: the storm's cover sealed)
+    wf.storm[0] = Smoothstep(0.1f, 0.7f, rain);   // (cloud_weather.frag: the storm's cover sealed)
     wf.storm[1] = kStormReach;                       // ... out to the horizon: one mass (user - no towers apart)
     // (... its thinner stretches between the heavy masses this thin: by RVK_StormThick - at 2 as before, 0.78 -
     // sealed and dark all over, one blob from below: user, 2026-10-19.)
@@ -1619,9 +1613,9 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     lf.eye[3] = float(clock);
     lf.layer[0] = m_cloudBase;
     // (A thunderstorm's layer taller: its towers - cloud_layer.frag Profile - the rest keep to the lower 1300.)
-    lf.layer[1] = m_cloudBase + kLayerThickness * (1.0f + 2.0f * smoothstep01(0.1f, 0.7f, StormSky()));
+    lf.layer[1] = m_cloudBase + kLayerThickness * (1.0f + 2.0f * Smoothstep(0.1f, 0.7f, StormSky()));
     lf.layer[2] = kLayerRadius;
-    lf.layer[3] = kLayerReach + (kStormReach - kLayerReach) * smoothstep01(0.1f, 0.7f, StormSky());
+    lf.layer[3] = kLayerReach + (kStormReach - kLayerReach) * Smoothstep(0.1f, 0.7f, StormSky());
     lf.weather[0] = m_cloudWeatherArea[0];
     lf.weather[1] = m_cloudWeatherArea[1];
     lf.weather[2] = 1.0f / m_cloudWeatherArea[2];
@@ -1763,7 +1757,7 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
     static const float deckOverride = getenv("RANDYVK_CLOUD_DECK") ? float(atof(getenv("RANDYVK_CLOUD_DECK"))) : -1.0f;
     lf.deck[0] = std::clamp((deckOverride >= 0.0f ? deckOverride : m_cloudDeck) * m_cloudParams.low, 0.0f, 1.0f);
     // (Between the ground and the layer's base; a thunderstorm's lower - its scud, near over the land.)
-    const float scud = smoothstep01(0.1f, 0.7f, StormSky());
+    const float scud = Smoothstep(0.1f, 0.7f, StormSky());
     lf.deck[1] = m_cloudBase - (0.55f + 0.15f * scud) * m_cloudParams.height;
     lf.deck[2] = lf.deck[1] + kDeckThickness;
     // The game's sheets' faint shadow (the shadow map), while it draws them.
@@ -1780,7 +1774,7 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
         lf.morph[1] = std::min(morph, 1.0f) * (0.04f + 0.06f * StormSky());
         lf.morph[2] = m_cloudBoil;
         // (The rain veils under a storm: some with its sky alone, all while it rains - any rain: the game's is ~0.1.)
-        const float rainy = smoothstep01(0.0f, 0.05f, std::clamp(m_rain, 0.0f, 1.0f));
+        const float rainy = Smoothstep(0.0f, 0.05f, std::clamp(m_rain, 0.0f, 1.0f));
         lf.morph[3] = m_weatherParams.enable ? StormSky() * (0.3f + 0.7f * rainy) * std::clamp(m_rainVeils, 0.0f, 3.0f) : 0.0f;
     }
     void* cpu = nullptr;

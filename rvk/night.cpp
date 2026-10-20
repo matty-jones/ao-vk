@@ -23,11 +23,6 @@ void Normalize(float v[3])
 
 float Dot(const float a[3], const float b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-float Smooth(float a, float b, float x)
-{
-    float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
 
 // The moon's light at full strength (RVK_MoonLight 1): cool, silvery, dim - on flat ground under a moon ~27 degrees
 // up about half the game's night ambient again.
@@ -121,8 +116,8 @@ void Device::UpdateMoon()
     // sun's light is gone at the horizon, so the two never overlap and the shadow map turns to the moon with both out
     // -, full ~8 degrees down. The moon's light by its own height: none at the horizon, full from ~27 degrees.
     const float sunUp = SunUp();
-    const float night = 1.0f - Smooth(-0.14f, -0.035f, sunUp);
-    const float target2 = have && m_moonLight > 0.0f ? night * Smooth(0.05f, 0.45f, m_moonPos[1]) : 0.0f;
+    const float night = 1.0f - Smoothstep(-0.14f, -0.035f, sunUp);
+    const float target2 = have && m_moonLight > 0.0f ? night * Smoothstep(0.05f, 0.45f, m_moonPos[1]) : 0.0f;
     if (m_moonFade > 0.0f || target2 > 0.0f)
         m_constantsDirty = true;                 // (the draws' lights: MoonLightFor)
     m_moonFade += (target2 - m_moonFade) * (1.0f - std::exp(-m_frameDt / 1.5f));

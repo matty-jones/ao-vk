@@ -16,11 +16,6 @@ using namespace detail;
 
 namespace {
 
-float Smooth(float a, float b, float x)
-{
-    float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
 
 constexpr float kMistReach = 800.0f;          // the low ground measured within this (horizontally) of the eye
 constexpr float kMistDepth = 25.0f;           // the layer's top over the low ground (world units)
@@ -69,7 +64,7 @@ void Device::UpdateMist()
         m_mistSunPrev = sunUp;
         m_mistSunPrevClock = now;
     }
-    const float lowSun = 1.0f - Smooth(-0.05f, 0.35f, sunUp);
+    const float lowSun = 1.0f - Smoothstep(-0.05f, 0.35f, sunUp);
     const float rising = m_mistSunTrend >= 0.0f ? 1.0f : 0.6f;
     // The sky: clear calm nights make the most; rain lately more (wet ground) - fading over an hour.
     const float sky = SkyCloudiness() * std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
@@ -81,7 +76,7 @@ void Device::UpdateMist()
     // wetter (up to ~110 units over the low ground); most in wet country (the playfield's lean: coasts and forests),
     // seldom in deserts. They drift with the wind, slowly.
     {
-        const float wetDay = m_mistWet * (1.0f - Smooth(0.25f, 0.55f, sunUp)) * (0.5f + 0.5f * sky);
+        const float wetDay = m_mistWet * (1.0f - Smoothstep(0.25f, 0.55f, sunUp)) * (0.5f + 0.5f * sky);
         const float zone = std::clamp(1.0f + 1.6f * m_skyZoneLean, 0.3f, 1.6f);
         float bank = std::clamp((0.7f * m_mistAmount / std::max(m_mist, 0.1f) + wetDay) * zone, 0.0f, 1.0f) *
                      std::clamp(m_fogBanks, 0.0f, 2.0f);

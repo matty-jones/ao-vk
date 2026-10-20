@@ -240,13 +240,9 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
                         fromR = std::clamp(r + dz, 0, int(g.cellsZ) - 1);
                     }
                 }
-            auto smooth = [](float a, float b, float x) {
-                const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-                return t * t * (3.0f - 2.0f * t);
-            };
             if (made(c, r) || (cliff > 0.0f && made(fromC, fromR))) continue;
-            const float foot = (1.0f - smooth(0.7f, 1.2f, s)) * smooth(1.0f, 2.2f, cliff);
-            const float rough = smooth(0.35f, 0.75f, s) * (1.0f - smooth(1.1f, 1.7f, s)) * (green(c, r) ? 0.0f : 0.3f);
+            const float foot = (1.0f - Smoothstep(0.7f, 1.2f, s)) * Smoothstep(1.0f, 2.2f, cliff);
+            const float rough = Smoothstep(0.35f, 0.75f, s) * (1.0f - Smoothstep(1.1f, 1.7f, s)) * (green(c, r) ? 0.0f : 0.3f);
             Rng rng{Hash(uint32_t(c), uint32_t(r), g.id)};
             const float want = (foot * 4.0f + rough * 2.0f) * density;
             const int count = int(want) + (rng() < want - std::floor(want) ? 1 : 0);

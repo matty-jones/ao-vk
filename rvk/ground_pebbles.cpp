@@ -59,11 +59,6 @@ struct Rng {
     float operator()() { s = s * 1664525u + 1013904223u; return float(s >> 8) / 16777216.0f; }
 };
 
-float Smooth(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
 
 // A pebble's shape: the icosahedron's 12 corners pushed in and out (a lump or two), its bottom cut flat; unit radius
 // about, smooth normals (each corner's faces by their areas - a pebble is worn round).
@@ -346,7 +341,7 @@ Device::ClutterBuild Device::BuildNativePebbles(std::shared_ptr<const NativeGrou
             const float h00 = H(c, r), h10 = H(c + 1, r), h01 = H(c, r + 1), h11 = H(c + 1, r + 1);
             // (Not on slopes: a slope's stones roll off - the rocks' scree is there.)
             const float gx0 = (h10 + h11 - h00 - h01) / (2.0f * g.cellX), gz0 = (h01 + h11 - h00 - h10) / (2.0f * g.cellZ);
-            const float keep = 1.0f - Smooth(0.3f, 0.6f, std::sqrt(gx0 * gx0 + gz0 * gz0));
+            const float keep = 1.0f - Smoothstep(0.3f, 0.6f, std::sqrt(gx0 * gx0 + gz0 * gz0));
             Rng rng{Hash(uint32_t(c), uint32_t(r), g.id ^ 0x5EB61E5u)};
             const float want = pt.density[tile] * density * kPerCell * keep;
             const int count = int(want) + (rng() < want - std::floor(want) ? 1 : 0);

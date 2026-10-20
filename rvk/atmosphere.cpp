@@ -73,11 +73,6 @@ constexpr uint32_t kUpRow = 87, kZenithRow = kViewH - 1;   // (~35 degrees up; s
 constexpr VkDeviceSize kRingBytes = kViewW * 8;  // (RGBA16F, one row)
 constexpr VkDeviceSize kSlotBytes = kRingBytes * 3;   // (a frame slot's: the horizon, 35 degrees up, overhead)
 
-float Ramp(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
 
 // The sky's colours (docs/sky-plan.md §1): how much of each time of day's keys by the sun's height - night, the blue
 // hour, dusk (and dawn), day - each full at its knot and eased into the next, so they always add up to 1.
@@ -91,7 +86,7 @@ void KeyPhases(float sunUpSine, float w[4])
     else
         for (int i = 0; i < 3; ++i)
             if (e <= kKnot[i + 1]) {
-                const float t = Ramp(kKnot[i], kKnot[i + 1], e);
+                const float t = Smoothstep(kKnot[i], kKnot[i + 1], e);
                 n[i] = 1.0f - t;
                 n[i + 1] = t;
                 break;
@@ -116,7 +111,7 @@ void KeyRatio(uint32_t key, uint32_t ref, float out[3])
 // The ratio in a direction (y up, a 0 away from the sun .. 1 towards it): atmos_view.frag KeyRatio.
 void KeyRatioAt(const float r[4][3], float y, float a, float out[3])
 {
-    const float mid = Ramp(0.05f, 0.57f, y), top = Ramp(0.57f, 1.0f, y);
+    const float mid = Smoothstep(0.05f, 0.57f, y), top = Smoothstep(0.57f, 1.0f, y);
     for (int c = 0; c < 3; ++c) {
         const float low = r[3][c] + (r[2][c] - r[3][c]) * a;
         const float m = low + (r[1][c] - low) * mid;
@@ -333,7 +328,7 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
     for (int i = 0; i < 3; ++i) push.zone[i] = m_skyFog[i] / fogL;
     // (By day only: the zone's colour is its day sky's - kept through the blue hour and night, its teal turned the
     // night sky a light cyan.)
-    push.zone[3] = m_skyFogSet ? std::clamp(m_skyZone, 0.0f, 1.0f) * Ramp(-0.07f, 0.05f, h) : 0.0f;
+    push.zone[3] = m_skyFogSet ? std::clamp(m_skyZone, 0.0f, 1.0f) * Smoothstep(-0.07f, 0.05f, h) : 0.0f;
     // Weather: an overcast greys it, a storm darker, in the storm's own colour (StormHue: its green).
     {
         const float vary = std::clamp(m_cloudParams.vary, 0.0f, 1.0f);
@@ -343,7 +338,7 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
         StormHue(hue);
         const float l = std::max(0.3f * hue[0] + 0.59f * hue[1] + 0.11f * hue[2], 1e-3f);
         for (int i = 0; i < 3; ++i) push.weather[i] = hue[i] / l;
-        push.weather[3] = std::clamp(std::max(0.6f * Ramp(0.5f, 0.95f, cloudy), storm), 0.0f, 1.0f);
+        push.weather[3] = std::clamp(std::max(0.6f * Smoothstep(0.5f, 0.95f, cloudy), storm), 0.0f, 1.0f);
     }
     // The night's floor: airglow and starlight, a deep blue at a little of the game's night sky's brightness.
     {

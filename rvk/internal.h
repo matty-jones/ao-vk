@@ -7,6 +7,7 @@
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #include <vma/vk_mem_alloc.h>
 
+#include <algorithm>
 #include <string>
 
 namespace rvk::detail {
@@ -242,6 +243,13 @@ int BoxInClip(const float mn[3], const float mx[3], const d3d::Matrix& vp, bool 
 // BoxInClip(mn, mx, vp, false) == -1 for an affine view-projection (orthographic: every point's w is 1) - the box's
 // centre and half extents through the matrix, not its eight corners (the sun cascades' cull, every caster each).
 bool BoxOutsideAffine(const float mn[3], const float mx[3], const d3d::Matrix& vp);
+
+// GLSL's smoothstep: 0 at a, 1 at b, eased between (a > b runs backwards).
+inline float Smoothstep(float a, float b, float x)
+{
+    const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
 
 // The native ground's cells (native_ground.cpp): corners a (x, z), b (x + 1, z), c (x, z + 1), d (x + 1, z + 1). Each
 // is split along b - c as the game splits it - what characters stand on - unless it is steep (a diagonal's ends more
