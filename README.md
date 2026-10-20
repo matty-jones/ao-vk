@@ -164,7 +164,8 @@ Spell effects with GPU particles, and depth of field.
 - Valley mist at night and at dawn, burning off as the sun climbs.
 - The suns drawn anew in the game's style (a white-hot core, a soft glow, rays), dimmed by cloud in front of them;
   low suns bigger and spread along the horizon. Dawn and dusk in the game's colours.
-- Darker nights, lit by the moon, with lamps and windows glowing (`RVK_NightDark`: 0 as the game, 1 moonlit, 2 dark).
+- Nights lit by the moon, with lamps and windows glowing. How dark nights, storms and dim places get is one setting,
+  `RVK_Darkness` (0 lightest, 0.5 the default, 1 darker, 2 very dark); the darkest places brighten as eyes adapt.
 - The ships over the cities hazed into the distance instead of cut off.
 
 **Clouds, rain and smoke** (on by default; sections Sky, Weather and Smoke)

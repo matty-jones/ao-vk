@@ -883,9 +883,9 @@ void ThreadedDevice::SetMoonLight(float s)
     Enqueue([this, s](const uint8_t*) { m_device.SetMoonLight(s); });
 }
 
-void ThreadedDevice::SetNightDark(float s)
+void ThreadedDevice::SetDarkness(float d, float floorScale)
 {
-    Enqueue([this, s](const uint8_t*) { m_device.SetNightDark(s); });
+    Enqueue([this, d, floorScale](const uint8_t*) { m_device.SetDarkness(d, floorScale); });
 }
 
 void ThreadedDevice::SetAtmos(bool on)

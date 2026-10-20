@@ -473,13 +473,14 @@ void Device::EndScene()
     ProfileMark("reflections");
     bool contact = RenderContactShadows(cmd);
     ProfileMark("contact shadows");
+    MeasureSceneLuma(cmd);                       // (darkness.cpp: the land's brightness, for RVK_Darkness's floor)
     Transition(cmd, m_albedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     // The upsampled bloom chain sums every level's light (weighted: RenderBloom): averaged here.
     // params[3]: how much bloom reaches objects nearer than its light (-1: the bloom carries no depth).
     // params[8..15]: colour grading (identity lookup tables until the proxy loads others).
     for (Texture*& lut : m_lut)
         if (!lut) lut = CreateLut(16, nullptr);
-    float params[16] = {m_tonemapKnee, m_exposure, bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
+    float params[16] = {m_tonemapKnee, m_exposure * m_darkGain, bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
                         m_bloomDepth ? m_bloomOverNearer : -1.0f, m_aoProj.m[2][2], m_aoProj.m[3][2],
                         gi ? m_giStrength : 0.0f,
                         float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0))};
@@ -1507,8 +1508,8 @@ void Device::RenderBloom(VkCommandBuffer cmd)
         MakeDepthReadable(cmd);
     Texture* src = m_scene;
     for (size_t i = 0; i < m_bloomLevels.size(); ++i) {
-        // (By night (RVK_NightDark) the threshold lower: lamps and windows glow out of the darker night.)
-        const float nightGlow = NightAmount() * std::min(m_nightDark, 1.0f);
+        // (By night - as dark as RVK_Darkness makes it - the threshold lower: lamps and windows glow out of the dark.)
+        const float nightGlow = NightAmount() * std::min(m_dark.tone, 1.0f);
         float params[8] = {1.0f / float(src->m_width), 1.0f / float(src->m_height),
                            m_bloomThreshold * (1.0f - 0.25f * nightGlow), i == 0 ? 1.0f : 0.0f,
                            m_aoProj.m[2][2], m_aoProj.m[3][2], m_bloomDepth ? 1.0f : 0.0f, 0.0f};

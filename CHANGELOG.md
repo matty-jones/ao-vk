@@ -6,6 +6,13 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- One setting for how dark the game gets: `RVK_Darkness` (Lighting, first in the list). It sets nights, the night sky
+  and clouds, the moon's light and thunderstorms together: 0 is the lightest (nights about as light as the blue hour
+  after sunset), 1 is the darkness ao-vk had before, 2 is very dark. It takes the place of `RVK_NightDark`; a value
+  you had chosen carries over.
+- The darkest places no longer go near black: when the land shows darker than `RVK_Darkness` allows (a night
+  thunderstorm, a cave, a dim basement), the picture brightens over a couple of seconds, as eyes adapt to the dark.
+  At `RVK_Darkness` 2 it never does. `RVK_DarkFloor` in randy-vk.ini (1; 0 for none) sets how much.
 - The ground is drawn by ao-vk itself (`RVK_NativeGround`, on): every patch of land shows its own textures out to the
   horizon instead of the game's blurry baked pictures past a short ring, and walking no longer makes the game rebuild
   the ground (no stutter, less memory). Cliffs, rock, shadows, mist and wet ground work on it as before, and texture
@@ -141,6 +148,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   clear ground between, deeper the wetter it has been and most in wet country (`RVK_FogBanks`, 1; 0 for none).
 
 ### Changed
+- Nights are lighter by default (`RVK_Darkness` 0.5): the land and the night sky keep more of the blue hour's light,
+  the moon lights a little more, and storms are less dark. Rooms and other places without a sun no longer get the
+  night's darkening on top of their own dim light. Set `RVK_Darkness` to 1 for the old look.
 - Thunderstorm clouds are no longer one dark, shapeless mass: heavy masses and thinner stretches show between them,
   light comes through the thinner parts, their undersides are lumpy and their edges ragged. `RVK_StormThick` (1; up to
   2 for the old, nearly black storm) sets how thick and dark they are.

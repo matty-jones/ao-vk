@@ -322,7 +322,7 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
     push.size[3] = tune[1];
     for (int i = 0; i < 3; ++i) push.sun[i] = -m_trueSunDir[i];
     push.sun[3] = 0.3f + std::max(m_frameEye[1], 0.0f) * 0.001f;   // (the eye's height, km: the ground's ~300 m up)
-    const float adapt = std::pow(10.0f, SkyAdaptLog(h));
+    const float adapt = std::pow(10.0f, SkyAdaptLog(h) + m_dark.skyLog);   // (RVK_Darkness lighter or darker: darkness.cpp)
     const float scale = std::clamp(m_skyBright, 0.25f, 4.0f) * std::max(m_skyDayFogL, 0.05f) / kZenithRef * adapt;
     for (int i = 0; i < 3; ++i) push.scale[i] = scale;
     push.scale[3] = std::clamp(m_twilight - 0.5f, 0.0f, 1.0f);   // (RVK_Twilight over 0.5: dusk more vivid)
@@ -348,7 +348,8 @@ void Device::UpdateAtmosphere(VkCommandBuffer cmd)
     // The night's floor: airglow and starlight, a deep blue at a little of the game's night sky's brightness.
     {
         const float night[3] = {0.55f, 0.75f, 1.6f};   // (unit luma)
-        for (int i = 0; i < 3; ++i) push.night[i] = night[i] * fogL * 0.08f;
+        const float dark = std::pow(10.0f, m_dark.skyLog);
+        for (int i = 0; i < 3; ++i) push.night[i] = night[i] * fogL * 0.08f * dark;
     }
     push.night[3] = 0.35f * std::clamp(m_skyGlow, 0.0f, 2.0f);   // (the halo round the sun: RVK_SkyGlow)
     // A desert's dusty air (RVK_DesertAir): a pale, warm band along the horizon. (The haze over the land takes its

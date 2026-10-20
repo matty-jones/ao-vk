@@ -1713,7 +1713,8 @@ void Device::MarchCloudLayer(VkCommandBuffer cmd, bool skipCovered, const float 
         const float t = std::clamp((-m_trueSunDir[1] / l + 0.2f) / 0.23f, 0.0f, 1.0f);
         const float night = 1.0f - t * t * (3.0f - 2.0f * t);
         // (A storm darker - by RVK_StormThick: at 2 half as bright, as before; at 1 three quarters.)
-        lf.tint[3] = m_cloudParams.brightness * (1.0f + (m_cloudParams.night - 1.0f) * night) *
+        // (And x RVK_Darkness's share at night: darkness.cpp.)
+        lf.tint[3] = m_cloudParams.brightness * (1.0f + (m_cloudParams.night - 1.0f) * night) * m_dark.clouds *
                      (1.0f - 0.25f * std::clamp(m_stormThick, 0.25f, 2.0f) * storm);
     }
     // The sky's light: its hue (the haze's, a quarter: whiter clouds), about unit brightness - the tint carries how light.

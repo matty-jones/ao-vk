@@ -49,6 +49,8 @@ Setting g_settings[] = {
     {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
     {"RVK_ViewRange",   "How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws)", "General", Float, 1, 3, 0.25f, 1.5f, nullptr, 0},
 
+    {"RVK_Darkness",   "Darkness: how dark nights, storms and dim places get (0 lightest, as the blue hour after sunset; 1 ao-vk's earlier nights; 2 very dark)", "Lighting", Float, 0, 2, 0.05f, 0.5f, nullptr, 0, "RVK_Hdr"},
+    {"RVK_DarkFloor",  "Darkness: the floor under the land's brightness, x (the exposure raised in the darkest places, as eyes adapt; 0 none)", "Lighting", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_PixelLight", "Per-pixel lighting",                                       "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_PIXEL_LIGHTING", 0},
     {"RVK_LightOver",  "All nearby lights (light override)",   "Lighting",         Bool,  0, 1, 1, 1, "RANDYVK_LIGHT_OVERRIDE", 0},
     {"RVK_Headroom", "Light headroom without effects", "Lighting",         Float, 1, 2, 0.05f, 1.15f, "RANDYVK_LIGHT_HEADROOM", 0, "RVK_LightOver"},
@@ -313,7 +315,6 @@ Setting g_settings[] = {
     {"RVK_VolLand", "Haze over distant land (cool, as the air makes it)", "Effects",  Float, 0, 1, 0.05f, 0.1f, nullptr, 0},
     {"RVK_DesertAir", "Deserts: dusty air in fair weather - far dunes paler and warmer, a pale band along the horizon (0 = none)", "Effects", Float, 0, 1, 0.1f, 1, nullptr, 0},
     {"RVK_HeatShimmer", "Deserts: heat shimmer over distant land in the midday sun (0 = none)", "Effects", Float, 0, 1, 0.1f, 0.5f, nullptr, 0},
-    {"RVK_NightDark", "Night darkness (0 = the game's, 2 = dark)", "Effects",  Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_Sun", "Sun brightness (0 = the game's own sun)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_Hdr"},
     {"RVK_SunSize", "The suns' size (1: the game's own; less: tamer)", "Effects", Float, 0.3f, 1.5f, 0.05f, 0.75f, nullptr, 0, "RVK_Sun"},
     {"RVK_SunBleed", "How much of the suns' glow shows through thick cloud (0 none)", "Effects", Float, 0, 1, 0.05f, 0.3f, nullptr, 0, "RVK_Sun"},
@@ -405,7 +406,7 @@ struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
     {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_NativeGround", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_GroundPebble", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
-    {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_NightDark", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
+    {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
@@ -420,6 +421,7 @@ const char* const kHidden[] = {
     "RVK_HeapCheck",
     "RVK_Prepass", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
     "RVK_GrassTex", "RVK_ShadowMem", "RVK_FxGlowOn", "RVK_NightOn", "RVK_MoonOn", "RVK_GameSun", "RVK_HillShade",
+    "RVK_DarkFloor",
     // leaves
     "RVK_LeafSize", "RVK_LeafCore", "RVK_LeafWind", "RVK_LeafFlutter", "RVK_LeafOwn", "RVK_LeafTrees",
     "RVK_LeafShrubs", "RVK_LeafPalms", "RVK_LeafShadow",
@@ -711,7 +713,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     else if (is("RVK_CrownShade")) d->SetCrownShade(V(n));
     else if (is("RVK_NightGlow")) d->SetNightGlow(V(n));
     else if (is("RVK_MoonLight")) d->SetMoonLight(V(n));
-    else if (is("RVK_NightDark")) d->SetNightDark(V(n));
+    else if (is("RVK_Darkness") || is("RVK_DarkFloor")) d->SetDarkness(V("RVK_Darkness"), V("RVK_DarkFloor"));
     else if (is("RVK_Atmos")) d->SetAtmos(V(n) != 0.0f);
     else if (is("RVK_Mist")) d->SetMist(V(n));
     else if (is("RVK_FogBanks")) d->SetFogBanks(V(n));
@@ -970,6 +972,38 @@ void Load()
                 RvkLog("settings: %s was off - on again (no longer in the settings window)", s.name);
             }
         WritePrivateProfileStringA("Migrations", "AlwaysOn", "1", g_iniPath);
+    }
+    // Once: RVK_NightDark becomes RVK_Darkness (docs/darkness-plan.md) - a value the player chose carried over, the
+    // old default (1) to the new, lighter one; in the settings and in the presets saved in the ini alike.
+    if (GetPrivateProfileIntA("Migrations", "Darkness", 0, g_iniPath) == 0) {
+        auto carried = [](const char* section, float* out) {
+            char text[64] = "";
+            GetPrivateProfileStringA(section, "RVK_NightDark", "", text, sizeof(text), g_iniPath);
+            char* end = nullptr;
+            const float v = std::strtof(text, &end);
+            if (!text[0] || end == text || !std::isfinite(v))
+                return false;
+            *out = std::fabs(v - 1.0f) < 1e-3f ? Find("RVK_Darkness")->defaultValue : std::clamp(v, 0.0f, 2.0f);
+            return true;
+        };
+        float v;
+        const size_t darkness = size_t(Find("RVK_Darkness") - g_settings);
+        if (carried("Renderer", &v) && !inIni[darkness]) {
+            g_settings[darkness].value = v;
+            RvkLog("settings: RVK_NightDark is now RVK_Darkness (%g)", v);
+        }
+        WritePrivateProfileStringA("Renderer", "RVK_NightDark", nullptr, g_iniPath);
+        for (int i = 1; i <= 9; ++i) {
+            char section[16];
+            std::snprintf(section, sizeof(section), "Preset %d", i);
+            if (!carried(section, &v))
+                continue;
+            char text[32];
+            std::snprintf(text, sizeof(text), "%g", v);
+            WritePrivateProfileStringA(section, "RVK_Darkness", text, g_iniPath);
+            WritePrivateProfileStringA(section, "RVK_NightDark", nullptr, g_iniPath);
+        }
+        WritePrivateProfileStringA("Migrations", "Darkness", "1", g_iniPath);
     }
     for (Setting& s : g_settings) {
         s.value = Clamp(s, s.value);

@@ -605,8 +605,15 @@ public:
     void SetNightGlow(float s) { m_nightGlow = s; m_frameLightsDirty = true; m_constantsDirty = true; }
     // The moon's light at night (night.cpp; 0 = none, 1 = as planned).
     void SetMoonLight(float s) { m_moonLight = s; m_frameLightsDirty = true; m_constantsDirty = true; }
-    // How dark nights get (tonemap.frag; 0 = as the game, 1 = moonlit blue, 2 = dark).
-    void SetNightDark(float s) { m_nightDark = s; }
+    // How dark nights, storms and dim places get (darkness.cpp; docs/darkness-plan.md): RVK_Darkness (0 lightest,
+    // 1 the old nights, 2 very dark) and RVK_DarkFloor, the brightness floor's share (0: no floor).
+    void SetDarkness(float d, float floorScale)
+    {
+        m_darkness = d;
+        m_darkFloorScale = floorScale;
+        m_frameLightsDirty = true;
+        m_constantsDirty = true;
+    }
     // The air's light scattering over distance (tonemap.frag Air; RVK_Atmos; off: the plain land haze).
     void SetAtmos(bool on) { m_atmos = on; }
     // Valley mist's amount (mist.cpp; 0 none, 1 as planned).
@@ -1429,7 +1436,34 @@ private:
     // The moon (night.cpp, RVK_MoonLight): once the sun is down, a dim cool light from the moon on the land - the
     // shadow map drawn from it, the game's night light (from under the ground) turned to come from it.
     float m_moonLight = 1.0f;                    // RVK_MoonLight (0: none)
-    float m_nightDark = 1.0f;                    // RVK_NightDark (0: as the game)
+    // How dark the game gets (darkness.cpp, RVK_Darkness): what each darkening takes of the setting, this frame.
+    struct DarkFactors {
+        float tone = 0.5f;                       // the tone mapping's night darkening (the old RVK_NightDark)
+        float skyLog = 0.0f;                     // our sky at night, x 10^this
+        float clouds = 1.0f;                     // the clouds at night, x
+        float moon = 1.0f;                       // the moon's light, x
+        float storm = 1.0f;                      // a storm's darkening (StormOvercast), x
+        float floor = 0.0f;                      // the land's least brightness as shown (log-average; 0: none)
+    };
+    DarkFactors m_dark;
+    float m_darkness = 0.5f;                     // RVK_Darkness
+    float m_darkFloorScale = 1.0f;               // RVK_DarkFloor
+    bool m_darkIndoors = false;                  // no sun known (a room's playfield): the tone's darkening half a step less
+    float m_darkGain = 1.0f;                     // the floor's exposure gain, eased
+    float m_landLuma = -1.0f;                    // the land's brightness as shown, last measured (scene_luma.comp)
+    uint64_t m_landLumaFrame = ~0ull;            // ... when
+    VkPipeline m_lumaPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_lumaLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_lumaSetLayout = VK_NULL_HANDLE;
+    VkBuffer m_lumaBuffer = VK_NULL_HANDLE;      // its results, a slot a frame in flight (host-visible)
+    VmaAllocation_T* m_lumaAllocation = nullptr;
+    uint8_t* m_lumaCpu = nullptr;
+    VkDeviceSize m_lumaStride = 256;
+    bool m_lumaMeasured[kFramesInFlight] = {};
+    bool CreateDarknessResources(std::string* error);
+    void DestroyDarknessResources();
+    void UpdateDarkness();
+    void MeasureSceneLuma(VkCommandBuffer cmd);
     bool m_atmos = true;                         // RVK_Atmos
     // Valley mist (mist.cpp, RVK_Mist).
     float m_mist = 1.0f;                         // RVK_Mist, x (0: none)

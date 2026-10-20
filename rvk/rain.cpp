@@ -854,14 +854,14 @@ void Device::StormGreen(float out[3]) const
     for (int i = 0; i < 3; ++i) out[i] = 1.0f + (green[i] - 1.0f) * k;
 }
 
-// How much a thunderstorm hides the sun from the land (0..1): with the rain (eased), x RVK_StormDark - the user: the
-// land lit as on a fair day under a storm sky, sharp shadows and all.
+// How much a thunderstorm hides the sun from the land (0..1): with the rain (eased), x RVK_StormDark x RVK_Darkness's
+// share (darkness.cpp) - the user: the land lit as on a fair day under a storm sky, sharp shadows and all.
 float Device::StormOvercast() const
 {
     if (!m_weatherParams.enable)
         return 0.0f;
     const float r = std::clamp((StormSky() - 0.05f) / 0.55f, 0.0f, 1.0f);
-    return std::clamp(r * r * (3.0f - 2.0f * r) * std::max(m_stormDark, 0.0f), 0.0f, 1.0f);
+    return std::clamp(r * r * (3.0f - 2.0f * r) * std::max(m_stormDark, 0.0f) * m_dark.storm, 0.0f, 1.0f);
 }
 
 // A colour of the air in a thunderstorm turned its dark yellow-green, its brightness kept (a little darker): the game's

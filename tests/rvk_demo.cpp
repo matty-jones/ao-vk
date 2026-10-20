@@ -2779,7 +2779,8 @@ float g_skyVary = 0.0f;           // --sky-vary X: RVK_SkyVary (off: the demo's 
 uint32_t g_skyZone = 0;      // --sky-zone PF: the sky leans by that playfield's climate (sky.cpp)
 double g_skyTime = -1.0;          // --sky-time T: the sky weather's clock (seconds)
 float g_moonLight = 1.0f;         // --moon-light X: RVK_MoonLight
-float g_nightDark = 1.0f;         // --night-dark X: RVK_NightDark
+float g_darkness = 1.0f;          // --darkness X (or --night-dark X): RVK_Darkness (the demo's default: the old nights)
+float g_darkFloor = 1.0f;         // --dark-floor X: RVK_DarkFloor
 bool g_atmos = true;              // --atmos 0|1: RVK_Atmos
 float g_twilight = 0.85f, g_skyGlow = 1.0f;   // --twilight T G: RVK_Twilight, RVK_SkyGlow
 float g_duskRays = 1.0f;                      // --dusk-rays X: RVK_DuskRays
@@ -4734,7 +4735,8 @@ int main(int argc, char** argv)
         else if (a == "--water-off") g_waterOff = true;
         else if (a == "--water-night") g_waterNight = true;
         else if (a == "--moon-light" && i + 1 < argc) g_moonLight = float(std::atof(argv[++i]));
-        else if (a == "--night-dark" && i + 1 < argc) g_nightDark = float(std::atof(argv[++i]));
+        else if ((a == "--darkness" || a == "--night-dark") && i + 1 < argc) g_darkness = float(std::atof(argv[++i]));
+        else if (a == "--dark-floor" && i + 1 < argc) g_darkFloor = float(std::atof(argv[++i]));
         else if (a == "--atmos" && i + 1 < argc) g_atmos = std::atoi(argv[++i]) != 0;
         else if (a == "--dawn-light" && i + 1 < argc) g_dawnLight = float(std::atof(argv[++i]));
         else if (a == "--twilight" && i + 2 < argc) {
@@ -5002,7 +5004,7 @@ int main(int argc, char** argv)
     dev.SetLeafLight(leaf);
     dev.SetNightGlow(nightGlow);
     dev.SetMoonLight(g_moonLight);
-    dev.SetNightDark(g_nightDark);
+    dev.SetDarkness(g_darkness, g_darkFloor);
     dev.SetAtmos(g_atmos);
     dev.SetTwilight(g_twilight, g_skyGlow);
     dev.SetDuskRays(g_duskRays);

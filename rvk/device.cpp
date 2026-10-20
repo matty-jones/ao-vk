@@ -205,6 +205,7 @@ Device::~Device()
     DestroyShadowResources();
     DestroyPointShadowResources();
     DestroyHdrResources();
+    DestroyDarknessResources();
     DestroyProfiler();
     DestroyParticleResources();
     DestroySkinResources();
@@ -1054,6 +1055,7 @@ bool Device::CreatePipelines(std::string* error)
     vkDestroyShaderModule(m_device, fragGlowNoCut, nullptr);
     vkDestroyShaderModule(m_device, fragNoCut, nullptr);
     if (!ok || !CreateShadowResources(error) || !CreatePointShadowResources(error) || !CreateHdrResources(error) ||
+        !CreateDarknessResources(error) ||
         !CreateParticleResources(error) || !CreateSkinResources(error))
         return false;
     CreateGrassResources(error);                 // not fatal: without it the ground grass is simply unavailable

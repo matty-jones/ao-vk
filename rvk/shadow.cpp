@@ -1478,6 +1478,7 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     // day and its clouds went dark).
     // (Eased over real time, with the dusk's phases from its height: sky.cpp UpdateSunClock.)
     UpdateSunClock();
+    UpdateDarkness();                            // (RVK_Darkness: how dark this frame may get - darkness.cpp)
     // With the sun down, the moon's light (night.cpp) - the map drawn from it. The valley mist (mist.cpp).
     UpdateMoon();
     UpdateMist();

@@ -157,7 +157,7 @@ public:
     void SetLeafLight(float s);
     void SetNightGlow(float s);
     void SetMoonLight(float s);
-    void SetNightDark(float s);
+    void SetDarkness(float d, float floorScale);
     void SetAtmos(bool on);
     void SetMist(float s);
     void SetSun(float s);

@@ -110,7 +110,7 @@ void Device::GradingParams(float out[8]) const
     out[4] = night;
     out[5] = m_nightTint;
     out[6] = m_vignette;
-    out[7] = m_nightDark;                        // RVK_NightDark (tonemap.frag main)
+    out[7] = m_dark.tone;                        // RVK_Darkness's night darkening (tonemap.frag main)
 }
 
 }  // namespace rvk

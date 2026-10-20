@@ -133,7 +133,7 @@ void Device::UpdateMoon()
             m_moonPos[0], m_moonPos[1], m_moonPos[2], night, m_moonFade, sunUp, sky ? "seen" : "not seen");
     for (int j = 0; j < 3; ++j) {
         m_moonDir[j] = -m_moonPos[j];
-        m_moonColour[j] = kMoon[j] * m_moonLight * m_moonFade;
+        m_moonColour[j] = kMoon[j] * m_moonLight * m_dark.moon * m_moonFade;   // (RVK_Darkness: darkness.cpp)
     }
 }
 
