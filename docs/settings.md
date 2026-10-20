@@ -15,14 +15,14 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-319 settings, 154 of them in the settings window.
+320 settings, 154 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (6)
 - [Lighting](#lighting) (17)
 - [Materials](#materials) (14)
-- [Debug](#debug) (6)
+- [Debug](#debug) (7)
 - [Terrain](#terrain) (21)
 - [Plants](#plants) (37)
 - [Water](#water) (22)
@@ -95,6 +95,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | --- | --- | --- | --- | --- |
 | `RVK_PbrDebug` | PBR materials: debug view (Ctrl+Shift+K) | 0 / 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 | 0 | ini only; switch `RVK_Pbr` |
 | `RVK_ShadowView` | Debug: show the sun shadow map's light (white lit, dark shadowed; tint = cascade) | on / off | off | ini only; knob |
+| `RVK_SceneProf` | Debug: the scene's GPU time and overdraw by kind of draw in the gpu ms log (costs a little; console sceneprof 1) | on / off | off | ini only; knob; was env `RANDYVK_SCENE_PROFILE` |
 | `RVK_Occlusion` | The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws) | on / off | on | ini only |
 | `RVK_TimeOfDay` | Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h) | -1 .. 27 | -1 | ini only |
 | `RVK_TimeSpeed` | Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own) | 0 .. 500 | 1 | ini only |

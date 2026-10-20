@@ -172,7 +172,7 @@ void Device::ProfileSceneClass(int cls)
 // The shading count's class for the draws from here on (Draw, once it knows whether the draw is pre-passed).
 void Device::ShadeClass(int cls)
 {
-    if (cls == m_shadeClass || !m_shadeQueries)
+    if (cls == m_shadeClass || !m_shadeQueries || !m_sceneProfile)
         return;
     if (m_profile[m_frameIndex].pool)
         FlushGroup();                            // the closing class's batched draws, counted in it

@@ -221,6 +221,7 @@ Setting g_settings[] = {
     {"RVK_ShadowMem",   "Shadows of things out of view: what stood in view and stands still keeps casting", "Shadows", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_SunShadow"},
     {"RVK_StaticShad",  "Shadows of the playfield's placed objects from its own list - rocks, walls, trees, seen or not (ao-assets statels): 0 off, 1 once their placement is confirmed, 2 always", "Shadows", Int, 0, 2, 1, 1, nullptr, 0, "RVK_SunShadow"},
     {"RVK_ShadowView",  "Debug: show the sun shadow map's light (white lit, dark shadowed; tint = cascade)", "Debug", Bool, 0, 1, 1, 0, nullptr, 0},
+    {"RVK_SceneProf",   "Debug: the scene's GPU time and overdraw by kind of draw in the gpu ms log (costs a little; console sceneprof 1)", "Debug", Bool, 0, 1, 1, 0, "RANDYVK_SCENE_PROFILE", 0},
     {"RVK_Occlusion",   "The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws)", "Debug", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_TimeOfDay",   "Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h)", "Debug", Float, -1, 27, 0.25f, -1, nullptr, 0},
     {"RVK_TimeSpeed",   "Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own)", "Debug", Float, 0, 500, 0.5f, 1, nullptr, 0},

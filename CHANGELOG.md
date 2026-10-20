@@ -227,6 +227,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ### Diagnostics
+- `RVK_SceneProf` (randy-vk.ini or console `sceneprof 1`): the `gpu ms` log line splits the scene by kind of draw
+  (buildings, ground, plants, characters, effects, water...) and a `scene shading` line says how many times each
+  screen pixel was shaded by each - where a slow spot's time goes. Was the `RANDYVK_SCENE_PROFILE` variable.
 - The profiling sweep (Ctrl+Shift+O, console `profile`) measures the newer features too: ground grass, tree leaves,
   water, clouds, weather, smoke, our sky, the native ground and its rocks, pebbles and ripples, depth maps,
   tessellation, normal maps, PBR and albedo maps. It now takes about six minutes.

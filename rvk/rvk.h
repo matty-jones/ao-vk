@@ -274,7 +274,8 @@ struct DeviceInfo {
     X(Atmos, m_atmos, 0)                              /* the air's scattering (off: the plain land haze) */ \
     X(ShadowView, m_shadowViewDebug, L)               /* debug: the sun shadow map's light shown */ \
     X(AlienMap, m_alienMap, 0)                        /* AI missions' map on green */ \
-    X(HillShade, m_hillShade, 0)                      /* the terrain shaded from a low sun */
+    X(HillShade, m_hillShade, 0)                      /* the terrain shaded from a low sun */ \
+    X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */
 enum class Knob : uint32_t {
 #define RVK_KNOB_NAME(name, member, refresh) name,
     RVK_FLOAT_KNOBS(RVK_KNOB_NAME) RVK_BOOL_KNOBS(RVK_KNOB_NAME)

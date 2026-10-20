@@ -573,15 +573,16 @@ bool Device::CreateLogicalDevice(std::string* error)
     m_depthBounds = features.features.depthBounds;
     enabled.features.depthBounds = features.features.depthBounds;
     // Profiling: fragment shader invocations per scene class (profile.cpp, "scene shading" - the overdraw).
-    // Only with RANDYVK_SCENE_PROFILE=1, as the scene's split by class (ProfileSceneClass): every class change ended
-    // the pending indirect batch and began a query - ~350 a frame over a city.
+    // Only with RVK_SceneProf on (or RANDYVK_SCENE_PROFILE=1 from the start), as the scene's split by class
+    // (ProfileSceneClass): every class change ended the pending indirect batch and began a query - ~350 a frame over a
+    // city. The pools are made whenever the GPU can count, so the setting can switch it on in game.
     {
         const char* v = std::getenv("RANDYVK_SCENE_PROFILE");
         m_sceneProfile = v && *v == '1';
         const char* o = std::getenv("RANDYVK_OPAQUE_BLEND");
         m_opaqueBlend = !(o && *o == '0');
     }
-    m_shadeQueries = features.features.pipelineStatisticsQuery && m_sceneProfile;
+    m_shadeQueries = features.features.pipelineStatisticsQuery;
     enabled.features.pipelineStatisticsQuery = features.features.pipelineStatisticsQuery;
     Log("draw grouping (indirect firstInstance + multiDrawIndirect): %s", m_groupIndirect ? "yes" : "no");
 
