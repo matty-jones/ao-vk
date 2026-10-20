@@ -155,7 +155,7 @@ void RvkState::SetWindow(HWND hwnd)
 
 // Ctrl+Shift+O: what each enhancement costs here - every one switched off in turn (in effect only, not saved) for
 // kSweepSettle + kSweepMeasure frames, the GPU passes measured over the last kSweepMeasure, logged as
-// "sweep <label>: gpu ms: ...". A baseline first and last (drift). Stand still while it runs (~1-2 min).
+// "sweep <label>: gpu ms: ...". A baseline first and last (drift). Stand still while it runs (~6-7 min at 60 fps: 47 steps of 420 frames).
 static void ProfileSweep(bool start)
 {
     struct Step { const char* label; const char* setting; float value; };
@@ -167,7 +167,17 @@ static void ProfileSweep(bool start)
         {"grass push off", "RVK_PushOn", 0}, {"plant detail off", "RVK_PlantDetOn", 0}, {"foliage lod off", "RVK_FolLodOn", 0},
         {"gi off", "RVK_GiOn", 0}, {"ao off", "RVK_AoOn", 0}, {"volumetric off", "RVK_VolOn", 0}, {"reflections off", "RVK_SsrOn", 0},
         {"dof off", "RVK_Dof", 0}, {"motion blur off", "RVK_MBlurOn", 0}, {"taa off", "RVK_Taa", 0}, {"bloom off", "RVK_BloomOn", 0},
-        {"particles off", "RVK_Particles", 0}, {"hdr off", "RVK_Hdr", 0}, {"baseline again", nullptr, 0},
+        {"particles off", "RVK_Particles", 0},
+        // (The features since: plants, water, weather, sky, the native ground and its parts, materials.)
+        {"ground grass off", "RVK_GrassOn", 0}, {"tree leaves off", "RVK_LeafOn", 0}, {"crown shade off", "RVK_CrownShade", 0},
+        {"plant soft edges off", "RVK_FolEdges", 0}, {"water off", "RVK_WaterOn", 0}, {"clouds off", "RVK_CloudsOn", 0},
+        {"weather off", "RVK_WeatherOn", 0}, {"smoke off", "RVK_SmokeOn", 0}, {"our sky off", "RVK_ProcSky", 0},
+        {"atmosphere off", "RVK_Atmos", 0}, {"ground tessellation off", "RVK_GroundTess", 0},
+        {"cliff depth off", "RVK_CliffDepth", 0}, {"rocks off", "RVK_GroundRocks", 0}, {"pebbles off", "RVK_Pebbles", 0},
+        {"sand ripples off", "RVK_SandRipple", 0}, {"native ground off", "RVK_GroundOn", 0},
+        {"depth maps (parallax) off", "RVK_Parallax", 0}, {"tessellation off", "RVK_TessOn", 0},
+        {"normal maps off", "RVK_NormalMaps", 0}, {"pbr off", "RVK_Pbr", 0}, {"albedo maps off", "RVK_Albedo", 0},
+        {"hdr off", "RVK_Hdr", 0}, {"baseline again", nullptr, 0},
     };
     constexpr unsigned kSweepSettle = 120, kSweepMeasure = 300;
     constexpr unsigned kCount = sizeof(kSteps) / sizeof(kSteps[0]);

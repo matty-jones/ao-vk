@@ -224,6 +224,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`RVK_SunBleed`) now fades with the light the clouds let through, gone under a full cloud deck.
 
 ### Diagnostics
+- The profiling sweep (Ctrl+Shift+O, console `profile`) measures the newer features too: ground grass, tree leaves,
+  water, clouds, weather, smoke, our sky, the native ground and its rocks, pebbles and ripples, depth maps,
+  tessellation, normal maps, PBR and albedo maps. It now takes about six minutes.
 - randy-vk.log names a setting written twice in randy-vk.ini's `[Renderer]` (after a hand edit): only the first one
   counts, so changing the other did nothing.
 - randy-vk.log has a `darkness:` line every 10 seconds: the `RVK_Darkness` setting, how much it is night, how bright

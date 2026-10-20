@@ -466,7 +466,8 @@ it or Esc closes it. While it is open the game gets no keyboard input (the mouse
 | F9 | frame dump (draw list + screenshot next to the log) | O | profiling sweep (below) |
 | H | hide the game's interface (screenshots) | | |
 
-**Profiling sweep (Ctrl+Shift+O):** stand still for a minute or two; ao-vk switches each enhancement off in turn,
+**Profiling sweep (Ctrl+Shift+O, or `profile` in the console):** stand still for about six minutes; ao-vk switches
+each enhancement off in turn (the grass, leaves, water, weather, sky and ground features too),
 measures, and writes lines like `sweep sun shadows off (133.6 fps): gpu ms: ...` to the log. It shows what each
 feature costs exactly where you are.
 
