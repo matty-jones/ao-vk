@@ -2384,8 +2384,9 @@ private:
     std::vector<GrassTile*> m_grassCoverGrid;    // CaptureCover's scratch: the new tiles under an object
     uint64_t m_grassCoverFrame = 0;              // the frame m_grassCoverMs counts
     double m_grassCoverMs = 0.0;                 // CaptureCover's time this frame (a budget: the rest waits)
+    // asBase: the native ground drawn in one pass (RVK_GroundOne) taken as its base pass too - its heights and colours.
     void CaptureTerrain(uint32_t primitive, const detail::FvfLayout& layout, const void* vertices, uint32_t vertexCount,
-                        const uint16_t* indices, uint32_t indexCount);
+                        const uint16_t* indices, uint32_t indexCount, bool asBase = false);
     bool GroundAt(float x, float z, float* y, uint32_t* colour, uint32_t* light) const;
     void GroundNormal(float x, float z, float out[3]) const;   // the ground's upward normal (the slope) at x, z
     bool BuildGrassTile(GrassTile& tile);

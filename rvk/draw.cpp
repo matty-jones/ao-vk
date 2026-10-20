@@ -2762,8 +2762,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     ProfileDrawSection("draw: setup (sky, terrain notes, grass tiles)", since);
     FvfLayout layout = DecodeFvf(fvf);
     // RVK_GrassOn: the terrain's ground heights feed the procedural grass (grass.cpp CaptureTerrain / RenderGrassField).
-    if (m_grassOn && !m_external && vertices && IsTerrain(fvf) && !m_native.clutter)   // (not the rocks on it)
+    // The native ground in one pass (RVK_GroundOne) is its base pass too: the grass takes its heights and colours from
+    // it as well - with no base pass drawn, no tile was ever given its ground, and no grass grew (user, 2026-10-20).
+    if (m_grassOn && !m_external && vertices && IsTerrain(fvf) && !m_native.clutter) {   // (not the rocks on it)
         CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount);
+        if (m_groundOne && m_native.drawing)
+            CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount, true);
+    }
     DrawMeshInfo(fvf, layout.stride, vertices, vertexCount, indices, indexCount);
     ProfileDrawSection("draw: setup (mesh info)", since);
     NoteMeshPiece();                             // (mesh ids: which mesh the object drawing is)

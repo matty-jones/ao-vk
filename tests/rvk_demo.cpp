@@ -1203,6 +1203,7 @@ bool g_walkerLight = false;    // --walker-light: the round "character" carries 
                                // an arm beside its body (its own light's shadow on itself)          // --walker-skip N: the "character" animates only every N-th frame (crowds: the game skips)    // --walker-round: the "character" a low-polygon smooth-shaded 8-sided column
 int g_grassDense = 1;          // --grass-dense K: K x K as many tufts, K times closer (a field, for profiling)      // --grass-flip: the tufts modelled upside down, turned up by their world matrix
 bool g_grassBench = false;     // --grass-bench: RunGrassBench (a big terrain, the camera walking)
+int g_grassLate = 0;               // --grass-late N: the grass switched on at frame N of the zone ground scene
 bool g_grassFieldOn = false;   // --grass-field: the procedural ground grass (RVK_GrassOn) over the shadow test's terrain
 float g_grassFieldDist = 25.0f;
 float g_grassEven = 1.0f;         // --grass-even E: RVK_GrassEven
@@ -1849,12 +1850,15 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         t.rippleDepth = g_rippleDepth;
         dev.SetTerrain(t);
     }
-    if (g_grassFieldOn) dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true);   // (--grass-field: the grass on it)
+    if (g_grassFieldOn && g_grassLate == 0)
+        dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true);   // (--grass-field: the grass on it)
     struct VtxTerrain { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
     const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
     const VtxTerrain standIn[3] = {{0, -1000, 0, 0, 1, 0, 0, 0, 0, 0}, {1, -1000, 0, 0, 1, 0, 1, 0, 1, 0},
                                    {0, -1000, 1, 0, 1, 0, 0, 1, 0, 1}};
     for (int frame = 0; frame < frames; ++frame) {
+        if (g_grassFieldOn && g_grassLate > 0 && frame == g_grassLate)   // (--grass-late N: switched on at frame N,
+            dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true); // as after zoning: its tiles come later)
         // (The last 300 frames' GPU and CPU times logged - "ground bench:" - once the rocks and pebbles are made.)
         if (frame == std::max(frames - 301, 0)) dev.ProfileWindow(true, "");
         if (frame == frames - 1) {
@@ -4665,6 +4669,7 @@ int main(int argc, char** argv)
         else if (a == "--grass-walk" && i + 1 < argc) g_grassWalk = float(std::atof(argv[++i]));
         else if (a == "--grass-walk-speed" && i + 1 < argc) g_grassWalkSpeed = float(std::atof(argv[++i]));
         else if (a == "--grass-flip") g_grassFlip = true;
+        else if (a == "--grass-late" && i + 1 < argc) g_grassLate = std::atoi(argv[++i]);
         else if (a == "--grass-field") { g_grassFieldOn = true; hdr = true; }
         else if (a == "--grass-bench") { g_grassFieldOn = g_grassBench = true; hdr = true; }
         else if (a == "--terrain-test") g_terrainTest = true;
