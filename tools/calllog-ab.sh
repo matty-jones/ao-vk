@@ -13,7 +13,7 @@ logs=$AO_CLIENT/../logs
 c=$PWD/build/characters
 s=$PWD/build/statics
 character="--character $c/5900.catmesh $c/9386.catanim --crowd 3 --time 400"
-scenes=${*:-"setup setup0 setup16 setupfs defaults targets shutdown resize debugdraw sprites basic dynamic materials texture plain blend shadow alpha env sfx1 sfx2 lights manylights culled terrain occmeshes preprocess lifecycle anim106 statics staticshadow lightmap staticpick connector grid png status"}
+scenes=${*:-"setup setup0 setup16 setupfs defaults targets shutdown resize debugdraw sprites basic dynamic materials texture plain blend shadow alpha env sfx1 sfx2 lights manylights sfxlights culled terrain occmeshes preprocess lifecycle anim106 statics staticshadow lightmap staticpick connector grid png status"}
 # One Wine boot for every run: a server that stays up between them (if none is running yet, e.g. the game's), else
 # each launch boots the prefix's services again (~20 s).
 WINEPREFIX=${WINEPREFIX:-$HOME/.wine-prk} wineserver -p 120 2>/dev/null
@@ -51,6 +51,8 @@ for scene in $scenes; do
         sfx2) args="$character --sfx 2" ;;
         lights) args="$character --lights 2" ;;
         manylights) args="$character --crowd 12 --lights 12" ;;
+        sfxlights) args="$character --sfx 1 --crowd 12 --lights 12" ;;   # the special light's pass among 9+ lights (no
+                                                                         # lights asked for: CullLights' short path)
         terrain) args="$character --crowd 100 --terrain 6" ;;   # 40 behind a ridge: the heightmap occluder
         occmeshes) args="$character --crowd 9 --terrain 6 --playfield 730 --static $s/17879.archive --statics 25" ;;
         preprocess) args="$character --crowd 9 --terrain 6 --preprocess 705" ;;   # hand corrections (generated data)

@@ -186,6 +186,25 @@ uint32_t __fastcall CullLights(Visual* v, void*, void*, float radius, uint32_t m
     void** begin = Global<void**>(kLightsBegin);
     void** end = Global<void**>(kLightsEnd);
     const uint32_t all = uint32_t(end - begin);
+    // How the calls go (one line every 2^18 calls): those asking for no lights, and the scene's lights per call.
+    static uint32_t calls = 0, noLights = 0;
+    static uint64_t lightsSeen = 0;
+    ++calls;
+    lightsSeen += all;
+    noLights += mask == 0 ? 1u : 0u;
+    if (calls == 1u << 18) {
+        Log("visuals: light culling: %u calls, %.0f%% asking for no lights; %.1f scene lights a call", calls,
+            100.0 * noLights / calls, double(lightsSeen) / calls);
+        calls = noLights = 0;
+        lightsSeen = 0;
+    }
+    // No lights asked for (the statels' and characters' special-light passes) among more than 8: none can be chosen,
+    // so only those on are switched off - in the same order, without the tests.
+    if (mask == 0 && all >= 9) {
+        for (void** it = begin; it != end; ++it)
+            if (Field<uint8_t>(*it, 0x118)) orig::RLight_t_Enable(*it, false);
+        return 0;
+    }
     const float* m = World(v);
     void** lights = &Field<void*>(v, kLights);
     uint32_t count = 0;

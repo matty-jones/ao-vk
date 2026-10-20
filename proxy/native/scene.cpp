@@ -120,6 +120,11 @@ struct Cached {
     const void* vtable = nullptr;
     uint32_t stamp = 0;
     VisualInfo info;
+    // Describe's walk up the frames to a character's attractors (AttachedOwner): its answer, while the attachments
+    // (g_attachGeneration) and the visual's parent are as they were.
+    uint32_t attachGeneration = ~0u;
+    const void* parent = nullptr;
+    const void* attachedOwner = nullptr;
 };
 std::unordered_map<const void*, Cached> g_visuals;
 std::unordered_map<const void*, std::string> g_classNames;   // by vtable; never cleared (names are handed out)
@@ -186,6 +191,7 @@ struct AttachedFrames {
     std::vector<const void*> frames;
 };
 std::unordered_map<const void*, AttachedFrames> g_attachments;   // character visual -> its frames
+uint32_t g_attachGeneration = 0;                // g_attachedTo changed (Describe's cached walks)
 
 void IndexAttachments(const void* character)
 {
@@ -193,13 +199,22 @@ void IndexAttachments(const void* character)
     if (a.stamp == g_renders && !a.frames.empty())
         return;                                  // (once a render)
     a.stamp = g_renders;
-    for (const void* f : a.frames) {
-        auto it = g_attachedTo.find(f);
-        if (it != g_attachedTo.end() && it->second == character) g_attachedTo.erase(it);
-    }
-    a.frames.clear();
+    // The frames read again; the index changed only if they differ from last time (most renders: the same).
+    static std::vector<const void*> frames;
+    frames.clear();
+    const auto apply = [&] {
+        if (frames == a.frames)
+            return;
+        for (const void* f : a.frames) {
+            auto it = g_attachedTo.find(f);
+            if (it != g_attachedTo.end() && it->second == character) g_attachedTo.erase(it);
+        }
+        for (const void* f : frames) g_attachedTo[f] = character;
+        a.frames = frames;
+        ++g_attachGeneration;
+    };
     const void* head = SafeRead(character, kAttachedMap + 4);
-    if (!head) return;
+    if (!head) { apply(); return; }
     // In-order walk of the red-black tree (VS2010: head->parent = root; the head node and nil leaves are the head).
     const void* stack[64];
     int depth = 0, nodes = 0;
@@ -218,8 +233,7 @@ void IndexAttachments(const void* character)
         if (first && last >= first && last - first <= 16 && Readable(first, size_t(last - first) * sizeof(void*)))
             for (const void* const* f = first; f < last; ++f)
                 if (*f) {
-                    g_attachedTo[*f] = character;
-                    a.frames.push_back(*f);
+                    frames.push_back(*f);
                     if (logged < 8) {
                         ++logged;
                         // (the name: a VS2010 std::string - inline below 16 characters)
@@ -232,6 +246,7 @@ void IndexAttachments(const void* character)
                 }
         n = SafeRead(n, 8);                      // right
     }
+    apply();
     // Characters not drawn for a while: their frames forgotten.
     if ((g_renders & 1023) == 0)
         for (auto it = g_attachments.begin(); it != g_attachments.end();) {
@@ -241,6 +256,7 @@ void IndexAttachments(const void* character)
                     if (at != g_attachedTo.end() && at->second == it->first) g_attachedTo.erase(at);
                 }
                 it = g_attachments.erase(it);
+                ++g_attachGeneration;
             } else {
                 ++it;
             }
@@ -419,17 +435,24 @@ VisualInfo Describe(const void* visual)
             }
     }
     VisualInfo info = c.info;
-    if (g_visuals.size() > 20000)                       // visuals come and go: start over now and then
-        g_visuals.clear();
-    // What hangs on a character's attractors - looked up every time, not cached: a part may be drawn before its
-    // character is (heads are), and weapons are put in and out of hands.
-    if (info.kind == Kind::Character)
+    // What hangs on a character's attractors - looked up again whenever the attachments change: a part may be drawn
+    // before its character is (heads are), and weapons are put in and out of hands.
+    if (info.kind == Kind::Character) {
         IndexAttachments(visual);
-    else if (info.kind != Kind::CharacterPart && info.kind != Kind::BlobShadow)
-        if (const void* character = AttachedOwner(visual)) {
-            info.kind = Kind::CharacterPart;
-            info.owner = character;
+    } else if (info.kind != Kind::CharacterPart && info.kind != Kind::BlobShadow) {
+        const void* parent = SafeRead(visual, kParent);
+        if (c.attachGeneration != g_attachGeneration || c.parent != parent) {
+            c.attachGeneration = g_attachGeneration;
+            c.parent = parent;
+            c.attachedOwner = AttachedOwner(visual);
         }
+        if (c.attachedOwner) {
+            info.kind = Kind::CharacterPart;
+            info.owner = c.attachedOwner;
+        }
+    }
+    if (g_visuals.size() > 20000)                       // visuals come and go: start over now and then
+        g_visuals.clear();                              // (c is gone from here on)
     return info;
 }
 
