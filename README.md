@@ -254,6 +254,22 @@ ao-vk spends that idle graphics card on its effects, and takes work off the game
 - Static meshes stay on the graphics card and are drawn by reference instead of being sent again every frame.
 - The interface can be redrawn fewer times a second than the 3D (`RVK_UiRate`, 60 recommended).
 
+And it can draw the 3D world at less than the screen's size and bring it back up, or put frames of its own between
+the game's:
+
+- **Render scale** (`RVK_RenderScale`, 75% by default; console `renderscale`): the world drawn at 85, 75, 67 or 50%
+  of the screen's size and brought up to full size by the TAA. At 75% the world costs the graphics card about a
+  third less; the interface and the names over characters stay sharp at full size. 100 draws everything at full size.
+- **Upscalers** (`RVK_Upscaler`): ao-vk's own TAA (0), or AMD FSR 2.2 (1) or FSR 3.1 (2), sharper at the same scale -
+  most of all at 50% - for a little more graphics-card time.
+- **Frame generation** (`RVK_FrameGen`, off by default; console `framegen 1`): AMD FSR 3.1 puts a frame of its own
+  between each two the game draws, for about twice the frames on screen, at the cost of a little more delay between
+  your input and the picture. It helps most where the game runs well under your screen's refresh rate. The
+  interface, the names, the pointer and the console are laid over every frame as they are.
+- **Performance readout** (`RVK_PerfHud`; console `perfhud 1`): frames a second, the game's thread, the renderer's
+  thread and the graphics card per frame (the one holding the frame back in amber), CPU and GPU use, and with frame
+  generation the frames shown.
+
 How much that gains depends on where the time goes:
 
 - **Crowds gain the most.** Animating characters is the game's heaviest renderer work, and it moves to the graphics
@@ -322,7 +338,7 @@ the work. `docs/native.md` has the plan, results and method.
   extended dynamic state 3 (colour blend enable and equation), vertex input dynamic state,
   demote-to-helper-invocation, cube map arrays and fragment-shader quad operations. Tessellation is optional
   (rounder characters need it). Any recent NVIDIA, AMD or Intel desktop GPU should qualify.
-- **Tested on:** Linux with Wine 11.18 (staging, WoW64), NVIDIA RTX 4070 Ti, driver 615. Windows should work the
+- **Tested on:** Linux with Wine 11.19 (staging, WoW64), NVIDIA RTX 4070 Ti, driver 615. Windows should work the
   same way (the DLL is a normal 32-bit Windows DLL that loads `vulkan-1.dll` from the GPU driver) but has not been
   tested yet - reports welcome. AMD and Intel GPUs have not been tested either.
 
@@ -494,6 +510,8 @@ feature costs exactly where you are.
 - The game's ground render mode must be **Shadows** (video options): the grass, the valley mist and the terrain's
   lighting read the ground as that mode draws it (the Renderer tab says so).
 - The water's reflections are screen-space: what is off screen reflects as sky.
+- Frame generation has been tried on Linux/Wine with an NVIDIA card only. Above about half your screen's refresh
+  rate it adds little (the screen can't show more frames than its refresh rate).
 
 ## How it works
 
@@ -552,3 +570,7 @@ The result is `build/linux-release/randy31.dll`, plus test programs.
 
 MIT, see `LICENSE`. Anarchy Online is a trademark of Funcom; this project is not affiliated with Funcom and
 contains none of its files.
+
+The DLL includes AMD FidelityFX Super Resolution 2 (`third_party/fsr2`) and parts of the AMD FidelityFX SDK 1.1.4
+(FSR 3.1, `third_party/ffx-sdk`), both MIT-licensed; their licences ship as `LICENSE-FSR2.txt` and
+`LICENSE-FidelityFX-SDK.txt`. The changes made to them are listed in their folders' READMEs.
