@@ -155,7 +155,7 @@ void RvkState::SetWindow(HWND hwnd)
 
 // Ctrl+Shift+O: what each enhancement costs here - every one switched off in turn (in effect only, not saved) for
 // kSweepSettle + kSweepMeasure frames, the GPU passes measured over the last kSweepMeasure, logged as
-// "sweep <label>: gpu ms: ...". A baseline first and last (drift). Stand still while it runs (~6-7 min at 60 fps: 47 steps of 420 frames).
+// "sweep <label>: gpu ms: ...". A baseline first and last (drift). Stand still while it runs (~7-8 min at 60 fps, ~3.5 at 130: 56 steps of 420 frames).
 static void ProfileSweep(bool start)
 {
     struct Step { const char* label; const char* setting; float value; };
@@ -174,7 +174,13 @@ static void ProfileSweep(bool start)
         {"weather off", "RVK_WeatherOn", 0}, {"smoke off", "RVK_SmokeOn", 0}, {"our sky off", "RVK_ProcSky", 0},
         {"atmosphere off", "RVK_Atmos", 0}, {"ground tessellation off", "RVK_GroundTess", 0},
         {"cliff depth off", "RVK_CliffDepth", 0}, {"rocks off", "RVK_GroundRocks", 0}, {"pebbles off", "RVK_Pebbles", 0},
-        {"sand ripples off", "RVK_SandRipple", 0}, {"native ground off", "RVK_GroundOn", 0},
+        {"sand ripples off", "RVK_SandRipple", 0},
+        // (The native ground's shading, part by part: docs/render-perf-plan.md Phase 3.)
+        {"ground tile blending off", "RVK_GroundBlend", 0}, {"ground grain off", "RVK_GroundGrain", 0},
+        {"ground sky visibility off", "RVK_GroundAo", 0}, {"ground slopes' sun off", "RVK_GroundSun", 0},
+        {"ground variation off", "RVK_GroundVary", 0}, {"tile repeats hidden off", "RVK_TileHide", 0},
+        {"cliff texture off", "RVK_CliffTex", 0}, {"cliff rock off", "RVK_CliffRock", 0},
+        {"render scale 100", "RVK_RenderScale", 100}, {"native ground off", "RVK_GroundOn", 0},
         {"depth maps (parallax) off", "RVK_Parallax", 0}, {"tessellation off", "RVK_TessOn", 0},
         {"normal maps off", "RVK_NormalMaps", 0}, {"pbr off", "RVK_Pbr", 0}, {"albedo maps off", "RVK_Albedo", 0},
         {"hdr off", "RVK_Hdr", 0}, {"baseline again", nullptr, 0},
