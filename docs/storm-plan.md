@@ -1,6 +1,7 @@
 # Storms: one wind, gust fronts, sandstorms, rain that moves
 
-Status: plan (2026-10-14), branch `storms` (from main 2346b5b). After 0.5.0 - not in that release (user). Under the
+Status (2026-10-20): released in 0.6.0 (CHANGELOG.md); the code is the reference now, the plan its history.
+First status: plan (2026-10-14), branch `storms` (from main 2346b5b). After 0.5.0 - not in that release (user). Under the
 Experimental "New weather" switch (RVK_WeatherOn) until tuned.
 
 ## Why

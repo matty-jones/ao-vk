@@ -1,6 +1,7 @@
 # The game's flat cloud sheets, back (clouds v2)
 
-Status: planned (2026-10-13). Builds on the cloud layer (`docs/clouds-layer-plan.md`, `rvk/clouds.cpp`,
+Status (2026-10-20): released in 0.5.0 (CHANGELOG.md); the code is the reference now, the plan its history.
+First status: planned (2026-10-13). Builds on the cloud layer (`docs/clouds-layer-plan.md`, `rvk/clouds.cpp`,
 `cloud_layer.frag`).
 
 ## Why

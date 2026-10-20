@@ -1,5 +1,7 @@
 # Pebbles plan: stones and grit on flat ground
 
+Status (2026-10-20): built, on main for the next release (CHANGELOG.md, Unreleased).
+
 The native ground (docs/native-ground-plan.md) has rocks where the heights say rock fell - cliff feet and rough slopes
 (`RVK_GroundRocks`, rvk/ground_clutter.cpp) - but flat dirt, gravel and sand are bare up close: a photo of stones,
 flat. This adds small loose stones on the flat ground that is dirt, gravel or sand, near the eye, so the ground at

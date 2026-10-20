@@ -1,6 +1,7 @@
 # Volumetric clouds, second version: a cloud layer
 
-Status: planned (2026-10-13). Replaces the per-puff volumes of `rvk/clouds.cpp` (v1, branch `clouds`).
+Status (2026-10-20): released in 0.5.0 (CHANGELOG.md); the code is the reference now, the plan its history.
+First status: planned (2026-10-13). Replaces the per-puff volumes of `rvk/clouds.cpp` (v1, branch `clouds`).
 
 ## Why
 

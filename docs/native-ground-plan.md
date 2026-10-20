@@ -1,5 +1,7 @@
 # Native ground plan
 
+Status (2026-10-20): built, on main for the next release (CHANGELOG.md, Unreleased).
+
 The game's ground renderer (DisplaySystem.dll `AnarchyGround_t`) rebuilds a split tree of triangles on the game's
 thread as the camera moves, draws its near ring with each cell's own tile and bakes everything beyond into blurry
 patch pictures (2 texels a unit) that fill the 32-bit address space. Raising its radius stutters (docs/rvk.md,

@@ -1,6 +1,8 @@
 # Stability: the parked freezes and crashes
 
-Status: plan (2026-10-14), branch `stability` (from main b3835b1). The user: "revisit the crashes we were running into
+Status (2026-10-20): released in 0.5.0 (CHANGELOG.md). Still open: the planet map's first open each session (~70 ms,
+the end of this file).
+First status: plan (2026-10-14), branch `stability` (from main b3835b1). The user: "revisit the crashes we were running into
 in our testing that I decided to hold off. See if it's still relevant."
 
 ## Triage (2026-10-14, from logs/wine-*.txt since 2026-10-10)

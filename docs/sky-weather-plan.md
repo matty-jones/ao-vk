@@ -1,6 +1,7 @@
 # Sky weather: clear days to overcast
 
-Status: planned (2026-10-13). Builds on the cloud layer (clouds.cpp: the weather map, `cloudy`), the game's sheets
+Status (2026-10-20): released in 0.5.0 (CHANGELOG.md); the code is the reference now, the plan its history.
+First status: planned (2026-10-13). Builds on the cloud layer (clouds.cpp: the weather map, `cloudy`), the game's sheets
 (docs/clouds-sheets-plan.md), rain (docs: ao-weather memory, rain.cpp). Before the light scattering
 (docs/scattering-plan.md), which takes its haze from this.
 
