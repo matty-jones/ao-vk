@@ -463,7 +463,7 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->screen[2] = fl->screen[3] = 0.0f;
     std::memcpy(fl->skyRing, m_skyRing, sizeof(fl->skyRing));
     std::memcpy(fl->skyUp, m_skyUp, sizeof(fl->skyUp));
-    if (!ProcSkyReady()) {
+    if (!OwnSkyFog()) {                          // (indoors too: the zone's fog colour, not our sky's horizon)
         for (auto& r : fl->skyRing) r[3] = 0.0f;
         fl->skyUp[3] = 0.0f;
     }
@@ -863,6 +863,12 @@ float Device::LightScale(const d3d::Light& l) const
 // sharing a model share this.) Lit world meshes, character-sized; plus a character's rigid parts - its head, hair, a
 // helmet: the game moves those whole by their world matrix (same vertices every frame) and draws them before the
 // body - small, in a body's column (last frame's characters) from its feet to a little above its top.
+// Two-pass foliage isn't dithered far off when its texture is translucent all over: most of its visible cells partly
+// see-through (Texture::m_alphaSoftShare) and hardly a hard edge between leaf and hole (m_alphaHardEdges) - the alien
+// ships' door membranes (0.72 soft, 0.000 edges), panels of glass. Leaves have hard edges (a tree's 1024 x 1024 atlas:
+// 0.68 soft on the coarse grid, but 0.226 edges).
+constexpr float kDitherSoftShare = 0.5f, kDitherHardEdges = 0.01f;
+
 bool Device::CharacterDraw(uint32_t fvf, uint32_t vertexCount)
 {
     if (m_external || !m_drawMesh || m_drawIsLabel || !m_rs[d3d::RS_LIGHTING] ||
@@ -1639,10 +1645,21 @@ bool Device::IsWater(uint32_t fvf) const
            fvf == (d3d::FVF_XYZRHW | d3d::FVF_DIFFUSE | d3d::FVF_SPECULAR | (1u << d3d::FVF_TEXCOUNT_SHIFT));
 }
 
+// A sheen laid on a surface drawn just before: added, depth EQUAL, no depth writes - the alien levels' shine on every
+// wall, door and Kyr'Ozch (a 64 x 64 environment texture, lit by the game with no lights and a dim ambient). Not an
+// effect: it neither feeds the glow nor takes the frame's lights and headroom (lit by our lamps - the player's carried
+// light up close - and bloomed, a Kyr'Ozch came out a white blaze); the game's own light it keeps.
+bool Device::SurfaceSheen(uint32_t fvf) const
+{
+    return m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE &&
+           m_rs[d3d::RS_ZFUNC] == d3d::CMP_EQUAL && !m_rs[d3d::RS_ZWRITEENABLE] &&
+           (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW;
+}
+
 bool Device::GlowDraw(uint32_t fvf) const
 {
     if (m_effectGlow <= 0.0f || m_target != m_scene || !m_rs[d3d::RS_ALPHABLENDENABLE] ||
-        (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW || m_rs[d3d::RS_ZFUNC] == d3d::CMP_ALWAYS)
+        (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW || m_rs[d3d::RS_ZFUNC] == d3d::CMP_ALWAYS || SurfaceSheen(fvf))
         return false;
     uint32_t src = m_rs[d3d::RS_SRCBLEND], dst = m_rs[d3d::RS_DESTBLEND];
     return dst == d3d::BLEND_ONE && (src == d3d::BLEND_ONE || src == d3d::BLEND_SRCALPHA);
@@ -3286,7 +3303,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // what is added, the sky's own draws and its scenery (their fog colour set above).)
     {
         const bool added = m_rs[d3d::RS_ALPHABLENDENABLE] && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_ONE;
-        c.fogParams[3] = ProcSkyReady() && m_skyRing[0][3] > 0.5f && !IsMultiplyPass() && !added && !skyScenery &&
+        c.fogParams[3] = OwnSkyFog() && !IsMultiplyPass() && !added && !skyScenery &&
                                  VisualKind(m_drawVisualKind) != VisualKind::Sky
                              ? 1.0f
                              : 0.0f;
@@ -3342,7 +3359,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_rs[d3d::RS_LIGHTING] && (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW) flags |= F_LIGHTING;
     if ((flags & F_LIGHTING) && m_pixelLighting) flags |= F_PERPIXEL;
     if (m_lightingDebug) flags |= F_DEBUGLIGHT;
-    bool override = (flags & F_PERPIXEL) && m_lightOverride;
+    bool override = (flags & F_PERPIXEL) && m_lightOverride && !SurfaceSheen(fvf);
     if (override) flags |= F_LIGHTOVERRIDE;
     bool hdrTarget = m_target->m_format == Format::RGBA16F;
     if (hdrTarget) flags |= F_HDR;
@@ -3553,7 +3570,19 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                       (zf == d3d::CMP_LESS || zf == d3d::CMP_LESSEQUAL) && m_rs[d3d::RS_ALPHABLENDENABLE] &&
                       m_rs[d3d::RS_SRCBLEND] == d3d::BLEND_SRCALPHA && m_rs[d3d::RS_DESTBLEND] == d3d::BLEND_INVSRCALPHA &&
                       !WaterWritesDepth(fvf);
+        // (Dithered: a cut-out's soft rims, not a surface translucent all over - Texture::m_alphaSoftShare.)
         m_drawDither = m_drawSplit && m_foliageDither > 0.0f && TaaActive() && DrawFartherThan(m_foliageDither);
+        if (m_drawDither && m_textures[0] && m_textures[0]->m_alphaSoftShare >= kDitherSoftShare &&
+            m_textures[0]->m_alphaHardEdges < kDitherHardEdges) {
+            m_drawDither = false;
+            static uint32_t logged;
+            if (logged < 20 && m_ditherRefusedLogged.insert(m_textures[0]->m_rdbId).second) {
+                ++logged;
+                Log("foliage dither: texture %u (%ux%u) translucent all over (soft %.2f, edges %.3f) - blended, not "
+                    "dithered", m_textures[0]->m_rdbId, m_textures[0]->Width(), m_textures[0]->Height(),
+                    double(m_textures[0]->m_alphaSoftShare), double(m_textures[0]->m_alphaHardEdges));
+            }
+        }
         dt.motion[3] = m_drawDither ? 3.0f : m_drawSplit ? 1.0f : 0.0f;   // its core now (ffp_main.glsl); the edges'
                                                                           // record below
     }

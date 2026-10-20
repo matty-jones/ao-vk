@@ -788,7 +788,7 @@ void Device::LandHaze(float out[24]) const
         out[4] = fogParams[0];
         out[5] = fogParams[1];
     }
-    if (m_landHaze <= 0.0f || !linear)
+    if (m_landHaze <= 0.0f || !linear || !SunKnown())   // (indoors: no distant land, no outdoor air - the zone's fog)
         return;
     const float l = 0.3f * fog[0] + 0.59f * fog[1] + 0.11f * fog[2];
     // (A desert's dust, RVK_DesertAir: the haze warm and pale instead of cool and blue, and thicker.)

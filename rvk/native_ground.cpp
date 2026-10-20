@@ -519,7 +519,7 @@ void Device::DrawNativeGroundOne()
     uint32_t fogBits = 0;
     for (int i = 0; i < 3; ++i)
         fogBits |= uint32_t(std::clamp(fog[i], 0.0f, 1.0f) * 255.0f + 0.5f) << (16 - 8 * i);
-    if (ProcSkyReady() && m_skyRing[0][3] > 0.5f) fogBits |= 1u << 24;
+    if (OwnSkyFog()) fogBits |= 1u << 24;
     if (m_native.baseRs[d3d::RS_FOGENABLE]) fogBits |= 1u << 25;
     m_recordExtra[0] = BindlessImage(m_blackTexture) + 1;
     m_recordExtra[1] = m_native.baseSampler;

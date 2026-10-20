@@ -3889,7 +3889,7 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
         if (g_shinePass >= 0) {
             std::vector<VtxMesh> sv;
             std::vector<uint16_t> si;
-            const int rings = 16, segs = 24;
+            const int rings = 6, segs = 8;            // (coarse: rounding by tessellation shows)
             const float r = 1.6f, cx = -3.0f, cy = 1.8f, cz = -7.0f;
             for (int i = 0; i <= rings; ++i)
                 for (int j = 0; j <= segs; ++j) {
@@ -3903,6 +3903,7 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
                     si.insert(si.end(), {a, b, uint16_t(a + 1), uint16_t(a + 1), b, uint16_t(b + 1)});
                 }
             dev.LightEnable(0, true);                 // (the sun: switched off for what follows)
+            dev.SetRenderState(RS_LIGHTING, 1);       // (off since the blob shadow; characters are lit draws)
             dev.SetDrawVisual(uint32_t(VisualKind::Character), "RCATMesh_t");
             dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, sv.data(), uint32_t(sv.size()), si.data(), uint32_t(si.size()));
@@ -3919,6 +3920,7 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
                 dev.SetRenderState(RS_ZWRITEENABLE, 1);
             }
             dev.SetDrawVisual(0, nullptr);
+            dev.SetRenderState(RS_LIGHTING, 0);
             dev.LightEnable(0, false);
         }
         if (g_uiWindow) {

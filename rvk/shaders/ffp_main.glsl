@@ -107,7 +107,10 @@ vec4 Op(uint op, vec4 a1, vec4 a2, vec4 current, vec4 tex)
     case 4u: return a1 * a2;                              // MODULATE
     case 5u: return a1 * a2 * 2.0;                        // MODULATE2X
     case 6u: return a1 * a2 * 4.0;                        // MODULATE4X
-    case 7u: return a1 + a2;                              // ADD
+    // ADD: past 1 (HDR's headroom - Cascade's maxColor) only as far as its brighter input already is. D3D clamps it
+    // to 1; the game adds a texture's alpha to the lit colour as a glow mask (the Kyr'Ozch armour: texture x (alpha +
+    // light)), which with the light's headroom on top came out two or three times over, blown out white.
+    case 7u: return min(a1 + a2, max(vec4(1.0), max(a1, a2)));
     case 8u: return a1 + a2 - 0.5;                        // ADDSIGNED
     case 9u: return (a1 + a2 - 0.5) * 2.0;                // ADDSIGNED2X
     case 10u: return a1 - a2;                             // SUBTRACT

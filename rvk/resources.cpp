@@ -599,6 +599,15 @@ void Device::UpdateTexture(Texture* t, uint32_t level, uint32_t x, uint32_t y, u
             }
             if (mask != t->m_alphaMask) {
                 t->m_alphaHardEdges = 1.0f;
+                t->m_alphaSoftShare = 0.0f;
+                {
+                    uint32_t seen = 0, soft = 0;
+                    for (uint8_t a : mask) {
+                        seen += a > 12;
+                        soft += a > 12 && a < 230;
+                    }
+                    t->m_alphaSoftShare = seen ? float(soft) / float(seen) : 0.0f;
+                }
                 if (!mask.empty() && mw > 1 && mh > 1) {
                     uint32_t hard = 0, pairs = 0;
                     for (uint32_t y = 0; y < mh; ++y)

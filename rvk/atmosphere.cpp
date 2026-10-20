@@ -183,7 +183,7 @@ void Device::SunThroughAir(float up, float out[3]) const
 // mist, the smoke, the cloud puffs (the scene's own draws fade into the ring towards each pixel: draw.cpp).
 void Device::OurSkyFog(float rgb[3]) const
 {
-    if (!ProcSkyReady() || m_skyRing[0][3] <= 0.5f)
+    if (!OwnSkyFog())
         return;
     float mean[3] = {};
     for (const auto& r : m_skyRing)
@@ -196,6 +196,11 @@ bool Device::ProcSkyReady() const
 {
     return m_procSky && m_atmosView && m_atmosViewFrame != ~0ull && m_atmosViewFrame + 2 >= m_frameNumber &&
            m_atmosView->m_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+bool Device::OwnSkyFog() const
+{
+    return ProcSkyReady() && m_skyRing[0][3] > 0.5f && SunKnown();
 }
 
 // Once a frame, after the sky's model (outside the scene's rendering): the tables brought up to date.

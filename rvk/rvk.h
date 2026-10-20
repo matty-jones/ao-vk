@@ -170,6 +170,11 @@ private:
     // The share of neighbouring mask cells whose alpha jumps by more than 0.3: a cut-out's hard edges (leaves: from
     // ~0.004 up), none in a soft glow, beam or smoke card (0). Plants are cut-outs (leaves.cpp, SwayParams).
     float m_alphaHardEdges = 1.0f;
+    // Of the mask's cells that aren't holes (alpha over 0.05), the share partly see-through (under 0.9): with few hard
+    // edges, a surface translucent all over (the alien ships' door membranes, glass, a force field), not dithered far
+    // off (RVK_FolDither: a screen door over a whole membrane). Leaves on a coarse grid read soft too - their hard
+    // edges tell them apart. 0 without a mask (opaque).
+    float m_alphaSoftShare = 0.0f;
     uint32_t m_alphaVersion = 0;       // counts the uploads that changed the mask (a canopy's leaves are rebaked)
     VkDeviceSize m_bytes = 0;          // its image's memory (the GPU memory report)
     bool m_lightmap = false;           // captured as a terrain lightmap (a re-upload recaptures the grass's light)
@@ -1655,6 +1660,9 @@ private:
     void SunThroughAir(float up, float out[3]) const;   // the sun's colour through the air (unit luma)
     void OurSkyFog(float rgb[3]) const;          // the scene fog's colour into our sky's horizon (its mean), if on
     bool ProcSkyReady() const;
+    // What the game fogs fades into our sky's horizon instead of the zone's fog colour: our sky drawn, outdoors (the sun
+    // known). Indoors - the alien ships' green, a dungeon's - the zone's own colour stays: there is no sky to match.
+    bool OwnSkyFog() const;
     void UpdateAtmosphere(VkCommandBuffer cmd);
     void DestroyAtmosphere();
     void UpdateSkyModel();
@@ -1922,6 +1930,7 @@ private:
     // Close up the soft pass stays: its blend is exact, and the dither's grain could show on a big, near leaf.
     float m_foliageDither = 20.0f;
     bool m_drawDither = false;                   // the current two-pass foliage draw is dithered
+    std::unordered_set<uint32_t> m_ditherRefusedLogged;   // (the log: textures kept blended, by game id)
     struct DeferredEdge {
         uint32_t primitive, fvf, stride, vertexCount, indexCount, record;
         VkDeviceSize vbOffset, ibOffset;
@@ -3150,6 +3159,7 @@ private:
                                                  // G: reflectivity; B: the direct sunlight's share (contact shadows)
     bool m_glowCleared = false;                  // this frame
     uint32_t m_glowDraws = 0;                    // this frame's draws feeding the glow (frame dumps)
+    bool SurfaceSheen(uint32_t fvf) const;   // an added layer on a surface (depth EQUAL): not an effect
     bool GlowDraw(uint32_t fvf) const;
     bool GlowOccluder(uint32_t fvf) const;
     bool IsInterfaceDraw(uint32_t fvf) const;

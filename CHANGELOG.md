@@ -191,6 +191,13 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   2 for the old, nearly black storm) sets how thick and dark they are.
 
 ### Fixed
+- Kyr'Ozch aliens came out blown-out white with the enhancements on, worst up close with a light of your own: the
+  shine the alien levels lay over every surface was lit by ao-vk's lamps and bloomed like a spell effect. It is now
+  the faint sheen the game draws, and parts their texture marks as self-lit brighten only up to its own colour.
+- The alien ships' green fog (Kyr'Ozch missions) and other indoor zones' fog are back with the enhancements on: their
+  fog took the outdoor sky's colours (our sky, its twilight, the land haze), which washed the green out.
+- Doors and other see-through surfaces in alien missions no longer turn into a speckled screen pattern from a
+  distance: only plants' leaf edges are dithered far off (`RVK_FolDither`), not surfaces translucent all over.
 - Shiny characters up close (the Kyr'Ozch's armour) showed their shine as flickering speckle: the shine layer is
   now rounded like the body under it (`RVK_Tess`), so it covers it evenly again.
 - Signs, screens and windows that the game lights itself no longer glow two or three times over when a texture pack

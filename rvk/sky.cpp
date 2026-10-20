@@ -351,7 +351,9 @@ void Device::UpdateSkyModel()
     }
     // (Only an overcast, storms and rain mute the colours: broken cloud covers the sky behind it itself, and muting
     // for it left a fair evening's sunset at half strength.)
-    const float clear = ClearSky() * (1.0f - 0.6f * std::clamp(m_mistWet, 0.0f, 1.0f));
+    // (Indoors - no sun known: a room's playfield, the alien ships - no sky and no twilight to colour its fog: the zone's
+    // own colour stays, the alien ships' green.)
+    const float clear = SunKnown() ? ClearSky() * (1.0f - 0.6f * std::clamp(m_mistWet, 0.0f, 1.0f)) : 0.0f;
     std::memcpy(m, m_skyFog, sizeof(m_skyFog));
     m[3] = std::clamp(m_twilight, 0.0f, 1.5f) * clear;
     float to[3];
