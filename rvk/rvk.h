@@ -1448,6 +1448,11 @@ private:
     uint64_t m_casterViewGen = 0, m_casterViewFrame = 0;   // ... as of this camera generation, this frame
     d3d::Matrix m_shadowWorldProj{};             // the world camera's projection: only its draws take shadows
     bool WorldCamera() const;
+    // (Diagnostics: this frame's casters left out as another camera's, and whether the world camera's projection
+    // differed from the last frame's - which the frame's receivers were tested against; frame dumps and the log.)
+    uint32_t m_casterOtherView = 0, m_logViewSplitFrames = 0, m_logOtherViewCasters = 0, m_logProjChanges = 0;
+    bool m_shadowProjChanged = false;
+    d3d::Matrix m_shadowProjBefore{};
     bool m_drawIsLabel = false;                  // the current draw is a name label (IsLabel)
     bool IsLabel(uint32_t primitive, uint32_t fvf, uint32_t vertexCount) const;
     // Name labels drawn during the scene are held back - their vertices and the state they were drawn with - and
@@ -1477,6 +1482,7 @@ private:
     VkImageLayout m_shadowImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkSampler m_shadowSampler = VK_NULL_HANDLE;
     VkSampler m_shadowDepthSampler = VK_NULL_HANDLE;   // the same map without comparison
+    VkSampler m_cutoutSampler = VK_NULL_HANDLE;   // the shadow passes' cut-out textures (repeating, anisotropic)
     VkDescriptorSetLayout m_shadowSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_shadowPipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_shadowPipelines[2] = {};        // opaque, alpha-tested

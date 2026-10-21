@@ -45,6 +45,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### Fixed
 - Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken
   for walls drawn the same way. Every tree crown now lets the light through.
+- Chain-link fences' sun shadows flickered between the mesh pattern and solid panels while the mouse pointer was
+  hidden (after turning the camera with the mouse), on the frames that redrew the interface. Fences, grilles and
+  leaves now keep the holes in their shadows every frame.
 
 ### Diagnostics
 - Frame dumps also save AMD's indirect light (`-brixgi.bmp`, with `RVK_GiMode 1`) and the surfaces AMD's effects read

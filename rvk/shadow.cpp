@@ -271,6 +271,22 @@ bool Device::CreateShadowResources(std::string* error)
     si.compareEnable = VK_FALSE;
     if (!Check(vkCreateSampler(m_device, &si, nullptr, &m_shadowDepthSampler), "shadow depth sampler", error))
         return false;
+    // The cut-outs' textures, as the scene samples a tiled fence or leaf card: repeating, filtered, anisotropic (seen
+    // edge-on from the sun). Not the game's stage 0 sampler (SamplerFor): the passes run at the frame's end, after
+    // the interface, so they took the interface's clamped one on frames that redrew it - a chain-link fence's tiles
+    // all read its edge, and its shadow went solid every other frame while the mouse pointer was hidden (user,
+    // 2026-10-21).
+    VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    ci.magFilter = ci.minFilter = VK_FILTER_LINEAR;
+    ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    ci.addressModeU = ci.addressModeV = ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    ci.maxLod = VK_LOD_CLAMP_NONE;
+    if (m_maxAnisotropy > 1.0f) {
+        ci.anisotropyEnable = VK_TRUE;
+        ci.maxAnisotropy = std::min(m_maxAnisotropy, 16.0f);
+    }
+    if (!Check(vkCreateSampler(m_device, &ci, nullptr, &m_cutoutSampler), "cut-out sampler", error))
+        return false;
 
     // Pass pipelines: depth only (opaque casters) and with an alpha-testing fragment shader.
     VkDescriptorSetLayoutBinding bindings[3] = {
@@ -391,6 +407,8 @@ void Device::DestroyShadowResources()
     if (m_shadowSampler) vkDestroySampler(m_device, m_shadowSampler, nullptr);
     if (m_shadowDepthSampler) vkDestroySampler(m_device, m_shadowDepthSampler, nullptr);
     m_shadowDepthSampler = VK_NULL_HANDLE;
+    if (m_cutoutSampler) vkDestroySampler(m_device, m_cutoutSampler, nullptr);
+    m_cutoutSampler = VK_NULL_HANDLE;
     DestroyShadowMap();
     m_shadowPipelineLayout = VK_NULL_HANDLE;
     m_shadowSetLayout = VK_NULL_HANDLE;
@@ -879,7 +897,14 @@ void Device::UpdateCasterCache()
 {
     m_characterSpotsPrev.swap(m_characterSpots);   // (this frame's the last's; the next frame's anew)
     m_characterSpots.clear();
+    if (m_casterViews.size() > 1) ++m_logViewSplitFrames;
+    m_logOtherViewCasters += m_casterOtherView;
+    if (m_shadowProjChanged) ++m_logProjChanges;
     if (m_frameNumber % 300 == 0) {
+        Log("shadow cameras (last 300 frames): %u frames with casters under more than one camera, %u casters left out "
+            "as another camera's; the world camera's projection changed on %u frames (their draws took no sun shadow)",
+            m_logViewSplitFrames, m_logOtherViewCasters, m_logProjChanges);
+        m_logViewSplitFrames = m_logOtherViewCasters = m_logProjChanges = 0;
         Log("caster cache: %zu remembered, %zu streaks; this frame %u streaks started, refused %u far (last %.0f from the "
             "eye (%.1f %.1f %.1f)), %u full, %u without vertices, %u moving or a character's; %u kept "
             "solid when the game let their texture go",
@@ -1072,8 +1097,10 @@ void Device::CollectShadowItems()
     std::vector<uint32_t> drawOf;                // per item: its draw number
     const bool untraced = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();   // (the rays' casters marked)
     for (const ShadowCaster& c : m_casters) {
-        if (c.view != world)
+        if (c.view != world) {
+            ++m_casterOtherView;
             continue;
+        }
         bool ringData = !c.vb || c.ib == m_frames[m_frameIndex].ring;
         if (ringData && c.generation != m_ringGeneration) {   // the ring restarted since (mid-frame flush): overwritten
             staleKeys.push_back(c.key);          // drawn from the caster cache instead, if remembered
@@ -1289,7 +1316,7 @@ void Device::BindShadowItem(VkCommandBuffer cmd, ShadowBind& bind, const ShadowI
     // Every caster binds a texture: the vertex shader may read it (sway.glsl); casters without one get a stand-in.
     Texture* texture = item.texture ? (item.texture->m_albedoMap && m_pbr.albedoMaps ? item.texture->m_albedoMap : item.texture) : m_blackTexture;
     if (texture != bind.texture) {
-        VkDescriptorImageInfo image{SamplerFor(0), texture->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo image{m_cutoutSampler, texture->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         w.dstBinding = 0;
         w.descriptorCount = 1;
@@ -1522,7 +1549,11 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
         if (m_casterViews[i].count > m_casterViews[world].count) world = i;
     float eye[3], forward[3];
     m_frameViewProjValid = !m_casterViews.empty();
+    m_casterOtherView = 0;
+    m_shadowProjChanged = false;
     if (m_frameViewProjValid) {
+        m_shadowProjBefore = m_shadowWorldProj;
+        m_shadowProjChanged = std::memcmp(&m_shadowWorldProj, &m_casterViews[world].proj, sizeof(d3d::Matrix)) != 0;
         const auto& v = m_casterViews[world].view.m;
         for (int i = 0; i < 3; ++i) {
             eye[i] = -(v[3][0] * v[i][0] + v[3][1] * v[i][1] + v[3][2] * v[i][2]);

@@ -791,7 +791,7 @@ void Device::DrawLeafShadows(VkCommandBuffer cmd)
             bound = true;
         }
         Texture* drawn = set.art ? set.art : item.texture;   // (our own canopy: its atlas)
-        VkDescriptorImageInfo image{SamplerFor(0), drawn->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo image{m_cutoutSampler, drawn->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         w.dstBinding = 0;
         w.descriptorCount = 1;

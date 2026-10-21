@@ -251,6 +251,29 @@ void Device::EndFrameDump()
                  m_shadowItemsCount, m_shadowStaticItems, m_shadowAnimatedItems, m_shadowDrawn, m_shadowStaticDrawn,
                  m_shadowAnimatedDrawn, m_shadowCulled, m_shadowCollectMs, m_shadowCullMs, m_shadowDrawMs,
                  m_shadowGroupCalls);
+    {
+        // The cameras the casters were drawn with (the world's: most casters), and the projection this frame's
+        // receivers were tested against (the last frame's world camera's): differing, no draw took the sun's shadow.
+        uint32_t world = 0;
+        for (uint32_t i = 1; i < m_casterViews.size(); ++i)
+            if (m_casterViews[i].count > m_casterViews[world].count) world = i;
+        std::fprintf(m_dumpFile, "# shadow cameras: %zu, %u casters left out as another camera's; receivers' projection "
+                                 "%s (was %.6f %.6f %.6f %.6f)\n",
+                     m_casterViews.size(), m_casterOtherView, m_shadowProjChanged ? "CHANGED" : "the same",
+                     double(m_shadowProjBefore.m[0][0]), double(m_shadowProjBefore.m[1][1]),
+                     double(m_shadowProjBefore.m[2][2]), double(m_shadowProjBefore.m[3][2]));
+        for (uint32_t i = 0; i < m_casterViews.size(); ++i) {
+            const auto& v = m_casterViews[i].view.m;
+            const auto& p = m_casterViews[i].proj.m;
+            float eye[3];
+            for (int k = 0; k < 3; ++k) eye[k] = -(v[3][0] * v[k][0] + v[3][1] * v[k][1] + v[3][2] * v[k][2]);
+            std::fprintf(m_dumpFile, "#   camera %u%s: %u casters, eye (%.3f %.3f %.3f) forward (%.4f %.4f %.4f), "
+                                     "projection %.6f %.6f %.6f %.6f\n",
+                         i, i == world ? " (world)" : "", m_casterViews[i].count, double(eye[0]), double(eye[1]),
+                         double(eye[2]), double(v[0][2]), double(v[1][2]), double(v[2][2]), double(p[0][0]),
+                         double(p[1][1]), double(p[2][2]), double(p[3][2]));
+        }
+    }
     std::fprintf(m_dumpFile, "# instancing: %u runs of >=2 identical static draws; %u draws could merge away (longest run"
                              " %u)\n", m_batchRuns, m_batchMerged, m_batchMaxRun);
     std::fprintf(m_dumpFile, "# M3 batching: %u indirect calls for %u draws (%u single); %u indexed draws left direct\n",
