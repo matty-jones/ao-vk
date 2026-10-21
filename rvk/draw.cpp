@@ -578,10 +578,19 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->prevProj = m_prevProj;
     m_frameLightIndices.clear();
     m_frameLightSpheres.clear();
+    // (RANDYVK_SPOT_CONE=0: spot lights by their range alone, as for their cubes - comparisons.)
+    static const bool spotConeOff = [] { const char* v = std::getenv("RANDYVK_SPOT_CONE"); return v && *v == '0'; }();
     for (uint32_t k = 0; k < used; ++k) {
         const CapturedLight& c = m_lightsPrev[candidates[k].index];
         m_frameLightIndices.push_back(candidates[k].index);
-        m_frameLightSpheres.push_back({c.light.position.x, c.light.position.y, c.light.position.z, c.light.range * c.light.range});
+        LightSphere sphere{c.light.position.x, c.light.position.y, c.light.position.z, c.light.range * c.light.range};
+        if (const Cone cone = SpotCone(c.light); cone.on && !spotConeOff) {
+            std::memcpy(sphere.axis, cone.axis, sizeof(sphere.axis));
+            sphere.cosHalf = cone.cosHalf;
+            sphere.sinHalf = cone.sinHalf;
+            sphere.spot = true;
+        }
+        m_frameLightSpheres.push_back(sphere);
         FillGpuLight(c.light, c.cosHalfTheta, c.cosHalfPhi, fl->lights[k],
                      m_pointLightScale + (m_charLightScale - m_pointLightScale) * c.carried);
         fl->lights[k].ambient[3] = c.carried > 0.5f ? 1.0f : 0.0f;   // carried by a character (F_CHARACTER draws)
@@ -1477,14 +1486,28 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
     const LightSphere* spheres = m_frameLightSpheres.data();
     count = std::min<uint32_t>(count, uint32_t(m_frameLightSpheres.size()));
     uint64_t hits = 0;
-    auto Test = [&](uint32_t k) {
-        if (hits >> k & 1)
-            return;
-        const LightSphere& l = spheres[k];
+    // Its sphere reaches the box, and a spot light's cone does too (a floodlight's range - 1,041 units over Borealis's
+    // bridges - reached every draw: every pixel tried it, and no draw got the build without the lights' loop).
+    auto Reaches = [&](const LightSphere& l) {
         float dx = std::max(std::max(wmn[0] - l.x, l.x - wmx[0]), 0.0f);
         float dy = std::max(std::max(wmn[1] - l.y, l.y - wmx[1]), 0.0f);
         float dz = std::max(std::max(wmn[2] - l.z, l.z - wmx[2]), 0.0f);
-        if (dx * dx + dy * dy + dz * dz <= l.r2)
+        if (dx * dx + dy * dy + dz * dz > l.r2)
+            return false;
+        if (!l.spot)
+            return true;
+        Cone cone{};
+        std::memcpy(cone.axis, l.axis, sizeof(cone.axis));
+        cone.cosHalf = l.cosHalf;
+        cone.sinHalf = l.sinHalf;
+        cone.on = true;
+        const float at[3] = {l.x, l.y, l.z};
+        return BoxInCone(wmn, wmx, at, cone);
+    };
+    auto Test = [&](uint32_t k) {
+        if (hits >> k & 1)
+            return;
+        if (Reaches(spheres[k]))
             hits |= uint64_t(1) << k;
     };
     // The candidates: the lights of the grid cells the box covers (clipped to the grid), plus the ones too large for
@@ -1522,13 +1545,8 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
     }
     if (m_lightMaskVerify) {                     // the same mask from every light: a check while bringing the grid up
         uint64_t brute = 0;
-        for (uint32_t k = 0; k < count; ++k) {
-            const LightSphere& l = spheres[k];
-            float dx = std::max(std::max(wmn[0] - l.x, l.x - wmx[0]), 0.0f);
-            float dy = std::max(std::max(wmn[1] - l.y, l.y - wmx[1]), 0.0f);
-            float dz = std::max(std::max(wmn[2] - l.z, l.z - wmx[2]), 0.0f);
-            if (dx * dx + dy * dy + dz * dz <= l.r2) brute |= uint64_t(1) << k;
-        }
+        for (uint32_t k = 0; k < count; ++k)
+            if (Reaches(spheres[k])) brute |= uint64_t(1) << k;
         if (brute != hits) ++m_lightMaskDiff;
         hits = brute;
     }

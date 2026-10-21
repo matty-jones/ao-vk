@@ -3132,7 +3132,13 @@ private:
     float m_drawSway[4] = {};                    // the current draw's sway (for its shadow caster)
     bool m_dynamicWriteMask = false;             // per-draw colour write masks (extended dynamic state 3)
     void FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount, uint32_t out[4]);
-    struct LightSphere { float x, y, z, r2; };
+    struct LightSphere {
+        float x, y, z, r2;
+        // A spot light's cone (SpotCone, with its margin): the light gives nothing outside it - ambient included
+        // (lighting.glsl) - so a draw wholly outside leaves it out of its mask. on: a cone under a half turn.
+        float axis[3] = {}, cosHalf = 0.0f, sinHalf = 0.0f;
+        bool spot = false;
+    };
     std::vector<LightSphere> m_frameLightSpheres;  // the frame lights' spheres in FrameLights order (light masks)
     uint32_t m_pusherSeenMax = 0;                // the most pushers any frame in the window had (the grass's log)
     // A coarse x/z grid over those lights, so a draw's mask tests only the lights near it, not all of them (a busy

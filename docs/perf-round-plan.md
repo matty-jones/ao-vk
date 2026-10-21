@@ -41,6 +41,8 @@ registers and spilled 144 bytes - 12 warps a core of 48 (25% occupancy) - for ev
 
 | Lamps in the air (RVK_VolLamps): the range fade and a spot's cone before the march through its cube, not after | city bench, 12 lamps and 3 floodlights: volumetric 1.09 -> 1.03 ms, picture identical (the march itself: 32 steps, ~0.76 ms with no lamps, left) |
 
+| Spot lights in the draws' light masks only where their cone reaches the draw's box | picture identical; city bench with 3 floodlights: within noise (the floodlights were 3 of 52 lights); a floodlight is too large for the per-pixel grid, so before it was tried by every pixel of every draw |
+
 City bench overall: GPU 4.08 -> 3.43 ms, render thread 6.0 -> ~5.5 ms. `RANDYVK_FULL_SHADER=1` draws every draw with
 the full shader build, `RANDYVK_SPOT_CONE=0` renders spot lights' cubes whole (comparisons).
 
