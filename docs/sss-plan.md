@@ -40,15 +40,53 @@ counts - the cause of "leaflight does nothing" (user). Demo (`--leaf-tree 20842,
 crown's top +23 %, its underside -13 %; backlit, the light through it 9.2 (the old test) -> 15.2 (crowns always) -> 18.2
 (with the depth) on the big crown, the small dense one 2.8 -> 6.8 -> 4.9 (its middle darker, as meant).
 
+Code: `rvk/shaders/ffp.vert` (`crownSky` before the lighting block; the shoulder in the per-vertex path),
+`rvk/shaders/ffp_main.glsl` (`CrownThrough`; the shoulder before the `F_OVERBRIGHT` clamp; the light through leaves
+under "Sunlight through leaves"), `FL.foliage` (x `RVK_CrownSky`, y `RVK_CrownDepth`; z, w free) in
+`frame_lights.glsl` / `internal.h` `FrameLights`, filled in `draw.cpp` next to `volume2`; knobs in `rvk.h`
+`RVK_FLOAT_KNOBS`; settings in `rvk_settings.cpp` (Lighting, the Advanced list, `kVanilla`). Commit `a7e44d7`, staged
+`randy31-crowns1.dll`. Awaiting the user's look in game (noon from the side; walking towards a low sun through trees).
+
 ## Phase 2: grass
 
-- The same colour and a softer terminator in grass.vert; the light through a blade fading with how deep in the field
-  it stands (the blades' density round it).
+What grass.vert already does (per vertex, `GF.look.z` = `RVK_GrassGlow`, around line 325): a rounded blade (the edge
+towards the sun lighter, zero-mean), the sun through the blade (`behind` - the sun on the face away from the camera -
+and `bk` - looking into the sun - times `pow(t, 1.3)`, the thin upper blade more), tinted `albedo * vec3(1.2, 1.25,
+0.7)`, a sheen along it, and `canopyShade` (in a dense field a low sun reaches only the upper blades). So less is
+missing than for the crowns:
+- **Colour**: the light through a blade as the leaves' now - `albedo * albedo / luma(albedo)` - in place of the fixed
+  yellowish tint (check against the user's fields at noon and dusk before switching).
+- **Depth into the field**: the light through a blade fading with the blades between it and the sun - the grass
+  shadow layer (`kGrassShadowLayer`, the map's layer 4: the blades cast into it) gives whether a blade is lit; its
+  depth (if that layer keeps one) how far. `canopyShade` approximates it from the blade's height alone today.
+- Setting: `RVK_GrassDepth` (0..1) or under `RVK_GrassGlow`; names within 15 characters (`RVK_Grass*` - check
+  rvk_settings.cpp's prefix routing, as `RVK_Leaf*` routes to the leaf settings and couldn't be used for phase 1).
+- Test: `rvk_demo` grass scenes (`--grass-walk X`, `--grass-field`, the native ground with `--grass-field`), sun behind
+  (`--sun-dir`) and overhead; `--shot-run K` saves K frames in the statel and native-ground scenes.
 
 ## Phase 3: lamps through foliage
 
-- Point and spot lights behind a bush or a crown glowing through it at night (the frame lights' loop, lighting.glsl;
-  their shadow cubes for depth where they have one).
+- Point and spot lights behind a bush or a crown glowing through it at night: in `AccumulateLights`
+  (`lighting.glsl`, line ~117) a term for foliage (`F_FOLIAGE` or `D.leaf.w != 0`) like the sun's through-term in
+  ffp_main.glsl - `max(-dot(nf, L), 0)` for the light behind the leaf as the camera sees it - times the light's
+  attenuation; through the light's shadow cube (`PointShadow`, ffp_main.glsl line 14) where it has one, for depth.
+- Test: the point-shadow scene (`--point-shadow-test`) with trees, or `--leaf-tree` with `--ground-light`-style lamps
+  (add a lamp option to the tree scene).
+
+## Testing the trees (what tripped phase 1)
+
+The demo's tree scene (`--leaf-tree build/trees/20842.tree,build/trees/13147.tree`, absolute paths) is not lit as
+the game by default:
+- `--pixel-lighting`: without it the demo lights per vertex (the game: "pixel lighting 1" in a dump's first line); the
+  scene's sun share (dump `-local.bmp` B) is then 0 and per-pixel changes show nothing.
+- `--shadows`: without them every leaf is sunlit and the ambient is a small part of the light.
+- `--leaf 1`: the demo's `RVK_LeafLight` is 0 by default (the game's 1).
+- `--fixed-clock 16.667`: else the leaves' wind and flutter differ between runs and swamp small changes.
+- `--sun-dir X Y Z`: the direction the light travels; the camera stands at -z looking +z, so `0.1 -0.35 -1` is behind
+  the trees, `0.6 -0.7 -0.4` about the user's noon.
+- `--dump d.txt` writes the in-between images (`-scene`, `-albedo`, `-local`: G reflectivity, B sun share; `-surface`,
+  `-brixgi`): light = scene (undo x/(1+x), gamma 2.2) / albedo, as measured above.
+Everything Wine runs in `WINEPREFIX=$HOME/.wine` while the user's game is open (`~/.wine-prk`); look-check too.
 
 ## Not planned: skin
 
