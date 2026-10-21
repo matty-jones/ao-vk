@@ -23,8 +23,14 @@
 
 const float kTerrainBase = 1.0, kTerrainLight = 2.0;
 
-// The draw is a ground chunk whose base texture lies on the world from above (rvk FillTerrainRecord).
+// The draw is a ground chunk whose base texture lies on the world from above (rvk FillTerrainRecord). (RVK_NO_GROUND:
+// the scene shader's build for every other draw - without the ground's code it needs 128 registers, not 168 and a
+// spill, so more pixels are in flight on the GPU: rvk Device::m_drawGround picks the build.)
+#ifdef RVK_NO_GROUND
+bool TerrainMapped() { return false; }
+#else
 bool TerrainMapped() { return D.terrainAt.w > 0.5; }
+#endif
 
 #include "terrain_rock.glsl"
 

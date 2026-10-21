@@ -69,7 +69,7 @@ foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag 
 endforeach()
 
 # Variants built from another shader with a define: output name, source, define.
-foreach(entry "leaf.vert|ffp.vert|RVK_LEAF" "leaf_shadow.vert|shadow.vert|RVK_LEAF" "smoke_half.frag|smoke.frag|RVK_SMOKE_HALF" "cloud_half.frag|cloud.frag|RVK_CLOUD_HALF" "cloud_layer_shadow.frag|cloud_layer.frag|RVK_CLOUD_SHADOW" "cloud_layer_sunray.frag|cloud_layer.frag|RVK_CLOUD_SUNRAY" "rain_near.frag|rain.frag|RVK_RAIN_NEAR")
+foreach(entry "ffp_ng.frag|ffp.frag|RVK_NO_GROUND" "ffp_glow_ng.frag|ffp_glow.frag|RVK_NO_GROUND" "ffp_nocut_ng.frag|ffp_nocut.frag|RVK_NO_GROUND" "ffp_glow_nocut_ng.frag|ffp_glow_nocut.frag|RVK_NO_GROUND" "leaf.vert|ffp.vert|RVK_LEAF" "leaf_shadow.vert|shadow.vert|RVK_LEAF" "smoke_half.frag|smoke.frag|RVK_SMOKE_HALF" "cloud_half.frag|cloud.frag|RVK_CLOUD_HALF" "cloud_layer_shadow.frag|cloud_layer.frag|RVK_CLOUD_SHADOW" "cloud_layer_sunray.frag|cloud_layer.frag|RVK_CLOUD_SUNRAY" "rain_near.frag|rain.frag|RVK_RAIN_NEAR")
     string(REPLACE "|" ";" variant "${entry}")
     list(GET variant 0 name)
     list(GET variant 1 shader)

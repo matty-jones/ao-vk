@@ -63,6 +63,19 @@ const uint32_t kFragNoCutSpirv[] = {            // no discard: a draw that never
 const uint32_t kFragGlowNoCutSpirv[] = {
 #include "ffp_glow_nocut.frag.inc"
 };
+// The same four without the ground's code (RVK_NO_GROUND, terrain.glsl): every draw but the ground's.
+const uint32_t kFragNgSpirv[] = {
+#include "ffp_ng.frag.inc"
+};
+const uint32_t kFragGlowNgSpirv[] = {
+#include "ffp_glow_ng.frag.inc"
+};
+const uint32_t kFragNoCutNgSpirv[] = {
+#include "ffp_nocut_ng.frag.inc"
+};
+const uint32_t kFragGlowNoCutNgSpirv[] = {
+#include "ffp_glow_nocut_ng.frag.inc"
+};
 
 // Access/stage masks to go with an image layout, for barriers.
 void LayoutUse(VkImageLayout layout, VkPipelineStageFlags2* stage, VkAccessFlags2* access)
@@ -203,6 +216,10 @@ Device::~Device()
     for (VkPipeline p : m_pipelinesHdrNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_tessPipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_tessPipelinesNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
+    for (VkPipeline* set : {m_groundPipelines, m_groundPipelinesHdr, m_groundPipelinesNoCut, m_groundPipelinesHdrNoCut})
+        for (int c = 0; c < 3; ++c) if (set[c]) vkDestroyPipeline(m_device, set[c], nullptr);
+    for (VkPipeline p : m_groundTessPipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);
+    for (VkPipeline p : m_groundTessPipelinesNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
     if (m_prepassPipeline) vkDestroyPipeline(m_device, m_prepassPipeline, nullptr);
     if (m_prepassCutoutPipeline) vkDestroyPipeline(m_device, m_prepassCutoutPipeline, nullptr);
     if (m_leafPrepassPipeline) vkDestroyPipeline(m_device, m_leafPrepassPipeline, nullptr);
@@ -1061,12 +1078,19 @@ bool Device::CreatePipelines(std::string* error)
         ci.pCode = code;
         return Check(vkCreateShaderModule(m_device, &ci, nullptr, out), "vkCreateShaderModule", error);
     };
-    VkShaderModule vert, frag, fragGlow, fragNoCut, fragGlowNoCut;
-    if (!module(kVertSpirv, sizeof(kVertSpirv), &vert) || !module(kFragSpirv, sizeof(kFragSpirv), &frag) ||
-        !module(kFragGlowSpirv, sizeof(kFragGlowSpirv), &fragGlow) ||
-        !module(kFragNoCutSpirv, sizeof(kFragNoCutSpirv), &fragNoCut) ||
-        !module(kFragGlowNoCutSpirv, sizeof(kFragGlowNoCutSpirv), &fragGlowNoCut))
+    // frags[ground][set][nc]: the pixel shader by whether it holds the ground's code, the target (8-bit, the HDR
+    // scene: glow) and whether it may discard (nc: no cut-out, early-Z).
+    VkShaderModule vert, frags[2][2][2];
+    if (!module(kVertSpirv, sizeof(kVertSpirv), &vert) || !module(kFragSpirv, sizeof(kFragSpirv), &frags[1][0][0]) ||
+        !module(kFragGlowSpirv, sizeof(kFragGlowSpirv), &frags[1][1][0]) ||
+        !module(kFragNoCutSpirv, sizeof(kFragNoCutSpirv), &frags[1][0][1]) ||
+        !module(kFragGlowNoCutSpirv, sizeof(kFragGlowNoCutSpirv), &frags[1][1][1]) ||
+        !module(kFragNgSpirv, sizeof(kFragNgSpirv), &frags[0][0][0]) ||
+        !module(kFragGlowNgSpirv, sizeof(kFragGlowNgSpirv), &frags[0][1][0]) ||
+        !module(kFragNoCutNgSpirv, sizeof(kFragNoCutNgSpirv), &frags[0][0][1]) ||
+        !module(kFragGlowNoCutNgSpirv, sizeof(kFragGlowNoCutNgSpirv), &frags[0][1][1]))
         return false;
+    const VkShaderModule frag = frags[0][0][0], fragGlow = frags[0][1][0];   // (the leaves': never the ground)
 
     VkPipelineShaderStageCreateInfo stages[2] = {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vert, "main", nullptr},
@@ -1123,14 +1147,15 @@ bool Device::CreatePipelines(std::string* error)
                                                           VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
     bool ok = true;
     // One set for the 8-bit targets, one for the HDR scene (float); each also as a no-discard variant (early-Z for
-    // draws that never cut out).
+    // draws that never cut out); each without the ground's code (g 0) and with it (g 1: the ground's draws).
+    for (int g = 0; g < 2 && ok; ++g)
     for (int set = 0; set < 2 && ok; ++set)
     for (int nc = 0; nc < 2 && ok; ++nc)
     for (int c = 0; c < 3 && ok; ++c) {
         colorFormats[0] = set ? GetFormatInfo(Format::RGBA16F).vk : kColorFormat;
         rendering.colorAttachmentCount = cb.attachmentCount = set ? 5 : 1;
         rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
-        stages[1].module = nc ? (set ? fragGlowNoCut : fragNoCut) : (set ? fragGlow : frag);
+        stages[1].module = frags[g][set][nc];
         VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         ia.topology = kClassTopology[c];
         VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
@@ -1146,8 +1171,10 @@ bool Device::CreatePipelines(std::string* error)
         ci.pColorBlendState = &cb;
         ci.pDynamicState = &ds;
         ci.layout = m_pipelineLayout;
-        VkPipeline* dst = set ? (nc ? &m_pipelinesHdrNoCut[c] : &m_pipelinesHdr[c])
-                              : (nc ? &m_pipelinesNoCut[c] : &m_pipelines[c]);
+        VkPipeline* dst = g ? (set ? (nc ? &m_groundPipelinesHdrNoCut[c] : &m_groundPipelinesHdr[c])
+                                   : (nc ? &m_groundPipelinesNoCut[c] : &m_groundPipelines[c]))
+                            : (set ? (nc ? &m_pipelinesHdrNoCut[c] : &m_pipelinesHdr[c])
+                                   : (nc ? &m_pipelinesNoCut[c] : &m_pipelines[c]));
         ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                    "vkCreateGraphicsPipelines", error);
     }
@@ -1166,12 +1193,14 @@ bool Device::CreatePipelines(std::string* error)
         VkPipelineTessellationStateCreateInfo ts{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
         ts.pNext = &origin;
         ts.patchControlPoints = 3;
+        // (The characters take g 0, the native ground g 1.)
+        for (int g = 0; g < 2 && ok; ++g)
         for (int set = 0; set < 2 && ok; ++set)
         for (int nc = 0; nc < 2 && ok; ++nc) {
             colorFormats[0] = set ? GetFormatInfo(Format::RGBA16F).vk : kColorFormat;
             rendering.colorAttachmentCount = cb.attachmentCount = set ? 5 : 1;
             rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
-            tstages[3].module = nc ? (set ? fragGlowNoCut : fragNoCut) : (set ? fragGlow : frag);
+            tstages[3].module = frags[g][set][nc];
             VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
             ia.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
             VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
@@ -1188,7 +1217,8 @@ bool Device::CreatePipelines(std::string* error)
             ci.pColorBlendState = &cb;
             ci.pDynamicState = &ds;
             ci.layout = m_pipelineLayout;
-            VkPipeline* dst = nc ? &m_tessPipelinesNoCut[set] : &m_tessPipelines[set];
+            VkPipeline* dst = g ? (nc ? &m_groundTessPipelinesNoCut[set] : &m_groundTessPipelines[set])
+                                : (nc ? &m_tessPipelinesNoCut[set] : &m_tessPipelines[set]);
             ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                        "tessellation pipeline", error);
         }
@@ -1238,10 +1268,9 @@ bool Device::CreatePipelines(std::string* error)
     if (leafVert)
         vkDestroyShaderModule(m_device, leafVert, nullptr);
     vkDestroyShaderModule(m_device, vert, nullptr);
-    vkDestroyShaderModule(m_device, fragGlow, nullptr);
-    vkDestroyShaderModule(m_device, frag, nullptr);
-    vkDestroyShaderModule(m_device, fragGlowNoCut, nullptr);
-    vkDestroyShaderModule(m_device, fragNoCut, nullptr);
+    for (auto& byGround : frags)
+        for (auto& bySet : byGround)
+            for (VkShaderModule m : bySet) vkDestroyShaderModule(m_device, m, nullptr);
     if (!ok || !CreateShadowResources(error) || !CreatePointShadowResources(error) || !CreateHdrResources(error) ||
         !CreateDarknessResources(error) ||
         !CreateParticleResources(error) || !CreateSkinResources(error))

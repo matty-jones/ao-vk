@@ -2039,17 +2039,22 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     uint32_t topoClass = TopologyClass(primitive);
     bool hdrTarget = m_target->m_format == Format::RGBA16F;
     // Pipeline classes: 0-2 points / lines / triangles, 3-5 the same for the float target, 6 / 7 tessellated; +12
-    // for the no-discard variant (a draw that never cuts out keeps early-Z).
+    // for the no-discard variant (a draw that never cuts out keeps early-Z); +24 for the ground's (the shader's build
+    // with the ground's code: m_drawGround).
     uint32_t colorClass = m_drawTess ? 6u + (hdrTarget ? 1u : 0u) : topoClass + (hdrTarget ? 3u : 0u);
-    uint32_t pipelineClass = colorClass + (m_drawMayDiscard ? 0u : 12u);
+    uint32_t pipelineClass = colorClass + (m_drawMayDiscard ? 0u : 12u) + (m_drawGround ? 24u : 0u);
     if (c.topologyClass != pipelineClass) {
         VkPipeline pipeline;
+        const bool g = m_drawGround;
         if (m_drawTess)
-            pipeline = m_drawMayDiscard ? m_tessPipelines[hdrTarget ? 1 : 0] : m_tessPipelinesNoCut[hdrTarget ? 1 : 0];
+            pipeline = m_drawMayDiscard ? (g ? m_groundTessPipelines : m_tessPipelines)[hdrTarget ? 1 : 0]
+                                        : (g ? m_groundTessPipelinesNoCut : m_tessPipelinesNoCut)[hdrTarget ? 1 : 0];
         else if (hdrTarget)
-            pipeline = m_drawMayDiscard ? m_pipelinesHdr[topoClass] : m_pipelinesHdrNoCut[topoClass];
+            pipeline = m_drawMayDiscard ? (g ? m_groundPipelinesHdr : m_pipelinesHdr)[topoClass]
+                                        : (g ? m_groundPipelinesHdrNoCut : m_pipelinesHdrNoCut)[topoClass];
         else
-            pipeline = m_drawMayDiscard ? m_pipelines[topoClass] : m_pipelinesNoCut[topoClass];
+            pipeline = m_drawMayDiscard ? (g ? m_groundPipelines : m_pipelines.data())[topoClass]
+                                        : (g ? m_groundPipelinesNoCut : m_pipelinesNoCut)[topoClass];
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         c.topologyClass = pipelineClass;
     }
@@ -2404,6 +2409,7 @@ void Device::FlushEdges()
                terrainLight = m_drawTerrainLight;
     m_drawMayDiscard = true;
     m_drawTess = m_drawIsLabel = m_drawBackdrop = m_drawOverbright2x = m_drawTerrainBase = m_drawTerrainLight = false;
+    m_drawGround = false;
     // Depth compared strictly (LESS, whatever the draw had): where the plant's own core wrote its depth the edge has
     // nothing to draw (alpha from the core up), and fails there before its shader runs rather than after.
     m_drawPrepassed = false;
@@ -3761,10 +3767,14 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         ShadeClass(shade);
     }
     uint64_t groupKey = 0;
+    // The shader's build with the ground's code for the ground's draws (ApplyDynamicState). RANDYVK_FULL_SHADER=1: for
+    // every draw, as before the builds were split (comparisons).
+    static const bool fullShader = [] { const char* v = std::getenv("RANDYVK_FULL_SHADER"); return v && *v == '1'; }();
+    m_drawGround = fullShader || dt.terrainAt[3] > 0.5f;
     if (m_groupIndirect && indices && !m_external && !(m_particlePending && fvf == kParticleFvf) && !m_drawLeafCount) {
         bool hdr = m_target->m_format == Format::RGBA16F;
-        uint32_t pipelineClass = m_drawTess ? 6u + (hdr ? 1u : 0u)
-                                            : TopologyClass(primitive) + (hdr ? 3u : 0u);
+        uint32_t pipelineClass = (m_drawTess ? 6u + (hdr ? 1u : 0u)
+                                             : TopologyClass(primitive) + (hdr ? 3u : 0u)) + (m_drawGround ? 24u : 0u);
         VkBuffer vb = m_drawGpu ? m_frames[m_frameIndex].skinArena
                                 : (m_drawStaticBuffer ? m_drawStaticBuffer : f.ring);
         VkBuffer ib = m_drawGpu ? m_drawGpu->mesh->buffer : (staticIb ? staticIb : f.ring);

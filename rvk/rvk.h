@@ -1921,6 +1921,12 @@ private:
     VkPipeline m_pipelinesHdrNoCut[3] = {};
     VkPipeline m_tessPipelines[2] = {};          // characters' Phong tessellation: 8-bit target, float target
     VkPipeline m_tessPipelinesNoCut[2] = {};     // ... no-discard
+    // The scene pipelines above are built without the ground's code (ffp_*_ng.frag: 128 registers, the full shader
+    // 168 and a spill - fewer pixels in flight); the ground's draws (and its rocks: their record's terrainAt.w) take
+    // these, the full shader's, in the same arrangement.
+    VkPipeline m_groundPipelines[3] = {}, m_groundPipelinesHdr[3] = {}, m_groundPipelinesNoCut[3] = {},
+               m_groundPipelinesHdrNoCut[3] = {}, m_groundTessPipelines[2] = {}, m_groundTessPipelinesNoCut[2] = {};
+    bool m_drawGround = false;                   // the current draw takes the ground's path (its record's terrainAt.w)
     bool m_tessSupported = false;
     // Phong tessellation of characters near the camera (draw.cpp TessellateDraw): RVK_Tess*.
     float m_tessShape = 0.0f;                    // 0 = off; how far towards the smooth shape (Phong's alpha)

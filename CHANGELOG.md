@@ -46,6 +46,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   screen or hidden too. `RVK_Gi` still sets its strength. In randy-vk.ini, `RVK_GiDebug` 1 shows that model and 2 the
   light alone; `RVK_GiSky` adds the sky's light to it.
 
+### Changed
+- Faster on the GPU wherever buildings, characters and plants fill the view: they no longer share the ground's heavy
+  shader build, so the graphics card works on more of their pixels at once (a city's scene ~27% less GPU time).
+
 ### Fixed
 - Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken
   for walls drawn the same way. Every tree crown now lets the light through.
