@@ -1797,7 +1797,7 @@ FfxErrorCode CreateBackendContextVK(FfxInterface* backendInterface, FfxEffect ef
 
                 descriptorPoolCreateInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
                 descriptorPoolCreateInfo.pNext         = nullptr;
-                descriptorPoolCreateInfo.flags         = 0;
+                descriptorPoolCreateInfo.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;   // ao-vk: its sets are freed one by one (DestroyBackendContext)
                 descriptorPoolCreateInfo.poolSizeCount = poolSizeCount;
                 descriptorPoolCreateInfo.pPoolSizes    = poolSizes;
                 descriptorPoolCreateInfo.maxSets       = poolSizeCount;
