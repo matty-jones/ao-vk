@@ -52,6 +52,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   pixels at once (a city's scene by day about half the GPU time).
 - The ground draws faster on the GPU too (~14% less of its time): its shader no longer holds the ground's texture
   layout through the lighting, so the graphics card keeps a third more of its pixels in flight.
+- Floodlights and other spot lights cost much less for their shadows: only the part of their shadow map their beam
+  can reach is drawn, not all six sides with everything in range (Borealis's bridge lights reach over 1,000 units).
 
 ### Fixed
 - Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken
