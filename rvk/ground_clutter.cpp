@@ -33,6 +33,13 @@ constexpr float kKeep = 450.0f;                // ... and kept made within this
 constexpr float kSmallRange = 90.0f;           // ... the small ones (under kSmall across) within this
 constexpr float kSmall = 0.45f;
 constexpr int kMakeAtOnce = 2;                 // patches' rocks made at a time (on workers) at most
+// A patch's rocks in blocks of this many cells a side, each a mesh of its own culled alone: a patch is 256 units
+// across, and culled whole it drew every rock in it - those behind the camera and ~450 units off - wherever a corner
+// of it came into view within kRange (the ground bench's rocks ~0.45 ms of its 2 ms scene, much of it rocks unseen).
+constexpr uint32_t kBlockCells = 16;
+// The frustum's test of a block widened by this (world units): a rock just outside the view still casts its shadow
+// into it.
+constexpr float kBlockMargin = 10.0f;
 constexpr uint32_t kMaxRocksPerPatch = 6000;
 
 uint32_t Hash(uint32_t a, uint32_t b, uint32_t c)
@@ -201,17 +208,33 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
         return tile < grassy.size() && grassy[tile] == 2;
     };
     const auto& shapes = Shapes();
-    std::vector<Vertex> lists[2];                // the big rocks, the small
+    // The big rocks and the small, by block (kBlockCells): the cells still visited in rows over the whole patch, so
+    // the same rocks are made as before the blocks (kMaxRocksPerPatch counts them in that order).
+    const uint32_t blocks = (P + kBlockCells - 1) / kBlockCells;
+    std::vector<std::vector<Vertex>> lists(size_t(blocks) * blocks * 2);
     uint32_t rocks = 0;
-    auto flush = [&](int pebbles) {
-        std::vector<Vertex>& verts = lists[pebbles];
+    auto flush = [&](size_t list) {
+        std::vector<Vertex>& verts = lists[list];
         if (verts.empty()) return;
         auto data = std::make_shared<std::vector<uint8_t>>(verts.size() * sizeof(Vertex));
         std::memcpy(data->data(), verts.data(), data->size());
         auto idx = std::make_shared<std::vector<uint8_t>>(verts.size() * 2);
         uint16_t* ix = reinterpret_cast<uint16_t*>(idx->data());
         for (size_t i = 0; i < verts.size(); ++i) ix[i] = uint16_t(i);
-        out.pieces.push_back({data, idx, uint32_t(verts.size()), pebbles != 0});
+        NativeClutter piece;
+        piece.vertices = data;
+        piece.indices = idx;
+        piece.count = uint32_t(verts.size());
+        piece.pebbles = (list & 1) != 0;
+        for (int k = 0; k < 3; ++k) { piece.lo[k] = 1e30f; piece.hi[k] = -1e30f; }
+        for (const Vertex& v : verts) {
+            const float q[3] = {v.x, v.y, v.z};
+            for (int k = 0; k < 3; ++k) {
+                piece.lo[k] = std::min(piece.lo[k], q[k]);
+                piece.hi[k] = std::max(piece.hi[k], q[k]);
+            }
+        }
+        out.pieces.push_back(std::move(piece));
         verts.clear();
     };
     density = std::clamp(density, 0.0f, 2.0f);
@@ -277,8 +300,9 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
                 const float az[3] = {ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]};
                 const float sink = 0.12f * sy;  // (its cut bottom at -0.32: a little under the ground)
                 const int pebble = std::max(sx, sz) < kSmall ? 1 : 0;
-                std::vector<Vertex>& verts = lists[pebble];
-                if (verts.size() + shape.size() > 65535) flush(pebble);
+                const size_t list = (size_t(j / kBlockCells) * blocks + i / kBlockCells) * 2 + size_t(pebble);
+                std::vector<Vertex>& verts = lists[list];
+                if (verts.size() + shape.size() > 65535) flush(list);
                 for (size_t q = 0; q < shape.size(); q += 3) {
                     float w[3][3];
                     for (int e = 0; e < 3; ++e) {
@@ -310,8 +334,7 @@ Device::ClutterBuild Device::BuildNativeClutter(std::shared_ptr<const NativeGrou
                 }
             }
         }
-    flush(0);
-    flush(1);
+    for (size_t list = 0; list < lists.size(); ++list) flush(list);
     out.rocks = rocks;
     return out;
 }
@@ -325,6 +348,23 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
     int pending = 0;
     for (const NativePatch& p : m_native.patches) pending += p.clutterPending.valid() ? 1 : 0;
     std::vector<uint8_t> grassy;
+    // Whether a box, widened by `margin`, lies wholly outside one of the view's planes.
+    const auto OutsideView = [&vp](const float lo[3], const float hi[3], float margin) {
+        bool outside[6] = {true, true, true, true, true, true};
+        for (int k = 0; k < 8; ++k) {
+            const float w[3] = {(k & 1) ? hi[0] + margin : lo[0] - margin, (k & 2) ? hi[1] + margin : lo[1] - margin,
+                                (k & 4) ? hi[2] + margin : lo[2] - margin};
+            float c[4];
+            for (int j = 0; j < 4; ++j) c[j] = w[0] * vp.m[0][j] + w[1] * vp.m[1][j] + w[2] * vp.m[2][j] + vp.m[3][j];
+            outside[0] = outside[0] && c[0] < -c[3];
+            outside[1] = outside[1] && c[0] > c[3];
+            outside[2] = outside[2] && c[1] < -c[3];
+            outside[3] = outside[3] && c[1] > c[3];
+            outside[4] = outside[4] && c[2] < 0.0f;
+            outside[5] = outside[5] && c[2] > c[3];
+        }
+        return outside[0] || outside[1] || outside[2] || outside[3] || outside[4] || outside[5];
+    };
     m_native.clutter = true;
     for (uint32_t i = 0; i < m_native.patches.size(); ++i) {
         NativePatch& p = m_native.patches[i];
@@ -338,21 +378,8 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
             continue;                            // (one being made is taken when it comes near again)
         }
         if (d2 > kRange * kRange) continue;
-        bool outside[6] = {true, true, true, true, true, true};
-        for (int k = 0; k < 8; ++k) {
-            // (Two units round the box: the rocks stand on its ground.)
-            const float w[3] = {(k & 1) ? p.hi[0] + 2.0f : p.lo[0] - 2.0f, (k & 2) ? p.hi[1] + 2.0f : p.lo[1] - 2.0f,
-                                (k & 4) ? p.hi[2] + 2.0f : p.lo[2] - 2.0f};
-            float c[4];
-            for (int j = 0; j < 4; ++j) c[j] = w[0] * vp.m[0][j] + w[1] * vp.m[1][j] + w[2] * vp.m[2][j] + vp.m[3][j];
-            outside[0] = outside[0] && c[0] < -c[3];
-            outside[1] = outside[1] && c[0] > c[3];
-            outside[2] = outside[2] && c[1] < -c[3];
-            outside[3] = outside[3] && c[1] > c[3];
-            outside[4] = outside[4] && c[2] < 0.0f;
-            outside[5] = outside[5] && c[2] > c[3];
-        }
-        if (outside[0] || outside[1] || outside[2] || outside[3] || outside[4] || outside[5]) continue;
+        // (Two units round the patch's box: the rocks stand on its ground.)
+        if (OutsideView(p.lo, p.hi, 2.0f)) continue;
         if (!p.clutterMade) {
             // (Made on a worker, kMakeAtOnce patches at a time; drawn once in.)
             if (!p.clutterPending.valid()) {
@@ -371,9 +398,12 @@ void Device::DrawNativeClutter(const d3d::Matrix& vp)
             p.clutterMade = true;
             m_native.rocksMade += built.rocks;
         }
-        for (const NativeClutter& piece : p.clutter)
-            if (!piece.pebbles || d2 < kSmallRange * kSmallRange)
-                DrawSharedIndexed(d3d::TriangleList, kFvf, piece.vertices, 0, piece.count, piece.indices, piece.count);
+        // (The ranges still the patch's, as they were: the rocks drawn are the same - only blocks out of view go.)
+        for (const NativeClutter& piece : p.clutter) {
+            if ((piece.pebbles && d2 > kSmallRange * kSmallRange) || OutsideView(piece.lo, piece.hi, kBlockMargin))
+                continue;
+            DrawSharedIndexed(d3d::TriangleList, kFvf, piece.vertices, 0, piece.count, piece.indices, piece.count);
+        }
     }
     m_native.clutter = false;
 }

@@ -56,6 +56,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   can reach is drawn, not all six sides with everything in range (Borealis's bridge lights reach over 1,000 units).
   Grass outside their beam no longer goes into their shadows either, and with no swaying grass in the beam their
   shadows are kept between frames instead of redrawn.
+- The rocks ao-vk scatters at the feet of cliffs cost less: they are now skipped in blocks that are out of view,
+  instead of a whole stretch of land's rocks being drawn whenever a corner of it was in view (the rocks the camera
+  can see are the same).
 
 ### Fixed
 - Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken

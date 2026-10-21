@@ -1140,6 +1140,7 @@ private:
         uint32_t indexCount = 0;                 // (the pebbles: their own indices)
         bool pebbles = false;                    // the small rocks (drawn nearer); the pebbles' blocks
         uint8_t size = 0;                        // (the pebbles: grit 0, small 1, bigger 2 - each its own range)
+        float lo[3] = {}, hi[3] = {};            // (the rocks: the piece's box - each a block of the patch, culled alone)
     };
     struct ClutterBuild {                        // a patch's rocks as made (on a worker)
         std::vector<NativeClutter> pieces;
