@@ -2040,21 +2040,25 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     bool hdrTarget = m_target->m_format == Format::RGBA16F;
     // Pipeline classes: 0-2 points / lines / triangles, 3-5 the same for the float target, 6 / 7 tessellated; +12
     // for the no-discard variant (a draw that never cuts out keeps early-Z); +24 for the ground's (the shader's build
-    // with the ground's code: m_drawGround).
+    // with the ground's code: m_drawGround), +48 for the draws no frame light reaches (the build without their loop).
+    const uint32_t build = m_drawGround ? 1u : m_drawNoFrameLights ? 2u : 0u;
     uint32_t colorClass = m_drawTess ? 6u + (hdrTarget ? 1u : 0u) : topoClass + (hdrTarget ? 3u : 0u);
-    uint32_t pipelineClass = colorClass + (m_drawMayDiscard ? 0u : 12u) + (m_drawGround ? 24u : 0u);
+    uint32_t pipelineClass = colorClass + (m_drawMayDiscard ? 0u : 12u) + 24u * build;
     if (c.topologyClass != pipelineClass) {
         VkPipeline pipeline;
-        const bool g = m_drawGround;
-        if (m_drawTess)
-            pipeline = m_drawMayDiscard ? (g ? m_groundTessPipelines : m_tessPipelines)[hdrTarget ? 1 : 0]
-                                        : (g ? m_groundTessPipelinesNoCut : m_tessPipelinesNoCut)[hdrTarget ? 1 : 0];
-        else if (hdrTarget)
-            pipeline = m_drawMayDiscard ? (g ? m_groundPipelinesHdr : m_pipelinesHdr)[topoClass]
-                                        : (g ? m_groundPipelinesHdrNoCut : m_pipelinesHdrNoCut)[topoClass];
-        else
-            pipeline = m_drawMayDiscard ? (g ? m_groundPipelines : m_pipelines.data())[topoClass]
-                                        : (g ? m_groundPipelinesNoCut : m_pipelinesNoCut)[topoClass];
+        const uint32_t h = hdrTarget ? 1u : 0u, nc = m_drawMayDiscard ? 0u : 1u;
+        if (m_drawTess) {
+            VkPipeline* const tess[3][2] = {{m_tessPipelines, m_tessPipelinesNoCut},
+                                            {m_groundTessPipelines, m_groundTessPipelinesNoCut},
+                                            {m_noFrameTessPipelines, m_noFrameTessPipelinesNoCut}};
+            pipeline = tess[build][nc][h];
+        } else {
+            VkPipeline* const sets[3][2][2] = {
+                {{m_pipelines.data(), m_pipelinesNoCut}, {m_pipelinesHdr, m_pipelinesHdrNoCut}},
+                {{m_groundPipelines, m_groundPipelinesNoCut}, {m_groundPipelinesHdr, m_groundPipelinesHdrNoCut}},
+                {{m_noFramePipelines, m_noFramePipelinesNoCut}, {m_noFramePipelinesHdr, m_noFramePipelinesHdrNoCut}}};
+            pipeline = sets[build][h][nc][topoClass];
+        }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         c.topologyClass = pipelineClass;
     }
@@ -2409,7 +2413,7 @@ void Device::FlushEdges()
                terrainLight = m_drawTerrainLight;
     m_drawMayDiscard = true;
     m_drawTess = m_drawIsLabel = m_drawBackdrop = m_drawOverbright2x = m_drawTerrainBase = m_drawTerrainLight = false;
-    m_drawGround = false;
+    m_drawGround = m_drawNoFrameLights = false;
     // Depth compared strictly (LESS, whatever the draw had): where the plant's own core wrote its depth the edge has
     // nothing to draw (alpha from the core up), and fails there before its shader runs rather than after.
     m_drawPrepassed = false;
@@ -3411,6 +3415,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_lightingDebug) flags |= F_DEBUGLIGHT;
     bool override = (flags & F_PERPIXEL) && m_lightOverride && !SurfaceSheen(fvf);
     if (override) flags |= F_LIGHTOVERRIDE;
+    m_constLightOverride = override;             // (the block's: kept while later draws reuse it)
     bool hdrTarget = m_target->m_format == Format::RGBA16F;
     if (hdrTarget) flags |= F_HDR;
     // Generated normals: per-pixel lit 3D drawn with a texture in stage 0 as its surface (not the ground's
@@ -3771,10 +3776,14 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // every draw, as before the builds were split (comparisons).
     static const bool fullShader = [] { const char* v = std::getenv("RANDYVK_FULL_SHADER"); return v && *v == '1'; }();
     m_drawGround = fullShader || dt.terrainAt[3] > 0.5f;
+    // ... and the build without the frame lights' loop for the draws none reaches (lighting.glsl): the override off
+    // (the loop's test), or none in the draw's mask.
+    m_drawNoFrameLights = !m_drawGround && (!m_constLightOverride || (dt.lightMask[0] | dt.lightMask[1]) == 0u);
     if (m_groupIndirect && indices && !m_external && !(m_particlePending && fvf == kParticleFvf) && !m_drawLeafCount) {
         bool hdr = m_target->m_format == Format::RGBA16F;
         uint32_t pipelineClass = (m_drawTess ? 6u + (hdr ? 1u : 0u)
-                                             : TopologyClass(primitive) + (hdr ? 3u : 0u)) + (m_drawGround ? 24u : 0u);
+                                             : TopologyClass(primitive) + (hdr ? 3u : 0u)) +
+                                 24u * (m_drawGround ? 1u : m_drawNoFrameLights ? 2u : 0u);
         VkBuffer vb = m_drawGpu ? m_frames[m_frameIndex].skinArena
                                 : (m_drawStaticBuffer ? m_drawStaticBuffer : f.ring);
         VkBuffer ib = m_drawGpu ? m_drawGpu->mesh->buffer : (staticIb ? staticIb : f.ring);

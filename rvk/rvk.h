@@ -1926,7 +1926,13 @@ private:
     // these, the full shader's, in the same arrangement.
     VkPipeline m_groundPipelines[3] = {}, m_groundPipelinesHdr[3] = {}, m_groundPipelinesNoCut[3] = {},
                m_groundPipelinesHdrNoCut[3] = {}, m_groundTessPipelines[2] = {}, m_groundTessPipelinesNoCut[2] = {};
+    // ... and for the draws no frame light reaches (ffp_*_nf.frag, RVK_NO_FRAME_LIGHTS: 96 registers) - their mask is
+    // empty, or the light override is off; never the ground's.
+    VkPipeline m_noFramePipelines[3] = {}, m_noFramePipelinesHdr[3] = {}, m_noFramePipelinesNoCut[3] = {},
+               m_noFramePipelinesHdrNoCut[3] = {}, m_noFrameTessPipelines[2] = {}, m_noFrameTessPipelinesNoCut[2] = {};
     bool m_drawGround = false;                   // the current draw takes the ground's path (its record's terrainAt.w)
+    bool m_drawNoFrameLights = false;            // ... no frame light reaches it (m_noFrame*Pipelines)
+    bool m_constLightOverride = false;           // the current constant block has F_LIGHTOVERRIDE (Draw, as it writes it)
     bool m_tessSupported = false;
     // Phong tessellation of characters near the camera (draw.cpp TessellateDraw): RVK_Tess*.
     float m_tessShape = 0.0f;                    // 0 = off; how far towards the smooth shape (Phong's alpha)

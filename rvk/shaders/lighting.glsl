@@ -120,6 +120,9 @@ void AccumulateLights(vec3 posW, vec3 normalW, float sunScale, float localScale,
     vec3 toEye = (C.flags.x & F_LOCALVIEWER) != 0u || gPbr ? normalize(C.eyePos.xyz - posW) : -C.eyeDir.xyz;
     for (uint i = 0u; i < C.lightInfo.x; ++i)
         AccumulateLight(C.lights[i], posW, normalW, toEye, sunScale, localScale, ambient, diff, spec);
+    // (RVK_NO_FRAME_LIGHTS: the build for the draws none reaches - the rvk side knows: their mask is empty, or the
+    // light override is off. Without this loop the scene shader takes 96 registers, not 128: more pixels in flight.)
+#ifndef RVK_NO_FRAME_LIGHTS
     // Only the frame lights whose range reaches the draw's bounding box (the CPU's mask): most draws have none or a
     // few of the 64.
     // ... and of those, only the ones reaching the pixel's own cell of the frame's light grid (rvk LightGridLights): a
@@ -160,4 +163,5 @@ void AccumulateLights(vec3 posW, vec3 normalW, float sunScale, float localScale,
                 AccumulateLight(l, posW, normalW, toEye, sunScale, localScale, ambient, diffLocal, specLocal);
             }
         }
+#endif
 }

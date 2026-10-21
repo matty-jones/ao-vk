@@ -1,6 +1,10 @@
 // Direct3D 7 fixed-function pixel processing: two texture stages, specular add, fog, alpha test.
 #extension GL_KHR_shader_subgroup_quad : require
 #extension GL_EXT_nonuniform_qualifier : require
+// RVK_NO_FRAME_LIGHTS: the build for draws no frame light reaches (lighting.glsl) - not the ground's either.
+#ifdef RVK_NO_FRAME_LIGHTS
+#define RVK_NO_GROUND
+#endif
 #include "constants.glsl"
 
 // tex0 / tex1 / bumpBase / normalMap are bindless now (TEX0 / TEX1 / BUMPTEX / NORMALTEX in constants.glsl).
@@ -829,7 +833,11 @@ void main()
     const float texShadeLit = texShade;
     // (The ground's base pass: its texture as terrain.glsl lays it.)
     const bool terrainBasePass = terrainMapped && D.terrainAt.w < 1.5;
+#ifdef RVK_NO_GROUND
+    vec4 t0 = vec4(0.0);   // (sampled after the lighting: with no ground's map to let go first, held through it it cost registers)
+#else
     vec4 t0 = terrainBasePass ? TerrainBase(D.texIdx.x, bindlessSamplers[D.sampIdx.x], terrain) : Sample(0u);
+#endif
     // The native ground's lightmap read where the pixel is (its cell from world x, z), not where its triangle's corners
     // say: a cliff's cells are split corner to corner and each half spread the light its own way - dark wedges up the
     // face. Read so, a cliff's light runs evenly down it, as the baked texel says.
@@ -871,7 +879,6 @@ void main()
             t0.rgb *= turn * mix(1.0, gParallaxSun, 0.75 * sunShare);
         }
     }
-    vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
     if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
     if (terrainBasePass && TerrainNative()) {
         // (The grit where the parallax met the ground: its cells' coordinates moved, the world point with them.)
@@ -1023,6 +1030,10 @@ void main()
             gSpecular = clamp(vec4(litSpec + localSpec, vSpecular.a), 0.0, 1.0);
         }
     }
+#ifdef RVK_NO_GROUND
+    t0 = Sample(0u);
+#endif
+    vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
 #ifdef RVK_GLOW
     // The surface's own colour, for the indirect light it reflects: lit draws through the stages under white light,
     // unlit ones as they are (the ground's base pass is its bare texture; its lightmap pass keeps this). A

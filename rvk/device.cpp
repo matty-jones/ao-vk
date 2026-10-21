@@ -76,6 +76,19 @@ const uint32_t kFragNoCutNgSpirv[] = {
 const uint32_t kFragGlowNoCutNgSpirv[] = {
 #include "ffp_glow_nocut_ng.frag.inc"
 };
+// ... and without the frame lights' loop either (RVK_NO_FRAME_LIGHTS, lighting.glsl): the draws none reaches.
+const uint32_t kFragNfSpirv[] = {
+#include "ffp_nf.frag.inc"
+};
+const uint32_t kFragGlowNfSpirv[] = {
+#include "ffp_glow_nf.frag.inc"
+};
+const uint32_t kFragNoCutNfSpirv[] = {
+#include "ffp_nocut_nf.frag.inc"
+};
+const uint32_t kFragGlowNoCutNfSpirv[] = {
+#include "ffp_glow_nocut_nf.frag.inc"
+};
 
 // Access/stage masks to go with an image layout, for barriers.
 void LayoutUse(VkImageLayout layout, VkPipelineStageFlags2* stage, VkAccessFlags2* access)
@@ -216,10 +229,11 @@ Device::~Device()
     for (VkPipeline p : m_pipelinesHdrNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_tessPipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_tessPipelinesNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
-    for (VkPipeline* set : {m_groundPipelines, m_groundPipelinesHdr, m_groundPipelinesNoCut, m_groundPipelinesHdrNoCut})
+    for (VkPipeline* set : {m_groundPipelines, m_groundPipelinesHdr, m_groundPipelinesNoCut, m_groundPipelinesHdrNoCut,
+                            m_noFramePipelines, m_noFramePipelinesHdr, m_noFramePipelinesNoCut, m_noFramePipelinesHdrNoCut})
         for (int c = 0; c < 3; ++c) if (set[c]) vkDestroyPipeline(m_device, set[c], nullptr);
-    for (VkPipeline p : m_groundTessPipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);
-    for (VkPipeline p : m_groundTessPipelinesNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
+    for (VkPipeline* set : {m_groundTessPipelines, m_groundTessPipelinesNoCut, m_noFrameTessPipelines, m_noFrameTessPipelinesNoCut})
+        for (int k = 0; k < 2; ++k) if (set[k]) vkDestroyPipeline(m_device, set[k], nullptr);
     if (m_prepassPipeline) vkDestroyPipeline(m_device, m_prepassPipeline, nullptr);
     if (m_prepassCutoutPipeline) vkDestroyPipeline(m_device, m_prepassCutoutPipeline, nullptr);
     if (m_leafPrepassPipeline) vkDestroyPipeline(m_device, m_leafPrepassPipeline, nullptr);
@@ -1078,9 +1092,10 @@ bool Device::CreatePipelines(std::string* error)
         ci.pCode = code;
         return Check(vkCreateShaderModule(m_device, &ci, nullptr, out), "vkCreateShaderModule", error);
     };
-    // frags[ground][set][nc]: the pixel shader by whether it holds the ground's code, the target (8-bit, the HDR
-    // scene: glow) and whether it may discard (nc: no cut-out, early-Z).
-    VkShaderModule vert, frags[2][2][2];
+    // frags[g][set][nc]: the pixel shader by its build (g: 0 without the ground's code, 1 with it, 2 without the frame
+    // lights' loop either), the target (8-bit, the HDR scene: glow) and whether it may discard (nc: no cut-out,
+    // early-Z).
+    VkShaderModule vert, frags[3][2][2];
     if (!module(kVertSpirv, sizeof(kVertSpirv), &vert) || !module(kFragSpirv, sizeof(kFragSpirv), &frags[1][0][0]) ||
         !module(kFragGlowSpirv, sizeof(kFragGlowSpirv), &frags[1][1][0]) ||
         !module(kFragNoCutSpirv, sizeof(kFragNoCutSpirv), &frags[1][0][1]) ||
@@ -1088,7 +1103,11 @@ bool Device::CreatePipelines(std::string* error)
         !module(kFragNgSpirv, sizeof(kFragNgSpirv), &frags[0][0][0]) ||
         !module(kFragGlowNgSpirv, sizeof(kFragGlowNgSpirv), &frags[0][1][0]) ||
         !module(kFragNoCutNgSpirv, sizeof(kFragNoCutNgSpirv), &frags[0][0][1]) ||
-        !module(kFragGlowNoCutNgSpirv, sizeof(kFragGlowNoCutNgSpirv), &frags[0][1][1]))
+        !module(kFragGlowNoCutNgSpirv, sizeof(kFragGlowNoCutNgSpirv), &frags[0][1][1]) ||
+        !module(kFragNfSpirv, sizeof(kFragNfSpirv), &frags[2][0][0]) ||
+        !module(kFragGlowNfSpirv, sizeof(kFragGlowNfSpirv), &frags[2][1][0]) ||
+        !module(kFragNoCutNfSpirv, sizeof(kFragNoCutNfSpirv), &frags[2][0][1]) ||
+        !module(kFragGlowNoCutNfSpirv, sizeof(kFragGlowNoCutNfSpirv), &frags[2][1][1]))
         return false;
     const VkShaderModule frag = frags[0][0][0], fragGlow = frags[0][1][0];   // (the leaves': never the ground)
 
@@ -1147,8 +1166,9 @@ bool Device::CreatePipelines(std::string* error)
                                                           VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
     bool ok = true;
     // One set for the 8-bit targets, one for the HDR scene (float); each also as a no-discard variant (early-Z for
-    // draws that never cut out); each without the ground's code (g 0) and with it (g 1: the ground's draws).
-    for (int g = 0; g < 2 && ok; ++g)
+    // draws that never cut out); each without the ground's code (g 0), with it (g 1: the ground's draws), and without
+    // the frame lights' loop (g 2: the draws none reaches).
+    for (int g = 0; g < 3 && ok; ++g)
     for (int set = 0; set < 2 && ok; ++set)
     for (int nc = 0; nc < 2 && ok; ++nc)
     for (int c = 0; c < 3 && ok; ++c) {
@@ -1171,10 +1191,11 @@ bool Device::CreatePipelines(std::string* error)
         ci.pColorBlendState = &cb;
         ci.pDynamicState = &ds;
         ci.layout = m_pipelineLayout;
-        VkPipeline* dst = g ? (set ? (nc ? &m_groundPipelinesHdrNoCut[c] : &m_groundPipelinesHdr[c])
-                                   : (nc ? &m_groundPipelinesNoCut[c] : &m_groundPipelines[c]))
-                            : (set ? (nc ? &m_pipelinesHdrNoCut[c] : &m_pipelinesHdr[c])
-                                   : (nc ? &m_pipelinesNoCut[c] : &m_pipelines[c]));
+        VkPipeline* const byBuild[3][2][2] = {
+            {{&m_pipelines[c], &m_pipelinesNoCut[c]}, {&m_pipelinesHdr[c], &m_pipelinesHdrNoCut[c]}},
+            {{&m_groundPipelines[c], &m_groundPipelinesNoCut[c]}, {&m_groundPipelinesHdr[c], &m_groundPipelinesHdrNoCut[c]}},
+            {{&m_noFramePipelines[c], &m_noFramePipelinesNoCut[c]}, {&m_noFramePipelinesHdr[c], &m_noFramePipelinesHdrNoCut[c]}}};
+        VkPipeline* dst = byBuild[g][set][nc];
         ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                    "vkCreateGraphicsPipelines", error);
     }
@@ -1193,8 +1214,8 @@ bool Device::CreatePipelines(std::string* error)
         VkPipelineTessellationStateCreateInfo ts{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
         ts.pNext = &origin;
         ts.patchControlPoints = 3;
-        // (The characters take g 0, the native ground g 1.)
-        for (int g = 0; g < 2 && ok; ++g)
+        // (The characters take g 0 or 2, the native ground g 1.)
+        for (int g = 0; g < 3 && ok; ++g)
         for (int set = 0; set < 2 && ok; ++set)
         for (int nc = 0; nc < 2 && ok; ++nc) {
             colorFormats[0] = set ? GetFormatInfo(Format::RGBA16F).vk : kColorFormat;
@@ -1217,8 +1238,10 @@ bool Device::CreatePipelines(std::string* error)
             ci.pColorBlendState = &cb;
             ci.pDynamicState = &ds;
             ci.layout = m_pipelineLayout;
-            VkPipeline* dst = g ? (nc ? &m_groundTessPipelinesNoCut[set] : &m_groundTessPipelines[set])
-                                : (nc ? &m_tessPipelinesNoCut[set] : &m_tessPipelines[set]);
+            VkPipeline* const byBuild[3][2] = {{&m_tessPipelines[set], &m_tessPipelinesNoCut[set]},
+                                               {&m_groundTessPipelines[set], &m_groundTessPipelinesNoCut[set]},
+                                               {&m_noFrameTessPipelines[set], &m_noFrameTessPipelinesNoCut[set]}};
+            VkPipeline* dst = byBuild[g][nc];
             ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                        "tessellation pipeline", error);
         }
