@@ -131,6 +131,7 @@ constexpr uint32_t kSprayPerFoot = 48;          // particles a segment (water_sp
 
 constexpr uint32_t kDetailSize = 256;
 constexpr uint32_t kMapMax = 1024;              // water map side (texels)
+constexpr size_t kWaterKept = 8;                // water maps (and surfaces) kept, by their mesh's key
 constexpr float kGridFirstRing = 0.25f;         // world units
 constexpr uint32_t kGridMaxRings = 720;
 
@@ -658,6 +659,14 @@ void Device::SplitWaterTriangles(const WaterVertex* v, uint32_t count, const uin
 // The water map (the grid's surface, and where the disturbance field finds water) of the flat triangles.
 Device::WaterMap* Device::WaterMapFor(uint64_t key, const WaterVertex* v, const std::vector<uint32_t>& flatIdx)
 {
+    if (flatIdx.empty())
+        return nullptr;
+    for (WaterMap& m : m_waterMaps)              // (made already: the usual case, before any work on the triangles)
+        if (m.key == key) {
+            m.lastFrame = m_frameNumber;
+            return &m;
+        }
+    const auto start = std::chrono::steady_clock::now();
     struct Tri { uint32_t a, b, c; };
     std::vector<Tri> flat(flatIdx.size() / 3);
     for (size_t t = 0; t < flat.size(); ++t) flat[t] = {flatIdx[t * 3], flatIdx[t * 3 + 1], flatIdx[t * 3 + 2]};
@@ -680,13 +689,10 @@ Device::WaterMap* Device::WaterMapFor(uint64_t key, const WaterVertex* v, const 
     }
     if (flat.empty())
         return nullptr;
-    for (WaterMap& m : m_waterMaps)
-        if (m.key == key) {
-            m.lastFrame = m_frameNumber;
-            return &m;
-        }
-    // A new map: in place of the one not used the longest once a few are kept.
-    if (m_waterMaps.size() >= 4) {
+    // A new map: in place of the one not used the longest once a few are kept. (Eight: the game hands over several
+    // variants of a playfield's mesh as the camera moves - Borealis cycled through six, and with four kept each was
+    // made again and again, a hitch each time.)
+    if (m_waterMaps.size() >= kWaterKept) {
         auto oldest = std::min_element(m_waterMaps.begin(), m_waterMaps.end(),
                                        [](const WaterMap& a, const WaterMap& b) { return a.lastFrame < b.lastFrame; });
         if (oldest->texture) DestroyTexture(oldest->texture);
@@ -842,14 +848,15 @@ Device::WaterMap* Device::WaterMapFor(uint64_t key, const WaterVertex* v, const 
     for (const Tri& t : flat)
         for (uint32_t i : {t.a, t.b, t.c}) { uint32_t a = v[i].colour >> 24; flatLo = std::min(flatLo, a); flatHi = std::max(flatHi, a); }
     for (uint32_t i : m_waterSteep) { uint32_t a = v[i].colour >> 24; steepLo = std::min(steepLo, a); steepHi = std::max(steepHi, a); }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     WaterLog("water map %016llx: %u flat + %u steep triangles, %.0f x %.0f units, %zu bodies at y %.2f..%.2f, "
-             "%u x %u texels of %.2f; vertex alpha flat %u..%u, steep %u..%u; flat triangle heights %.2f..%.2f",
+             "%u x %u texels of %.2f; vertex alpha flat %u..%u, steep %u..%u; flat triangle heights %.2f..%.2f; %.1f ms",
              (unsigned long long)key, m.flatTriangles, uint32_t(m_waterSteep.size() / 3), double(ex), double(ez),
              bodyLevel.size(), double(m.base),
              bodyLevel.empty() ? double(m.base)
                                : double(m.base + (*std::max_element(bodyLevel.begin(), bodyLevel.end()) - minLevel)),
              w, h, double(texel), flatLo, flatHi, m_waterSteep.empty() ? 0u : steepLo, steepHi,
-             double(flatLoY), double(flatHiY));
+             double(flatLoY), double(flatHiY), ms);
     return &m_waterMaps.back();
 }
 
@@ -866,7 +873,7 @@ const water::Surface* Device::WaterSurfaceFor(uint64_t key, const WaterVertex* v
             s.lastFrame = m_frameNumber;
             return &s.surface;
         }
-    if (m_waterSurfaces.size() >= 4)
+    if (m_waterSurfaces.size() >= kWaterKept)
         m_waterSurfaces.erase(std::min_element(m_waterSurfaces.begin(), m_waterSurfaces.end(),
                                                [](const WaterSurface& a, const WaterSurface& b) { return a.lastFrame < b.lastFrame; }));
     WaterSurface s;
