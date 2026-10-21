@@ -34,6 +34,9 @@ registers and spilled 144 bytes - 12 warps a core of 48 (25% occupancy) - for ev
 | Inline equality (SSE2) for the per-draw compares; 32-bit offset divisions | render thread 5.75 -> ~5.54 ms |
 | Spot lights' cubes: only the faces and casters their cone reaches | no false negative in 120k random tests; spot test pictures identical (60/100/170 deg) |
 
+| Spot lights: grass outside the cone left out of their cubes (and not stopping a cube being kept); the cone test without acos/asin; the casters' hash a word at a time | 3 floodlights over the city bench: grass blades into cubes 60.6k -> 37.6k a frame; point scan 0.18 -> 0.09 ms (the byte-wise hash had made it 0.5 on some runs) |
+| The native ground's rocks in 64-unit blocks, each culled by the view alone (the ranges still the patch's: the same rocks drawn) | ground bench scene 1.98 -> 1.85 ms, total 3.54 -> 3.40 |
+
 City bench overall: GPU 4.08 -> 3.43 ms, render thread 6.0 -> ~5.5 ms. `RANDYVK_FULL_SHADER=1` draws every draw with
 the full shader build, `RANDYVK_SPOT_CONE=0` renders spot lights' cubes whole (comparisons).
 
@@ -43,6 +46,20 @@ the full shader build, `RANDYVK_SPOT_CONE=0` renders spot lights' cubes whole (c
   as with the game's triangles. Less would be lower quality.
 - AMD's GI (Brixelizer, already traced at half) ~1 ms, FSR 3 ~0.75 ms at 1440p: fixed costs at these settings.
 - The ground's rocks: ~0.5 ms of the ground bench's scene, mostly per pixel (the ground's full shader).
+
+- The game's cloud sheets (`RVK_CloudSheet`): over Borealis ~9 pixel-shader runs per screen pixel (30 puffs drawn
+  as sheets). A short path in the shader for them (no lighting) and leaving the local-light and albedo targets
+  unwritten both left the time as it was (0.14 ms for 10 puffs at 1080p): it is the rasterising - reverted.
+- The rocks' coarse shape for all of them (20 faces, not 80): 0.02 ms of the scene - their cost is per pixel (the
+  ground's full shader, the rock read from three sides), not their vertices. Left as they are.
+- Ray-traced sun shadows: their trace shows in the "depth pre-pass" interval (+0.48 ms at 1080p, city bench).
+- Async compute (the next frame's shadow maps beside this frame's post passes): one queue family today, and it
+  needs a second queue, semaphores and the shadow maps' ownership handed between queues - a larger change than
+  this round; and the in-game frame is GPU-bound throughout, so overlap would win only where the passes leave
+  units idle. Not started.
+- The render thread over the city bench after this round: no line above 2.5% (remembered casters' cache misses
+  as they are stamped, the cascades' cull loop); memcpy ~6% (the frame's copied vertices). Further gains need the
+  persistent shadow list (below).
 
 ## Next
 
