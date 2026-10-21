@@ -45,6 +45,7 @@ void main()
     // smooth over curved low-poly meshes, and with their normal maps' detail. (Other surfaces' normals, w 6 .. 8, are
     // AMD's effects': ours keeps the depth buffer's there, as it was made with.)
     vec2 o = texelFetch(normals, ipix, 0).zw;
+    if (o.y > 9.5 && o.y < 13.0) o.y -= 8.0;   // (a character's, w 10 .. 12)
     if (o.y > 1.5 && o.y < 5.0) {
         o.y -= 3.0;
         vec3 s = vec3(o, 1.0 - abs(o.x) - abs(o.y));

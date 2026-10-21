@@ -1284,14 +1284,16 @@ void main()
     // PBR surfaces give the screen-space reflections their shading normal (view space, octahedral; w 2 .. 4 marks
     // it): the depth buffer's normals are the triangles' own, which mirror faceted on curved low-poly meshes. Other
     // surfaces with a normal give theirs too, for AMD's effects (w 6 .. 8; ssr.frag keeps the depth buffer's there):
-    // the per-pixel one, else the vertices'; facing the camera (two-sided leaves, the inside of a cloak).
+    // the per-pixel one, else the vertices'; facing the camera (two-sided leaves, the inside of a cloak). A character's
+    // 8 higher again (w 10 .. 12, 14 .. 16): brix_pack.frag steadies AMD's indirect light on characters with it.
+    const float marked = (C.flags.x & F_CHARACTER) != 0u ? 8.0 : 0.0;
     if (gPbrOn && reflectivity > 0.0) {
-        outMotion.zw = OctNormal((C.view * vec4(gPbrNormal, 0.0)).xyz) + vec2(0.0, 3.0);
+        outMotion.zw = OctNormal((C.view * vec4(gPbrNormal, 0.0)).xyz) + vec2(0.0, 3.0 + marked);
     } else if (FL.screen.z > 0.5) {
         vec3 n = dot(gShadeNormal, gShadeNormal) > 0.0 ? gShadeNormal : vNormalW.xyz;
         if (dot(n, n) > 0.0) {
             if (dot(n, C.eyePos.xyz - vPosW) < 0.0) n = -n;
-            outMotion.zw = OctNormal((C.view * vec4(n, 0.0)).xyz) + vec2(0.0, 7.0);
+            outMotion.zw = OctNormal((C.view * vec4(n, 0.0)).xyz) + vec2(0.0, 7.0 + marked);
         }
     }
     // Blended with this fragment's alpha like the colour (kept by multiplying and additive passes, see the blend state).

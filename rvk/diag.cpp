@@ -637,13 +637,15 @@ void DumpBmp(const std::string& path, uint32_t w, uint32_t h, const std::vector<
 // (EndScene, after the post passes): the HDR scene before them (tone mapped simply: x / (1 + x), gamma 2.2), the
 // scene's other targets (the local lights' share, the surface colour, the glow), the half-size passes' results (ambient
 // occlusion, indirect light, scattered light, contact shadows: their first channel), the environment probe, the
-// reflections - where a fault first shows is where it comes from.
+// reflections, AMD's indirect light (brixgi), and the surfaces AMD's effects read (surface: each normal's size per
+// axis, half bright - a character's, written twice as long, full) - where a fault first shows is where it comes from.
 void Device::DumpTargets(const std::string& base)
 {
     struct Item { Texture* t; const char* name; };
     const Item items[] = {{m_scene, "scene"}, {m_localFraction, "local"}, {m_albedo, "albedo"}, {m_glow, "glow"},
                           {m_aoTex[1], "ao"}, {m_giTex[1], "gi"}, {m_volumeTex[1], "volume"},
-                          {m_contactTex[1], "contact"}, {m_envAtlas, "env"}, {m_ssrTex, "ssr"}};
+                          {m_contactTex[1], "contact"}, {m_envAtlas, "env"}, {m_ssrTex, "ssr"}, {m_brixGi, "brixgi"},
+                          {m_sceneSurface, "surface"}};
     struct Read { const Item* item; uint32_t bpp; VkBuffer buffer; VmaAllocation_T* allocation; const uint8_t* data; };
     std::vector<Read> reads;
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
@@ -690,6 +692,10 @@ void Device::DumpTargets(const std::string& base)
                 std::memcpy(c, s, 6);
                 float v[3];
                 for (int k = 0; k < 3; ++k) v[k] = DumpHalf(c[k]);
+                if (t == m_sceneSurface) {
+                    for (int k = 0; k < 3; ++k) o[k] = uint8_t(std::min(std::fabs(v[k]), 2.0f) * 127.5f);
+                    continue;
+                }
                 // (Not a number: magenta; negative: cyan - where the faults are.)
                 if (std::isnan(v[0]) || std::isnan(v[1]) || std::isnan(v[2]) || std::isinf(v[0]) || std::isinf(v[1]) ||
                     std::isinf(v[2])) {

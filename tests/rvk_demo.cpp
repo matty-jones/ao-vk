@@ -1765,6 +1765,56 @@ float g_groundFog = 0.0f;           // --ground-fog END: the native ground scene
                                     // Newland Desert: 1276), its colour the desert's, our sky over it; 0 none
 float g_heatShimmer = 0.5f;         // --heat-shimmer X: RVK_HeatShimmer
 bool g_tileOrm = false;             // --tile-orm: every other tile a shiny material map (PBR, pixel lighting on)
+bool g_statelSkinned = false;   // (--statel-skinned: also the native ground's, RunGroundFile)
+int g_shotRun = 0;   // --shot-run K: the last K frames each saved (<shot>-0.bmp ...), to see what changes frame to frame
+
+// A stand-in character skinned on the GPU (--statel-skinned): an 8-sided column 1.8 high on one bone.
+std::shared_ptr<rvk::skin::Source> MakeColumn()
+{
+    auto column = std::make_shared<rvk::skin::Source>();
+    for (int k = 0; k < 8; ++k)
+        for (int e = 0; e < 2; ++e) {
+            const float a = float(k) * kPi / 4.0f, cx = 0.4f * std::cos(a), cz = 0.4f * std::sin(a), cy = e ? 1.8f : 0.0f;
+            rvk::skin::TriVertex v{};
+            v.posA[0] = v.posB[0] = v.bind[0] = cx;
+            v.posA[1] = v.posB[1] = v.bind[1] = cy;
+            v.posA[2] = v.posB[2] = v.bind[2] = cz;
+            v.normal[0] = std::cos(a);
+            v.normal[2] = std::sin(a);
+            v.boneA = v.boneB = 0;
+            v.weightA = 1.0f;
+            column->vertices.push_back(v);
+        }
+    for (int k = 0; k < 8; ++k) {
+        const uint16_t a = uint16_t(2 * k), b = uint16_t(2 * ((k + 1) % 8));
+        const uint16_t q[6] = {a, uint16_t(a + 1), b, b, uint16_t(a + 1), uint16_t(b + 1)};
+        column->indices.insert(column->indices.end(), q, q + 6);
+    }
+    column->Finish();
+    column->gameIndices = column->indices.data();
+    return column;
+}
+
+// The column standing at (x, y, z) this frame: a new job, as the game makes one each frame it skins a character.
+template <typename D>
+void DrawColumn(D& dev, const std::shared_ptr<rvk::skin::Source>& column, float x, float y, float z, uint32_t owner)
+{
+    if constexpr (requires { dev.DrawSkinned(0u, 0u, std::declval<rvk::skin::Job&>(), 0u, 0u, nullptr, 0u); }) {
+        rvk::skin::Bone bone{{1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z}};
+        auto palette = std::make_shared<rvk::skin::Palette>();
+        palette->Set(&bone, 1);
+        rvk::skin::Job job;
+        job.source = column;
+        job.bones = palette;
+        job.ComputeBounds();
+        dev.SetTexture(0, nullptr);
+        dev.SetDrawVisual(uint32_t(VisualKind::Character), "column", owner);
+        dev.DrawSkinned(TriangleList, rvk::skin::kVertexFvf, job, 0, uint32_t(column->vertices.size()),
+                        column->indices.data(), uint32_t(column->indices.size()));
+        dev.SetDrawVisual(0, nullptr);
+    }
+}
+
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
 int g_lookRound = 0;   // --look-round N: the camera turns once round, level, over the first N frames (the environment
                        // probe sees all round: RVK_RtReflect's hits off the screen), then the given view
@@ -1865,7 +1915,23 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
     const VtxTerrain standIn[3] = {{0, -1000, 0, 0, 1, 0, 0, 0, 0, 0}, {1, -1000, 0, 0, 1, 0, 1, 0, 1, 0},
                                    {0, -1000, 1, 0, 1, 0, 0, 1, 0, 1}};
+    // (--statel-skinned: two stand-in characters 8 units ahead of the eye on the ground, one still, one walking a
+    // circle - what AMD's indirect light makes of characters, which its model of the world lacks.)
+    auto column = MakeColumn();
+    auto groundY = [&](float x, float z) {
+        const float fc = std::clamp(x / ground->cellX, 0.0f, float(ground->cellsX) - 0.001f);
+        const float fr = std::clamp(z / ground->cellZ, 0.0f, float(ground->cellsZ) - 0.001f);
+        const uint32_t c = uint32_t(fc), r = uint32_t(fr), w = ground->cellsX + 1;
+        const float u = fc - float(c), v = fr - float(r);
+        const float* h = ground->heights.data();
+        return (h[r * w + c] * (1 - u) + h[r * w + c + 1] * u) * (1 - v) + (h[(r + 1) * w + c] * (1 - u) + h[(r + 1) * w + c + 1] * u) * v;
+    };
     for (int frame = 0; frame < frames; ++frame) {
+        if (g_shotRun > 0 && frame >= frames - g_shotRun) {
+            std::string name = shot;
+            name.insert(name.size() - 4, "-" + std::to_string(frame - (frames - g_shotRun)));
+            dev.RequestScreenshot(name);
+        }
         if (g_grassFieldOn && g_grassLate > 0 && frame == g_grassLate)   // (--grass-late N: switched on at frame N,
             dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true); // as after zoning: its tiles come later)
         // (The last 300 frames' GPU and CPU times logged - "ground bench:" - once the rocks and pebbles are made.)
@@ -1998,6 +2064,16 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         dev.SetMaterial(mat);
         dev.SetDrawVisual(0, nullptr);
         dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        if (g_statelSkinned) {
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            const float ax = g_eye[0] + 8.0f * std::cos(g_viewYaw), az = g_eye[2] + 8.0f * std::sin(g_viewYaw);
+            DrawColumn(dev, column, ax - 1.5f, groundY(ax - 1.5f, az), az, 7);
+            const float t = float(frame) * 2.0f * kPi / 240.0f;
+            const float wx = ax + 1.5f + std::cos(t), wz = az + std::sin(t);
+            DrawColumn(dev, column, wx, groundY(wx, wz), wz, 8);
+        }
         dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
         dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
         dev.EndFrame();
@@ -3991,7 +4067,7 @@ Matrix Offset()
 // --statel-movers: the cube twice more through a world matrix, one standing and one circling - one mesh at two places
 // a frame, one of them new each frame (the ray tracing's and Brixelizer's instances must not pile up: placements.h).
 std::string g_statelPack;
-bool g_statelSkinned = false, g_statelMovers = false;
+bool g_statelMovers = false;
 uint32_t g_statelPlayfield = 0, g_statelMode = 2;
 float g_statelAt[3] = {};
 
@@ -4006,28 +4082,13 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
     std::vector<VtxMesh> cube;
     std::vector<uint16_t> cubeIdx;
     AddCube(cube, cubeIdx, x - 6.0f, y + 0.5f, z - 6.0f, 0.5f);
-    auto column = std::make_shared<rvk::skin::Source>();
-    for (int k = 0; k < 8; ++k)
-        for (int e = 0; e < 2; ++e) {
-            const float a = float(k) * kPi / 4.0f, cx = 0.4f * std::cos(a), cz = 0.4f * std::sin(a), cy = e ? 1.8f : 0.0f;
-            rvk::skin::TriVertex v{};
-            v.posA[0] = v.posB[0] = v.bind[0] = cx;
-            v.posA[1] = v.posB[1] = v.bind[1] = cy;
-            v.posA[2] = v.posB[2] = v.bind[2] = cz;
-            v.normal[0] = std::cos(a);
-            v.normal[2] = std::sin(a);
-            v.boneA = v.boneB = 0;
-            v.weightA = 1.0f;
-            column->vertices.push_back(v);
-        }
-    for (int k = 0; k < 8; ++k) {
-        const uint16_t a = uint16_t(2 * k), b = uint16_t(2 * ((k + 1) % 8));
-        const uint16_t q[6] = {a, uint16_t(a + 1), b, b, uint16_t(a + 1), uint16_t(b + 1)};
-        column->indices.insert(column->indices.end(), q, q + 6);
-    }
-    column->Finish();
-    column->gameIndices = column->indices.data();
+    auto column = MakeColumn();
     for (int frame = 0; frame < frames; ++frame) {
+        if (g_shotRun > 0 && frame >= frames - g_shotRun) {
+            std::string name = shot;
+            name.insert(name.size() - 4, "-" + std::to_string(frame - (frames - g_shotRun)));
+            dev.RequestScreenshot(name);
+        }
         if (frame == frames - 1) {
             dev.RequestScreenshot(shot);
             if (!dump.empty()) dev.RequestFrameDump(dump);
@@ -4084,18 +4145,7 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
         if constexpr (requires { dev.DrawSkinned(0u, 0u, std::declval<rvk::skin::Job&>(), 0u, 0u, nullptr, 0u); }) {
             if (g_statelSkinned) {               // the column walking round the cube, a turn in 240 frames
                 const float t = float(frame) * 2.0f * kPi / 240.0f;
-                rvk::skin::Bone bone{{1, 0, 0, 0, 1, 0, 0, 0, 1, x - 6.0f + 3.0f * std::cos(t), y, z - 6.0f + 3.0f * std::sin(t)}};
-                auto palette = std::make_shared<rvk::skin::Palette>();
-                palette->Set(&bone, 1);
-                rvk::skin::Job job;
-                job.source = column;
-                job.bones = palette;
-                job.ComputeBounds();
-                dev.SetTexture(0, nullptr);
-                dev.SetDrawVisual(uint32_t(VisualKind::Character), "column", 7);
-                dev.DrawSkinned(TriangleList, rvk::skin::kVertexFvf, job, 0, uint32_t(column->vertices.size()),
-                                column->indices.data(), uint32_t(column->indices.size()));
-                dev.SetDrawVisual(0, nullptr);
+                DrawColumn(dev, column, x - 6.0f + 3.0f * std::cos(t), y, z - 6.0f + 3.0f * std::sin(t), 7);
             }
         }
         dev.EndFrame();
@@ -4790,6 +4840,7 @@ int main(int argc, char** argv)
         else if (a == "--statel-mode" && i + 1 < argc) g_statelMode = uint32_t(std::atoi(argv[++i]));
         else if (a == "--statel-skinned") g_statelSkinned = true;
         else if (a == "--statel-movers") g_statelMovers = true;
+        else if (a == "--shot-run" && i + 1 < argc) g_shotRun = std::atoi(argv[++i]);
         else if (a == "--point-shadow-test") pointShadowTest = true;
         else if (a == "--world-offset" && i + 3 < argc) { for (int k = 0; k < 3; ++k) g_off[k] = float(std::atof(argv[++i])); }
         else if (a == "--point-shadow-slab") g_slabTest = pointShadowTest = pointShadowSun = shadows = true;

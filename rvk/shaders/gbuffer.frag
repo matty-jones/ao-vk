@@ -2,7 +2,8 @@
 // The scene's surfaces for AMD's effects (sssr.cpp; docs/amd-fx-plan.md): each pixel's world-space normal (rgb) and
 // perceptual roughness (a), at the scene's size. The normal: the one the scene wrote into the motion vectors' zw
 // (ffp_main.glsl: octahedral, view space; w 2 .. 4 a PBR surface's shading normal, 6 .. 8 any other's), else the
-// depth buffer's (the triangles' own, as ssr.frag takes them). The roughness: the scene keeps none of its own, only
+// depth buffer's (the triangles' own, as ssr.frag takes them). A character's (w 8 higher) is written twice as long,
+// as a mark of what AMD's model of the world lacks (every reader normalizes it). The roughness: the scene keeps none of its own, only
 // how much each surface reflects (attachment 2's G: water, glossy and wet surfaces, smooth PBR materials) - the more
 // it reflects, the smoother it is taken to be; one that doesn't reflect is rough (1: no reflection rays).
 layout(set = 0, binding = 0) uniform sampler2D depthTex;
@@ -39,6 +40,8 @@ void main()
     vec2 o = texelFetch(motion, ipix, 0).zw;
     vec3 p = ViewPos(vec2(ipix));
     vec3 n;
+    const bool character = o.y > 9.5;
+    if (character) o.y -= 8.0;
     if (o.y > 5.5) {
         n = OctDecode(vec2(o.x, o.y - 7.0));
     } else if (o.y > 1.5) {
@@ -53,5 +56,5 @@ void main()
     vec3 world = normalize(vec3(dot(P.view[0].xyz, n), dot(P.view[1].xyz, n), dot(P.view[2].xyz, n)));
     float r = texelFetch(reflectivity, ipix, 0).g;
     float rough = r < 0.004 ? 1.0 : mix(P.size.z, P.size.w, sqrt(clamp(r, 0.0, 1.0)));
-    outSurface = vec4(world, rough);
+    outSurface = vec4(character ? world * 2.0 : world, rough);
 }

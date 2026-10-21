@@ -426,11 +426,14 @@ bool Device::RenderBrixGi(VkCommandBuffer cmd)
         s->historyValid = false;
         Log("Brixelizer GI: at %ux%u (traced at half)", w, h);
     }
-    if (!m_brixGi || m_brixGi->m_width != w || m_brixGi->m_height != h) {
-        if (m_brixGi) DestroyTexture(m_brixGi);
-        m_brixGi = CreateImage(w, h, Format::RGBA16F, 1, true);
-        if (!m_brixGi)
-            return false;
+    if (!m_brixGi || !m_brixGiLast || m_brixGi->m_width != w || m_brixGi->m_height != h) {
+        for (Texture** t : {&m_brixGi, &m_brixGiLast}) {
+            if (*t) DestroyTexture(*t);
+            *t = CreateImage(w, h, Format::RGBA16F, 1, true);
+            if (!*t)
+                return false;
+        }
+        m_brixGiFrame = 0;
     }
     if (!RenderSceneSurface(cmd) || !RenderSceneMotion(cmd) || !RenderSceneEnv(cmd))
         return false;
@@ -685,12 +688,18 @@ bool Device::RenderBrixGi(VkCommandBuffer cmd)
     }
     Transition(cmd, s->diffuse, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    // For the tone mapping: its light and the view depth (brix_pack.frag), as ours leaves them.
+    // For the tone mapping: its light and the view depth (brix_pack.frag), as ours leaves them; on characters, averaged
+    // with last frame's (their light flickered: a character is a few of its probes wide, and curved).
     MakeDepthReadable(cmd);
-    float params[4] = {m_aoProj.m[2][2], m_aoProj.m[3][2], 0.0f, 0.0f};
+    std::swap(m_brixGi, m_brixGiLast);
+    const bool last = m_brixGiFrame && m_brixGiFrame + 1 == m_frameNumber;
+    Transition(cmd, m_brixGiLast, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    Transition(cmd, m_motionVectors, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    float params[4] = {m_aoProj.m[2][2], m_aoProj.m[3][2], last ? 1.0f : 0.0f, 0.2f};
     FullscreenPass(cmd, m_brixGi, m_brixPackPipeline, s->diffuse->m_view, m_depthView, m_pointSampler, params,
-                   sizeof(params), false);
+                   sizeof(params), false, m_brixGiLast->m_view, m_motionVectors->m_view);
     Transition(cmd, m_brixGi, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_brixGiFrame = m_frameNumber;
 
     // This frame's lit scene, depth and normals for the next (before a debug view goes over the scene).
     copyHistory();

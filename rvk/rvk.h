@@ -3282,6 +3282,8 @@ private:
     struct BrixState;
     BrixState* m_brix = nullptr;
     Texture* m_brixGi = nullptr;
+    Texture* m_brixGiLast = nullptr;             // last frame's m_brixGi (brix_pack.frag steadies characters with it)
+    uint64_t m_brixGiFrame = 0;                  // the frame m_brixGi was last made
     bool m_giFull = false;                       // this frame's indirect light is m_brixGi
     VkPipeline m_brixPackPipeline = VK_NULL_HANDLE;      // brix_pack.frag
     bool BrixWanted() const { return m_giStrength > 0.0f && m_giMode >= 0.5f; }

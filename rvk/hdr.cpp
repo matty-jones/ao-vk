@@ -418,6 +418,7 @@ void Device::DestroyHdrResources()
     DestroyRt();
     DestroySceneSurfaces();
     if (m_brixGi) { DestroyTextureNow(m_brixGi); m_brixGi = nullptr; }
+    if (m_brixGiLast) { DestroyTextureNow(m_brixGiLast); m_brixGiLast = nullptr; }
     if (m_uiLayer) { DestroyTextureNow(m_uiLayer); m_uiLayer = nullptr; }
     if (m_fgLabels) { DestroyTextureNow(m_fgLabels); m_fgLabels = nullptr; }
     if (m_fgOverlay) { DestroyTextureNow(m_fgOverlay); m_fgOverlay = nullptr; }

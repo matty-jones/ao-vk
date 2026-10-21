@@ -36,6 +36,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   light alone; `RVK_GiSky` adds the sky's light to it.
 
 ### Diagnostics
+- Frame dumps also save AMD's indirect light (`-brixgi.bmp`, with `RVK_GiMode 1`) and the surfaces AMD's effects read
+  (`-surface.bmp`: normals, characters' marked twice as bright); `-gi.bmp` stays ours.
 - `RVK_RtDebug 1` (randy-vk.ini) shows what ray tracing sees on GPUs that have it: each building, rock and patch of
   ground in its own colour (red: a surface seen from behind). The ray-traced effects are built on it.
 
