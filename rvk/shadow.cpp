@@ -1627,8 +1627,11 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
         // Beyond the nearest, the cascades take turns: of four, the second every other frame and the two widest every
         // fourth (of three, the two widest every other) - their shadows are further off, where a frame or three's
         // lag of a moving caster doesn't show, and each is read with the matrix it was drawn with, so still things'
-        // shadows stay exact. Any the camera has moved a good way across since it was drawn is drawn again.
+        // shadows stay exact. Any whose centre has moved a good way across since it was drawn (the eye moving, or turning)
+        // is drawn again.
         // RANDYVK_CASCADE_TURNS=0: every cascade every frame (comparisons).
+        float center[3];
+        for (int i = 0; i < 3; ++i) center[i] = eye[i] + forward[i] * range * 0.4f;
         bool turn = true;
         if (!sunMoved && !everyFrame && c > 0) {
             if (count >= 4 && c == count - 3)
@@ -1637,17 +1640,15 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
                 turn = (m_cascadeFrame & 3) == (c == count - 2 ? 1u : 3u);
             else if (count == 3)
                 turn = (m_cascadeFrame & 1) != ((count - 1 - c) & 1);
-            if (!turn) {
+            if (!turn) {                         // (its centre: where the eye is and which way it looks)
                 float moved2 = 0.0f;
-                for (int i = 0; i < 3; ++i) moved2 += (eye[i] - m_cascadeEye[c][i]) * (eye[i] - m_cascadeEye[c][i]);
+                for (int i = 0; i < 3; ++i) moved2 += (center[i] - m_cascadeCenter[c][i]) * (center[i] - m_cascadeCenter[c][i]);
                 turn = moved2 > (0.05f * range) * (0.05f * range);
             }
         }
         if (!turn)
             continue;
-        std::memcpy(m_cascadeEye[c], eye, sizeof(eye));
-        float center[3];
-        for (int i = 0; i < 3; ++i) center[i] = eye[i] + forward[i] * range * 0.4f;
+        std::memcpy(m_cascadeCenter[c], center, sizeof(center));
         float texel = 2.0f * range / float(m_shadowSize);
         float cx = std::round(Dot(x, center) / texel) * texel, cy = std::round(Dot(y, center) / texel) * texel;
         float cz = Dot(z, center);
