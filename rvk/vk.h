@@ -143,6 +143,8 @@
     X(vkGetAccelerationStructureBuildSizesKHR) \
     X(vkGetAccelerationStructureDeviceAddressKHR) \
     X(vkCmdBuildAccelerationStructuresKHR) \
+    X(vkCmdWriteAccelerationStructuresPropertiesKHR) \
+    X(vkCmdCopyAccelerationStructureKHR) \
     X(vkCmdFillBuffer) \
     X(vkCmdCopyBufferToImage) \
     X(vkCmdCopyBuffer) \

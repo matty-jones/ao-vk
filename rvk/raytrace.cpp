@@ -2,6 +2,9 @@
 // has them (VK_KHR_acceleration_structure, VK_KHR_ray_query: device.cpp m_rayQuery; under Wine they work from this
 // 32-bit DLL as from a 64-bit one).
 //
+// Each static mesh's BLAS is compacted once built: its compacted size asked for after the build, and when that frame is
+// done on the GPU, copied into a structure of that size (about half the memory).
+//
 // The meshes are the draws Brixelizer takes (draw.cpp: opaque draws whose vertices and indices the static arena keeps -
 // the statics' retained meshes, the native ground's patches). Each mesh gets a bottom-level structure (BLAS), built
 // once from its arena slots - a budget of triangles a frame, so a zone's arrival doesn't stall - and freed with them
@@ -51,6 +54,7 @@ const uint32_t kRtShadowBlurSpirv[] = {
 };
 
 constexpr uint32_t kBuildBudget = 400000;        // triangles of new BLAS a frame
+constexpr uint32_t kCompactQueries = 1024;       // compacted sizes asked for a frame (each frame slot's query pool)
 constexpr double kRange = 1500.0;                // instances this near the camera go into the TLAS (world units)
 // Instance masks: what casts the sun's shadows, and the ground (which casts none: its lightmap has the hills' shade, as
 // for the shadow map - shadow.cpp IsTerrain).
@@ -127,7 +131,7 @@ struct Device::RtState {
         RtBuffer storage;
         VkDeviceAddress vertices = 0, indices = 0, address = 0;
         uint32_t stride = 0, vertexCount = 0, triangles = 0;
-        bool built = false;
+        bool built = false, compacted = false;
         bool queued = true;                      // in toBuild (a placed object's piece: once a place of it is in range)
         std::vector<uint64_t> places;            // its instances (the arena's meshes)
     };
@@ -148,6 +152,16 @@ struct Device::RtState {
     std::unordered_map<uint64_t, VkDeviceAddress> chunkAddress;
     Placements placements;
     std::vector<uint64_t> toBuild;
+    // Compaction: each frame slot's query pool of compacted sizes; the meshes whose size was asked for (by the frame
+    // that asked: read once it is done).
+    VkQueryPool compactPool[kFramesInFlight] = {};
+    struct Compacting {
+        uint64_t mesh, tag;
+        VkAccelerationStructureKHR as;           // (the one asked about: the mesh may have been made again since)
+        uint32_t slot, query;
+    };
+    std::vector<Compacting> compacting;
+    VkDeviceSize compactBefore = 0, compactAfter = 0;
     RtBuffer scratch;
     VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
     RtBuffer tlasStorage;
@@ -247,6 +261,8 @@ void Device::DestroyRt()
     for (auto& [key, k] : s->skinned) kill(k.as, k.storage);
     kill(s->tlas, s->tlasStorage);
     kill(VK_NULL_HANDLE, s->scratch);
+    for (VkQueryPool& p : s->compactPool)
+        if (p) { vkDestroyQueryPool(m_device, p, nullptr); p = VK_NULL_HANDLE; }
     for (RtBuffer& b : s->instanceBuf) kill(VK_NULL_HANDLE, b);
     for (RtBuffer& b : s->geoBuf) kill(VK_NULL_HANDLE, b);
     for (RtBuffer& b : s->shadowParams) kill(VK_NULL_HANDLE, b);
@@ -529,6 +545,62 @@ void Device::RtSyncStatels()
         s->statelMeshes.size());
 }
 
+// The meshes whose compacted size a finished frame asked for: each copied into a structure of that size (in `cmd`,
+// before this frame's builds), the old one let go once no submission in flight reads it. (Those of this frame slot
+// still unread when it comes round again - not yet done - stay as they are.)
+void Device::RtCompact(VkCommandBuffer cmd)
+{
+    RtState* s = m_rt;
+    bool copied = false;
+    for (auto it = s->compacting.begin(); it != s->compacting.end(); ++it) {
+        if (it->tag > m_completed)
+            continue;
+        auto m = s->meshes.find(it->mesh);
+        uint64_t size = 0;
+        if (m == s->meshes.end() || m->second.as != it->as || m->second.compacted ||
+            vkGetQueryPoolResults(m_device, s->compactPool[it->slot], it->query, 1, sizeof(size), &size, sizeof(size),
+                                  VK_QUERY_RESULT_64_BIT) != VK_SUCCESS ||
+            !size || size >= m->second.storage.size)
+            continue;
+        RtState::Mesh& mesh = m->second;
+        RtBuffer storage;
+        if (!MakeBuffer(m_allocator, m_device, &storage, size, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false))
+            continue;
+        VkAccelerationStructureCreateInfoKHR ci{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+        ci.buffer = storage.buffer;
+        ci.size = size;
+        ci.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        VkAccelerationStructureKHR as = VK_NULL_HANDLE;
+        if (vkCreateAccelerationStructureKHR(m_device, &ci, nullptr, &as) != VK_SUCCESS) {
+            vmaDestroyBuffer(m_allocator, storage.buffer, storage.allocation);
+            continue;
+        }
+        VkCopyAccelerationStructureInfoKHR copy{VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR};
+        copy.src = mesh.as;
+        copy.dst = as;
+        copy.mode = VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+        vkCmdCopyAccelerationStructureKHR(cmd, &copy);
+        copied = true;
+        s->dead.push_back({DeathTag(), mesh.as, mesh.storage});
+        s->compactBefore += mesh.storage.size;
+        s->compactAfter += size;
+        if (mesh.built) s->meshBytes += size - mesh.storage.size;
+        mesh.as = as;
+        mesh.storage = storage;
+        VkAccelerationStructureDeviceAddressInfoKHR ai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+        ai.accelerationStructure = as;
+        mesh.address = vkGetAccelerationStructureDeviceAddressKHR(m_device, &ai);
+        mesh.compacted = true;
+    }
+    // (Read, or not to be: gone. This slot's unread ones go too - its pool is asked again this frame.)
+    s->compacting.erase(std::remove_if(s->compacting.begin(), s->compacting.end(), [&](const RtState::Compacting& c) {
+                            return c.tag <= m_completed || c.slot == m_frameIndex;
+                        }),
+                        s->compacting.end());
+    if (copied)
+        Barrier(cmd, kBuild, VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, kBuild, kAsRW);
+}
+
 // This frame's new meshes built (within the budget) and the TLAS of the instances near the camera, in `cmd` - before
 // any ray query of the frame. False: nothing to trace (no state, no camera, or it couldn't be made).
 bool Device::RtUpdate(VkCommandBuffer cmd)
@@ -635,6 +707,8 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
             VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
             kBuild, kAsRW | VK_ACCESS_2_SHADER_READ_BIT);
 
+    RtCompact(cmd);
+
     // The new meshes' BLAS, a budget of triangles at a time.
     std::vector<VkAccelerationStructureGeometryKHR> geoms;
     std::vector<VkAccelerationStructureBuildGeometryInfoKHR> infos;
@@ -673,7 +747,8 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         VkAccelerationStructureBuildGeometryInfoKHR& bi = infos[i];
         bi = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
         bi.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-        bi.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        bi.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                   VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
         bi.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
         bi.geometryCount = 1;
         bi.pGeometries = &g;
@@ -943,6 +1018,25 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
             ++s->builtMeshes;
         }
         Barrier(cmd, kBuild, VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, kBuild, kAsRW);
+        // Their compacted sizes, asked for (read once this frame is done: RtCompact).
+        VkQueryPool& pool = s->compactPool[m_frameIndex];
+        if (!pool) {
+            VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+            qi.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+            qi.queryCount = kCompactQueries;
+            if (vkCreateQueryPool(m_device, &qi, nullptr, &pool) != VK_SUCCESS) pool = VK_NULL_HANDLE;
+        }
+        const uint32_t asked = pool ? uint32_t(std::min<size_t>(building.size(), kCompactQueries)) : 0;
+        if (asked) {
+            std::vector<VkAccelerationStructureKHR> structures(asked);
+            for (uint32_t i = 0; i < asked; ++i) {
+                structures[i] = s->meshes[building[i]].as;
+                s->compacting.push_back({building[i], DeathTag(), structures[i], m_frameIndex, i});
+            }
+            vkCmdResetQueryPool(cmd, pool, 0, asked);
+            vkCmdWriteAccelerationStructuresPropertiesKHR(cmd, asked, structures.data(),
+                                                          VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, pool, 0);
+        }
     }
     ti.scratchData.deviceAddress = scratchBase;
     VkAccelerationStructureBuildRangeInfoKHR tr{count, 0, 0, 0};
@@ -954,9 +1048,10 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
     s->tlasFrame = m_frameNumber;
     if (m_frameNumber >= s->logFrame + 600) {
         s->logFrame = m_frameNumber;
-        Log("ray tracing: %u meshes built (%.1f MB, %llu triangles), %zu waiting; %zu instances, %u in the TLAS (%zu of "
-            "them characters' pieces, %zu drawn)",
-            s->builtMeshes, double(s->meshBytes) / 1048576.0, (unsigned long long)s->meshTriangles, s->toBuild.size(),
+        Log("ray tracing: %u meshes built (%.1f MB, %llu triangles; compacted %.1f MB into %.1f), %zu waiting; %zu "
+            "instances, %u in the TLAS (%zu of them characters' pieces, %zu drawn)",
+            s->builtMeshes, double(s->meshBytes) / 1048576.0, (unsigned long long)s->meshTriangles,
+            double(s->compactBefore) / 1048576.0, double(s->compactAfter) / 1048576.0, s->toBuild.size(),
             s->instances.size(), count, skinDrawn.size(), s->skinnedFrame == m_frameNumber ? s->skinnedDraws.size() : 0);
     }
     return true;

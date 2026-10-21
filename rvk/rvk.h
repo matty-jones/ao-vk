@@ -3317,6 +3317,7 @@ private:
     uint32_t RtShadowMaskBits();                 // FL.rtShadow.x: the mask's bindless image + 1 | sampler << 20
     void RtForgetSlot(VkBuffer buffer, VkDeviceSize offset);
     void RtSyncStatels();                        // the placed objects' pieces as meshes and instances
+    void RtCompact(VkCommandBuffer cmd);         // built BLAS copied into their compacted size
     bool RtUpdate(VkCommandBuffer cmd);          // this frame's BLAS builds and TLAS; false: none to trace
     void RenderRtDebug(VkCommandBuffer cmd);
     bool RenderRtAo(VkCommandBuffer cmd);
