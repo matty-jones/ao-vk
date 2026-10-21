@@ -1195,7 +1195,9 @@ bool Device::CreatePipelines(std::string* error)
     }
     if (tesc) vkDestroyShaderModule(m_device, tesc, nullptr);
     if (tese) vkDestroyShaderModule(m_device, tese, nullptr);
-    // A canopy's leaves (leaves.cpp): triangles through leaf.vert, cut out (both targets). Not fatal.
+    // A canopy's leaves (leaves.cpp): triangles through leaf.vert, cut out (both targets). Not fatal. Every pixel shaded
+    // (RVK_Vrs), as the other cut-out draws: their sprigs showed squares as the camera turned (user, 2026-10-21).
+    rateState.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
     VkShaderModule leafVert = VK_NULL_HANDLE;
     if (ok && module(kLeafVertSpirv, sizeof(kLeafVertSpirv), &leafVert)) {
         VkPipelineShaderStageCreateInfo lstages[2] = {stages[0], stages[1]};
