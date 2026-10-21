@@ -558,7 +558,9 @@ void Device::EndScene()
     m_sandFogValid = RenderSandFog(cmd);
     ProfileMark("sand fog");
     Transition(cmd, m_localFraction, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    bool ssr = SceneNormalsWanted() && RenderSssr(cmd);   // (RVK_SsrMode 1: AMD's; ours where they can't run)
+    // (RVK_SsrMode 1: AMD's; ours where they can't run. Only then: the scene's normals are made for AMD's GI and the
+    // traced AO too, and with them on AMD's reflections had taken over from ours.)
+    bool ssr = m_ssrMode >= 0.5f && SceneNormalsWanted() && RenderSssr(cmd);
     if (!ssr) {
         const bool traced = rays && RtReflectWanted() && RtReflectReady();   // (RVK_RtReflect: rays where ours miss)
         ssr = RenderSsr(cmd, traced);
