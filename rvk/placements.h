@@ -3,7 +3,9 @@
 // vertices and indices the static arena keeps (static_gpu.cpp), known by its arena slots; drawn at a place, it is an
 // instance there, kept while its slots live (casters behind the camera, which the game doesn't draw, still count). A
 // mesh drawn somewhere new each frame and nowhere else (a door, a lift) moved: its old instance goes, and after a few
-// moves it is left out.
+// moves it is left out. A new place is young until it has stood for a while: one that goes unseen before that (a
+// moving thing of a mesh placed several times - the same weapon on two characters, machinery turning) goes too, and a
+// mesh that keeps leaving places behind so is left out as well - else they pile up, a new one each frame.
 #pragma once
 
 #include "d3d7.h"
@@ -46,6 +48,9 @@ inline uint64_t PlaceKey(uint64_t mesh, const d3d::Matrix& world)
 class Placements {
 public:
     static constexpr uint32_t kMoves = 3;        // a mesh moved this often is left out
+    static constexpr uint64_t kStill = 30;       // frames a place is drawn over before it counts as standing
+    static constexpr uint64_t kGone = 4;         // frames a young place may go unseen
+    static constexpr uint32_t kLeftBehind = 8;   // young places of a mesh gone this often: it is left out
 
     // A draw of `mesh` at `place` in frame `frame`. False: leave it out (it keeps moving). *moved: the instance it
     // left (to delete), else 0.
@@ -66,18 +71,60 @@ public:
         }
         m.frame = frame;
         m.place = place;
+        if (!m_young.empty()) {
+            auto y = m_young.find(place);
+            if (y != m_young.end()) y->second.last = frame;
+        }
         return true;
     }
 
-    void Clear() { m_meshes.clear(); }
+    // An instance made for a place Note kept: young until it has stood kStill frames.
+    void Added(uint64_t mesh, uint64_t place, uint64_t frame) { m_young[place] = {mesh, frame, frame}; }
+
+    // Once a frame: gone(place) for each young place unseen for kGone frames (its instance to delete).
+    template <class F>
+    void Expire(uint64_t frame, F&& gone)
+    {
+        for (auto it = m_young.begin(); it != m_young.end();) {
+            const Young& y = it->second;
+            if (y.last >= y.first + kStill) {
+                it = m_young.erase(it);          // (it stands: kept as the others)
+            } else if (frame > y.last + kGone) {
+                Mesh& m = m_meshes[y.mesh];
+                if (++m.leftBehind >= kLeftBehind)
+                    m.moves = kMoves;
+                gone(it->first);
+                it = m_young.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    // Seen this frame or the last, or standing (a young place unseen since may have moved on: not traced meanwhile).
+    bool Current(uint64_t place, uint64_t frame) const
+    {
+        auto y = m_young.find(place);
+        return y == m_young.end() || y->second.last + 1 >= frame;
+    }
+
+    void Clear()
+    {
+        m_meshes.clear();
+        m_young.clear();
+    }
 
 private:
     struct Mesh {
         uint64_t frame = 0, place = 0;
         bool many = false;
-        uint32_t moves = 0;
+        uint32_t moves = 0, leftBehind = 0;
     };
     std::unordered_map<uint64_t, Mesh> m_meshes;
+    struct Young {
+        uint64_t mesh, first, last;
+    };
+    std::unordered_map<uint64_t, Young> m_young;
 };
 
 }  // namespace rvk

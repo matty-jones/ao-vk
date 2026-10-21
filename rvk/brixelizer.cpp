@@ -289,6 +289,7 @@ void Device::BrixNoteDraw(uint32_t primitive, uint32_t fvf, const void* vertices
     s->bySlot.emplace(inst.indexSlot, key);
     s->pending.push_back(d);
     s->pendingKeys.push_back(key);
+    s->placements.Added(mesh, key, m_frameNumber);
 }
 
 // An arena slot freed (ArenaFree): the instances reading it go.
@@ -434,7 +435,24 @@ bool Device::RenderBrixGi(VkCommandBuffer cmd)
     if (!RenderSceneSurface(cmd) || !RenderSceneMotion(cmd) || !RenderSceneEnv(cmd))
         return false;
 
-    // The instances noted since the last frame made.
+    // Young places gone unseen (placements.h: moving things of a mesh placed several times) go, then the instances
+    // noted since the last frame are made.
+    s->placements.Expire(m_frameNumber, [&](uint64_t key) {
+        auto inst = s->instances.find(key);
+        if (inst == s->instances.end())
+            return;
+        if (inst->second.id != FFX_BRIXELIZER_INVALID_ID) {
+            ffxBrixelizerDeleteInstances(&s->context, &inst->second.id, 1);
+        } else {
+            for (size_t i = 0; i < s->pendingKeys.size(); ++i)
+                if (s->pendingKeys[i] == key) {
+                    s->pendingKeys.erase(s->pendingKeys.begin() + ptrdiff_t(i));
+                    s->pending.erase(s->pending.begin() + ptrdiff_t(i));
+                    break;
+                }
+        }
+        s->instances.erase(inst);                // (its bySlot entries find nothing later)
+    });
     if (!s->pending.empty()) {
         std::vector<FfxBrixelizerInstanceID> ids(s->pending.size(), FFX_BRIXELIZER_INVALID_ID);
         for (size_t i = 0; i < s->pending.size(); ++i) s->pending[i].outInstanceID = &ids[i];

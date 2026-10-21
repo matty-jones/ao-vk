@@ -115,6 +115,14 @@ Built after (2026-10-21, all on `amd-fx`):
   the frame holds.
 - Found on the way: with AMD's GI or the traced AO on (their scene normals), AMD's SSSR had run in place of our
   reflections whatever RVK_SsrMode said (hdr.cpp; fixed).
+- Found in the game (2026-10-21, a frame dump after fps fell from 68 to 41 over a session): the instances piled up -
+  230,897, 48,000 of them in each frame's TLAS, the render thread 24 ms a frame against the GPU's 11.5. A mesh placed
+  several times (the same weapon on two characters, turning machinery) that moves made a new place each frame, and
+  `Placements` only caught the moves of a mesh placed once; Brixelizer had sat at its 65,535-instance limit, taking
+  nothing new. Now a new place is young until drawn over 30 frames; one unseen for 4 frames before that goes (and
+  isn't traced meanwhile), and a mesh that leaves 8 such places behind is left out. `--city-bench --city-movers 50`
+  (rvk_demo): 6,585 -> 28,379 instances over 1,200 frames before, 4,056 -> 4,338 after. The log's cpu ms line has
+  "ray tracing" now (RtUpdate).
 
 GPU time, the native ground at 960 x 960 (rvk_demo, the game open in the background - approximate; base 1.99 ms
 with our AO, GI and reflections): RVK_RtShadow +0.30 (trace and TLAS +0.15, scene +0.07, untraced layers +0.08);

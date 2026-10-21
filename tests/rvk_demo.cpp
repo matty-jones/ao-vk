@@ -2324,6 +2324,8 @@ bool g_cityNoGrass = false;       // --city-no-grass: without the ground grass (
 bool g_cityNoCull = false;        // --city-no-cull: every object drawn every frame (the game draws what is in view)
 std::string g_cityStatels;        // --city-statels PACK: playfield 790's placed objects (their shadows), the scene moved
                                   // to West Bank's city (1380, 0, 2950) where they stand
+int g_cityMovers = 0;             // --city-movers N: the first N objects sway to and fro a little each frame (moving
+                                  // pieces of meshes placed many times: placements.h's young places)
 int g_cityLamps = 0;              // --city-lamps N: N lamps more (a lamp-lit outpost has ~90), set each frame as the game
                                   // sets lights, and handed over as its scene lights: on a jittered grid, 3 to 6 units
                                   // up, ranges 12-28 (the frame lights' per-pixel cost, docs/render-perf-plan.md)
@@ -2762,7 +2764,13 @@ void RunCityBench(D& dev, int frames, const std::string& shot, const std::string
                 ++draws;
             }
         };
-        for (const Object& o : objects) if (inView(o)) drawObject(o);
+        for (size_t i = 0; i < objects.size(); ++i) {
+            if (!inView(objects[i])) continue;
+            if (int(i) >= g_cityMovers) { drawObject(objects[i]); continue; }
+            Object o = objects[i];
+            o.x += 1.5f * std::sin(float(frame) * 0.05f + float(i));
+            drawObject(o);
+        }
         for (const Object& o : panes) if (inView(o)) drawObject(o);
         dev.SetRenderState(RS_ZWRITEENABLE, 1);
         dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
@@ -3980,8 +3988,10 @@ Matrix Offset()
 // Mode 2 (the default here: the demo draws none of them to confirm the placement), 0 for the scene without them.
 // --statel-skinned: a "character" skinned on the GPU (DrawSkinned, as the game's) walking round the cube - an 8-sided
 // column on one bone, the bone moved each frame (a new job each frame, as the game makes them).
+// --statel-movers: the cube twice more through a world matrix, one standing and one circling - one mesh at two places
+// a frame, one of them new each frame (the ray tracing's and Brixelizer's instances must not pile up: placements.h).
 std::string g_statelPack;
-bool g_statelSkinned = false;
+bool g_statelSkinned = false, g_statelMovers = false;
 uint32_t g_statelPlayfield = 0, g_statelMode = 2;
 float g_statelAt[3] = {};
 
@@ -4058,6 +4068,19 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
         dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
         dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cube.data(), uint32_t(cube.size()), cubeIdx.data(),
                                  uint32_t(cubeIdx.size()));
+        if (g_statelMovers) {
+            const float t = float(frame) * 2.0f * kPi / 300.0f;
+            const float at[2][2] = {{8.0f, 4.0f}, {4.0f * std::cos(t), 4.0f * std::sin(t)}};
+            for (const auto& a : at) {
+                Matrix w = Identity();
+                w.m[3][0] = a[0];
+                w.m[3][2] = a[1];
+                dev.SetTransform(World, w);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cube.data(), uint32_t(cube.size()), cubeIdx.data(),
+                                         uint32_t(cubeIdx.size()));
+            }
+            dev.SetTransform(World, Identity());
+        }
         if constexpr (requires { dev.DrawSkinned(0u, 0u, std::declval<rvk::skin::Job&>(), 0u, 0u, nullptr, 0u); }) {
             if (g_statelSkinned) {               // the column walking round the cube, a turn in 240 frames
                 const float t = float(frame) * 2.0f * kPi / 240.0f;
@@ -4766,6 +4789,7 @@ int main(int argc, char** argv)
         }
         else if (a == "--statel-mode" && i + 1 < argc) g_statelMode = uint32_t(std::atoi(argv[++i]));
         else if (a == "--statel-skinned") g_statelSkinned = true;
+        else if (a == "--statel-movers") g_statelMovers = true;
         else if (a == "--point-shadow-test") pointShadowTest = true;
         else if (a == "--world-offset" && i + 3 < argc) { for (int k = 0; k < 3; ++k) g_off[k] = float(std::atof(argv[++i])); }
         else if (a == "--point-shadow-slab") g_slabTest = pointShadowTest = pointShadowSun = shadows = true;
@@ -4805,6 +4829,7 @@ int main(int argc, char** argv)
         else if (a == "--city-bench") { cityBench = true; hdr = shadows = g_grassFieldOn = true; }
         else if (a == "--city-warm" && i + 1 < argc) g_cityWarm = std::atoi(argv[++i]);
         else if (a == "--city-lamps" && i + 1 < argc) g_cityLamps = std::atoi(argv[++i]);
+        else if (a == "--city-movers" && i + 1 < argc) g_cityMovers = std::atoi(argv[++i]);
         else if (a == "--city-no-grass") g_cityNoGrass = true;
         else if (a == "--city-no-cull") g_cityNoCull = true;
         else if (a == "--city-statels" && i + 1 < argc) g_cityStatels = argv[++i];
@@ -5318,6 +5343,7 @@ int main(int argc, char** argv)
         tdev.SetShadows(shadows);
         tdev.SetHdr(hdr);
         tdev.SetBloom(bloom, 1.0f);
+        for (const auto& [k, value] : knobs) tdev.SetKnob(k, value);
         // (Only as asked: the bench's baselines were made without.)
         if (lightOverride) {
             tdev.SetLightOverride(true);

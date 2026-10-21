@@ -148,6 +148,7 @@ struct Device::RtState {
         Texture* texture;                        // a cut-out's: its alpha tested at the rays' hits (null: solid)
         float alphaRef;                          // ... kept where over this (0..1)
         uint32_t uvOffset;                       // ... its texture coordinates' place in a vertex
+        uint64_t seen;                           // the frame it was last drawn (a placed object's: always)
     };
     std::unordered_map<uint64_t, Instance> instances;
     std::unordered_multimap<uint64_t, uint64_t> bySlot;   // SlotKey -> mesh
@@ -303,8 +304,10 @@ uint64_t Device::RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t s
         s->instances.erase(moved);               // (its mesh's list finds nothing for it later)
     if (!keep)
         return 0;
-    if (s->instances.count(place))
+    if (auto i = s->instances.find(place); i != s->instances.end()) {
+        i->second.seen = m_frameNumber;
         return place;
+    }
     auto it = s->meshes.find(mesh);
     if (it == s->meshes.end()) {
         auto address = [&](VkBuffer b) {
@@ -362,7 +365,9 @@ uint64_t Device::RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t s
     inst.texture = cutout;
     inst.alphaRef = alphaRef;
     inst.uvOffset = uvOffset;
+    inst.seen = m_frameNumber;
     s->instances[place] = inst;
+    s->placements.Added(mesh, place, m_frameNumber);
     it->second.places.push_back(place);
     if (cutout)
         s->byTexture.emplace(cutout, place);
@@ -541,6 +546,7 @@ void Device::RtSyncStatels()
         inst.texture = piece.texture;            // (its alpha mask: white, the mask in alpha)
         inst.alphaRef = piece.alphaRef <= 1.0f ? piece.alphaRef : piece.alphaRef / 255.0f;
         inst.uvOffset = 12;
+        inst.seen = ~0ull >> 1;
         const uint64_t place = RtStatelPlace(i);
         s->instances[place] = inst;
         if (piece.texture)
@@ -714,7 +720,22 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         return false;
     if (s->tlasFrame == m_frameNumber)
         return true;                             // (built already this frame: RenderRtShadow, at the pre-pass's end)
+    struct Timed {
+        Device* d;
+        double since;
+        ~Timed() { d->ProfileCpuAdd("ray tracing", since); }
+    } timed{this, ProfileCpu()};
     RtSyncStatels();
+    s->placements.Expire(m_frameNumber, [&](uint64_t place) {
+        auto i = s->instances.find(place);
+        if (i == s->instances.end())
+            return;
+        if (auto m = s->meshes.find(i->second.mesh); m != s->meshes.end()) {
+            auto& places = m->second.places;
+            places.erase(std::remove(places.begin(), places.end(), place), places.end());
+        }
+        s->instances.erase(i);
+    });
     {
         const auto& v = m_aoView.m;
         for (int k = 0; k < 3; ++k)
@@ -896,6 +917,8 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         return g.texture != 0;
     };
     for (const auto& [place, in] : s->instances) {
+        if (in.seen + 1 < m_frameNumber && !s->placements.Current(place, m_frameNumber))
+            continue;                            // (young and not drawn since: it may have moved on)
         const double dx = in.centre[0] - s->eye[0], dy = in.centre[1] - s->eye[1], dz = in.centre[2] - s->eye[2];
         const double reach = kRange + in.radius;
         if (dx * dx + dy * dy + dz * dz > reach * reach)
