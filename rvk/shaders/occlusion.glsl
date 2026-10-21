@@ -20,7 +20,9 @@ layout(push_constant) uniform Push {
     vec4 params;        // knee, exposure, bloom strength, bloom left on objects nearer than its light (-1: no depth)
     vec4 proj;          // D3D projection m[2][2], m[3][2] (view depth from the depth buffer), indirect light strength,
                         // volumetric light on (bit 1), reflections on (bit 2), ambient occlusion on (bit 4),
-                        // contact shadows on (bit 8), the depth is the scene's (bit 16)
+                        // contact shadows on (bit 8), the depth is the scene's (bit 16), the ambient occlusion at
+                        // full resolution (bit 32: AMD's, rvk cacao.cpp), the indirect light at full resolution
+                        // (bit 64: AMD's, rvk brixelizer.cpp)
     vec4 grade;         // saturation, contrast, warmth (-1 cool .. 1 warm), lookup table amount
     vec4 grade2;        // night (0 day .. 1 night), night tint, vignette, unused
     vec4 haze;          // the haze over the distant land (bit 16 only): rgb its colour, w how much (0: none)
@@ -98,14 +100,15 @@ vec4 SandFogAt()
 float Occlusion()
 {
     if (texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r >= 1.0) return 1.0;
-    return Upsample(ao, 1, 2.0).r;
+    return Upsample(ao, 1, (int(P.proj.w) & 32) != 0 ? 1.0 : 2.0).r;
 }
 
 // The light surfaces reflect from the lit scene around them (indirect light x their own colour); 0 when off.
 vec3 Indirect()
 {
     if (P.proj.z <= 0.0 || texelFetch(depthTex, ivec2(gl_FragCoord.xy), 0).r >= 1.0) return vec3(0.0);
-    return Upsample(gi, 3, 4.0).rgb * texelFetch(albedo, ivec2(gl_FragCoord.xy), 0).rgb * P.proj.z;
+    return Upsample(gi, 3, (int(P.proj.w) & 64) != 0 ? 1.0 : 4.0).rgb * texelFetch(albedo, ivec2(gl_FragCoord.xy), 0).rgb *
+           P.proj.z;
 }
 
 // What the scene's colour is multiplied by for ambient occlusion - which takes ambient light away, not the light

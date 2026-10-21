@@ -15,7 +15,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-327 settings, 159 of them in the settings window.
+337 settings, 164 of them in the settings window.
 
 ## Sections
 
@@ -29,8 +29,8 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Weather](#weather) (35)
 - [Smoke](#smoke) (12)
 - [Sky](#sky) (45)
-- [Shadows](#shadows) (16)
-- [Effects](#effects) (46)
+- [Shadows](#shadows) (17)
+- [Effects](#effects) (55)
 - [Tone mapping](#tone-mapping) (2)
 - [Anti-aliasing](#anti-aliasing) (6)
 - [Colour grading](#colour-grading) (10)
@@ -312,6 +312,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | Setting | What it does | Values | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `RVK_ShadowMem` | Shadows of things out of view: what stood in view and stands still keeps casting | on / off | on | ini only; switch `RVK_SunShadow` |
+| `RVK_RtShadow` | Sun shadows ray traced: soft, exact shadows of the static world (characters and plants: the shadow map as before; GPUs with ray tracing only) | on / off | off | window; switch `RVK_SunShadow`; knob |
 | `RVK_StaticShad` | Shadows of the playfield's placed objects from its own list - rocks, walls, trees, seen or not (ao-assets statels): 0 off, 1 once their placement is confirmed, 2 always | 0 .. 2 | 1 | ini only; switch `RVK_SunShadow` |
 | `RVK_SunShadow` | Sun shadows | on / off | on | window; game value off; was env `RANDYVK_SHADOWS` |
 | `RVK_SunRes` | Sun shadows: resolution | 1024 / 2048 / 4096 / 8192 | 2048 | window; switch `RVK_SunShadow` |
@@ -348,9 +349,11 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_AoOn` | Ambient occlusion | on / off | on | window |
 | `RVK_Ao` | Ambient occlusion: strength | 0.25 .. 3 | 1 | window; switch `RVK_AoOn`; game value 0; was env `RANDYVK_AO` |
 | `RVK_AoRadius` | Ambient occlusion: radius (world units) | 0.25 .. 4 | 1 | ini only; switch `RVK_AoOn`; was env `RANDYVK_AO_RADIUS` |
+| `RVK_AoMode` | Ambient occlusion: whose (0 = ours, 1 = AMD's FidelityFX CACAO, 2 = ray traced: GPUs with ray tracing only) | 0 / 1 / 2 | 0 | window; switch `RVK_AoOn`; knob |
 | `RVK_GiOn` | Indirect light (bounce light from the lit scene) | on / off | on | window |
 | `RVK_Gi` | Indirect light: strength | 0.25 .. 3 | 1 | window; switch `RVK_GiOn`; game value 0 |
 | `RVK_GiRadius` | Indirect light: reach (world units) | 1 .. 12 | 4 | ini only; switch `RVK_GiOn` |
+| `RVK_GiMode` | Indirect light: whose (0 = ours, 1 = AMD's FidelityFX Brixelizer GI) | 0 / 1 | 0 | window; switch `RVK_GiOn`; knob |
 | `RVK_VolOn` | Volumetric light (sun shafts) | on / off | on | window |
 | `RVK_Volume` | Volumetric light: strength | 0.25 .. 4 | 0.5 | window; switch `RVK_VolOn`; game value 0 |
 | `RVK_VolHaze` | Volumetric light: haze | 0.25 .. 4 | 0.5 | window; switch `RVK_VolOn` |
@@ -374,6 +377,13 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_SsrWater` | Reflections: water | 0 .. 1 | 0.25 | ini only; switch `RVK_SsrOn` |
 | `RVK_SsrGloss` | Reflections: glossy surfaces | 0 .. 1 | 0.3 | ini only; switch `RVK_SsrOn` |
 | `RVK_SsrWet` | Wet look of floors and ground (0 = dry) | 0 .. 1 | 0 | ini only; switch `RVK_SsrOn` |
+| `RVK_SsrMode` | Reflections: whose (0 = ours, 1 = AMD's FidelityFX SSSR: rough surfaces too, denoised) | 0 / 1 | 0 | window; switch `RVK_SsrOn`; knob |
+| `RVK_SssrThick` | Reflections, AMD's: how far behind a surface a ray's hit still counts (world units; more: fewer gaps, more smearing) | 0.05 .. 3 | 0.5 | ini only; switch `RVK_SsrOn`; knob |
+| `RVK_Vrs` | Variable rate shading: flat or fast-moving parts of the scene shaded in 2 x 2 blocks, for speed (AMD's FidelityFX VRS; needs a GPU with shading rate images) | 0 / 1 | 0 | window; knob |
+| `RVK_GiDebug` | Indirect light, AMD's: a view (0 = none, 1 = its distance field of the world, 2 = its light alone) | 0 / 1 / 2 | 0 | ini only; switch `RVK_GiOn`; knob |
+| `RVK_GiSky` | Indirect light, AMD's: the sky's light on rays that hit nothing (0 = bounce light only: the game's ambient is the sky's) | 0 .. 1 | 0 | ini only; switch `RVK_GiOn`; knob |
+| `RVK_RtDebug` | Ray tracing: a view of what its rays hit, coloured by object (0 = off, 1 = on; GPUs with ray tracing only) | 0 / 1 | 0 | ini only; knob |
+| `RVK_VrsCutoff` | Variable rate shading: how much a block's brightness may vary and still be shaded once (higher: more blocks, blurrier) | 0.01 .. 0.2 | 0.05 | ini only; switch `RVK_Vrs`; knob |
 | `RVK_MBlurOn` | Motion blur | on / off | off | window |
 | `RVK_MBlurObj` | Per-object (off = camera only) | on / off | on | window; switch `RVK_MBlurOn` |
 | `RVK_MBlur` | Motion blur: amount | 0.05 .. 2 | 0.15 | window; switch `RVK_MBlurOn`; game value 0; was env `RANDYVK_MOTION_BLUR` |

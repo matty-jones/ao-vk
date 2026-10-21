@@ -211,6 +211,7 @@ bool Device::CreateRainResources(std::string* error)
         VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        ci.flags = m_sceneRateFlag;   // (RVK_Vrs: drawn in the scene's rendering, vrs.cpp)
         ci.pNext = &rendering;
         ci.stageCount = 2;
         ci.pStages = stages;

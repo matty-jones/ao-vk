@@ -199,7 +199,10 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float fogBanks[4];             // fog banks (mist.cpp FogBankParams): their noise at the eye (x, z), how deep, how much
     float lightGrid[4];            // the frame lights' grid (Device::LightGridLights): its corner x, z, cells across, down
     float cond[4];                 // the world's conditions (rvk.h Conditions): x the clouds' night; y, z, w unused
-    float screen[4];               // x, y scene pixels per back-buffer pixel (RVK_RenderScale: the motion vectors); z, w unused
+    float screen[4];               // x, y scene pixels per back-buffer pixel (RVK_RenderScale: the motion vectors); z: 1 =
+                                   // every surface's normal into the motion vectors' zw (SceneNormalsWanted); w unused
+    float rtShadow[4];             // ray-traced sun shadows (raytrace.cpp): x the mask's bindless image + 1 | sampler
+                                   // << 20 (the float's bits; 0 none), y, z the world camera's projection m22, m32
     GpuLight lights[kFrameLights];
 };
 
@@ -232,6 +235,9 @@ void ImageBarrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
 d3d::Matrix Identity();
 d3d::Matrix MulMatrix(const d3d::Matrix& a, const d3d::Matrix& b);   // D3D order: v * a * b
 bool InvertMatrix(const d3d::Matrix& m, d3d::Matrix* out);
+// This frame's clip -> last frame's clip for a still world, in double (hdr.cpp).
+void CameraReprojection(const d3d::Matrix& view, const d3d::Matrix& proj, const d3d::Matrix& prevView,
+                        const d3d::Matrix& prevProj, d3d::Matrix* out);
 // A model-space box through a matrix: the world box around it (shadow.cpp).
 void TransformBounds(const float mn[3], const float mx[3], const d3d::Matrix& m, float outMin[3], float outMax[3]);
 VkPrimitiveTopology TopologyOf(uint32_t d3dPrimitive);

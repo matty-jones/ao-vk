@@ -5,6 +5,31 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+### New
+- AMD's reflections to try: `RVK_SsrMode 1` (Effects, under Reflections) swaps our screen-space reflections for
+  AMD's FidelityFX SSSR - glossy surfaces get blurred reflections instead of none, and they are denoised over frames.
+  Off by default (0: ours).
+- AMD's ambient occlusion to compare with ours: `RVK_AoMode 1` (Effects, under Ambient occlusion) uses FidelityFX
+  CACAO. `RVK_Ao` and `RVK_AoRadius` still set its strength and reach.
+- Ray-traced ambient occlusion on GPUs with ray tracing (NVIDIA RTX, AMD RX 6000 and later): `RVK_AoMode 2`. It sees
+  what the screen can't - the underside of a bridge, the inside of a doorway, walls behind the camera - and reaches
+  three times `RVK_AoRadius`. Buildings and the ground occlude; characters and plants don't yet.
+- Ray-traced sun shadows on GPUs with ray tracing: `RVK_RtShadow 1` (Shadows). Buildings, walls and rocks cast exact
+  shadows that are sharp where they touch the ground and soften with distance, with no shadow-map blockiness, and
+  every placed object of the playfield casts, seen or not. Characters, plants and cut-outs (fences, leaves) still
+  cast from the shadow map; grass, water and glass still take the map's shadows. Needs the sun's shadows and the
+  depth pre-pass on.
+- Variable rate shading: `RVK_Vrs 1` (Effects) shades flat and fast-moving parts of the scene in 2 x 2 blocks, for
+  more frames per second on GPUs that support it (AMD's FidelityFX VRS). `RVK_VrsCutoff` (ini) sets how readily.
+- AMD's indirect light to try: `RVK_GiMode 1` (Effects, under Indirect light) traces bounce light through a model of
+  the world's buildings and ground (FidelityFX Brixelizer GI), so light reflects off walls and slopes that are off
+  screen or hidden too. `RVK_Gi` still sets its strength. In randy-vk.ini, `RVK_GiDebug` 1 shows that model and 2 the
+  light alone; `RVK_GiSky` adds the sky's light to it.
+
+### Diagnostics
+- `RVK_RtDebug 1` (randy-vk.ini) shows what ray tracing sees on GPUs that have it: each building, rock and patch of
+  ground in its own colour (red: a surface seen from behind). The ray-traced effects are built on it.
+
 ## 0.7.0 - 2026-10-20
 
 ### New

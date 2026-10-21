@@ -49,6 +49,7 @@ bool Device::CreatePrepassPipeline(VkShaderModule vert, VkShaderModule leafVert)
     VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
     rendering.depthAttachmentFormat = kDepthFormat;   // depth only: no colour attachments, no fragment shader
     VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    ci.flags = m_sceneRateFlag;   // (RVK_Vrs: drawn in the scene's rendering, vrs.cpp)
     ci.pNext = &rendering;
     ci.stageCount = 1;
     ci.pStages = &stage;
@@ -337,6 +338,8 @@ void Device::PrepassEnd(uint32_t cause)
                  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, tests, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, tests,
                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     vkEndCommandBuffer(cmd);
+    if (RtShadowWanted())
+        RenderRtShadow(cause);                   // (raytrace.cpp: the sun's mask from this depth, before mainB)
 }
 
 // One draw's depth into the pre-pass: the same vertex shader, record, geometry and descriptors as its main draw.
@@ -542,7 +545,7 @@ void Device::FlushPrepassGroup()
 
 // What a submission of this frame slot runs after its uploads: the main commands, or, split, mainA, the pre-pass and
 // mainB. The current main command buffer must already be ended; an armed pre-pass is ended here.
-uint32_t Device::FrameCommands(Frame& f, VkCommandBuffer out[4])
+uint32_t Device::FrameCommands(Frame& f, VkCommandBuffer out[5])
 {
     PrepassEnd(kEndFlush);
     if (!f.split) {
@@ -554,6 +557,8 @@ uint32_t Device::FrameCommands(Frame& f, VkCommandBuffer out[4])
     out[n++] = f.prepass;
     if (f.cloudsRecorded)
         out[n++] = f.clouds;                     // (clouds.cpp: after the pre-pass's depth, before the scene's draws)
+    if (f.raysRecorded)
+        out[n++] = f.rays;                       // (raytrace.cpp: the sun's mask from the pre-pass's depth)
     out[n++] = f.mainB;
     return n;
 }
@@ -563,6 +568,7 @@ uint32_t Device::FrameCommands(Frame& f, VkCommandBuffer out[4])
 void Device::FrameCommandsSubmitted(Frame& f)
 {
     f.cloudsRecorded = false;
+    f.raysRecorded = false;
     if (!f.split)
         return;
     std::swap(f.mainA, f.mainB);

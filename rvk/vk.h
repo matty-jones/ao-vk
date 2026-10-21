@@ -136,6 +136,13 @@
     X(vkCmdDrawIndexedIndirect) \
     X(vkCmdDrawIndirect) \
     X(vkCmdDispatch) \
+    /* ray queries (raytrace.cpp; null where the GPU has none) */ \
+    X(vkGetBufferDeviceAddress) \
+    X(vkCreateAccelerationStructureKHR) \
+    X(vkDestroyAccelerationStructureKHR) \
+    X(vkGetAccelerationStructureBuildSizesKHR) \
+    X(vkGetAccelerationStructureDeviceAddressKHR) \
+    X(vkCmdBuildAccelerationStructuresKHR) \
     X(vkCmdFillBuffer) \
     X(vkCmdCopyBufferToImage) \
     X(vkCmdCopyBuffer) \

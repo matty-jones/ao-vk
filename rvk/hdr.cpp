@@ -80,6 +80,21 @@ const uint32_t kTaaSpirv[] = {
 const uint32_t kDepthUpSpirv[] = {
 #include "depth_up.frag.inc"
 };
+const uint32_t kCacaoPackSpirv[] = {
+#include "cacao_pack.frag.inc"
+};
+const uint32_t kBrixPackSpirv[] = {
+#include "brix_pack.frag.inc"
+};
+const uint32_t kSssrEnvSpirv[] = {
+#include "sssr_env.frag.inc"
+};
+const uint32_t kGbufferSpirv[] = {
+#include "gbuffer.frag.inc"
+};
+const uint32_t kSssrResolveSpirv[] = {
+#include "sssr_resolve.frag.inc"
+};
 const uint32_t kMotionFillSpirv[] = {
 #include "motion_fill.frag.inc"
 };
@@ -319,6 +334,13 @@ bool Device::CreateHdrResources(std::string* error)
               fullscreen(kSandFogSpirv, sizeof(kSandFogSpirv), hdrFormat, false, m_volumeLayout, &m_sandFogPipeline) &&
               fullscreen(kSandFogBlurSpirv, sizeof(kSandFogBlurSpirv), hdrFormat, false, m_bloomLayout, &m_sandFogBlurPipeline) &&
               fullscreen(kSsrSpirv, sizeof(kSsrSpirv), hdrFormat, false, m_bloomLayout, &m_ssrPipeline) &&
+              fullscreen(kGbufferSpirv, sizeof(kGbufferSpirv), hdrFormat, false, m_bloomLayout, &m_gbufferPipeline) &&
+              fullscreen(kSssrEnvSpirv, sizeof(kSssrEnvSpirv), hdrFormat, false, m_bloomLayout, &m_sssrEnvPipeline) &&
+              fullscreen(kCacaoPackSpirv, sizeof(kCacaoPackSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
+                         &m_cacaoPackPipeline) &&
+              fullscreen(kBrixPackSpirv, sizeof(kBrixPackSpirv), hdrFormat, false, m_bloomLayout, &m_brixPackPipeline) &&
+              fullscreen(kSssrResolveSpirv, sizeof(kSssrResolveSpirv), hdrFormat, false, m_bloomLayout,
+                         &m_sssrResolvePipeline) &&
               fullscreen(kContactSpirv, sizeof(kContactSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_contactPipeline) &&
               fullscreen(kTaaSpirv, sizeof(kTaaSpirv), hdrFormat, false, m_bloomLayout, &m_taaPipeline) &&
@@ -387,6 +409,13 @@ void Device::DestroyHdrResources()
     if (m_taaOut) { DestroyTextureNow(m_taaOut); m_taaOut = nullptr; }
     DestroyFsr2();
     DestroyFsr3();
+    DestroySssr();
+    DestroyCacao();
+    DestroyVrs();
+    DestroyBrix();
+    DestroyRt();
+    DestroySceneSurfaces();
+    if (m_brixGi) { DestroyTextureNow(m_brixGi); m_brixGi = nullptr; }
     if (m_uiLayer) { DestroyTextureNow(m_uiLayer); m_uiLayer = nullptr; }
     if (m_fgLabels) { DestroyTextureNow(m_fgLabels); m_fgLabels = nullptr; }
     if (m_fgOverlay) { DestroyTextureNow(m_fgOverlay); m_fgOverlay = nullptr; }
@@ -400,6 +429,7 @@ void Device::DestroyHdrResources()
     for (VkPipeline* p : {&m_bloomDown, &m_bloomUp, &m_aoPipeline, &m_aoBlurPipeline, &m_giPipeline, &m_giBlurPipeline,
                           &m_envAccumPipeline, &m_envFilterPipeline, &m_atmosTransPipeline, &m_atmosMultiPipeline,
                           &m_atmosViewPipeline, &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
+                          &m_gbufferPipeline, &m_sssrResolvePipeline, &m_cacaoPackPipeline, &m_sssrEnvPipeline, &m_brixPackPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
                           &m_uiOverlayPipeline,
                           &m_motionPipeline,
@@ -504,10 +534,21 @@ void Device::EndScene()
     if (bloom)
         RenderBloom(cmd);
     ProfileMark("bloom");
-    bool ao = RenderAo(cmd);
+    if (m_rt && !RtWanted())
+        DestroyRt();
+    const bool rays = RtWanted() && RtUpdate(cmd);   // (the ray tracing's structures, for the passes after)
+    ProfileMark("ray tracing");
+    // RVK_AoMode: 1 AMD's, 2 ray traced (ours where they can't run).
+    m_aoFull = m_aoMode >= 1.5f ? rays && RenderRtAo(cmd) : m_aoMode >= 0.5f && RenderCacao(cmd);
+    bool ao = m_aoFull || RenderAo(cmd);
     ProfileMark("ao");
-    bool gi = RenderGi(cmd);
+    if (m_brix && !BrixWanted())
+        DestroyBrix();                           // (RVK_GiMode back to 0: its field's memory goes)
+    m_giFull = BrixWanted() && RenderBrixGi(cmd);   // (RVK_GiMode 1: AMD's; ours where it can't run)
+    bool gi = m_giFull || RenderGi(cmd);
     ProfileMark("gi");
+    if (rays && m_rtDebug >= 0.5f)
+        RenderRtDebug(cmd);                      // (RVK_RtDebug: over the scene)
     RenderEnvProbe(cmd);
     ProfileMark("environment probe");
     bool volume = RenderVolume(cmd);
@@ -515,7 +556,8 @@ void Device::EndScene()
     m_sandFogValid = RenderSandFog(cmd);
     ProfileMark("sand fog");
     Transition(cmd, m_localFraction, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    bool ssr = RenderSsr(cmd);
+    bool ssr = SceneNormalsWanted() && RenderSssr(cmd);   // (RVK_SsrMode 1: AMD's; ours where they can't run)
+    if (!ssr) ssr = RenderSsr(cmd);
     ProfileMark("reflections");
     bool contact = RenderContactShadows(cmd);
     ProfileMark("contact shadows");
@@ -529,7 +571,8 @@ void Device::EndScene()
     float params[16] = {m_tonemapKnee, m_exposure * m_darkGain, bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
                         m_bloomDepth ? m_bloomOverNearer : -1.0f, m_aoProj.m[2][2], m_aoProj.m[3][2],
                         gi ? m_giStrength : 0.0f,
-                        float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0))};
+                        float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0) | (m_aoFull ? 32 : 0) |
+                              (gi && m_giFull ? 64 : 0))};
     GradingParams(params + 8);
     // Depth of field blurs the scene with its ambient occlusion, indirect and volumetric light applied; the tone
     // mapping then leaves them out.
@@ -711,8 +754,8 @@ void Device::TonemapInputsPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pip
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     Texture* glow = bloom ? m_bloomLevels[0] : m_scene;          // unread when the strength is 0
-    Texture* occlusion = ao ? m_aoTex[1] : m_scene;               // unread when off
-    Texture* indirect = gi ? m_giTex[1] : m_scene;                // unread when off
+    Texture* occlusion = ao ? (m_aoFull ? m_aoFullTex : m_aoTex[1]) : m_scene;   // unread when off
+    Texture* indirect = gi ? (m_giFull ? m_brixGi : m_giTex[1]) : m_scene;                // unread when off
     Texture* scattered = volume ? m_volumeTex[1] : m_scene;       // unread when off
     Texture* reflections = m_ssrTex && (int(params[7]) & 2) ? m_ssrTex : m_scene;   // unread when off
     Texture* contact = (int(params[7]) & 8) ? m_contactTex[1] : m_scene;              // unread when off
@@ -1441,8 +1484,8 @@ bool Device::RenderContactShadows(VkCommandBuffer cmd)
 // holds the camera's world position (thousands of units), and a float inverse of view x projection is off by a
 // sub-pixel amount that differs with where the camera is - the TAA then resamples its history by it every frame and
 // the still image drifts and blurs. A camera that didn't change reprojects to exactly itself.
-static void CameraReprojection(const d3d::Matrix& view, const d3d::Matrix& proj, const d3d::Matrix& prevView,
-                               const d3d::Matrix& prevProj, d3d::Matrix* out)
+void detail::CameraReprojection(const d3d::Matrix& view, const d3d::Matrix& proj, const d3d::Matrix& prevView,
+                                const d3d::Matrix& prevProj, d3d::Matrix* out)
 {
     if (std::memcmp(&view, &prevView, sizeof(view)) == 0 && std::memcmp(&proj, &prevProj, sizeof(proj)) == 0) {
         *out = Identity();

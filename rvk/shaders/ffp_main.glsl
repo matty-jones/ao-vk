@@ -78,6 +78,16 @@ float gSunShare = 0.0;                          // how much of the colour is dir
 bool gPbrOn = false, gPbrBase = false;
 vec3 gPbrAlbedo = vec3(0.0), gPbrNormal = vec3(0.0, 0.0, 1.0), gPbrSpec = vec3(0.0);
 float gPbrAo = 1.0, gPbrRough = 1.0, gPbrMetal = 0.0;
+// The normal the surface was lit with per pixel (world space; its normal or bump map's detail in it), for the scene's
+// normals (outMotion.zw). Zero: not lit per pixel.
+vec3 gShadeNormal = vec3(0.0);
+
+// A unit normal as two numbers, octahedral (-1 .. 1): the scene's normals (outMotion.zw; ssr.frag, gbuffer.frag).
+vec2 OctNormal(vec3 n)
+{
+    vec2 o = n.xy / (abs(n.x) + abs(n.y) + abs(n.z));
+    return n.z < 0.0 ? (1.0 - abs(o.yx)) * vec2(o.x >= 0.0 ? 1.0 : -1.0, o.y >= 0.0 ? 1.0 : -1.0) : o;
+}
 
 #ifndef RVK_PREPASS_CUTOUT                       // (the pre-pass: depth only, no colour attachment)
 layout(location = 0) out vec4 outColor;
@@ -149,7 +159,9 @@ vec2 Vogel(int i, int n, float rotation)
 // the cascade's border (0 = centre, >= 1 = outside). Soft (FL.effects.z > 0): the penumbra grows with the distance
 // between the blocker and the receiver, as under a sun of some size - sharp where a trunk meets the ground, soft at
 // the far edge of a canopy's shadow (blocker search, then a filter that wide). Hard: 3x3 taps of 2x2 filtering.
-float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
+// (base: the map's first layer of the set read - 0 every caster, kUntracedLayer those the rays lack.)
+const int kUntracedLayer = 5;                    // rvk.h kUntracedLayer
+float CascadeVisibility(int c, int base, vec3 posW, vec3 n, float nl, out float edge)
 {
     if (nl >= 0.0)
         posW += n * FL.cascadeTexel[c] * (1.5 + 2.0 * (1.0 - nl));   // normal offset against self-shadowing
@@ -159,24 +171,25 @@ float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
     if (edge >= 1.0 || ndc.z <= 0.0 || ndc.z >= 1.0) { edge = 2.0; return 1.0; }
     vec2 uv = ndc.xy * 0.5 + 0.5;
     vec2 ts = 1.0 / vec2(textureSize(shadowMap, 0).xy);
+    float layer = float(c + base);
     float soft = FL.effects.z;
     if (soft <= 0.0) {
         float sum = 0.0;
         for (int y = -1; y <= 1; ++y)
             for (int x = -1; x <= 1; ++x)
-                sum += texture(shadowMap, vec4(uv + vec2(x, y) * ts, float(c), ndc.z));
+                sum += texture(shadowMap, vec4(uv + vec2(x, y) * ts, layer, ndc.z));
         return sum / 9.0;
     }
     float texel = FL.cascadeTexel[c];
     if ((C.flags.x & F_SHADOWCHEAP) != 0u)              // far foliage: one filtered tap
-        return texture(shadowMap, vec4(uv, float(c), ndc.z));
+        return texture(shadowMap, vec4(uv, layer, ndc.z));
     float rotation = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + FL.taa.z);
     // Far cascades (distance level of detail): a texel there is wider than most penumbrae, so a small fixed filter
     // instead of the blocker search and the wide one - a quarter of the taps.
     if (c >= 2) {
         float sum = 0.0;
         for (int i = 0; i < 4; ++i)
-            sum += texture(shadowMap, vec4(uv + Vogel(i, 4, rotation) * 1.5 * ts, float(c), ndc.z));
+            sum += texture(shadowMap, vec4(uv + Vogel(i, 4, rotation) * 1.5 * ts, layer, ndc.z));
         return sum / 4.0;
     }
     float k = 0.02 * soft;                       // penumbra width per world unit from blocker to receiver
@@ -187,7 +200,7 @@ float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
     const int kSearch = 5;                       // the centre plus four blockers (a thin shadow still hits the centre)
     for (int i = 0; i < kSearch; ++i) {
         vec2 o = i == kSearch - 1 ? vec2(0.0) : Vogel(i, kSearch - 1, rotation) * searchTexels * ts;
-        float d = texture(shadowDepths, vec3(uv + o, float(c))).r;
+        float d = texture(shadowDepths, vec3(uv + o, layer)).r;
         if (d < ndc.z) { blockerSum += d; blockers += 1.0; }
     }
     if (blockers == 0.0) return 1.0;
@@ -195,10 +208,10 @@ float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
     float distance = (ndc.z - blockerSum / blockers) * FL.cascadeDepth[c];
     float radius = clamp(distance * k / texel, 1.0, 24.0);
     if (radius < 2.0)                            // a sharp penumbra: the wide filter would only re-read the same texels
-        return texture(shadowMap, vec4(uv, float(c), ndc.z));
+        return texture(shadowMap, vec4(uv, layer, ndc.z));
     float sum = 0.0;
     for (int i = 0; i < 12; ++i)
-        sum += texture(shadowMap, vec4(uv + Vogel(i, 12, rotation) * radius * ts, float(c), ndc.z));
+        sum += texture(shadowMap, vec4(uv + Vogel(i, 12, rotation) * radius * ts, layer, ndc.z));
     return sum / 12.0;
 }
 
@@ -348,7 +361,22 @@ float FlatShade()
 
 int gShadowCascade = -1;                         // the cascade SunVisibilityCasters read (RVK_ShadowView)
 
-float SunVisibilityMap(vec3 posW, vec3 n, float nl);
+float SunVisibilityMap(vec3 posW, vec3 n, float nl, int base);
+
+#ifdef RVK_GLOW
+// The rays' sun visibility at this pixel (rvk raytrace.cpp, RVK_RtShadow: traced from the pre-pass's depth, before the
+// scene is shaded) - where this fragment is the surface they were traced from (its view depth the mask's); else -1.
+float RtShadowMask()
+{
+    uint bits = floatBitsToUint(FL.rtShadow.x);
+    if ((bits & 0xFFFFFu) == 0u)
+        return -1.0;
+    uint img = (bits & 0xFFFFFu) - 1u, smp = (bits >> 20) & 0xFFu;
+    vec2 m = texelFetch(sampler2D(texImages[img], bindlessSamplers[smp]), ivec2(gl_FragCoord.xy), 0).rg;
+    float z = FL.rtShadow.z / (gl_FragCoord.z - FL.rtShadow.y);
+    return abs(m.g - z) < 0.01 * z + 0.05 ? m.r : -1.0;
+}
+#endif
 
 // The native ground faced away from the sun is in its own shade (gGroundAway, taken with the terrain's shade in
 // TerrainShade), and the map's shadows are drawn there too, not left to the lightmap - the hour's bake is a 4-unit
@@ -368,15 +396,21 @@ float SunVisibilityCasters(vec3 posW, vec3 n)
         } else if (nl <= 0.0)
             return 1.0;                                    // faces away: the light equation handles it
     }
-    return SunVisibilityMap(posW, n, nl);
+#ifdef RVK_GLOW
+    // Ray traced (RVK_RtShadow): the rays' mask, times the map's casters they lack (characters, plants, cut-outs).
+    float traced = RtShadowMask();
+    if (traced >= 0.0)
+        return traced * SunVisibilityMap(posW, n, nl, kUntracedLayer);
+#endif
+    return SunVisibilityMap(posW, n, nl, 0);
 }
 
-float SunVisibilityMap(vec3 posW, vec3 n, float nl)
+float SunVisibilityMap(vec3 posW, vec3 n, float nl, int base)
 {
     int count = int(FL.shadowParams.z);
     for (int c = 0; c < count; ++c) {
         float edge;
-        float v = CascadeVisibility(c, posW, n, nl, edge);
+        float v = CascadeVisibility(c, base, posW, n, nl, edge);
         if (edge >= 1.0) continue;
         gShadowCascade = c;
         float blend = (C.flags.x & F_SHADOWCHEAP) != 0u ? 0.0 : smoothstep(0.8, 1.0, edge);
@@ -384,7 +418,7 @@ float SunVisibilityMap(vec3 posW, vec3 n, float nl)
         float next = 1.0;
         if (c + 1 < count) {
             float e2;
-            next = CascadeVisibility(c + 1, posW, n, nl, e2);
+            next = CascadeVisibility(c + 1, base, posW, n, nl, e2);
         }
         return mix(v, next, blend);
     }
@@ -815,6 +849,7 @@ void main()
                     gLightmapRelief = mix(1.0, gLightmapRelief, 0.3 + 0.7 * min(gCasterVisibility, gGroundAway));
             }
         }
+        if (len2 > 0.0) gShadeNormal = normalize(n);
         // PBR material: its maps, and the specular lobe the lights below use (lighting.glsl gPbr*). The ground's
         // lighting pass takes its chunk's base texture's material (MAT_BASE), read with the base's coordinates.
         gPbrOn = (D.mat.z & MAT_PBR) != 0u && FL.pbr2.y > 0.5 && (C.flags.x & F_SHADOWCHEAP) == 0u;
@@ -1244,13 +1279,18 @@ void main()
     vec2 now = vClip.xy / vClip.w, before = vPrevClip.xy / max(vPrevClip.w, 1e-6);
     outMotion = vec4(vPrevClip.w > 1e-6 ? (now - before) * 0.5 * C.viewport.zw * FL.screen.xy * vec2(1.0, -1.0) : vec2(0.0),
                      0.0, 1.0);   // (scene pixels: the game's viewport is in back-buffer pixels)
-    // PBR surfaces give the screen-space reflections their shading normal (view space, octahedral; w above 1.5 marks
-    // it): the depth buffer's normals are the triangles' own, which mirror faceted on curved low-poly meshes.
+    // PBR surfaces give the screen-space reflections their shading normal (view space, octahedral; w 2 .. 4 marks
+    // it): the depth buffer's normals are the triangles' own, which mirror faceted on curved low-poly meshes. Other
+    // surfaces with a normal give theirs too, for AMD's effects (w 6 .. 8; ssr.frag keeps the depth buffer's there):
+    // the per-pixel one, else the vertices'; facing the camera (two-sided leaves, the inside of a cloak).
     if (gPbrOn && reflectivity > 0.0) {
-        vec3 nv = normalize((C.view * vec4(gPbrNormal, 0.0)).xyz);
-        vec2 o = nv.xy / (abs(nv.x) + abs(nv.y) + abs(nv.z));
-        if (nv.z < 0.0) o = (1.0 - abs(o.yx)) * vec2(o.x >= 0.0 ? 1.0 : -1.0, o.y >= 0.0 ? 1.0 : -1.0);
-        outMotion.zw = vec2(o.x, o.y + 3.0);
+        outMotion.zw = OctNormal((C.view * vec4(gPbrNormal, 0.0)).xyz) + vec2(0.0, 3.0);
+    } else if (FL.screen.z > 0.5) {
+        vec3 n = dot(gShadeNormal, gShadeNormal) > 0.0 ? gShadeNormal : vNormalW.xyz;
+        if (dot(n, n) > 0.0) {
+            if (dot(n, C.eyePos.xyz - vPosW) < 0.0) n = -n;
+            outMotion.zw = OctNormal((C.view * vec4(n, 0.0)).xyz) + vec2(0.0, 7.0);
+        }
     }
     // Blended with this fragment's alpha like the colour (kept by multiplying and additive passes, see the blend state).
     // (Its alpha read by the indirect light only: the native ground's pebbles mark themselves 0.5 there - gi.frag.)

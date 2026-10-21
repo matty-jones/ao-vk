@@ -4677,6 +4677,7 @@ int main(int argc, char** argv)
     double fadeIn = 0.0;
     bool hdr = false;
     float bloom = 0.0f, effectGlow = 1.0f, ao = 0.0f, aoRadius = 1.5f, gi = 0.0f, giRadius = 4.0f, volume = 0.0f, volHaze = 1.0f, volShafts = 1.0f, ssr = 0.0f, ssrWet = 0.0f, bloomOcc = 0.15f, neonSat = 0.0f, bloomWide = 0.0f, sunSoft = 0.0f, leaf = 0.0f, nightGlow = 0.0f, contact = 0.0f, sway = 0.0f, bump = 0.0f, grassPush = 1.0f, plantDetail = 1.0f, foliageLod = 35.0f;
+    std::vector<std::pair<rvk::Knob, float>> knobs;   // --knob
     int sunRes = 4096, ptRes = 1024;
     float ptLight = 1.0f, tess = 0.0f;
     int tessLevel = 4;
@@ -5002,6 +5003,13 @@ int main(int argc, char** argv)
         else if (a == "--vol-shafts" && i + 1 < argc) volShafts = float(std::atof(argv[++i]));
         else if (a == "--ssr" && i + 1 < argc) { ssr = float(std::atof(argv[++i])); hdr = true; }
         else if (a == "--ssr-wet" && i + 1 < argc) ssrWet = float(std::atof(argv[++i]));
+        else if (a == "--knob" && i + 1 < argc) {   // RVK_Name=value: any plain setting (rvk.h RVK_*_KNOBS)
+            std::string kv = argv[++i];
+            size_t eq = kv.find('=');
+            int k = eq == std::string::npos ? -1 : rvk::KnobByName(kv.substr(0, eq).c_str());
+            if (k < 0) { std::fprintf(stderr, "--knob %s: not a knob\n", kv.c_str()); return 2; }
+            knobs.emplace_back(rvk::Knob(k), float(std::atof(kv.c_str() + eq + 1)));
+        }
         else if (a == "--bloom-occ" && i + 1 < argc) bloomOcc = float(std::atof(argv[++i]));
         else if (a == "--neon-sat" && i + 1 < argc) neonSat = float(std::atof(argv[++i]));
         else if (a == "--bloom-wide" && i + 1 < argc) bloomWide = float(std::atof(argv[++i]));
@@ -5158,6 +5166,7 @@ int main(int argc, char** argv)
     dev.SetKnob(rvk::Knob::Atmos, g_atmos);
     dev.SetTwilight(g_twilight, g_skyGlow);
     dev.SetKnob(rvk::Knob::DuskRays, g_duskRays);
+    for (const auto& [k, value] : knobs) dev.SetKnob(k, value);
     dev.SetProcSky(g_procSky, g_skyZoneHint, 1.0f);
     dev.SetSkyColours(g_skyColours);
     dev.SetNightSky(g_nightSky);

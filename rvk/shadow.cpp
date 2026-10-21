@@ -183,7 +183,7 @@ bool Device::CreateShadowMap(std::string* error)
     ci.format = kDepthFormat;
     ci.extent = {m_shadowSize, m_shadowSize, 1};
     ci.mipLevels = 1;
-    ci.arrayLayers = kShadowLayers;
+    ci.arrayLayers = m_shadowLayerCount;
     ci.samples = VK_SAMPLE_COUNT_1_BIT;
     ci.tiling = VK_IMAGE_TILING_OPTIMAL;
     ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -196,16 +196,17 @@ bool Device::CreateShadowMap(std::string* error)
     vi.image = m_shadowImage;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     vi.format = kDepthFormat;
-    vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, kShadowLayers};
+    vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, m_shadowLayerCount};
     if (!Check(vkCreateImageView(m_device, &vi, nullptr, &m_shadowView), "shadow map view", error))
         return false;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    for (uint32_t i = 0; i < kShadowLayers; ++i) {
+    for (uint32_t i = 0; i < m_shadowLayerCount; ++i) {
         vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, i, 1};
         if (!Check(vkCreateImageView(m_device, &vi, nullptr, &m_shadowLayerViews[i]), "shadow cascade view", error))
             return false;
     }
     m_shadowImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_shadowUntraced = false;
     return true;
 }
 
@@ -220,18 +221,21 @@ void Device::DestroyShadowMap()
     m_shadowImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
-// Shadow map sizes changed (SetShadowResolution): wait for the GPU, recreate the maps (cleared to lit when first
-// used). The sun's shadow is invalid until drawn again; the point lights' cubes are all redrawn.
+// Shadow map sizes changed (SetShadowResolution), or its layers (the untraced ones come and go with RVK_RtShadow):
+// wait for the GPU, recreate the maps (cleared to lit when first used). The sun's shadow is invalid until drawn again;
+// the point lights' cubes are all redrawn.
 void Device::ApplyShadowResolution()
 {
+    const uint32_t layers = RtShadowWanted() ? kShadowLayers : kShadowCascades + 1;
     if (m_shadowSizeWanted == m_shadowSize && m_pointShadowSizeWanted == m_pointShadowSize &&
-        m_cubeCountWanted == m_cubeCount)
+        m_cubeCountWanted == m_cubeCount && layers == m_shadowLayerCount)
         return;
     WaitIdle();
     std::string error;
-    if (m_shadowSizeWanted != m_shadowSize) {
+    if (m_shadowSizeWanted != m_shadowSize || layers != m_shadowLayerCount) {
         DestroyShadowMap();
         m_shadowSize = m_shadowSizeWanted;
+        m_shadowLayerCount = layers;
         if (!CreateShadowMap(&error))
             Log("rvk: sun shadow map %u: %s", m_shadowSize, error.c_str());
         m_shadowValid = false;
@@ -245,7 +249,8 @@ void Device::ApplyShadowResolution()
         for (PointShadowLight& l : m_pointShadowLights) l = {};
         m_pointShadowCount = 0;
     }
-    Log("rvk: shadow maps: sun %u, point lights %u x %u cubes", m_shadowSize, m_pointShadowSize, m_cubeCount);
+    Log("rvk: shadow maps: sun %u (%u layers), point lights %u x %u cubes", m_shadowSize, m_shadowLayerCount,
+        m_pointShadowSize, m_cubeCount);
 }
 
 bool Device::CreateShadowResources(std::string* error)
@@ -401,7 +406,7 @@ void Device::PrepareShadowMap(VkCommandBuffer cmd)
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
                  VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     VkClearDepthStencilValue clear{1.0f, 0};
-    VkImageSubresourceRange range{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, kShadowLayers};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, m_shadowLayerCount};
     vkCmdClearDepthStencilImage(cmd, m_shadowImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
     ImageBarrier(cmd, m_shadowImage, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -554,6 +559,7 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
     c.owner = m_drawOwner;
     c.kind = m_drawVisualKind;
     c.leafKey = m_drawLeaves ? m_drawLeafKey : 0;
+    c.rtPlace = m_drawRtPlace;
     m_casters.push_back(c);
     if (VisualKind(c.kind) == VisualKind::Static) {
         if (m_statelVerified[0] == 0 || m_statelVerified[1] == 0)
@@ -776,6 +782,7 @@ void Device::CacheCaster(uint64_t key, const ShadowCaster& c, const void* vertic
     e.alphaRef = c.alphaRef;
     e.kind = c.kind;
     e.leafKey = c.leafKey;
+    e.rtPlace = c.rtPlace;
     std::memcpy(e.plantSway, c.sway, sizeof(e.plantSway));
     e.lastSeen = m_frameNumber;
     e.lastSeenTime = m_frameClock;
@@ -1063,6 +1070,7 @@ void Device::CollectShadowItems()
         if (m_casterViews[i].count > m_casterViews[world].count) world = i;
     std::vector<uint64_t> staleKeys;
     std::vector<uint32_t> drawOf;                // per item: its draw number
+    const bool untraced = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();   // (the rays' casters marked)
     for (const ShadowCaster& c : m_casters) {
         if (c.view != world)
             continue;
@@ -1091,6 +1099,7 @@ void Device::CollectShadowItems()
         it.owner = c.owner;
         it.kind = c.kind;
         it.leafKey = c.leafKey;
+        it.traced = untraced && RtTraced(c.rtPlace);
         std::memcpy(it.sway, c.sway, sizeof(it.sway));
         it.cacheKey = c.key;
         m_shadowItems.push_back(it);
@@ -1123,6 +1132,7 @@ void Device::CollectShadowItems()
         it.group = ~0u;
         it.kind = e.kind;
         it.leafKey = e.leafKey;
+        it.traced = untraced && RtTraced(e.rtPlace);
         std::memcpy(it.sway, e.plantSway, sizeof(it.sway));
         it.cacheKey = key;
         if (!e.itemKey || e.itemKeyTexture != it.texture) {   // (made again when its texture went: solid now)
@@ -1485,6 +1495,7 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     const bool moon = !haveSun && !lowSun && MoonOn();
     const float* lightDir = haveSun || lowSun ? m_sunDir : m_moonDir;
     m_shadowValid = false;
+    m_shadowUntraced = false;
     m_shadowItemsCount = m_shadowStaticItems = m_shadowAnimatedItems = 0;
     m_shadowDrawn = m_shadowCulled = m_shadowStaticDrawn = m_shadowAnimatedDrawn = 0;
     m_shadowCollectMs = m_shadowCullMs = m_shadowDrawMs = 0.0;
@@ -1564,6 +1575,10 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     m_cachedCastersDrawn = 0;
     ++m_cascadeFrame;
     BindShadowRecords(cmd);
+    // RVK_RtShadow: each cascade again with only the casters the rays lack (kUntracedLayer + c), for the pixels the
+    // rays' mask covers - its shadows times theirs (the others take the whole map, as without).
+    const bool untraced = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();
+    std::vector<uint32_t> traceless;
     for (uint32_t c = 0; c < count; ++c) {
         // The two widest cascades take turns (their shadows are far away, a frame's lag doesn't show).
         bool alternate = count >= 3 && c >= count - 2;
@@ -1647,9 +1662,27 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
         }
         FlushShadowGroup(cmd);                   // the cascade's last batch (M4)
         DrawLeafShadows(cmd);                    // the canopies' leaves (leaves.cpp)
+        vkCmdEndRendering(cmd);
+        if (untraced) {
+            traceless.clear();
+            for (uint32_t i : m_cascadeVisible)
+                if (!m_shadowItems[i].traced) traceless.push_back(i);
+            depthAtt.imageView = m_shadowLayerViews[kUntracedLayer + c];
+            vkCmdBeginRendering(cmd, &ri);
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            vkCmdSetDepthBias(cmd, 2.0f * 600.0f / depth, 0.0f, 2.5f);
+            ShadowPassMatrix(cmd, lightViewProj);
+            ShadowBind untracedBind;
+            for (uint32_t i : traceless) DrawShadowItem(cmd, untracedBind, m_shadowItems[i]);
+            FlushShadowGroup(cmd);
+            std::swap(m_cascadeVisible, traceless);   // (the leaves: of these)
+            DrawLeafShadows(cmd);
+            std::swap(m_cascadeVisible, traceless);
+            vkCmdEndRendering(cmd);
+        }
         m_shadowDrawMs += ProfileCpu() - drawStart;
         ProfileCpuAdd("shadow draw", drawStart);
-        vkCmdEndRendering(cmd);
         m_cascadeViewProj[c] = lightViewProj;
         m_cascadeTexel[c] = texel;
         m_cascadeDepth[c] = 2.0f * depth;
@@ -1687,6 +1720,7 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     for (int i = 0; i < 3; ++i) m_shadowSunColor[i] = haveSun ? m_frameSunColor[i] : 0.0f;   // (the moon: FrameLights moon)
     m_shadowIsMoon = !haveSun;
     m_shadowValid = true;
+    m_shadowUntraced = untraced;
 }
 
 // After all shadow passes of the frame.

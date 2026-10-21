@@ -1,0 +1,35 @@
+#version 450
+// RVK_RtShadow (raytrace.cpp): the traced sun visibility (rt_shadow.comp) blurred one way - run across, then down.
+// Its reach follows the penumbra: as wide on the screen as the sun's disc makes it at the distance from the caster
+// (the pixel's mean hit distance), wider still while few frames are averaged; neighbours at another depth (another
+// surface) don't mix in.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D src;      // visibility, view depth, hit distance, frames
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D dst;
+layout(push_constant) uniform Push {
+    vec4 params;        // direction xy (pixels), z: pixels per world unit at view depth 1, w: the sun disc's radius
+} P;
+
+void main()
+{
+    ivec2 c = ivec2(gl_GlobalInvocationID.xy), size = textureSize(src, 0);
+    if (c.x >= size.x || c.y >= size.y) return;
+    vec4 centre = texelFetch(src, c, 0);
+    if (centre.g >= 1e5) {                       // the sky
+        imageStore(dst, c, centre);
+        return;
+    }
+    float radius = centre.b * P.params.w * P.params.z / max(centre.g, 1e-3);
+    radius = clamp(max(radius, centre.a < 4.0 ? 3.0 : 1.0), 1.0, 12.0);
+    float step = radius / 4.0;
+    float sum = centre.r, weight = 1.0;
+    for (int i = -4; i <= 4; ++i) {
+        if (i == 0) continue;
+        ivec2 q = clamp(c + ivec2(round(P.params.xy * (float(i) * step))), ivec2(0), size - 1);
+        vec4 s = texelFetch(src, q, 0);
+        float w = exp(-float(i * i) / 8.0) * exp(-abs(s.g - centre.g) * 16.0 / max(centre.g, 1e-3));
+        sum += s.r * w;
+        weight += w;
+    }
+    imageStore(dst, c, vec4(sum / weight, centre.gba));
+}

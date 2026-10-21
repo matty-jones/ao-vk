@@ -269,7 +269,17 @@ struct DeviceInfo {
     X(SunSize, m_sunSize, 0)                          /* the suns' size, x the game's sprites */ \
     X(SunBleed, m_sunBleed, 0)                        /* the suns' glow through thick cloud (0..1) */ \
     X(Contact, m_contact, C)                          /* contact shadows' strength */ \
-    X(Headroom, m_lightHeadroom, C|L)                 /* how bright local lights may make a surface (1..2) */
+    X(Headroom, m_lightHeadroom, C|L)                 /* how bright local lights may make a surface (1..2) */ \
+    X(SsrMode, m_ssrMode, 0)                          /* whose reflections: 0 ours, 1 AMD's (sssr.cpp) */ \
+    X(SssrThick, m_sssrThick, 0)                      /* ... how far behind the depth buffer a hit counts (units) */ \
+    X(AoMode, m_aoMode, 0)                            /* ambient occlusion: 0 ours, 1 AMD's (cacao.cpp), 2 traced */ \
+    X(Vrs, m_vrsMode, 0)                              /* variable rate shading of the scene (vrs.cpp; 0 off) */ \
+    X(VrsCutoff, m_vrsCutoff, 0)                      /* ... the luminance variance a coarser rate allows */ \
+    X(GiMode, m_giMode, 0)                            /* whose indirect light: 0 ours, 1 AMD's (brixelizer.cpp) */ \
+    X(GiDebug, m_giDebug, 0)                          /* ... a view: 1 its distance field, 2 its light alone */ \
+    X(GiSky, m_giSky, 0)                              /* ... the sky's light on rays that miss (0: bounce only) */ \
+    X(RtDebug, m_rtDebug, 0)                          /* ray tracing's view: 1 what its rays hit (raytrace.cpp) */ \
+    X(RtShadow, m_rtShadow, 0)                        /* the sun's shadows ray traced (raytrace.cpp; 0 off) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
@@ -1000,6 +1010,10 @@ private:
         // between the pre-pass and mainB - outside the scene's rendering, which goes on unbroken (its pre-pass too).
         VkCommandBuffer clouds = VK_NULL_HANDLE;
         bool cloudsRecorded = false;
+        // Ray-traced sun shadows (raytrace.cpp RenderRtShadow): recorded where the pre-pass ends, run after it (and
+        // the clouds), before mainB - whose draws read their mask.
+        VkCommandBuffer rays = VK_NULL_HANDLE;
+        bool raysRecorded = false;
         VkFence fence = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
         VkBuffer ring = VK_NULL_HANDLE;
@@ -1340,7 +1354,12 @@ private:
     static constexpr uint32_t kShadowCascades = 4;   // layers of the sun shadow map, each 3x the area of the last
     // ... and after them the ground grass's own (grass_shadow.vert; the nearest cascade's square): receivers weigh it
     // apart from the other casters' (a field shading itself in full would be far darker than its ground).
-    static constexpr uint32_t kGrassShadowLayer = kShadowCascades, kShadowLayers = kShadowCascades + 1;
+    // ... and, with ray-traced shadows (RVK_RtShadow), the cascades again holding only the casters the rays lack
+    // (characters, plants, cut-outs; m_shadowUntraced): what the traced pixels take with the rays' mask.
+    static constexpr uint32_t kGrassShadowLayer = kShadowCascades, kUntracedLayer = kShadowCascades + 1,
+                              kShadowLayers = 2 * kShadowCascades + 1;
+    uint32_t m_shadowLayerCount = kShadowCascades + 1;   // the map's layers now (the untraced ones only while wanted)
+    bool m_shadowUntraced = false;               // the map's untraced layers were drawn with it (the next frame's mask)
     static constexpr float kCasterCacheRange = 60.0f; // remembered casters: kept within 3x, forgotten beyond 4x - at least
     // As far as the sun's shadows reach (the widest cascade: its half width, and its centre ahead of the camera): a
     // caster further off than 180 units was never remembered, and its shadow on a cliff in view went when the camera
@@ -1364,6 +1383,7 @@ private:
         uint32_t owner;                          // the character it belongs to (SetDrawVisual), 0: unknown
         uint32_t kind;                           // VisualKind of the visual that drew it (m_drawVisualKind)
         uint64_t leafKey;                        // a canopy with leaves: its leaf set (m_leafSets), 0 = none
+        uint64_t rtPlace;                        // its instance in the ray tracing (raytrace.cpp RtTraced), 0 = none
     };
     // One caster as the shadow passes draw it: from this frame's ring or from the caster cache (own buffer).
     struct ShadowItem {
@@ -1383,6 +1403,7 @@ private:
         uint32_t owner;                          // ShadowCaster owner
         uint32_t kind;                           // ShadowCaster kind (VisualKind)
         uint64_t leafKey = 0;                    // ShadowCaster leafKey
+        bool traced = false;                     // the rays hold it (RtTraced): not in the untraced layers
         // Made at its first draw this frame and shared by every cascade and cube face it is drawn into (the pass's
         // light matrix is a push constant): its record (kNoShadowRecord: the arena was full) and its group key.
         uint32_t record = ~0u;
@@ -1761,6 +1782,7 @@ private:
         float plantSway[4];                      // a plant's wind sway (as ShadowCaster sway)
         uint32_t kind;                           // ShadowCaster kind (VisualKind)
         uint64_t leafKey;                        // ShadowCaster leafKey
+        uint64_t rtPlace;                        // ShadowCaster rtPlace
         uint64_t itemKey;                        // its shadow item's batch key (ShadowItemKey), 0: not yet
         Texture* itemKeyTexture;                 // ... made with this cut-out texture (null: solid)
     };
@@ -2020,7 +2042,7 @@ private:
                      VkDeviceSize vbOffset, VkDeviceSize ibOffset, VkBuffer vb, VkBuffer ib,
                      VkDeviceSize frameLightsOffset, VkBuffer prevBuffer, VkDeviceSize prevOffset, VkDeviceSize prevBytes,
                      VkBuffer smoothBuffer, VkDeviceSize smoothOffset, VkDeviceSize smoothBytes, uint32_t recordIndex, bool cutout);
-    uint32_t FrameCommands(Frame& f, VkCommandBuffer out[4]);   // what a submission runs (ends the pre-pass)
+    uint32_t FrameCommands(Frame& f, VkCommandBuffer out[5]);   // what a submission runs (ends the pre-pass)
     void FrameCommandsSubmitted(Frame& f);       // back to one main command buffer
     // Shared with ApplyDynamicState: the D3D viewport as Vulkan's (and its scissor), the FVF's vertex input.
     void ViewportState(VkViewport* vp, VkRect2D* scissor) const;
@@ -2174,6 +2196,7 @@ private:
     VkDeviceSize m_staticBytes = 0;              // on the GPU now
     VkBuffer m_drawStaticBuffer = VK_NULL_HANDLE;   // the current draw's vertices are in this buffer, at this offset
     VkDeviceSize m_drawStaticOffset = 0;
+    VkDeviceSize m_drawStaticSlot = 0;           // ... the start of its arena slot (Brixelizer: brixelizer.cpp)
     VkBuffer m_drawStaticIndexBuffer = VK_NULL_HANDLE;   // with m_drawStaticBuffer: its indices retained here, at
     VkDeviceSize m_drawStaticIndexOffset = 0;            // this offset (DrawSharedIndexed); else through the ring
     // A slot in the static arena (device memory, filled by uploads) or, `casters`, the caster arena (host memory).
@@ -3180,6 +3203,30 @@ private:
     void RenderObjectMotionBlur(VkCommandBuffer cmd, Texture* src, const float params[28]);
     float m_aoStrength = 1.0f, m_aoRadius = 1.5f;
     Texture* m_aoTex[2] = {};                    // half resolution: raw, blurred (ping-pong)
+    // RVK_AoMode 1 (cacao.cpp): AMD's AO (FidelityFX CACAO) in place of ours, into m_cacaoAo - full resolution,
+    // occlusion and view depth as m_aoTex[1] holds ours; ours where it can't run. docs/amd-fx-plan.md.
+    float m_aoMode = 0.0f;
+    struct CacaoState;
+    CacaoState* m_cacao = nullptr;
+    Texture* m_cacaoOut = nullptr;               // its output (storage)
+    Texture* m_cacaoAo = nullptr;
+    bool m_aoFull = false;                       // this frame's AO is full resolution, in m_aoFullTex
+    Texture* m_aoFullTex = nullptr;              // m_cacaoAo, or the ray-traced (RVK_AoMode 2, raytrace.cpp)
+    bool m_gatherExtended = false;               // (its shaders gather with offsets: shaderImageGatherExtended)
+    VkPipeline m_cacaoPackPipeline = VK_NULL_HANDLE;     // cacao_pack.frag
+    bool RenderCacao(VkCommandBuffer cmd);
+    void DestroyCacao();
+    // RVK_Vrs (vrs.cpp): variable rate shading - AMD's shading rate image (FidelityFX VRS) as the scene rendering's
+    // fragment shading rate attachment, taken by the scene shader's pipelines. m_sceneRateFlag: every pipeline is made
+    // for the attachment when the GPU has it (VK_KHR_fragment_shading_rate; 0 otherwise); m_vrsTexel its tile size.
+    float m_vrsMode = 0.0f, m_vrsCutoff = 0.05f;
+    VkPipelineCreateFlags m_sceneRateFlag = 0;
+    uint32_t m_vrsTexel = 16;
+    struct VrsState;
+    VrsState* m_vrs = nullptr;
+    bool RenderVrsImage(VkCommandBuffer cmd);
+    VkImageView VrsAttachment() const;
+    void DestroyVrs();
     VkPipeline m_aoPipeline = VK_NULL_HANDLE, m_aoBlurPipeline = VK_NULL_HANDLE;
     float m_giStrength = 1.0f, m_giRadius = 4.0f;
     Texture* m_albedo = nullptr;                 // fifth scene attachment: surface colour without lighting (fogged)
@@ -3217,6 +3264,74 @@ private:
     Texture* m_ssrTex = nullptr;                 // full resolution: reflected colour, how much it shows
     VkPipeline m_ssrPipeline = VK_NULL_HANDLE;
     bool RenderSsr(VkCommandBuffer cmd);
+    // RVK_SsrMode 1 (sssr.cpp): AMD's reflections (FidelityFX SSSR) in place of ours, into m_ssrTex as ours; ours
+    // where they can't run. docs/amd-fx-plan.md.
+    float m_ssrMode = 0.0f, m_sssrThick = 0.5f;
+    struct SssrState;
+    SssrState* m_sssr = nullptr;
+    Texture* m_sssrOut = nullptr;                // its output (storage)
+    VkPipeline m_sssrResolvePipeline = VK_NULL_HANDLE;   // sssr_resolve.frag
+    bool RenderSssr(VkCommandBuffer cmd);
+    void DestroySssr();
+    // RVK_GiMode 1 (brixelizer.cpp): AMD's indirect light (FidelityFX Brixelizer GI, traced through a distance field
+    // of the static world) in place of ours, into m_brixGi - full resolution, light and view depth as m_giTex[1]
+    // holds ours; ours where it can't run. RVK_GiDebug (ini): 1 the distance field, 2 its light alone.
+    float m_giMode = 0.0f, m_giDebug = 0.0f, m_giSky = 0.0f;
+    struct BrixState;
+    BrixState* m_brix = nullptr;
+    Texture* m_brixGi = nullptr;
+    bool m_giFull = false;                       // this frame's indirect light is m_brixGi
+    VkPipeline m_brixPackPipeline = VK_NULL_HANDLE;      // brix_pack.frag
+    bool BrixWanted() const { return m_giStrength > 0.0f && m_giMode >= 0.5f; }
+    void BrixNoteDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t stride, uint32_t vertexCount,
+                      VkBuffer ib, uint32_t indexCount);
+    void BrixForgetSlot(VkBuffer buffer, VkDeviceSize offset);
+    bool RenderBrixGi(VkCommandBuffer cmd);
+    void DestroyBrix();
+    // Ray queries (raytrace.cpp, docs/rt-plan.md): acceleration structures of the static world - a BLAS per mesh the
+    // static arena keeps, a TLAS of their places round the camera each frame - for rays from any shader. Only where
+    // the GPU has them (m_rayQuery); RVK_RtDebug 1 shows what the rays hit.
+    bool m_rayQuery = false;
+    VkDeviceSize m_asScratchAlign = 128;         // (the GPU's minAccelerationStructureScratchOffsetAlignment)
+    float m_rtDebug = 0.0f;
+    struct RtState;
+    RtState* m_rt = nullptr;
+    bool RtAoWanted() const { return m_rayQuery && m_aoStrength > 0.0f && m_aoMode >= 1.5f; }   // RVK_AoMode 2
+    // RVK_RtShadow 1: the sun's shadows ray traced where the pre-pass's depth is (raytrace.cpp RenderRtShadow).
+    float m_rtShadow = 0.0f;
+    bool RtShadowWanted() const { return m_rayQuery && m_rtShadow >= 0.5f && m_shadows && m_prepassOn; }
+    bool RtWanted() const { return m_rayQuery && (m_rtDebug >= 0.5f || RtAoWanted() || RtShadowWanted()); }
+    // (Its instance's key when the draw's place is kept - else 0.)
+    uint64_t RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t stride, uint32_t vertexCount, VkBuffer ib,
+                        uint32_t indexCount, bool ground);
+    uint64_t m_drawRtPlace = 0;                  // this draw's (RtNoteDraw), for its shadow caster
+    bool RtTraced(uint64_t place) const;         // that instance is in the rays (its BLAS built)
+    uint64_t RtStatelPlace(uint32_t item) const; // a placed object's piece's instance key (statels.cpp), 0 = none
+    void RenderRtShadow(uint32_t cause);         // at the pre-pass's end: the rays' sun mask (Frame::rays)
+    uint32_t RtShadowMaskBits();                 // FL.rtShadow.x: the mask's bindless image + 1 | sampler << 20
+    void RtForgetSlot(VkBuffer buffer, VkDeviceSize offset);
+    void RtSyncStatels();                        // the placed objects' pieces as meshes and instances
+    bool RtUpdate(VkCommandBuffer cmd);          // this frame's BLAS builds and TLAS; false: none to trace
+    void RenderRtDebug(VkCommandBuffer cmd);
+    bool RenderRtAo(VkCommandBuffer cmd);
+    void RtCollect();                            // (structures no submission in flight can still read)
+    void DestroyRt();
+    // The scene's surfaces for AMD's effects: every surface's normal written into the motion vectors' zw while one
+    // reads them (FL.screen.z), unpacked by gbuffer.frag into m_sceneSurface - world normal, roughness. Each of these
+    // is made once a frame, by the first effect that asks (sssr.cpp).
+    bool SceneNormalsWanted() const { return (m_ssr > 0.0f && m_ssrMode >= 0.5f) || BrixWanted() || RtAoWanted(); }
+    Texture* m_sceneSurface = nullptr;
+    VkPipeline m_gbufferPipeline = VK_NULL_HANDLE;       // gbuffer.frag
+    uint64_t m_sceneSurfaceFrame = ~0ull;
+    bool RenderSceneSurface(VkCommandBuffer cmd);
+    Texture* m_sceneMotion = nullptr;            // the motion vectors whole (motion_fill.frag), RG16F
+    uint64_t m_sceneMotionFrame = ~0ull;
+    bool RenderSceneMotion(VkCommandBuffer cmd);
+    Texture* m_sceneEnv = nullptr;               // the environment: the probe's atlas, the sky guessed where unseen
+    VkPipeline m_sssrEnvPipeline = VK_NULL_HANDLE;       // sssr_env.frag
+    uint64_t m_sceneEnvFrame = ~0ull;
+    bool RenderSceneEnv(VkCommandBuffer cmd);
+    void DestroySceneSurfaces();
     d3d::Matrix m_aoProj{};                      // the world camera's projection (first depth-writing 3D draw)
     d3d::Matrix m_aoView{};                      // ... and view
     float m_motionBlur = 0.0f, m_motionNear = 8.0f;

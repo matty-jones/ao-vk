@@ -33,7 +33,7 @@ find_program(GLSLC glslc HINTS "${VULKAN_SDK_DIR}/bin" REQUIRED)
 
 set(RVK_SHADER_OUT "${CMAKE_CURRENT_BINARY_DIR}/rvk-shaders")
 set(RVK_SHADER_INCS)
-foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag ffp_glow_nocut.frag prepass_cutout.frag shadow.vert shadow.frag fullscreen.vert tonemap.frag bloom_down.frag bloom_up.frag ao.frag ao_blur.frag gi.frag gi_blur.frag volume.frag volume_blur.frag sand_fog.frag sand_fog_blur.frag ssr.frag contact.frag taa.frag depth_up.frag motion_fill.frag reactive_mask.frag sharpen.frag fxaa.frag motion_blur.frag motion_tilemax.frag motion_neighbourmax.frag motion_object.frag dof_composite.frag dof_focus.frag dof_prefilter.frag dof_tiles.frag dof_gather.frag dof_final.frag ui_composite.frag grass.vert grass.frag grass_shadow.vert particles.comp skin.comp water.vert water.frag water_spray.vert water_spray.frag water_sim.comp rain.vert rain.frag splash.vert splash.frag bolt.vert bolt.frag debris.vert debris.frag smoke_sim.comp smoke.vert smoke.frag smoke_up.frag cloud.vert cloud.frag cloud_up.frag cloud_shadow.frag cloud_noise.comp cloud_layer_noise.comp cloud_weather.frag cloud_layer.frag cloud_resolve.frag sun.frag sky_glow.frag atmos_transmittance.frag atmos_multi.frag atmos_view.frag sun_vis.comp scene_luma.comp smoke_seen.comp terrain_sun.frag sand_prints.frag env_accum.frag env_filter.frag)
+foreach(shader ffp.vert ffp.tesc ffp.tese ffp.frag ffp_glow.frag ffp_nocut.frag ffp_glow_nocut.frag prepass_cutout.frag shadow.vert shadow.frag fullscreen.vert tonemap.frag bloom_down.frag bloom_up.frag ao.frag ao_blur.frag gi.frag gi_blur.frag volume.frag volume_blur.frag sand_fog.frag sand_fog_blur.frag ssr.frag gbuffer.frag sssr_resolve.frag sssr_env.frag cacao_pack.frag brix_pack.frag contact.frag taa.frag depth_up.frag motion_fill.frag reactive_mask.frag sharpen.frag fxaa.frag motion_blur.frag motion_tilemax.frag motion_neighbourmax.frag motion_object.frag dof_composite.frag dof_focus.frag dof_prefilter.frag dof_tiles.frag dof_gather.frag dof_final.frag ui_composite.frag grass.vert grass.frag grass_shadow.vert particles.comp skin.comp water.vert water.frag water_spray.vert water_spray.frag water_sim.comp rain.vert rain.frag splash.vert splash.frag bolt.vert bolt.frag debris.vert debris.frag smoke_sim.comp smoke.vert smoke.frag smoke_up.frag cloud.vert cloud.frag cloud_up.frag cloud_shadow.frag cloud_noise.comp cloud_layer_noise.comp cloud_weather.frag cloud_layer.frag cloud_resolve.frag sun.frag sky_glow.frag atmos_transmittance.frag atmos_multi.frag atmos_view.frag sun_vis.comp scene_luma.comp rt_debug.comp rt_ao.comp rt_shadow.comp rt_shadow_blur.comp smoke_seen.comp terrain_sun.frag sand_prints.frag env_accum.frag env_filter.frag)
     set(src "${CMAKE_CURRENT_SOURCE_DIR}/rvk/shaders/${shader}")
     set(out "${RVK_SHADER_OUT}/${shader}.inc")
     add_custom_command(OUTPUT "${out}"
@@ -127,7 +127,8 @@ set(FSR2_SOURCES third_party/fsr2/ffx_fsr2.cpp third_party/fsr2/ffx_assert.cpp t
 set_source_files_properties(${FSR2_SOURCES} PROPERTIES
     COMPILE_OPTIONS "-w;/FI${CMAKE_CURRENT_SOURCE_DIR}/rvk/fsr2_vk_shim.h")
 
-# FSR 3.1 (third_party/ffx-sdk: the FidelityFX SDK 1.1.4's FSR 3 parts, MIT; rvk/fsr3.cpp; docs/fsr3-plan.md): its
+# FSR 3.1 and the other effects (third_party/ffx-sdk: the FidelityFX SDK 1.1.4, MIT; rvk/fsr3.cpp; docs/fsr3-plan.md,
+# docs/amd-fx-plan.md): its
 # passes' permutation headers made by tools/gen_ffx_shaders.py (in place of AMD's Windows tool); built quietly, our
 # Vulkan loader's functions forced in, as FSR 2's.
 set(FFX_SDK "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffx-sdk")
@@ -144,6 +145,15 @@ set(FFX_SOURCES
     third_party/ffx-sdk/src/components/fsr3upscaler/ffx_fsr3upscaler.cpp
     third_party/ffx-sdk/src/components/frameinterpolation/ffx_frameinterpolation.cpp
     third_party/ffx-sdk/src/components/opticalflow/ffx_opticalflow.cpp
+    third_party/ffx-sdk/src/components/sssr/ffx_sssr.cpp
+    third_party/ffx-sdk/src/components/denoiser/ffx_denoiser.cpp
+    third_party/ffx-sdk/src/components/spd/ffx_spd.cpp
+    third_party/ffx-sdk/src/components/cacao/ffx_cacao.cpp
+    third_party/ffx-sdk/src/components/vrs/ffx_vrs.cpp
+    third_party/ffx-sdk/src/components/brixelizer/ffx_brixelizer.cpp
+    third_party/ffx-sdk/src/components/brixelizer/ffx_brixelizer_raw.cpp
+    third_party/ffx-sdk/src/components/brixelizergi/ffx_brixelizergi.cpp
+    third_party/ffx-sdk/src/components/parallelsort/ffx_parallelsort.cpp
     third_party/ffx-sdk/src/shared/ffx_assert.cpp
     third_party/ffx-sdk/src/shared/ffx_breadcrumbs_list.cpp
     third_party/ffx-sdk/src/shared/ffx_message.cpp
@@ -152,6 +162,14 @@ set(FFX_SOURCES
     third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_fsr3upscaler_shaderblobs.cpp
     third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_frameinterpolation_shaderblobs.cpp
     third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_opticalflow_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_sssr_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_denoiser_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_spd_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_cacao_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_vrs_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_brixelizer_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_brixelizergi_shaderblobs.cpp
+    third_party/ffx-sdk/src/backends/shared/blob_accessors/ffx_parallelsort_shaderblobs.cpp
     third_party/ffx-sdk/src/backends/vk/ffx_vk.cpp
     third_party/ffx-sdk/src/backends/vk/FrameInterpolationSwapchain/FrameInterpolationSwapchainVK.cpp
     third_party/ffx-sdk/src/backends/vk/FrameInterpolationSwapchain/FrameInterpolationSwapchainVK_DebugPacing.cpp
@@ -159,12 +177,12 @@ set(FFX_SOURCES
     third_party/ffx-sdk/src/backends/vk/FrameInterpolationSwapchain/FrameInterpolationSwapchainVK_UiComposition.cpp)
 set_source_files_properties(${FFX_SOURCES} PROPERTIES
     COMPILE_OPTIONS "-w;/FI${CMAKE_CURRENT_SOURCE_DIR}/rvk/ffx_vk_shim.h"
-    COMPILE_DEFINITIONS "FFX_FSR3UPSCALER;FFX_FI;FFX_OF;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS"
+    COMPILE_DEFINITIONS "FFX_FSR3UPSCALER;FFX_FI;FFX_OF;FFX_SSSR;FFX_DENOISER;FFX_SPD;FFX_CACAO;FFX_VRS;FFX_BRIXELIZER;FFX_BRIXELIZER_GI;FFX_PARALLEL_SORT;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS"
     INCLUDE_DIRECTORIES "${FFX_SDK}/include;${FFX_SDK}/src/shared;${FFX_SDK}/src/backends/shared;${FFX_SDK}/src/components;${FFX_HEADERS_DIR}"
     OBJECT_DEPENDS "${FFX_HEADERS_DIR}/ffx_shaders.stamp.h")
-set_source_files_properties(rvk/fsr3.cpp rvk/framegen.cpp PROPERTIES COMPILE_OPTIONS "/imsvc${FFX_SDK}/include")   # (its headers: AMD's warnings)
+set_source_files_properties(rvk/fsr3.cpp rvk/framegen.cpp rvk/sssr.cpp rvk/cacao.cpp rvk/vrs.cpp rvk/brixelizer.cpp PROPERTIES COMPILE_OPTIONS "/imsvc${FFX_SDK}/include")   # (its headers: AMD's warnings)
 
-add_library(rvk STATIC rvk/vk.cpp rvk/vma.cpp rvk/device.cpp rvk/resources.cpp rvk/draw.cpp rvk/objects.cpp rvk/diag.cpp rvk/shadow.cpp rvk/pointshadow.cpp rvk/hdr.cpp rvk/particles.cpp rvk/grading.cpp rvk/profile.cpp rvk/skin.cpp rvk/skin_gpu.cpp rvk/static_gpu.cpp rvk/prepass.cpp rvk/threaded.cpp rvk/interface.cpp rvk/grass.cpp rvk/leaves.cpp rvk/water.cpp rvk/rain.cpp rvk/smoke.cpp rvk/clouds.cpp rvk/meshids.cpp rvk/statels.cpp rvk/night.cpp rvk/darkness.cpp rvk/knobs.cpp rvk/sky.cpp rvk/atmosphere.cpp rvk/mist.cpp rvk/sun.cpp rvk/terrain_sun.cpp rvk/terrain.cpp rvk/native_ground.cpp rvk/ground_clutter.cpp rvk/ground_pebbles.cpp rvk/wind.cpp rvk/sand_map.cpp rvk/sand_prints.cpp rvk/fsr2.cpp rvk/fsr3.cpp rvk/framegen.cpp ${FSR2_SOURCES} ${FFX_SOURCES} "${FFX_HEADERS_DIR}/ffx_shaders.stamp.h" ${RVK_SHADER_INCS} ${RVK_ASSET_INCS})
+add_library(rvk STATIC rvk/vk.cpp rvk/vma.cpp rvk/device.cpp rvk/resources.cpp rvk/draw.cpp rvk/objects.cpp rvk/diag.cpp rvk/shadow.cpp rvk/pointshadow.cpp rvk/hdr.cpp rvk/particles.cpp rvk/grading.cpp rvk/profile.cpp rvk/skin.cpp rvk/skin_gpu.cpp rvk/static_gpu.cpp rvk/prepass.cpp rvk/threaded.cpp rvk/interface.cpp rvk/grass.cpp rvk/leaves.cpp rvk/water.cpp rvk/rain.cpp rvk/smoke.cpp rvk/clouds.cpp rvk/meshids.cpp rvk/statels.cpp rvk/night.cpp rvk/darkness.cpp rvk/knobs.cpp rvk/sky.cpp rvk/atmosphere.cpp rvk/mist.cpp rvk/sun.cpp rvk/terrain_sun.cpp rvk/terrain.cpp rvk/native_ground.cpp rvk/ground_clutter.cpp rvk/ground_pebbles.cpp rvk/wind.cpp rvk/sand_map.cpp rvk/sand_prints.cpp rvk/fsr2.cpp rvk/fsr3.cpp rvk/framegen.cpp rvk/sssr.cpp rvk/cacao.cpp rvk/vrs.cpp rvk/brixelizer.cpp rvk/raytrace.cpp ${FSR2_SOURCES} ${FFX_SOURCES} "${FFX_HEADERS_DIR}/ffx_shaders.stamp.h" ${RVK_SHADER_INCS} ${RVK_ASSET_INCS})
 target_include_directories(rvk PUBLIC rvk PRIVATE "${RVK_SHADER_OUT}" third_party third_party/fsr2)   # (stb: terrain.cpp decodes the embedded rock)
 # Vulkan headers and VMA come from the SDK; /imsvc keeps their warnings quiet.
 target_compile_options(rvk PUBLIC "/imsvc${VULKAN_SDK_DIR}/include")

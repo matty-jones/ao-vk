@@ -460,7 +460,15 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->cond[1] = fl->cond[2] = fl->cond[3] = 0.0f;
     fl->screen[0] = SceneScaleX();
     fl->screen[1] = SceneScaleY();
-    fl->screen[2] = fl->screen[3] = 0.0f;
+    fl->screen[2] = SceneNormalsWanted() ? 1.0f : 0.0f;
+    fl->screen[3] = 0.0f;
+    {
+        const uint32_t mask = RtShadowMaskBits();
+        std::memcpy(&fl->rtShadow[0], &mask, 4);
+        fl->rtShadow[1] = m_aoProjValid ? m_aoProj.m[2][2] : 0.0f;
+        fl->rtShadow[2] = m_aoProjValid ? m_aoProj.m[3][2] : 0.0f;
+        fl->rtShadow[3] = 0.0f;
+    }
     std::memcpy(fl->skyRing, m_skyRing, sizeof(fl->skyRing));
     std::memcpy(fl->skyUp, m_skyUp, sizeof(fl->skyUp));
     if (!OwnSkyFog()) {                          // (indoors too: the zone's fog colour, not our sky's horizon)
@@ -2897,6 +2905,26 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     }
     // Retained indices only with the retained vertices (one static draw path).
     const VkBuffer staticIb = m_drawStaticBuffer && indices ? m_drawStaticIndexBuffer : VK_NULL_HANDLE;
+    // An opaque static mesh kept on the GPU, as part of the models of the static world - AMD's distance field
+    // (RVK_GiMode 1, brixelizer.cpp), the ray tracing's structures (raytrace.cpp): the native ground's patches, solid
+    // statics and rooms; not plants, glass, characters or effects.
+    m_drawRtPlace = 0;
+    if ((m_brix || m_rt) && staticIb && m_target == m_scene && !m_external && !m_drawGpu && !m_drawLeaves && !m_drawSkin &&
+        !m_drawIsLabel && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ && m_rs[d3d::RS_ZENABLE] &&
+        m_rs[d3d::RS_ZWRITEENABLE]) {
+        const auto kind = VisualKind(m_drawVisualKind);
+        // (The ground: the native ground's patches, either pass - the same mesh at the same place.)
+        const bool solid = IsTerrain(fvf) ? m_native.drawing :
+                           ((kind == VisualKind::Static || kind == VisualKind::Room || kind == VisualKind::Unknown) &&
+                            !m_rs[d3d::RS_ALPHABLENDENABLE] && !m_rs[d3d::RS_ALPHATESTENABLE] &&
+                            (!m_textures[0] || m_textures[0]->m_opaque) && !CharacterDraw(fvf, vertexCount));
+        if (solid && m_brix)
+            BrixNoteDraw(primitive, fvf, vertices, layout.stride, vertexCount, staticIb, indexCount);
+        // (Its shadow caster: drawn into the untraced layers only if the rays lack it. A piece of a placed object the
+        // rays already hold from the playfield's list - raytrace.cpp RtSyncStatels - isn't taken twice.)
+        if (solid && m_rt && !(kind == VisualKind::Static && DrawStatelCasting(vertexCount, indexCount)))
+            m_drawRtPlace = RtNoteDraw(primitive, vertices, layout.stride, vertexCount, staticIb, indexCount, IsTerrain(fvf));
+    }
 
     // Two-pass foliage: the queued edges go before a draw that writes no depth (the effects drawn over the scene came
     // after the foliage, edges included, before).
