@@ -1601,6 +1601,12 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     uint32_t count = m_shadowCascades;
     if (count != m_cascadeCount)                 // cascades changed: draw them all this frame
         sunMoved = true;
+    // ... and so after a frame without the map (none drawn: what it holds is from before), on a new map (its contents
+    // undefined), and when the rays' layers come or go (they hold nothing yet).
+    const bool untracedNow = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();
+    if (m_cascadeDrawnFrame + 1 != m_frameNumber || m_shadowImageLayout == VK_IMAGE_LAYOUT_UNDEFINED ||
+        untracedNow != m_cascadeUntraced)
+        sunMoved = true;
 
     ImageBarrier(cmd, m_shadowImage, VK_IMAGE_ASPECT_DEPTH_BIT, m_shadowImageLayout,
                  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
@@ -1613,14 +1619,33 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     BindShadowRecords(cmd);
     // RVK_RtShadow: each cascade again with only the casters the rays lack (kUntracedLayer + c), for the pixels the
     // rays' mask covers - its shadows times theirs (the others take the whole map, as without).
-    const bool untraced = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();
+    const bool untraced = untracedNow;
     std::vector<uint32_t> traceless;
+    static const bool everyFrame = [] { const char* v = std::getenv("RANDYVK_CASCADE_TURNS"); return v && *v == '0'; }();
     for (uint32_t c = 0; c < count; ++c) {
-        // The two widest cascades take turns (their shadows are far away, a frame's lag doesn't show).
-        bool alternate = count >= 3 && c >= count - 2;
-        if (alternate && !sunMoved && ((m_cascadeFrame & 1) != ((count - 1 - c) & 1)))
-            continue;
         float range = m_shadowRange / std::pow(3.0f, float(count - 1 - c));   // half the cascade's width
+        // Beyond the nearest, the cascades take turns: of four, the second every other frame and the two widest every
+        // fourth (of three, the two widest every other) - their shadows are further off, where a frame or three's
+        // lag of a moving caster doesn't show, and each is read with the matrix it was drawn with, so still things'
+        // shadows stay exact. Any the camera has moved a good way across since it was drawn is drawn again.
+        // RANDYVK_CASCADE_TURNS=0: every cascade every frame (comparisons).
+        bool turn = true;
+        if (!sunMoved && !everyFrame && c > 0) {
+            if (count >= 4 && c == count - 3)
+                turn = (m_cascadeFrame & 1) == 0;
+            else if (count >= 4 && c >= count - 2)
+                turn = (m_cascadeFrame & 3) == (c == count - 2 ? 1u : 3u);
+            else if (count == 3)
+                turn = (m_cascadeFrame & 1) != ((count - 1 - c) & 1);
+            if (!turn) {
+                float moved2 = 0.0f;
+                for (int i = 0; i < 3; ++i) moved2 += (eye[i] - m_cascadeEye[c][i]) * (eye[i] - m_cascadeEye[c][i]);
+                turn = moved2 > (0.05f * range) * (0.05f * range);
+            }
+        }
+        if (!turn)
+            continue;
+        std::memcpy(m_cascadeEye[c], eye, sizeof(eye));
         float center[3];
         for (int i = 0; i < 3; ++i) center[i] = eye[i] + forward[i] * range * 0.4f;
         float texel = 2.0f * range / float(m_shadowSize);
@@ -1752,6 +1777,8 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
     m_shadowImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     m_cascadeCount = count;
+    m_cascadeDrawnFrame = m_frameNumber;
+    m_cascadeUntraced = untraced;
     std::memcpy(m_shadowSunDir, lightDir, sizeof(m_shadowSunDir));
     for (int i = 0; i < 3; ++i) m_shadowSunColor[i] = haveSun ? m_frameSunColor[i] : 0.0f;   // (the moon: FrameLights moon)
     m_shadowIsMoon = !haveSun;

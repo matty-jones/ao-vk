@@ -56,6 +56,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   can reach is drawn, not all six sides with everything in range (Borealis's bridge lights reach over 1,000 units).
   Grass outside their beam no longer goes into their shadows either, and with no swaying grass in the beam their
   shadows are kept between frames instead of redrawn.
+- Sun shadows cost less: beyond the nearest of the four shadow areas round the camera, they are redrawn in turns -
+  the second every other frame, the two widest every fourth - instead of the second every frame and the widest every
+  other (about a third less GPU time for sun shadows over a city). Still things' shadows are exactly as before;
+  moving the camera far, a new sun angle or a change of shadow settings redraws them all at once.
 - The rocks ao-vk scatters at the feet of cliffs cost less: they are now skipped in blocks that are out of view,
   and only the blocks a sun shadow's or a lamp's shadow map covers are drawn into it, instead of a whole stretch of
   land's rocks every time (the rocks you see are the same). Around Borealis's bridges the rocks were most of what the

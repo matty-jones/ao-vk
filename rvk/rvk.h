@@ -1500,7 +1500,10 @@ private:
     float m_cascadeDepth[kShadowCascades] = {};  // world units per unit of each one's depth
     float m_frameSunDir[3] = {0.0f, -1.0f, 0.0f}, m_frameSunColor[3] = {};   // this frame's sun, shadows or not (0: none)
     uint32_t m_cascadeCount = 0;                 // cascades the map holds
-    uint64_t m_cascadeFrame = 0;                 // the far cascades are redrawn on alternate frames
+    uint64_t m_cascadeFrame = 0;                 // the cascades past the nearest take turns (RenderShadowMap)
+    uint64_t m_cascadeDrawnFrame = ~0ull;        // the frame the map was last drawn in
+    bool m_cascadeUntraced = false;              // ... with the rays' layers (RVK_RtShadow)
+    float m_cascadeEye[kShadowCascades][3] = {}; // where the eye was when each cascade was last drawn
     float m_shadowSunDir[3] = {};
     // The moon (night.cpp, RVK_MoonLight): once the sun is down, a dim cool light from the moon on the land - the
     // shadow map drawn from it, the game's night light (from under the ground) turned to come from it.
