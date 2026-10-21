@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace rvk {
@@ -77,6 +78,84 @@ uint32_t CubeFaceMask(const float mn[3], const float mx[3], const float p[3], fl
         }
     }
     return mask;
+}
+
+// A spot light's cone, for culling its cube: the light gives nothing outside it (lighting.glsl: rho <= the outer
+// cone's cosine - no light, and no look into its shadow), so a cube face that sees none of the cone is never read and
+// a caster wholly outside it shades nothing lit. Widened by a margin for the shadow's taps and normal offset (a few
+// texels) near its edge. on: a spot light with a cone narrower than a half turn.
+struct Cone {
+    float axis[3];
+    float half;                                  // half the outer angle, with the margin (radians)
+    bool on;
+};
+constexpr float kConeMargin = 0.06f;            // radians (~3.4 degrees)
+
+Cone SpotCone(const d3d::Light& l)
+{
+    Cone c{};
+    const float len = std::sqrt(l.direction.x * l.direction.x + l.direction.y * l.direction.y + l.direction.z * l.direction.z);
+    if (l.type != d3d::LIGHT_SPOT || len < 1e-6f || !(l.phi > 0.0f))
+        return c;
+    c.half = std::min(0.5f * l.phi, 1.5707964f) + kConeMargin;
+    c.on = c.half < 1.5707964f;                  // (a half turn or more: every face and caster, as for a point light)
+    c.axis[0] = l.direction.x / len;
+    c.axis[1] = l.direction.y / len;
+    c.axis[2] = l.direction.z / len;
+    return c;
+}
+
+// Whether the cone reaches into cube face f's view (Vulkan's order: +X -X +Y -Y +Z -Z - CubeFaceMask's bits): the
+// directions d with s d[a] >= |d[b]| and |d[c]| (a the face's axis, s its sign), a convex cone - nearest the cone's
+// axis either the axis itself, or a direction on one of its four sides, or one of its four edges.
+bool FaceInCone(int f, const Cone& c)
+{
+    const int a = f / 2, b = a == 0 ? 1 : 0, k = a == 2 ? 1 : 2;
+    const float s = (f & 1) ? -1.0f : 1.0f;
+    float planes[4][3] = {};
+    for (int i = 0; i < 4; ++i) {
+        planes[i][a] = s;
+        planes[i][i < 2 ? b : k] = (i & 1) ? 1.0f : -1.0f;
+    }
+    auto inside = [&](const float d[3]) {
+        for (const auto& n : planes)
+            if (d[0] * n[0] + d[1] * n[1] + d[2] * n[2] < -1e-5f) return false;
+        return true;
+    };
+    if (inside(c.axis))
+        return true;
+    float best = -1.0f;                          // the nearest direction's cosine to the axis
+    for (const auto& n : planes) {
+        const float un = c.axis[0] * n[0] + c.axis[1] * n[1] + c.axis[2] * n[2];
+        float q[3] = {c.axis[0] - 0.5f * un * n[0], c.axis[1] - 0.5f * un * n[1], c.axis[2] - 0.5f * un * n[2]};
+        const float ql = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);   // (|n|^2 = 2: the projection's 0.5)
+        if (ql < 1e-6f) continue;
+        for (float& v : q) v /= ql;
+        if (inside(q)) best = std::max(best, c.axis[0] * q[0] + c.axis[1] * q[1] + c.axis[2] * q[2]);
+    }
+    for (int e = 0; e < 4; ++e) {
+        float d[3] = {};
+        d[a] = s;
+        d[b] = (e & 1) ? 1.0f : -1.0f;
+        d[k] = (e & 2) ? 1.0f : -1.0f;
+        best = std::max(best, (c.axis[0] * d[0] + c.axis[1] * d[1] + c.axis[2] * d[2]) * 0.57735027f);
+    }
+    return best >= std::cos(c.half);
+}
+
+// Whether any of a box can lie in the cone seen from p (its bounding sphere against the cone).
+bool BoxInCone(const float mn[3], const float mx[3], const float p[3], const Cone& c)
+{
+    float v[3], r2 = 0.0f;
+    for (int j = 0; j < 3; ++j) {
+        v[j] = 0.5f * (mn[j] + mx[j]) - p[j];
+        r2 += 0.25f * (mx[j] - mn[j]) * (mx[j] - mn[j]);
+    }
+    const float d = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), r = std::sqrt(r2);
+    if (d <= r)
+        return true;
+    const float cosA = std::clamp((v[0] * c.axis[0] + v[1] * c.axis[1] + v[2] * c.axis[2]) / d, -1.0f, 1.0f);
+    return std::acos(cosA) - std::asin(r / d) <= c.half;
 }
 
 // Squared distance from a point to a box (0 inside).
@@ -609,6 +688,16 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         }
         const d3d::Light& l = m_lightsCur[candidates[slots[k].candidate].index].light;
         float pos[3] = {l.position.x, l.position.y, l.position.z};
+        // A spot light: only the faces and casters its cone reaches (SpotCone) - a floodlight looking down drew all six
+        // faces with every caster within its range (1,041 units over Borealis's bridges).
+        static const bool coneOff = [] { const char* v = std::getenv("RANDYVK_SPOT_CONE"); return v && *v == '0'; }();
+        Cone cone = SpotCone(l);
+        cone.on = cone.on && !coneOff;           // (RANDYVK_SPOT_CONE=0: every face and caster, for comparisons)
+        uint32_t coneFaces = 0x3F;
+        if (cone.on) {
+            coneFaces = 0;
+            for (int f = 0; f < 6; ++f) coneFaces |= FaceInCone(f, cone) ? 1u << f : 0u;
+        }
         float fade = slots[k].fade;
         // A cube still holding the same light where it was keeps its map while what is in the light's range is
         // unchanged - the same casters, where they were, none swaying, no grass (it sways) - redrawn at least every
@@ -653,8 +742,8 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             bool housing = d2 == 0.0f && extent < 1.5f;              // smaller than a character
             if (housing)
                 continue;
-            uint32_t faces = CubeFaceMask(box, box + 3, pos, kPointShadowNear);
-            if (!faces)
+            uint32_t faces = CubeFaceMask(box, box + 3, pos, kPointShadowNear) & coneFaces;
+            if (!faces || (cone.on && !BoxInCone(box, box + 3, pos, cone)))
                 continue;
             inRange.push_back(i);
             inRangeFaces.push_back(uint8_t(faces));
@@ -691,6 +780,8 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         double drawStart = ProfileCpu();
         const bool grassUp = !GrassBelow(pos, l.range);   // (+Y, face 2: only if some grass reaches above the light)
         for (int face = 0; face < 6; ++face) {
+            if (!(coneFaces >> face & 1u))
+                continue;                        // (outside a spot light's cone: never read)
             VkRenderingAttachmentInfo depthAtt{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
             depthAtt.imageView = m_cubeFaceViews[k * 6 + face];
             depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;

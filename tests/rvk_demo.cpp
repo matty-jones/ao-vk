@@ -2947,6 +2947,7 @@ bool g_waterWalker = false;       // --water-walker: a "character" standing in t
                                   // bobbing along: the surface ripples around it (RVK_WaterSwim)
 bool g_waterJump = false;         // --water-jump: the walker jumps out of the water and lands (RVK_WakeSplash)
 float g_waterSwim = 1.0f;         // --water-swim S: strength of those ripples (RVK_WaterSwim)
+bool g_waterGrid = false;        // --water-grid: the older water surface (a grid over the water map; RVK_WaterMesh off)
 std::string g_waterMesh;          // --water-mesh FILE: the water mesh from a dump of the game's (count, index count, the
                                   // vertices as Device::WaterVertex, the 16-bit indices), the part within 150 units of
                                   // --water-mesh-at X Y Z moved to the lake's far side (that point to 0 0 60)
@@ -3240,6 +3241,7 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
     wp.waves = g_waterWaves;
     wp.swimRipples = g_waterSwim;
     wp.quality = uint32_t(g_waterQuality);
+    wp.mesh = !g_waterGrid;
     dev.SetWaterParams(wp);
     if (g_waterNoPrepass)
         dev.SetKnob(rvk::Knob::Prepass, false);
@@ -4152,6 +4154,8 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
     }
 }
 
+float g_spotDegrees = 0.0f;       // --point-shadow-spot DEG: the point shadow test's lamp a spot light looking down
+
 // Point light shadow test (--point-shadow-test): night, a lamp among cubes. Left half: lit ground (per-pixel); right
 // half: the ground the way Anarchy Online draws it (unlit base pass + lightmap and lights multiplying pass). A small
 // cube around the lamp (its housing) must not cast; the cubes around it must, in every direction (all cube faces).
@@ -4215,6 +4219,14 @@ void RunPointShadowTest(D& dev, int frames, const std::string& shot, const std::
             lamp.range = 6.13f;
             lamp.attenuation0 = 0.0f;
             lamp.attenuation1 = 0.1631f;
+        }
+        if (g_spotDegrees > 0.0f) {            // --point-shadow-spot DEG: a spot light looking down, its cone DEG across
+            lamp.type = LIGHT_SPOT;
+            lamp.direction = {0.05f, -1.0f, 0.03f};
+            lamp.phi = g_spotDegrees * kPi / 180.0f;
+            lamp.theta = 0.7f * lamp.phi;
+            lamp.falloff = 1.0f;
+            lamp.position.y += 1.5f;
         }
         lamp.position = {lamp.position.x + g_off[0], lamp.position.y + g_off[1], lamp.position.z + g_off[2]};
         // --lamp-wobble: the position moves in its last bits from frame to frame, as the game's lamps do.
@@ -4858,6 +4870,7 @@ int main(int argc, char** argv)
         else if (a == "--statel-movers") g_statelMovers = true;
         else if (a == "--shot-run" && i + 1 < argc) g_shotRun = std::atoi(argv[++i]);
         else if (a == "--point-shadow-test") pointShadowTest = true;
+        else if (a == "--point-shadow-spot" && i + 1 < argc) g_spotDegrees = float(std::atof(argv[++i]));
         else if (a == "--world-offset" && i + 3 < argc) { for (int k = 0; k < 3; ++k) g_off[k] = float(std::atof(argv[++i])); }
         else if (a == "--point-shadow-slab") g_slabTest = pointShadowTest = pointShadowSun = shadows = true;
         else if (a == "--point-shadow-sun") pointShadowTest = pointShadowSun = shadows = true;
@@ -5020,6 +5033,7 @@ int main(int argc, char** argv)
         else if (a == "--water-height" && i + 1 < argc) g_waterHeight = float(std::atof(argv[++i]));
         else if (a == "--water-waves" && i + 1 < argc) g_waterWaves = float(std::atof(argv[++i]));
         else if (a == "--water-quality" && i + 1 < argc) g_waterQuality = std::atoi(argv[++i]);
+        else if (a == "--water-grid") g_waterGrid = true;
         else if (a == "--water-off") g_waterOff = true;
         else if (a == "--water-night") g_waterNight = true;
         else if (a == "--moon-light" && i + 1 < argc) g_moonLight = float(std::atof(argv[++i]));

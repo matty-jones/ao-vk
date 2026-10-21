@@ -485,10 +485,14 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
         m_dumpedLightValid[i] = true;
         const d3d::Light& l = s.light;
         std::fprintf(f, "L %zu: type %u pos (%.2f %.2f %.2f) dir (%.2f %.2f %.2f) range %.2f att %.3f/%.4f/%.5f"
-                        " diffuse (%.2f %.2f %.2f) ambient (%.2f %.2f %.2f)\n",
+                        " diffuse (%.2f %.2f %.2f) ambient (%.2f %.2f %.2f)",
                      i, uint32_t(l.type), l.position.x, l.position.y, l.position.z, l.direction.x, l.direction.y,
                      l.direction.z, l.range, l.attenuation0, l.attenuation1, l.attenuation2, l.diffuse.r, l.diffuse.g,
                      l.diffuse.b, l.ambient.r, l.ambient.g, l.ambient.b);
+        if (l.type == d3d::LIGHT_SPOT)           // (its cone: inner and outer, full angles in degrees, and falloff)
+            std::fprintf(f, " cone %.1f/%.1f falloff %.2f", double(l.theta) * 57.29578, double(l.phi) * 57.29578,
+                         double(l.falloff));
+        std::fprintf(f, "\n");
     }
 
     // World positions -> nearest distance to each local light, and the screen rectangle.
