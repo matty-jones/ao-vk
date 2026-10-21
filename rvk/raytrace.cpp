@@ -52,6 +52,9 @@ const uint32_t kRtShadowSpirv[] = {
 const uint32_t kRtShadowBlurSpirv[] = {
 #include "rt_shadow_blur.comp.inc"
 };
+const uint32_t kRtReflectSpirv[] = {
+#include "rt_reflect.comp.inc"
+};
 
 constexpr uint32_t kBuildBudget = 400000;        // triangles of new BLAS a frame
 constexpr uint32_t kCompactQueries = 1024;       // compacted sizes asked for a frame (each frame slot's query pool)
@@ -206,7 +209,9 @@ struct Device::RtState {
     VkPipelineLayout layout = VK_NULL_HANDLE, aoLayout = VK_NULL_HANDLE, shadowLayout = VK_NULL_HANDLE,
                      blurLayout = VK_NULL_HANDLE;
     VkPipeline debugPipeline = VK_NULL_HANDLE, aoPipeline = VK_NULL_HANDLE, shadowPipeline = VK_NULL_HANDLE,
-               blurPipeline = VK_NULL_HANDLE;
+               blurPipeline = VK_NULL_HANDLE, reflectPipeline = VK_NULL_HANDLE;
+    VkDescriptorSetLayout reflectSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout reflectLayout = VK_NULL_HANDLE;
     // RVK_RtShadow: its history (ping-pong: visibility, view depth, frames, hit distance), the trace's output, the blur's
     // middle step and the mask the scene reads (FL.rtShadow); the trace's parameters (a uniform buffer per frame slot).
     Texture* shadowHistory[2] = {};
@@ -266,11 +271,12 @@ void Device::DestroyRt()
     for (RtBuffer& b : s->instanceBuf) kill(VK_NULL_HANDLE, b);
     for (RtBuffer& b : s->geoBuf) kill(VK_NULL_HANDLE, b);
     for (RtBuffer& b : s->shadowParams) kill(VK_NULL_HANDLE, b);
-    for (VkPipeline p : {s->debugPipeline, s->aoPipeline, s->shadowPipeline, s->blurPipeline})
+    for (VkPipeline p : {s->debugPipeline, s->aoPipeline, s->shadowPipeline, s->blurPipeline, s->reflectPipeline})
         if (p) vkDestroyPipeline(m_device, p, nullptr);
-    for (VkPipelineLayout l : {s->layout, s->aoLayout, s->shadowLayout, s->blurLayout})
+    for (VkPipelineLayout l : {s->layout, s->aoLayout, s->shadowLayout, s->blurLayout, s->reflectLayout})
         if (l) vkDestroyPipelineLayout(m_device, l, nullptr);
-    for (VkDescriptorSetLayout l : {s->setLayout, s->aoSetLayout, s->shadowSetLayout, s->blurSetLayout})
+    for (VkDescriptorSetLayout l : {s->setLayout, s->aoSetLayout, s->shadowSetLayout, s->blurSetLayout,
+                                    s->reflectSetLayout})
         if (l) vkDestroyDescriptorSetLayout(m_device, l, nullptr);
     for (Texture* t : {s->debug, s->aoHistory[0], s->aoHistory[1], s->aoOut, s->aoBlur, s->ao, s->shadowHistory[0],
                        s->shadowHistory[1], s->shadowRaw, s->shadowBlur, s->shadowMask})
@@ -680,6 +686,19 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
             Log("ray tracing: the sun shadows' pipelines could not be made");
             if (s->shadowPipeline) vkDestroyPipeline(m_device, s->shadowPipeline, nullptr);
             s->shadowPipeline = VK_NULL_HANDLE;
+        }
+        // RVK_RtReflect's (rt_reflect.comp).
+        const VkDescriptorSetLayoutBinding reflectBindings[6] = {
+            {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, comp, nullptr},
+            {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
+            {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
+            {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
+            {4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr},
+            {5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, comp, nullptr}};
+        if (ok && !pipeline(reflectBindings, 6, 80, kRtReflectSpirv, sizeof(kRtReflectSpirv), &s->reflectSetLayout,
+                            &s->reflectLayout, &s->reflectPipeline)) {
+            Log("ray tracing: the reflections' pipeline could not be made");
+            s->reflectPipeline = VK_NULL_HANDLE;
         }
         if (!ok) {
             Log("ray tracing: its pipelines could not be made");
@@ -1291,6 +1310,56 @@ uint32_t Device::RtShadowMaskBits()
         return 0;
     const uint32_t image = BindlessImage(s->shadowMask), sampler = FixedSamplerSlot(2, m_linearSampler);
     return image != ~0u && image < (1u << 20) - 1 && sampler < 256 ? (image + 1) | sampler << 20 : 0;
+}
+
+bool Device::RtReflectReady() const
+{
+    const RtState* s = m_rt;
+    return s && !s->failed && s->reflectPipeline && s->tlasFrame == m_frameNumber && s->geoBuf[m_frameIndex].buffer &&
+           m_ssrTex && m_ssrTex->m_storage;
+}
+
+// RVK_RtReflect 1: the screen-space reflections' misses (RenderSsr marked them) traced (rt_reflect.comp), in place in
+// m_ssrTex - every marked pixel written (RtReflectReady said this runs).
+void Device::RenderRtReflect(VkCommandBuffer cmd)
+{
+    RtState* s = m_rt;
+    const uint32_t w = m_ssrTex->m_width, h = m_ssrTex->m_height;
+    const bool env = m_envReady && m_envAtlas;
+    Transition(cmd, m_ssrTex, VK_IMAGE_LAYOUT_GENERAL);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->reflectPipeline);
+    VkWriteDescriptorSetAccelerationStructureKHR as{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    as.accelerationStructureCount = 1;
+    as.pAccelerationStructures = &s->tlas;
+    const VkDescriptorImageInfo images[4] = {
+        {m_pointSampler, m_depthView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {m_pointSampler, m_scene->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {m_linearSampler, env ? m_envAtlas->m_view : m_scene->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {VK_NULL_HANDLE, m_ssrTex->m_view, VK_IMAGE_LAYOUT_GENERAL}};
+    const VkDescriptorBufferInfo geos{s->geoBuf[m_frameIndex].buffer, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet wr[6] = {};
+    for (uint32_t i = 0; i < 6; ++i) {
+        wr[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wr[i].dstBinding = i;
+        wr[i].descriptorCount = 1;
+        wr[i].descriptorType = i == 0 ? VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+                             : i < 4  ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                             : i < 5  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                      : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (i > 0 && i < 5) wr[i].pImageInfo = &images[i - 1];
+    }
+    wr[0].pNext = &as;
+    wr[5].pBufferInfo = &geos;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->reflectLayout, 0, 6, wr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->reflectLayout, 1, 1, &m_bindlessSet, 0, nullptr);
+    const auto& v = m_aoView.m;
+    struct Push { float proj[4], size[4], view[3][4]; } push{
+        {m_aoProj.m[2][2], m_aoProj.m[3][2], m_aoProj.m[0][0], m_aoProj.m[1][1]},
+        {float(w), float(h), 300.0f, env ? 1.0f : 0.0f},
+        {{v[0][0], v[0][1], v[0][2], 0.0f}, {v[1][0], v[1][1], v[1][2], 0.0f}, {v[2][0], v[2][1], v[2][2], 0.0f}}};
+    vkCmdPushConstants(cmd, s->reflectLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+    vkCmdDispatch(cmd, (w + 7) / 8, (h + 7) / 8, 1);
+    Transition(cmd, m_ssrTex, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 // RVK_RtDebug 1: what the rays hit, over the scene (rt_debug.comp).

@@ -21,6 +21,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   and characters' hair still cast from the shadow map, and grass, water and glass still take the map's shadows.
   Ray-traced ambient occlusion (`RVK_AoMode 2`) sees characters and cut-outs as well. Needs the sun's shadows and
   the depth pre-pass on.
+- Ray-traced reflections on GPUs with ray tracing: `RVK_RtReflect 1` (Effects, under Reflections). Where the
+  screen-space reflections find nothing - what stands off the screen's edge, behind a wall, behind the camera -
+  a ray finds it: wet ground and glossy floors reflect cliffs and buildings that were cut off before. Things the
+  camera hasn't looked at lately reflect as the sky around them.
 - Variable rate shading: `RVK_Vrs 1` (Effects) shades flat and fast-moving parts of the scene in 2 x 2 blocks, for
   more frames per second on GPUs that support it (AMD's FidelityFX VRS). `RVK_VrsCutoff` (ini) sets how readily.
 - AMD's indirect light to try: `RVK_GiMode 1` (Effects, under Indirect light) traces bounce light through a model of

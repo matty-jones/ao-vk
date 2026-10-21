@@ -1,0 +1,76 @@
+#version 460
+#extension GL_EXT_ray_query : require
+#define RT_GEO_BINDING 5
+#include "rt_common.glsl"
+#include "env_common.glsl"
+// RVK_RtReflect 1 (raytrace.cpp RenderRtReflect): where the screen-space reflections found nothing (ssr.frag marked
+// those pixels: their reflected direction, view space, and minus how much shows), a ray into the ray tracing's
+// structures. What it hits, where the screen shows that point (not hidden there), is the scene's colour there - the
+// reflection of something behind a wall, or off the screen's edge, once the camera turns. A hit the screen doesn't
+// show takes what the camera has seen that way (the environment probe towards the hit, where sure): something behind
+// the camera, as lit as it was. A ray that hits nothing leaves the scene's own (the surface's sky and probe terms).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+layout(set = 0, binding = 1) uniform sampler2D depthTex;
+layout(set = 0, binding = 2) uniform sampler2D scene;        // the HDR scene
+layout(set = 0, binding = 3) uniform sampler2D envAtlas;     // the environment probe (hdr.cpp RenderEnvProbe)
+layout(set = 0, binding = 4, rgba16f) uniform image2D ssrImage;   // the reflections: colour, how much shows
+layout(push_constant) uniform Push {
+    vec4 proj;          // D3D projection: m[2][2], m[3][2], m[0][0], m[1][1]
+    vec4 size;          // width, height, the rays' reach (world units), 1 = the probe is there
+    vec4 view[3];       // the view matrix's rotation, rows (world -> view)
+} P;
+
+float ViewZ(float d) { return P.proj.y / (min(d, 0.999999) - P.proj.x); }
+
+vec3 ViewPoint(vec2 pix, float d)
+{
+    float z = ViewZ(d);
+    vec2 ndc = vec2(pix.x / P.size.x * 2.0 - 1.0, 1.0 - pix.y / P.size.y * 2.0);
+    return vec3(ndc.x * z / P.proj.z, ndc.y * z / P.proj.w, z);
+}
+
+// (D3D: view = world x M, row vectors; the rotation's inverse its transpose.)
+vec3 ToWorld(vec3 v) { return vec3(dot(P.view[0].xyz, v), dot(P.view[1].xyz, v), dot(P.view[2].xyz, v)); }
+vec3 ToView(vec3 w) { return w.x * P.view[0].xyz + w.y * P.view[1].xyz + w.z * P.view[2].xyz; }
+
+void main()
+{
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    if (pix.x >= int(P.size.x) || pix.y >= int(P.size.y)) return;
+    vec4 mark = imageLoad(ssrImage, pix);
+    if (mark.a >= 0.0) return;                   // (found on the screen, or nothing to reflect)
+    float amount = -mark.a;
+    float d = texelFetch(depthTex, pix, 0).r;
+    vec3 p = ViewPoint(vec2(pix) + 0.5, d);
+    vec3 dir = ToWorld(normalize(mark.rgb));
+    // From the surface (camera-relative world: the structures are placed round the eye), a little along the ray.
+    vec3 origin = ToWorld(p) + dir * (0.05 + 0.002 * p.z);
+    vec4 result = vec4(0.0);
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsNoneEXT, 0xFF, origin, 0.0, dir, P.size.z);
+    RtProceed(q);
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        float t = rayQueryGetIntersectionTEXT(q, true);
+        vec3 hit = origin + dir * t;
+        float fade = 1.0 - smoothstep(0.7, 1.0, t / P.size.z);
+        vec3 hv = ToView(hit);
+        bool shown = false;
+        if (hv.z > 0.05) {
+            vec2 ndc = vec2(hv.x * P.proj.z, hv.y * P.proj.w) / hv.z;
+            vec2 at = vec2((ndc.x + 1.0) * 0.5 * P.size.x, (1.0 - ndc.y) * 0.5 * P.size.y);
+            if (all(greaterThanEqual(at, vec2(0.0))) && all(lessThan(at, P.size.xy))) {
+                float z = ViewZ(texelFetch(depthTex, ivec2(at), 0).r);
+                if (abs(z - hv.z) < 0.03 * hv.z + 0.1) {
+                    result = vec4(texelFetch(scene, ivec2(at), 0).rgb, amount * fade);
+                    shown = true;
+                }
+            }
+        }
+        if (!shown && P.size.w > 0.5) {
+            vec4 e = textureLod(envAtlas, EnvAtlasUv(normalize(hit), 0), 0.0);
+            result = vec4(e.rgb, amount * fade * clamp(e.a, 0.0, 1.0));
+        }
+    }
+    imageStore(ssrImage, pix, result);
+}

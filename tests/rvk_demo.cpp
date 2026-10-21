@@ -1766,6 +1766,8 @@ float g_groundFog = 0.0f;           // --ground-fog END: the native ground scene
 float g_heatShimmer = 0.5f;         // --heat-shimmer X: RVK_HeatShimmer
 bool g_tileOrm = false;             // --tile-orm: every other tile a shiny material map (PBR, pixel lighting on)
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
+int g_lookRound = 0;   // --look-round N: the camera turns once round, level, over the first N frames (the environment
+                       // probe sees all round: RVK_RtReflect's hits off the screen), then the given view
 template <typename D>
 void RunGroundFile(D& dev, int frames, const std::string& shot)
 {
@@ -1898,8 +1900,11 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
             std::memcpy(&bits, &fogEnd, 4); dev.SetRenderState(RS_FOGEND, bits);
         }
         const Vector eye{g_eye[0], g_eye[1], g_eye[2]};
-        const Vector at{eye.x + std::cos(g_viewYaw) * std::cos(g_viewPitch), eye.y - std::sin(g_viewPitch),
-                        eye.z + std::sin(g_viewYaw) * std::cos(g_viewPitch)};
+        const bool round = frame < g_lookRound;
+        const float yaw = round ? g_viewYaw + 2.0f * kPi * float(frame) / float(g_lookRound) : g_viewYaw;
+        const float pitch = round ? 0.05f : g_viewPitch;
+        const Vector at{eye.x + std::cos(yaw) * std::cos(pitch), eye.y - std::sin(pitch),
+                        eye.z + std::sin(yaw) * std::cos(pitch)};
         dev.SetTransform(View, LookAtLH(eye, at, {0, 1, 0}));
         dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.5f, 2000.0f));
         dev.SetTransform(World, Identity());
@@ -4916,6 +4921,7 @@ int main(int argc, char** argv)
         else if (a == "--water-style" && i + 1 < argc) g_waterStyle = float(std::atof(argv[++i]));
         else if (a == "--water-yaw" && i + 1 < argc) g_waterYaw = float(std::atof(argv[++i]));
         else if (a == "--water-turn" && i + 1 < argc) g_waterTurn = float(std::atof(argv[++i]));
+        else if (a == "--look-round" && i + 1 < argc) g_lookRound = std::atoi(argv[++i]);
         else if (a == "--water-pitch" && i + 1 < argc) g_waterPitch = float(std::atof(argv[++i]));
         else if (a == "--water-height" && i + 1 < argc) g_waterHeight = float(std::atof(argv[++i]));
         else if (a == "--water-waves" && i + 1 < argc) g_waterWaves = float(std::atof(argv[++i]));

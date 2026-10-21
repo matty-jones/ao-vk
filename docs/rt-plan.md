@@ -94,6 +94,20 @@ The scene is forward shaded: the sun's visibility has to be known while the scen
   Fewer casters: the map gets cheaper too. The rays reach the TLAS's range (beyond the map's distance).
 - Same frame, where the map lags one frame.
 
+Built after (2026-10-21, all on `amd-fx`):
+- Phase 5: characters (`RtNoteSkinned`: a BLAS per piece refitted each frame from the skin arena, keyed by mesh and
+  character - the game makes a new skinning job every frame) and cut-outs (non-opaque instances; `rt_common.glsl`
+  tests the texture's alpha at each candidate hit through per-instance geometry records and buffer references; the
+  bindless set is bound as set 1). Statel cut-out pieces too.
+- The shadows' history is clamped to the 5 x 5 of this frame's rays round a pixel (moving shadows don't trail) -
+  what motion vectors would have given here, where none exist yet at the pre-pass's end.
+- BLAS compaction (`RtCompact`): 22 MB -> 7.3 MB on the native ground.
+- Phase 4 (AMD's shadow denoiser) not done: it runs after the scene with motion vectors and the G-buffer's normals;
+  ours must be ready before the scene shades (forward), and a frame's lag is what the rays removed.
+- `RVK_RtReflect` (`rt_reflect.comp`): our SSR's misses (ssr.frag marks them: direction, minus the amount) traced;
+  a hit the screen shows takes the scene's colour there, one it doesn't the environment probe towards the hit (what
+  the camera has seen that way, lit), a miss leaves the scene's own. No hit shading of its own.
+
 ## 4. AMD's denoiser for shadows (A/B, optional)
 
 The SDK's Denoiser has a shadows mode (the hybrid shadows sample: ray hits as 32-bit masks of 8 x 4 pixel tiles,

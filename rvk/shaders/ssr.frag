@@ -11,7 +11,7 @@ layout(set = 0, binding = 3) uniform sampler2D normals;        // the motion vec
 layout(push_constant) uniform Push {
     vec4 proj;          // D3D projection: m[2][2], m[3][2], m[0][0], m[1][1]
     vec4 size;          // full target width, height, steps, longest ray (world units)
-    vec4 params;        // strength
+    vec4 params;        // strength, 1 = rays come after (rt_reflect.comp: a miss marked - its direction, minus its amount)
 } P;
 layout(location = 0) out vec4 outSsr;
 
@@ -113,5 +113,5 @@ void main()
             return;
         }
     }
-    outSsr = vec4(0.0);
+    outSsr = P.params.y > 0.5 ? vec4(dir, -amount) : vec4(0.0);
 }

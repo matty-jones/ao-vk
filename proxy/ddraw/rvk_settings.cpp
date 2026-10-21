@@ -338,6 +338,7 @@ Setting g_settings[] = {
     {"RVK_SsrWater", "Water", "Effects",  Float, 0, 1, 0.05f, 0.25f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrGloss", "Glossy surfaces", "Effects",  Float, 0, 1, 0.05f, 0.3f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrWet", "Wet look of floors and ground (0 = dry)", "Effects",  Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_SsrOn"},
+    {"RVK_RtReflect", "Reflections ray traced where the screen has nothing to reflect - what is behind a wall, off the screen's edge, behind the camera (ours only; GPUs with ray tracing only)", "Effects", Bool, 0, 1, 1, 0, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrMode", "Reflections: whose (0 = ours, 1 = AMD's FidelityFX SSSR: rough surfaces too, denoised)", "Effects", Choice, 0, 1, 1, 0, nullptr, 0, "RVK_SsrOn", "0 1"},
     {"RVK_SssrThick", "Reflections, AMD's: how far behind a surface a ray's hit still counts (world units; more: fewer gaps, more smearing)", "Effects", Float, 0.05f, 3, 0.05f, 0.5f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_Vrs", "Variable rate shading: flat or fast-moving parts of the scene shaded in 2 x 2 blocks, for speed (AMD's FidelityFX VRS; needs a GPU with shading rate images)", "Effects", Choice, 0, 1, 1, 0, nullptr, 0, nullptr, "0 1"},

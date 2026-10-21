@@ -279,7 +279,8 @@ struct DeviceInfo {
     X(GiDebug, m_giDebug, 0)                          /* ... a view: 1 its distance field, 2 its light alone */ \
     X(GiSky, m_giSky, 0)                              /* ... the sky's light on rays that miss (0: bounce only) */ \
     X(RtDebug, m_rtDebug, 0)                          /* ray tracing's view: 1 what its rays hit (raytrace.cpp) */ \
-    X(RtShadow, m_rtShadow, 0)                        /* the sun's shadows ray traced (raytrace.cpp; 0 off) */
+    X(RtShadow, m_rtShadow, 0)                        /* the sun's shadows ray traced (raytrace.cpp; 0 off) */ \
+    X(RtReflect, m_rtReflect, 0)                      /* reflections the screen lacks ray traced (raytrace.cpp) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
@@ -3263,7 +3264,7 @@ private:
     float m_ssr = 1.0f, m_ssrWater = 1.0f, m_ssrGloss = 0.3f, m_ssrWet = 0.0f;
     Texture* m_ssrTex = nullptr;                 // full resolution: reflected colour, how much it shows
     VkPipeline m_ssrPipeline = VK_NULL_HANDLE;
-    bool RenderSsr(VkCommandBuffer cmd);
+    bool RenderSsr(VkCommandBuffer cmd, bool traced = false);   // (traced: misses marked for RenderRtReflect)
     // RVK_SsrMode 1 (sssr.cpp): AMD's reflections (FidelityFX SSSR) in place of ours, into m_ssrTex as ours; ours
     // where they can't run. docs/amd-fx-plan.md.
     float m_ssrMode = 0.0f, m_sssrThick = 0.5f;
@@ -3300,7 +3301,15 @@ private:
     // RVK_RtShadow 1: the sun's shadows ray traced where the pre-pass's depth is (raytrace.cpp RenderRtShadow).
     float m_rtShadow = 0.0f;
     bool RtShadowWanted() const { return m_rayQuery && m_rtShadow >= 0.5f && m_shadows && m_prepassOn; }
-    bool RtWanted() const { return m_rayQuery && (m_rtDebug >= 0.5f || RtAoWanted() || RtShadowWanted()); }
+    // RVK_RtReflect 1: where our screen-space reflections find nothing, a ray (raytrace.cpp RenderRtReflect).
+    float m_rtReflect = 0.0f;
+    bool RtReflectWanted() const { return m_rayQuery && m_rtReflect >= 0.5f && m_ssr > 0.0f; }
+    bool RtReflectReady() const;                 // this frame's structures and its pass are there (else no misses marked)
+    void RenderRtReflect(VkCommandBuffer cmd);
+    bool RtWanted() const
+    {
+        return m_rayQuery && (m_rtDebug >= 0.5f || RtAoWanted() || RtShadowWanted() || RtReflectWanted());
+    }
     // (Its instance's key when the draw's place is kept - else 0.)
     // (cutout: its texture, alpha-tested at the rays' hits - alpha over alphaRef, at uvOffset in its vertices.)
     uint64_t RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t stride, uint32_t vertexCount, VkBuffer ib,

@@ -557,7 +557,12 @@ void Device::EndScene()
     ProfileMark("sand fog");
     Transition(cmd, m_localFraction, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     bool ssr = SceneNormalsWanted() && RenderSssr(cmd);   // (RVK_SsrMode 1: AMD's; ours where they can't run)
-    if (!ssr) ssr = RenderSsr(cmd);
+    if (!ssr) {
+        const bool traced = rays && RtReflectWanted() && RtReflectReady();   // (RVK_RtReflect: rays where ours miss)
+        ssr = RenderSsr(cmd, traced);
+        if (ssr && traced)
+            RenderRtReflect(cmd);
+    }
     ProfileMark("reflections");
     bool contact = RenderContactShadows(cmd);
     ProfileMark("contact shadows");
@@ -1417,14 +1422,15 @@ bool Device::RenderSandFog(VkCommandBuffer cmd)
 
 // Screen-space reflections (ssr.frag) at full resolution into m_ssrTex: needs the scene, the depth buffer and the
 // reflectivity (the local-fraction attachment's G), all readable by now.
-bool Device::RenderSsr(VkCommandBuffer cmd)
+bool Device::RenderSsr(VkCommandBuffer cmd, bool traced)
 {
     bool perspective = m_aoProjValid && m_aoProj.m[2][3] == 1.0f && m_aoProj.m[3][3] == 0.0f;
     if (m_ssr <= 0.0f || !perspective || !m_depth)
         return false;
     if (!m_ssrTex || m_ssrTex->m_width != m_scene->m_width || m_ssrTex->m_height != m_scene->m_height) {
         if (m_ssrTex) DestroyTexture(m_ssrTex);
-        m_ssrTex = CreateImage(m_scene->m_width, m_scene->m_height, Format::RGBA16F, 1, true);
+        // (Storage too with ray tracing: RVK_RtReflect fills its misses in place.)
+        m_ssrTex = CreateImage(m_scene->m_width, m_scene->m_height, Format::RGBA16F, 1, true, m_rayQuery);
         if (!m_ssrTex)
             return false;
     }
@@ -1432,7 +1438,7 @@ bool Device::RenderSsr(VkCommandBuffer cmd)
     Transition(cmd, m_motionVectors, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);   // zw: PBR shading normals
     float params[12] = {m_aoProj.m[2][2], m_aoProj.m[3][2], m_aoProj.m[0][0], m_aoProj.m[1][1],
                         float(m_scene->m_width), float(m_scene->m_height), 48.0f, 80.0f,
-                        m_ssr, 0.0f, 0.0f, 0.0f};
+                        m_ssr, traced ? 1.0f : 0.0f, 0.0f, 0.0f};
     FullscreenPass(cmd, m_ssrTex, m_ssrPipeline, m_depthView, m_scene->m_view, m_pointSampler, params, sizeof(params), false,
                    m_localFraction->m_view, m_motionVectors->m_view);
     Transition(cmd, m_ssrTex, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);

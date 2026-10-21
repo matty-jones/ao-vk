@@ -15,7 +15,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-337 settings, 164 of them in the settings window.
+338 settings, 165 of them in the settings window.
 
 ## Sections
 
@@ -30,7 +30,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Smoke](#smoke) (12)
 - [Sky](#sky) (45)
 - [Shadows](#shadows) (17)
-- [Effects](#effects) (55)
+- [Effects](#effects) (56)
 - [Tone mapping](#tone-mapping) (2)
 - [Anti-aliasing](#anti-aliasing) (6)
 - [Colour grading](#colour-grading) (10)
@@ -377,6 +377,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_SsrWater` | Reflections: water | 0 .. 1 | 0.25 | ini only; switch `RVK_SsrOn` |
 | `RVK_SsrGloss` | Reflections: glossy surfaces | 0 .. 1 | 0.3 | ini only; switch `RVK_SsrOn` |
 | `RVK_SsrWet` | Wet look of floors and ground (0 = dry) | 0 .. 1 | 0 | ini only; switch `RVK_SsrOn` |
+| `RVK_RtReflect` | Reflections ray traced where the screen has nothing to reflect - what is behind a wall, off the screen's edge, behind the camera (ours only; GPUs with ray tracing only) | on / off | off | window; switch `RVK_SsrOn`; knob |
 | `RVK_SsrMode` | Reflections: whose (0 = ours, 1 = AMD's FidelityFX SSSR: rough surfaces too, denoised) | 0 / 1 | 0 | window; switch `RVK_SsrOn`; knob |
 | `RVK_SssrThick` | Reflections, AMD's: how far behind a surface a ray's hit still counts (world units; more: fewer gaps, more smearing) | 0.05 .. 3 | 0.5 | ini only; switch `RVK_SsrOn`; knob |
 | `RVK_Vrs` | Variable rate shading: flat or fast-moving parts of the scene shaded in 2 x 2 blocks, for speed (AMD's FidelityFX VRS; needs a GPU with shading rate images) | 0 / 1 | 0 | window; knob |
