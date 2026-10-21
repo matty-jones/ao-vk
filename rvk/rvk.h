@@ -29,7 +29,7 @@ struct VmaAllocator_T;
 struct VmaAllocation_T;
 struct VmaVirtualBlock_T;
 
-namespace rvk::detail { struct FrameLights; struct FvfLayout; struct DrawConstants; struct DrawTransform; struct ShadowRecord; }
+namespace rvk::detail { struct FrameLights; struct FvfLayout; struct DrawConstants; struct DrawTransform; struct ShadowRecord; struct Cone; }
 
 namespace rvk {
 
@@ -2521,9 +2521,11 @@ private:
     // The blades into the sun's nearest cascade (RVK_GrassShadow), after its casters: lightViewProj its matrix, texel
     // its texel size, depth its light-space depth range.
     void DrawGrassShadow(VkCommandBuffer cmd, const d3d::Matrix& lightViewProj, float texel, float depth);
-    bool DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range);
-    bool GrassNearLight(const float light[3], float range) const;   // some of our grass casts into its cube (it sways)
-    bool GrassBelow(const float light[3], float range) const;
+    // The blades into a point light's cube face; cone: a spot light's (only the tiles it reaches), or null.
+    bool DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range,
+                              const detail::Cone* cone);
+    bool GrassNearLight(const float light[3], float range, const detail::Cone* cone) const;   // some of our grass casts into its cube (it sways)
+    bool GrassBelow(const float light[3], float range, const detail::Cone* cone) const;
     bool m_grassDrawnThisFrame = false;            // the blades go in before the game's transparent pass (see Draw)
     // The water (water.cpp).
     WaterParams m_waterParams;

@@ -1222,6 +1222,8 @@ bool g_grassBenchWalker = false;  // --grass-bench-walker: a "character" walking
 bool g_grassBenchCross = false;   // --grass-bench-cross: ... crossing the view from left to right over the run (with
                                   // --grass-bench-still: the trail it leaves lies across the screenshot)
 bool g_grassBenchLamp = false;    // --grass-bench-lamp: a lamp just over the grass ahead (point light shadows)
+float g_spotDegrees = 0.0f;       // --point-shadow-spot DEG: the point shadow test's lamp a spot light looking down
+                                  // (with --grass-bench-lamp: a floodlight high over the grass, its cone DEG across)
 bool g_grassBenchNight = false;   // --grass-bench-night: a dim lightmap and ambient, a faint bluish moon
 float g_sunDir[3] = {}, g_sunColour[3] = {};   // --sun-dir X Y Z, --sun-colour R G B: the water scenes' and the grass
 bool g_sunDirSet = false, g_sunColourSet = false;   // bench's sun
@@ -2242,6 +2244,18 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
             lamp.range = 8;
             lamp.attenuation0 = 0.3f;
             lamp.attenuation1 = 0.2f;
+            if (g_spotDegrees > 0.0f) {        // a floodlight, as over Borealis's bridges: high, far-reaching, down
+                lamp.type = LIGHT_SPOT;
+                lamp.direction = {0.05f, -1.0f, 0.03f};
+                lamp.phi = g_spotDegrees * kPi / 180.0f;
+                lamp.theta = 0.7f * lamp.phi;
+                lamp.falloff = 1.0f;
+                lamp.position.y += 12.0f;
+                lamp.range = 1041.0f;
+                lamp.attenuation0 = 0.2f;
+                lamp.attenuation1 = 0.0f;
+                lamp.attenuation2 = 0.0009f;
+            }
             dev.SetLight(1, lamp);
             dev.LightEnable(1, true);
         }
@@ -2764,6 +2778,19 @@ void RunCityBench(D& dev, int frames, const std::string& shot, const std::string
                     l.range = 12.0f + 16.0f * Rand(uint32_t(i), 46);
                     l.attenuation0 = 1.0f;
                     l.attenuation1 = 0.1f;
+                    if (g_spotDegrees > 0.0f && i < 3) {   // --point-shadow-spot DEG: three floodlights, as Borealis's
+                        l.type = LIGHT_SPOT;
+                        l.diffuse = {1, 1, 1, 1};
+                        l.position.y = 16.0f;
+                        l.direction = {0.03f, -1.0f, 0.02f};
+                        l.phi = g_spotDegrees * kPi / 180.0f;
+                        l.theta = 0.7f * l.phi;
+                        l.falloff = 1.0f;
+                        l.range = 1041.0f;
+                        l.attenuation0 = 0.2f;
+                        l.attenuation1 = 0.0f;
+                        l.attenuation2 = 0.00009f;
+                    }
                     lamps.push_back({l, 0});
                 }
             }
@@ -4154,7 +4181,6 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
     }
 }
 
-float g_spotDegrees = 0.0f;       // --point-shadow-spot DEG: the point shadow test's lamp a spot light looking down
 
 // Point light shadow test (--point-shadow-test): night, a lamp among cubes. Left half: lit ground (per-pixel); right
 // half: the ground the way Anarchy Online draws it (unlit base pass + lightmap and lights multiplying pass). A small

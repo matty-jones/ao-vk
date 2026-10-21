@@ -257,6 +257,20 @@ int BoxInClip(const float mn[3], const float mx[3], const d3d::Matrix& vp, bool 
 // centre and half extents through the matrix, not its eight corners (the sun cascades' cull, every caster each).
 bool BoxOutsideAffine(const float mn[3], const float mx[3], const d3d::Matrix& vp);
 
+// A spot light's cone, for culling its cube (pointshadow.cpp): the light gives nothing outside it (lighting.glsl: rho
+// <= the outer cone's cosine - no light, and no look into its shadow), so a cube face that sees none of the cone is
+// never read and a caster wholly outside it shades nothing lit. Widened by a margin for the shadow's taps and normal
+// offset (a few texels) near its edge. on: a spot light with a cone narrower than a half turn.
+struct Cone {
+    float axis[3];
+    float half;                                  // half the outer angle, with the margin (radians)
+    float cosHalf, sinHalf;
+    bool on;
+};
+Cone SpotCone(const d3d::Light& l);
+bool FaceInCone(int f, const Cone& c);           // whether the cone reaches into cube face f's view
+bool BoxInCone(const float mn[3], const float mx[3], const float p[3], const Cone& c);   // any of the box, seen from p
+
 // Whether two byte ranges are the same - memcmp(...) == 0, inline, 16 bytes at a time: the CRT's memcmp is a call
 // that compares byte by byte in 32-bit code, and the per-draw compares (world matrices, constant blocks) were ~3% of
 // the render thread.

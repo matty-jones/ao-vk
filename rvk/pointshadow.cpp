@@ -80,16 +80,22 @@ uint32_t CubeFaceMask(const float mn[3], const float mx[3], const float p[3], fl
     return mask;
 }
 
-// A spot light's cone, for culling its cube: the light gives nothing outside it (lighting.glsl: rho <= the outer
-// cone's cosine - no light, and no look into its shadow), so a cube face that sees none of the cone is never read and
-// a caster wholly outside it shades nothing lit. Widened by a margin for the shadow's taps and normal offset (a few
-// texels) near its edge. on: a spot light with a cone narrower than a half turn.
-struct Cone {
-    float axis[3];
-    float half;                                  // half the outer angle, with the margin (radians)
-    bool on;
-};
 constexpr float kConeMargin = 0.06f;            // radians (~3.4 degrees)
+
+// Squared distance from a point to a box (0 inside).
+float BoxDistance2(const float mn[3], const float mx[3], const float p[3])
+{
+    float d2 = 0.0f;
+    for (int j = 0; j < 3; ++j) {
+        float d = std::max(std::max(mn[j] - p[j], 0.0f), p[j] - mx[j]);
+        d2 += d * d;
+    }
+    return d2;
+}
+
+}  // namespace
+
+namespace detail {
 
 Cone SpotCone(const d3d::Light& l)
 {
@@ -102,6 +108,8 @@ Cone SpotCone(const d3d::Light& l)
     c.axis[0] = l.direction.x / len;
     c.axis[1] = l.direction.y / len;
     c.axis[2] = l.direction.z / len;
+    c.cosHalf = std::cos(c.half);
+    c.sinHalf = std::sin(c.half);
     return c;
 }
 
@@ -140,10 +148,13 @@ bool FaceInCone(int f, const Cone& c)
         d[k] = (e & 2) ? 1.0f : -1.0f;
         best = std::max(best, (c.axis[0] * d[0] + c.axis[1] * d[1] + c.axis[2] * d[2]) * 0.57735027f);
     }
-    return best >= std::cos(c.half);
+    return best >= c.cosHalf;
 }
 
-// Whether any of a box can lie in the cone seen from p (its bounding sphere against the cone).
+// Whether any of a box can lie in the cone seen from p (its bounding sphere against the cone): the angle from the
+// axis to the sphere's centre, less the sphere's angular radius (asin r/d), within the cone's half angle - compared
+// as cosines (both under a quarter turn, so their sum is under a half turn), without the trigonometry: it runs for
+// every caster in a floodlight's range, and acos + asin made the point lights' scan ~3x slower.
 bool BoxInCone(const float mn[3], const float mx[3], const float p[3], const Cone& c)
 {
     float v[3], r2 = 0.0f;
@@ -151,25 +162,14 @@ bool BoxInCone(const float mn[3], const float mx[3], const float p[3], const Con
         v[j] = 0.5f * (mn[j] + mx[j]) - p[j];
         r2 += 0.25f * (mx[j] - mn[j]) * (mx[j] - mn[j]);
     }
-    const float d = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), r = std::sqrt(r2);
-    if (d <= r)
+    const float d2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    if (d2 <= r2)
         return true;
-    const float cosA = std::clamp((v[0] * c.axis[0] + v[1] * c.axis[1] + v[2] * c.axis[2]) / d, -1.0f, 1.0f);
-    return std::acos(cosA) - std::asin(r / d) <= c.half;
+    const float along = v[0] * c.axis[0] + v[1] * c.axis[1] + v[2] * c.axis[2];   // d cos(angle)
+    return along >= c.cosHalf * std::sqrt(d2 - r2) - c.sinHalf * std::sqrt(r2);   // d cos(half + asin(r / d))
 }
 
-// Squared distance from a point to a box (0 inside).
-float BoxDistance2(const float mn[3], const float mx[3], const float p[3])
-{
-    float d2 = 0.0f;
-    for (int j = 0; j < 3; ++j) {
-        float d = std::max(std::max(mn[j] - p[j], 0.0f), p[j] - mx[j]);
-        d2 += d * d;
-    }
-    return d2;
-}
-
-}  // namespace
+}  // namespace detail
 
 // The point lights' cube array: m_cubeCount cubes of m_pointShadowSize faces.
 bool Device::CreatePointShadowMaps(std::string* error)
@@ -723,10 +723,16 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         inRangeFaces.clear();
         // Batch-key order (CollectShadowItems): longer batches per face. The boxes come packed in that order
         // (m_shadowOrderBox): this scan runs per light over every caster.
-        uint64_t casters = 1469598103934665603ull;   // (FNV-1a over what each caster in range draws, and where)
+        // (FNV-1a over what each caster in range draws, and where - a 32-bit word at a time: every field is whole
+        // words, and byte by byte it was most of the scan for a floodlight with a city's casters in range.)
+        uint64_t casters = 1469598103934665603ull;
         bool swaying = false;
         const auto mix = [&](const void* p, size_t n) {
-            for (size_t b = 0; b < n; ++b) casters = (casters ^ static_cast<const uint8_t*>(p)[b]) * 1099511628211ull;
+            for (size_t b = 0; b + 4 <= n; b += 4) {
+                uint32_t w;
+                std::memcpy(&w, static_cast<const uint8_t*>(p) + b, sizeof(w));
+                casters = (casters ^ w) * 1099511628211ull;
+            }
         };
         const float* box = m_shadowOrderBox.data();
         for (size_t n = 0; n < m_shadowOrder.size(); ++n, box += 6) {
@@ -763,7 +769,7 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             }
         }
         if (sameLight && !animatedNear) {
-            const bool still = !swaying && casters == s.casters && s.kept < kCubeKeepMost && !GrassNearLight(pos, l.range);
+            const bool still = !swaying && casters == s.casters && s.kept < kCubeKeepMost && !GrassNearLight(pos, l.range, cone.on ? &cone : nullptr);
             if (still || ((k + m_frameNumber) & 1)) {
                 // This frame's position (the game's lamps wobble in the last bits): PointShadowLayer matches exactly.
                 std::memcpy(s.position, pos, sizeof(pos));
@@ -778,7 +784,7 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         s.kept = 0;
         pointScanMs += ProfileCpu() - scanStart;
         double drawStart = ProfileCpu();
-        const bool grassUp = !GrassBelow(pos, l.range);   // (+Y, face 2: only if some grass reaches above the light)
+        const bool grassUp = !GrassBelow(pos, l.range, cone.on ? &cone : nullptr);   // (+Y, face 2: only if some grass reaches above the light)
         for (int face = 0; face < 6; ++face) {
             if (!(coneFaces >> face & 1u))
                 continue;                        // (outside a spot light's cone: never read)
@@ -812,7 +818,7 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             FlushShadowGroup(cmd);               // this face's batch (M4)
             // Our ground grass casts too (grass.cpp). Its pipeline replaces the shadow pipelines' bindings: they are
             // bound again for the next face, and the cube's depth bias set back.
-            if ((face != 2 || grassUp) && DrawGrassPointShadow(cmd, vp, pos, l.range)) {
+            if ((face != 2 || grassUp) && DrawGrassPointShadow(cmd, vp, pos, l.range, cone.on ? &cone : nullptr)) {
                 bind = ShadowBind{};
                 m_shadowArenaBound = false;
                 BindShadowRecords(cmd);

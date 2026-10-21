@@ -54,6 +54,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   layout through the lighting, so the graphics card keeps a third more of its pixels in flight.
 - Floodlights and other spot lights cost much less for their shadows: only the part of their shadow map their beam
   can reach is drawn, not all six sides with everything in range (Borealis's bridge lights reach over 1,000 units).
+  Grass outside their beam no longer goes into their shadows either, and with no swaying grass in the beam their
+  shadows are kept between frames instead of redrawn.
 
 ### Fixed
 - Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken

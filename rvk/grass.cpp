@@ -2155,7 +2155,7 @@ void Device::DrawGrassShadow(VkCommandBuffer cmd, const d3d::Matrix& lightViewPr
 // rendering open): the tiles within the light's range that reach the face, each blade square to the light
 // (grass_shadow.vert's point mode). Tiles further than a few units from the light through their sparse quarter.
 // Returns whether anything was drawn (the caller then rebinds the shadow pipelines' state).
-bool Device::GrassNearLight(const float light[3], float range) const
+bool Device::GrassNearLight(const float light[3], float range, const Cone* cone) const
 {
     if (!m_grassOn || !m_grassShadows || !m_grassShadowPipeline || !m_grassPool || !m_grassIndex || !m_frameEyeValid)
         return false;
@@ -2165,16 +2165,19 @@ bool Device::GrassNearLight(const float light[3], float range) const
         if (!t.built || !t.blades)
             continue;
         const float x0 = float(t.tx) * kGrassTileSize, z0 = float(t.tz) * kGrassTileSize;
-        const float nx = std::max({x0 - 1.0f - light[0], 0.0f, light[0] - (x0 + kGrassTileSize + 1.0f)});
-        const float ny = std::max({t.minY - 1.0f - light[1], 0.0f, light[1] - (t.maxY + tall)});
-        const float nz = std::max({z0 - 1.0f - light[2], 0.0f, light[2] - (z0 + kGrassTileSize + 1.0f)});
-        if (nx * nx + ny * ny + nz * nz <= range * range)
+        const float lo[3] = {x0 - 1.0f, t.minY - 1.0f, z0 - 1.0f};
+        const float hi[3] = {x0 + kGrassTileSize + 1.0f, t.maxY + tall, z0 + kGrassTileSize + 1.0f};
+        const float nx = std::max({lo[0] - light[0], 0.0f, light[0] - hi[0]});
+        const float ny = std::max({lo[1] - light[1], 0.0f, light[1] - hi[1]});
+        const float nz = std::max({lo[2] - light[2], 0.0f, light[2] - hi[2]});
+        if (nx * nx + ny * ny + nz * nz <= range * range && (!cone || BoxInCone(lo, hi, light, *cone)))
             return true;
     }
     return false;
 }
 
-bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range)
+bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range,
+                                  const Cone* cone)
 {
     if (!m_grassOn || !m_grassShadows || !m_grassShadowPipeline || !m_grassPool || !m_grassIndex || !m_frameEyeValid ||
         m_grassTiles.empty())
@@ -2192,7 +2195,8 @@ bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceVi
         const float ny = std::max({lo[1] - light[1], 0.0f, light[1] - hi[1]});
         const float nz = std::max({lo[2] - light[2], 0.0f, light[2] - hi[2]});
         const float near2 = nx * nx + ny * ny + nz * nz;
-        if (near2 > range * range || BoxInClip(lo, hi, faceViewProj, false) == -1)
+        if (near2 > range * range || BoxInClip(lo, hi, faceViewProj, false) == -1 ||
+            (cone && !BoxInCone(lo, hi, light, *cone)))   // (a spot light's: only the tiles its cone reaches)
             continue;
         if (!bound) {
             bound = true;
@@ -2235,7 +2239,7 @@ bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceVi
 }
 
 // Whether all the grass within `range` of the light is below it (the cube's upward face then needs none).
-bool Device::GrassBelow(const float light[3], float range) const
+bool Device::GrassBelow(const float light[3], float range, const Cone* cone) const
 {
     const float tall = m_grassHeight * 1.7f + 1.0f;
     for (const auto& [key, tp] : m_grassTiles) {
@@ -2245,7 +2249,11 @@ bool Device::GrassBelow(const float light[3], float range) const
         const float x0 = float(t.tx) * kGrassTileSize, z0 = float(t.tz) * kGrassTileSize;
         const float nx = std::max({x0 - light[0], 0.0f, light[0] - x0 - kGrassTileSize});
         const float nz = std::max({z0 - light[2], 0.0f, light[2] - z0 - kGrassTileSize});
-        if (nx * nx + nz * nz <= range * range)
+        if (nx * nx + nz * nz > range * range)
+            continue;
+        const float lo[3] = {x0 - 1.0f, t.minY - 1.0f, z0 - 1.0f};
+        const float hi[3] = {x0 + kGrassTileSize + 1.0f, t.maxY + tall, z0 + kGrassTileSize + 1.0f};
+        if (!cone || BoxInCone(lo, hi, light, *cone))
             return false;
     }
     return true;
