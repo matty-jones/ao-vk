@@ -67,10 +67,14 @@ the full shader build, `RANDYVK_SPOT_CONE=0` renders spot lights' cubes whole (c
   as they are stamped, the cascades' cull loop); memcpy ~6% (the frame's copied vertices). Further gains need the
   persistent shadow list (below).
 
+- The per-pixel light grid can't take a floodlight's cone: the grid is columns over x/z, and the cone (1,041 units
+  long) widens under the ground to hundreds of cells. The draws' masks take the cone instead.
+
 ## Next
 
-1. In game: the frame dump's spot lights now print their cones (`cone theta/phi`) - how much the bridges' floodlights
-   save depends on theirs.
+1. In game (Borealis's bridges, the 12.09 ms GPU frame of the round's start): the gpu-ms line with the round's build -
+   sun shadows (rocks in blocks, cascades in turns), point shadows (cones, grass), terrain light; the frame dump's
+   spot lights print their cones (`cone theta/phi`).
 2. The ground's shader below 128: its own slimmer build (the one-pass map and the parallax are what hold it).
 3. The render thread: a persistent shadow item list for the remembered casters and placed objects (rebuilt only when
    they change); instanced statics (docs/render-batching-plan.md P3).
