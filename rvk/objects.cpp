@@ -56,7 +56,7 @@ Device::ObjectEntry* Device::FindObject()
         const uint32_t n = m_objects[m_objectPrev].next;
         if (n != ~0u) {
             const ObjectEntry& e = m_objects[n];
-            if (e.key && e.meshKey == m_drawMeshKey && std::memcmp(&e.world, &m_world, sizeof(m_world)) == 0) {
+            if (e.key && e.meshKey == m_drawMeshKey && SameBytes(&e.world, &m_world, sizeof(m_world))) {
                 index = n;
                 ++m_objectPredicted;
             }
@@ -130,7 +130,7 @@ Device::ObjectEntry* Device::FindObject()
             if (keys[i] != k)
                 continue;
             const ObjectEntry& e = m_objects[i];
-            if (e.meshKey == m_drawMeshKey && std::memcmp(&e.world, &m_world, sizeof(m_world)) == 0) {
+            if (e.meshKey == m_drawMeshKey && SameBytes(&e.world, &m_world, sizeof(m_world))) {
                 index = uint32_t(i);
                 break;
             }

@@ -8,6 +8,7 @@
 #include <vma/vk_mem_alloc.h>
 
 #include <algorithm>
+#include <emmintrin.h>
 #include <string>
 
 namespace rvk::detail {
@@ -255,6 +256,23 @@ int BoxInClip(const float mn[3], const float mx[3], const d3d::Matrix& vp, bool 
 // BoxInClip(mn, mx, vp, false) == -1 for an affine view-projection (orthographic: every point's w is 1) - the box's
 // centre and half extents through the matrix, not its eight corners (the sun cascades' cull, every caster each).
 bool BoxOutsideAffine(const float mn[3], const float mx[3], const d3d::Matrix& vp);
+
+// Whether two byte ranges are the same - memcmp(...) == 0, inline, 16 bytes at a time: the CRT's memcmp is a call
+// that compares byte by byte in 32-bit code, and the per-draw compares (world matrices, constant blocks) were ~3% of
+// the render thread.
+inline bool SameBytes(const void* a, const void* b, size_t n)
+{
+    const uint8_t* p = static_cast<const uint8_t*>(a);
+    const uint8_t* q = static_cast<const uint8_t*>(b);
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16)
+        if (_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p + i)),
+                                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(q + i)))) != 0xFFFF)
+            return false;
+    for (; i < n; ++i)
+        if (p[i] != q[i]) return false;
+    return true;
+}
 
 // GLSL's smoothstep: 0 at a, 1 at b, eased between (a > b runs backwards).
 inline float Smoothstep(float a, float b, float x)

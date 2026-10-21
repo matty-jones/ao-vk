@@ -2433,9 +2433,9 @@ void Device::FlushEdges()
         PushDrawSet(cmd, e.frameLights, e.prevBuffer, e.prevOffset, e.prevBytes, e.smoothBuffer, e.smoothOffset,
                     e.smoothBytes);
         if (e.indexCount)
-            vkCmdDrawIndexed(cmd, e.indexCount, 1, uint32_t(e.ibOffset / 2), int32_t(e.vbOffset / e.stride), e.record);
+            vkCmdDrawIndexed(cmd, e.indexCount, 1, uint32_t(e.ibOffset / 2), int32_t(uint32_t(e.vbOffset) / e.stride), e.record);
         else
-            vkCmdDraw(cmd, e.vertexCount, 1, uint32_t(e.vbOffset / e.stride), e.record);
+            vkCmdDraw(cmd, e.vertexCount, 1, uint32_t(e.vbOffset) / e.stride, e.record);
     }
     ++m_edgeFlushes;
     m_edgeDraws += uint32_t(m_edges.size());
@@ -2478,7 +2478,8 @@ void Device::RecordIndirect(uint32_t indexCount, VkDeviceSize ibOffset, VkDevice
     c.indexCount = indexCount;
     c.instanceCount = 1;
     c.firstIndex = uint32_t(ibOffset / 2);
-    c.vertexOffset = int32_t(vbOffset / stride);
+    c.vertexOffset = int32_t(uint32_t(vbOffset) / stride);   // (32-bit: the buffers are far below 4 GB, and a
+                                                             // 64-bit division is a library call in 32-bit code)
     c.firstInstance = recordIndex;
     if (m_group.active && m_group.key == key) {
         ++m_group.count;
@@ -3606,7 +3607,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // state set and set back, a light set again) keeps the last one: fewer blocks, and the draw can still join the
     // pending indirect batch (its key includes the block's index).
     size_t constBytes = offsetof(DrawConstants, lights) + size_t(lightCount) * sizeof(GpuLight);
-    if (sameArena && m_lastConstants.size() == constBytes && std::memcmp(m_lastConstants.data(), &c, constBytes) == 0) {
+    if (sameArena && m_lastConstants.size() == constBytes && SameBytes(m_lastConstants.data(), &c, constBytes)) {
         ++m_constantsReused;
     } else {
         constIndex = AppendConstant(c, constBytes);
@@ -3668,7 +3669,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         // Skinned on the GPU: the vertices in the frame's skin arena, the indices in the mesh's buffer.
         vbOffset = m_drawGpu->vertexOffset;
         ibOffset = m_drawGpu->mesh->indexOffset;
-        dt.motion[2] = float(vbOffset / layout.stride);
+        dt.motion[2] = float(uint32_t(vbOffset) / layout.stride);
         // A character's solid piece into the ray tracing (raytrace.cpp RtNoteSkinned; its shadow caster then only in
         // the map's untraced layers if the rays lack it). Cut-out pieces (hair, fringes) stay the map's.
         if (m_rt && m_drawSkin && primitive == d3d::TriangleList && indices && m_target == m_scene && !m_external &&
@@ -3682,7 +3683,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         // Static geometry on the GPU: the vertices stay where they are; the indices are retained there too
         // (DrawSharedIndexed) or come through the ring.
         vbOffset = m_drawStaticOffset;
-        dt.motion[2] = float(vbOffset / layout.stride);
+        dt.motion[2] = float(uint32_t(vbOffset) / layout.stride);
         if (staticIb) {
             ibOffset = m_drawStaticIndexOffset;
         } else if (indices) {
@@ -3695,7 +3696,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         VkDeviceSize vbBytes = VkDeviceSize(layout.stride) * vertexCount;
         vbOffset = Allocate(vbBytes, layout.stride, &cpu);
         std::memcpy(cpu, vertices, vbBytes);
-        dt.motion[2] = float(vbOffset / layout.stride);   // the base vertex: gl_VertexIndex - it = vertex
+        dt.motion[2] = float(uint32_t(vbOffset) / layout.stride);   // the base vertex: gl_VertexIndex - it = vertex
         if (indices) {
             ibOffset = Allocate(VkDeviceSize(indexCount) * 2, 2, &cpu);
             std::memcpy(cpu, indices, size_t(indexCount) * 2);
@@ -3714,7 +3715,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             smoothBytes = VkDeviceSize(vertexCount) * 12;
             dt.tess[0] = tessLevel;
             dt.tess[1] = m_tessShape;
-            dt.tess[2] = float(vbOffset / layout.stride);
+            dt.tess[2] = float(uint32_t(vbOffset) / layout.stride);
             m_drawTess = true;
         }
     } else if (tessLevel > 0.0f &&
@@ -3727,7 +3728,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         std::memcpy(smoothCpu, m_smoothNormals.data(), smoothBytes);
         dt.tess[0] = tessLevel;
         dt.tess[1] = m_tessShape;
-        dt.tess[2] = float(vbOffset / layout.stride);
+        dt.tess[2] = float(uint32_t(vbOffset) / layout.stride);
         m_drawTess = true;
     } else if (m_native.drawing && !m_native.clutter && m_native.tessPatch && m_tessSupported && primitive == d3d::TriangleList &&
                (m_terrainSettings.round > 0.0f || (m_terrainSettings.depth > 0.0f && TerrainRockOn()))) {

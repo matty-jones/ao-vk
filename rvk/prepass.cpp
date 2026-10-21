@@ -461,7 +461,7 @@ void Device::PrepassDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, uint
         d.indexCount = indexCount;
         d.instanceCount = 1;
         d.firstIndex = uint32_t(ibOffset / 2);
-        d.vertexOffset = int32_t(vbOffset / stride);
+        d.vertexOffset = int32_t(uint32_t(vbOffset) / stride);
         d.firstInstance = recordIndex;
         if (!c.groupCount) c.groupFirst = m_prepassIndirectCount;
         ++c.groupCount;
@@ -469,9 +469,9 @@ void Device::PrepassDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, uint
     } else {
         FlushPrepassGroup();
         if (indexCount)
-            vkCmdDrawIndexed(cmd, indexCount, 1, uint32_t(ibOffset / 2), int32_t(vbOffset / stride), recordIndex);
+            vkCmdDrawIndexed(cmd, indexCount, 1, uint32_t(ibOffset / 2), int32_t(uint32_t(vbOffset) / stride), recordIndex);
         else
-            vkCmdDraw(cmd, vertexCount, 1, uint32_t(vbOffset / stride), recordIndex);
+            vkCmdDraw(cmd, vertexCount, 1, uint32_t(vbOffset) / stride, recordIndex);
         ++m_prepassCalls;
     }
     ++m_prepassDraws;
