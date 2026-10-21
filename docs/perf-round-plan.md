@@ -39,6 +39,8 @@ registers and spilled 144 bytes - 12 warps a core of 48 (25% occupancy) - for ev
 
 | Sun cascades in turns: of four, the second every other frame, the two widest every fourth (was: the second every frame, the two widest every other); all at once after a gap, a new map, the rays' layers coming or going, the sun moving, or the cascade's centre (eye and view direction) moving 5% of its half width | city bench sun shadows GPU 0.29 -> 0.19 ms, their CPU 0.82 -> 0.71; pictures identical (shadow test, walker); `RANDYVK_CASCADE_TURNS=0` draws every cascade every frame |
 
+| Lamps in the air (RVK_VolLamps): the range fade and a spot's cone before the march through its cube, not after | city bench, 12 lamps and 3 floodlights: volumetric 1.09 -> 1.03 ms, picture identical (the march itself: 32 steps, ~0.76 ms with no lamps, left) |
+
 City bench overall: GPU 4.08 -> 3.43 ms, render thread 6.0 -> ~5.5 ms. `RANDYVK_FULL_SHADER=1` draws every draw with
 the full shader build, `RANDYVK_SPOT_CONE=0` renders spot lights' cubes whole (comparisons).
 

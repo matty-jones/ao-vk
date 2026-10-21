@@ -55,7 +55,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Floodlights and other spot lights cost much less for their shadows: only the part of their shadow map their beam
   can reach is drawn, not all six sides with everything in range (Borealis's bridge lights reach over 1,000 units).
   Grass outside their beam no longer goes into their shadows either, and with no swaying grass in the beam their
-  shadows are kept between frames instead of redrawn.
+  shadows are kept between frames instead of redrawn. Their light in the air (`RVK_VolLamps`) skips the work for the
+  view's rays the beam doesn't reach.
 - Sun shadows cost less: beyond the nearest of the four shadow areas round the camera, they are redrawn in turns -
   the second every other frame, the two widest every fourth - instead of the second every frame and the widest every
   other (about a third less GPU time for sun shadows over a city). Still things' shadows are exactly as before;

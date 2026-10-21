@@ -230,6 +230,14 @@ void main()
             float a = max(t0 - chord, 0.0), b = min(t0 + chord, dist);
             if (b <= a) continue;
             float hh = sqrt(h2 + 0.3);           // (a core: no point of infinite light at the lamp)
+            // Its fade towards the range and a spot's cone at the ray's nearest approach, first: a ray they leave
+            // dark needs no march (a floodlight's range - 1,041 units over Borealis's bridges - takes in every ray).
+            float shape = 1.0 - smoothstep(0.4 * range, range, sqrt(h2));
+            if (type == 2u) {
+                vec3 near = normalize(P.eye.xyz + dir * clamp(t0, a, b) - l.position.xyz);
+                shape *= smoothstep(l.spot.y, l.spot.x, dot(near, normalize(l.direction.xyz)));
+            }
+            if (shape <= 0.0) continue;
             float glow;
             if (l.spot.z > 0.5) {                // (12 steps, offset per pixel and frame: blurred and averaged)
                 const int kSteps = 12;
@@ -244,12 +252,7 @@ void main()
             } else {
                 glow = (atan((b - t0) / hh) - atan((a - t0) / hh)) / hh;
             }
-            glow *= 1.0 - smoothstep(0.4 * range, range, sqrt(h2));
-            if (type == 2u) {
-                vec3 near = normalize(P.eye.xyz + dir * clamp(t0, a, b) - l.position.xyz);
-                glow *= smoothstep(l.spot.y, l.spot.x, dot(near, normalize(l.direction.xyz)));
-            }
-            lamps += l.diffuse.rgb * glow;
+            lamps += l.diffuse.rgb * (glow * shape);
         }
         light += lamps * (0.03 * FL.volume2.x * (1.0 + 3.0 * FL.fogBanks.w));
     }
