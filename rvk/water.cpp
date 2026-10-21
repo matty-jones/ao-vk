@@ -484,6 +484,9 @@ void Device::DestroyWaterResources()
         if (m.texture) DestroyTextureNow(m.texture);
     m_waterMaps.clear();
     m_waterSurfaces.clear();
+    if (m_waterSimMap.texture) DestroyTextureNow(m_waterSimMap.texture);
+    m_waterSimMap = WaterMap{};
+    m_waterSimMapCell[0] = m_waterSimMapCell[1] = INT32_MIN;
     m_waterFalls.clear();
     m_waterFoot.clear();
     if (m_waterDetail) { DestroyTextureNow(m_waterDetail); m_waterDetail = nullptr; }
@@ -889,6 +892,89 @@ const water::Surface* Device::WaterSurfaceFor(uint64_t key, const WaterVertex* v
              w.splitRounds, w.bodies, double(w.largestBody), double(w.lo[1]), double(w.hi[1]), ms);
     m_waterSurfaces.push_back(std::move(s));
     return &m_waterSurfaces.back().surface;
+}
+
+// The disturbance field's map with the surface from the game's triangles (m_waterSimMap): kSimWindow units square round
+// the camera's kSimCell cell, at kSimTexel; the flat triangles over it rasterised as the playfield's map is - the
+// highest surface where water lies over water - but its heights as they are (the field needs where the water is
+// and how high, near the camera; the flattened bodies were the far grid's).
+Device::WaterMap* Device::WaterSimMapFor(uint64_t key, const WaterVertex* v, const std::vector<uint32_t>& flat)
+{
+    constexpr float kSimWindow = 128.0f, kSimCell = 32.0f, kSimTexel = 0.5f;
+    constexpr uint32_t kSide = uint32_t(kSimWindow / kSimTexel);
+    if (flat.empty())
+        return nullptr;
+    UpdateFrameEye();
+    const int32_t cx = int32_t(std::floor(m_frameEye[0] / kSimCell)), cz = int32_t(std::floor(m_frameEye[2] / kSimCell));
+    WaterMap& m = m_waterSimMap;
+    if (m.texture && m.key == key && m_waterSimMapCell[0] == cx && m_waterSimMapCell[1] == cz) {
+        m.lastFrame = m_frameNumber;
+        return &m;
+    }
+    m.key = key;
+    m.lastFrame = m_frameNumber;
+    m_waterSimMapCell[0] = cx;
+    m_waterSimMapCell[1] = cz;
+    m.origin[0] = (float(cx) + 0.5f) * kSimCell - 0.5f * kSimWindow;
+    m.origin[1] = (float(cz) + 0.5f) * kSimCell - 0.5f * kSimWindow;
+    m.size[0] = m.size[1] = kSimWindow;
+    m.texel = kSimTexel;
+    m.extent = kSimWindow;
+    m.lo[0] = m.origin[0]; m.lo[1] = m.origin[1];
+    m.hi[0] = m.origin[0] + kSimWindow; m.hi[1] = m.origin[1] + kSimWindow;
+    m.colour = v[flat[0]].colour;
+    std::vector<float> heights(size_t(kSide) * kSide, -1e30f);
+    float lowest = 1e30f;
+    uint32_t triangles = 0;
+    for (size_t t = 0; t + 2 < flat.size(); t += 3) {
+        const float* a = v[flat[t]].pos;
+        const float* b = v[flat[t + 1]].pos;
+        const float* c = v[flat[t + 2]].pos;
+        const float minX = std::min({a[0], b[0], c[0]}), maxX = std::max({a[0], b[0], c[0]});
+        const float minZ = std::min({a[2], b[2], c[2]}), maxZ = std::max({a[2], b[2], c[2]});
+        if (maxX < m.lo[0] || minX > m.hi[0] || maxZ < m.lo[1] || minZ > m.hi[1])
+            continue;
+        const float det = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2]);
+        if (std::fabs(det) < 1e-12f)
+            continue;
+        ++triangles;
+        // (Never the outermost texels: dry, so the clamped sampler reads no water beyond the window. Half a texel's
+        // slack, as the playfield's map: no seam between neighbouring triangles.)
+        const int x0 = std::max(int(std::floor((minX - m.origin[0]) / kSimTexel)) - 1, 1);
+        const int x1 = std::min(int(std::ceil((maxX - m.origin[0]) / kSimTexel)) + 1, int(kSide) - 2);
+        const int z0 = std::max(int(std::floor((minZ - m.origin[1]) / kSimTexel)) - 1, 1);
+        const int z1 = std::min(int(std::ceil((maxZ - m.origin[1]) / kSimTexel)) + 1, int(kSide) - 2);
+        const float slack = 0.5f * kSimTexel / std::sqrt(std::fabs(det)) * 2.0f;
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x) {
+                const float px = m.origin[0] + (float(x) + 0.5f) * kSimTexel, pz = m.origin[1] + (float(z) + 0.5f) * kSimTexel;
+                const float l0 = ((b[2] - c[2]) * (px - c[0]) + (c[0] - b[0]) * (pz - c[2])) / det;
+                const float l1 = ((c[2] - a[2]) * (px - c[0]) + (a[0] - c[0]) * (pz - c[2])) / det;
+                const float l2 = 1.0f - l0 - l1;
+                if (l0 < -slack || l1 < -slack || l2 < -slack)
+                    continue;
+                const float y = l0 * a[1] + l1 * b[1] + l2 * c[1];
+                float& h = heights[size_t(z) * kSide + size_t(x)];
+                h = std::max(h, y);
+                lowest = std::min(lowest, y);
+            }
+    }
+    m.base = lowest < 1e29f ? lowest : 0.0f;
+    m.flatTriangles = triangles;
+    std::vector<uint16_t> pixels(size_t(kSide) * kSide * 4, 0);
+    const uint16_t one = ToHalf(1.0f);
+    for (size_t i = 0; i < heights.size(); ++i)
+        if (heights[i] > -1e29f) {
+            pixels[i * 4 + 0] = ToHalf(heights[i] - m.base);
+            pixels[i * 4 + 1] = one;
+        }
+    if (!m.texture) {
+        m.texture = CreateImage(kSide, kSide, Format::RGBA16F, 1, false);
+        if (!m.texture)
+            return nullptr;
+    }
+    UpdateTexture(m.texture, 0, 0, 0, kSide, kSide, pixels.data(), kSide * 8);
+    return &m;
 }
 
 void Device::WaterLog(const char* fmt, ...)
@@ -1611,10 +1697,12 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     std::vector<uint32_t>& flat = m_waterFlat;
     SplitWaterTriangles(vertices, vertexCount, indices, indexCount, flat, steep);
     const uint64_t key = HashWater(vertices, vertexCount, indices, indexCount);
-    WaterMap* map = WaterMapFor(key, vertices, flat);   // (the grid's surface; where the disturbance field finds water)
-    // The surface: the game's own flat triangles, tessellated and waved (RVK_WaterMesh) - else the grid over the map.
+    // The surface: the game's own flat triangles, tessellated and waved (RVK_WaterMesh) - else the grid over the
+    // playfield's water map. The disturbance field reads a map either way: the playfield's, or with the surface a
+    // window round the camera.
     const water::Surface* surface =
         m_waterParams.mesh && m_waterSurfacePipeline ? WaterSurfaceFor(key, vertices, vertexCount, flat, steep) : nullptr;
+    WaterMap* map = surface ? WaterSimMapFor(key, vertices, flat) : WaterMapFor(key, vertices, flat);
     if (!map && !surface && steep.empty())
         return;
     // None of it in view - each of the game's triangles, raised and lowered by the tallest waves, outside the camera's
@@ -1732,7 +1820,7 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     wf.env[0] = env ? 1.0f : 0.0f;
     wf.env[1] = m_pbr.probe;
     // The game's water colour; a colourless one (white vertices) gets a water blue.
-    uint32_t colour = map ? map->colour : vertices[0].colour;
+    uint32_t colour = surface ? surface->colour : map ? map->colour : vertices[0].colour;
     ArgbTo4(colour, wf.tint);
     if (wf.tint[0] > 0.9f && wf.tint[1] > 0.9f && wf.tint[2] > 0.9f) {
         wf.tint[0] = 0.05f; wf.tint[1] = 0.2f; wf.tint[2] = 0.35f;

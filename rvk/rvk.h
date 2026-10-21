@@ -2546,6 +2546,12 @@ private:
         water::Surface surface;
     };
     std::vector<WaterSurface> m_waterSurfaces;
+    // With the surface from the game's triangles, the disturbance field's map: a window round the camera (the field
+    // reaches some 45 units), made again when the camera leaves its cell or the mesh changes - not the playfield's
+    // whole map (~30 ms over Borealis each time the game's mesh changed).
+    WaterMap m_waterSimMap;
+    int32_t m_waterSimMapCell[2] = {INT32_MIN, INT32_MIN};
+    WaterMap* WaterSimMapFor(uint64_t key, const WaterVertex* v, const std::vector<uint32_t>& flat);
     const water::Surface* WaterSurfaceFor(uint64_t key, const WaterVertex* v, uint32_t count, const std::vector<uint32_t>& flat,
                                           const std::vector<uint32_t>& steep);
     std::vector<uint32_t> m_waterFlat;
