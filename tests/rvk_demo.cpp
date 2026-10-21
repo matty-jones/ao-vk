@@ -4355,6 +4355,8 @@ float g_folDither = -1.0f;         // --fol-dither D: RVK_FolDither, soft edges 
 float g_leafCamDist = -1.0f;       // --leaf-cam-dist D: the camera this far from the row (default: from the trees' size)
 float g_leafCamHeight = -1.0f;     // --leaf-cam-height H: ... this high (default: a third of the tallest tree)
 float g_leafCamYaw = 0.0f;         // --leaf-cam-yaw R: ... turned R radians about the row's middle
+float g_leafCamTurn = 0.0f;        // --leaf-cam-turn R: ... looking to and fro, R radians either way (a turn in 2 s)
+float g_leafCamOrbit = 0.0f;       // --leaf-cam-orbit R: ... going round the row's middle to and fro, R radians either way
 int g_leafFilm = 0;                // --leaf-film N: ~60 frames a second, a screenshot every N frames (film_NNN.bmp)
 int g_frameGenToggle = 0;          // --frame-gen-toggle N: frame generation off at frame N, on again at 2N (the leaf
                                    // scenes; the swapchain made again each time)
@@ -4483,6 +4485,12 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
     if (g_folEdges >= 0) dev.SetKnob(rvk::Knob::FolEdges, float(g_folEdges));
     if (g_folDither >= 0.0f) dev.SetKnob(rvk::Knob::FolDither, g_folDither);
     if (g_prepassEq >= 0) dev.SetKnob(rvk::Knob::PrepassEq, float(g_prepassEq));
+    if (g_pbrDebug) {                            // (--pbr-debug 10: the two-pass foliage's parts in colour)
+        Device::PbrSettings pbr;
+        pbr.enabled = true;
+        pbr.debug = g_pbrDebug;
+        dev.SetPbr(pbr);
+    }
     for (int frame = 0; frame < frames; ++frame) {
         if (g_frameGenToggle > 0 && (frame == g_frameGenToggle || frame == 2 * g_frameGenToggle))
             dev.SetFrameGen(frame == 2 * g_frameGenToggle);
@@ -4499,10 +4507,17 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
         dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8AB0D8, 1.0f);
-        const float ex = mid + dist * std::sin(g_leafCamYaw), ez = -dist * std::cos(g_leafCamYaw);
+        const float yaw = g_leafCamYaw + g_leafCamOrbit * std::sin(float(frame) * kPi / 60.0f);
+        const float ex = mid + dist * std::sin(yaw), ez = -dist * std::cos(yaw);
         const float lookY = g_leafForest > 0 ? camY + 3.0f : tallest * 0.45f;
         const float lookZ = g_leafForest > 0 ? 30.0f : 0.0f;
-        dev.SetTransform(View, LookAtLH({ex, camY, ez}, {mid, lookY, lookZ}, {0, 1, 0}));
+        if (g_leafCamTurn != 0.0f) {             // (turning in place: the look's point swung round the eye)
+            const float a = g_leafCamTurn * std::sin(float(frame) * kPi / 60.0f), dx = mid - ex, dz = lookZ - ez;
+            dev.SetTransform(View, LookAtLH({ex, camY, ez}, {ex + dx * std::cos(a) - dz * std::sin(a), lookY,
+                                                             ez + dx * std::sin(a) + dz * std::cos(a)}, {0, 1, 0}));
+        } else {
+            dev.SetTransform(View, LookAtLH({ex, camY, ez}, {mid, lookY, lookZ}, {0, 1, 0}));
+        }
         if (g_freeCam && frame >= 10) {
             Device::FreeCamInput in;
             in.on = true;
@@ -4954,6 +4969,8 @@ int main(int argc, char** argv)
         else if (a == "--fol-dither" && i + 1 < argc) g_folDither = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-height" && i + 1 < argc) g_leafCamHeight = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-yaw" && i + 1 < argc) g_leafCamYaw = float(std::atof(argv[++i]));
+        else if (a == "--leaf-cam-turn" && i + 1 < argc) g_leafCamTurn = float(std::atof(argv[++i]));
+        else if (a == "--leaf-cam-orbit" && i + 1 < argc) g_leafCamOrbit = float(std::atof(argv[++i]));
         else if (a == "--leaf-film" && i + 1 < argc) g_leafFilm = std::atoi(argv[++i]);
         else if (a == "--leaf-forest" && i + 1 < argc) g_leafForest = std::atoi(argv[++i]);
         else if (a == "--water-lake") { g_waterScene = 1; hdr = true; }

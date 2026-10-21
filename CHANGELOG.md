@@ -30,6 +30,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   where a crate or a wall blocks its light.
 - Variable rate shading: `RVK_Vrs 1` (Effects) shades flat and fast-moving parts of the scene in 2 x 2 blocks, for
   more frames per second on GPUs that support it (AMD's FidelityFX VRS). `RVK_VrsCutoff` (ini) sets how readily.
+  Leaves, fences and grilles are always shaded in full, so their holes stay sharp.
 - AMD's indirect light to try: `RVK_GiMode 1` (Effects, under Indirect light) traces bounce light through a model of
   the world's buildings and ground (FidelityFX Brixelizer GI), so light reflects off walls and slopes that are off
   screen or hidden too. `RVK_Gi` still sets its strength. In randy-vk.ini, `RVK_GiDebug` 1 shows that model and 2 the

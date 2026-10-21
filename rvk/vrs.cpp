@@ -3,8 +3,9 @@
 // scene's own shader (ffp_main.glsl, the costly one) may shade a 2 x 2 (or 2 x 1, 1 x 2) block of pixels once: where
 // last frame's picture there was flat (its luminance varied less than a cutoff) or moved fast (motion blurs it anyway).
 // Vulkan's fragment shading rate attachment (VK_KHR_fragment_shading_rate) takes it as it is - AMD's encoding is
-// Vulkan's (log2 width << 2 | log2 height). Only the scene's shader takes the attachment's rate (its pipelines' combiner
-// REPLACE); the sky, water, grass, rain, smoke and clouds keep theirs (KEEP: 1 x 1). Every pipeline is made for the
+// Vulkan's (log2 width << 2 | log2 height). Only the scene's shader takes the attachment's rate (its no-discard pipelines'
+// combiner REPLACE); draws that cut out (leaves, fences: their holes would be cut 2 x 2), the sky, water, grass, rain,
+// smoke and clouds keep theirs (KEEP: 1 x 1). Every pipeline is made for the
 // attachment when the GPU has it (m_sceneRateFlag), so the setting switches without making any.
 #include "internal.h"
 #include "ffx_common.h"

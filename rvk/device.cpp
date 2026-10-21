@@ -1107,7 +1107,10 @@ bool Device::CreatePipelines(std::string* error)
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachmentFormats = colorFormats;
     rendering.depthAttachmentFormat = kDepthFormat;
-    // RVK_Vrs: the scene shader shades at the shading rate image's rate (REPLACE) where the scene has one (vrs.cpp).
+    // RVK_Vrs: the scene shader shades at the shading rate image's rate (REPLACE) where the scene has one (vrs.cpp) -
+    // its no-discard variants: a draw that cuts out (leaves, fences, grilles) shades every pixel (KEEP), or its holes
+    // were cut 2 x 2 at a time - and two-pass foliage's core and edge layers, each cut at its own alpha, showed squares
+    // of the tiles' size through dense leaves (user, 2026-10-21).
     VkPipelineFragmentShadingRateStateCreateInfoKHR rateState{
         VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR};
     rateState.fragmentSize = {1, 1};
@@ -1126,6 +1129,7 @@ bool Device::CreatePipelines(std::string* error)
     for (int c = 0; c < 3 && ok; ++c) {
         colorFormats[0] = set ? GetFormatInfo(Format::RGBA16F).vk : kColorFormat;
         rendering.colorAttachmentCount = cb.attachmentCount = set ? 5 : 1;
+        rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
         stages[1].module = nc ? (set ? fragGlowNoCut : fragNoCut) : (set ? fragGlow : frag);
         VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         ia.topology = kClassTopology[c];
@@ -1166,6 +1170,7 @@ bool Device::CreatePipelines(std::string* error)
         for (int nc = 0; nc < 2 && ok; ++nc) {
             colorFormats[0] = set ? GetFormatInfo(Format::RGBA16F).vk : kColorFormat;
             rendering.colorAttachmentCount = cb.attachmentCount = set ? 5 : 1;
+            rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
             tstages[3].module = nc ? (set ? fragGlowNoCut : fragNoCut) : (set ? fragGlow : frag);
             VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
             ia.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
