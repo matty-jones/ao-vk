@@ -8,6 +8,7 @@
 #include "d3d7.h"
 #include "skin.h"
 #include "vk.h"
+#include "water_surface.h"
 
 #include <array>
 #include <memory>
@@ -834,7 +835,8 @@ public:
         float fallSpray = 1.0f;                  // the spray and mist at a fall's foot (RVK_WaterSpray)
         float fallChurn = 1.0f;                  // the pool churned and foaming where a fall lands (RVK_WaterChurn)
         float fallSpeed = 1.75f;                 // how fast a fall's water falls, x a natural fall's (RVK_WaterSpeed)
-        uint32_t quality = 2;                    // 1 low, 2 medium, 3 high: grid density, reflection steps
+        uint32_t quality = 2;                    // 1 low, 2 medium, 3 high: mesh density, reflection steps
+        bool mesh = true;                        // the surface from the game's triangles (RVK_WaterMesh; off: the grid)
     };
     void SetWaterParams(const WaterParams& params) { m_waterParams = params; UpdateWaterReady(); }
     void DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount);
@@ -2483,6 +2485,17 @@ private:
         uint64_t lastFrame = 0;
     };
     std::vector<WaterMap> m_waterMaps;
+    // The surface from the game's own triangles (water_surface.h), made once for each mesh the game hands over (by the
+    // map's key), the last few kept.
+    struct WaterSurface {
+        uint64_t key = 0;
+        uint64_t lastFrame = 0;
+        water::Surface surface;
+    };
+    std::vector<WaterSurface> m_waterSurfaces;
+    const water::Surface* WaterSurfaceFor(uint64_t key, const WaterVertex* v, uint32_t count, const std::vector<uint32_t>& flat,
+                                          const std::vector<uint32_t>& steep);
+    std::vector<uint32_t> m_waterFlat;
     struct WaterGrid { uint32_t segments = 0; VkBuffer buffer = VK_NULL_HANDLE; VmaAllocation_T* allocation = nullptr; };
     std::vector<WaterGrid> m_waterGrids;
     std::vector<uint32_t> m_waterSteep;
@@ -2503,6 +2516,7 @@ private:
     VkDescriptorSetLayout m_waterSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_waterLayout = VK_NULL_HANDLE;
     VkPipeline m_waterPipeline = VK_NULL_HANDLE;
+    VkPipeline m_waterSurfacePipeline = VK_NULL_HANDLE;   // the surface's tessellated patches (water_surface.*)
     VkSampler m_waterRepeatSampler = VK_NULL_HANDLE;
     Texture* m_waterDetail = nullptr;            // RG ripple slope, B noise, A cell edges (tiled, mipmapped)
     Texture* m_waterSceneCopy = nullptr;         // the scene before the water (once a frame)
@@ -2940,8 +2954,9 @@ private:
     void MakeSandGround(const float corner[3], float size, uint32_t n);
     void UpdateWaterReady();
     const WaterGrid* WaterGridFor(uint32_t segments);
-    WaterMap* WaterMapFor(const WaterVertex* v, uint32_t count, const uint16_t* idx, uint32_t icount,
-                          std::vector<uint32_t>& steep);
+    void SplitWaterTriangles(const WaterVertex* v, uint32_t count, const uint16_t* idx, uint32_t icount,
+                             std::vector<uint32_t>& flat, std::vector<uint32_t>& steep);
+    WaterMap* WaterMapFor(uint64_t key, const WaterVertex* v, const std::vector<uint32_t>& flat);
     bool CopySceneForWater(VkCommandBuffer cmd, const WaterMap* map);
     void WaterLog(const char* fmt, ...);
     bool CreateGrassResources(std::string* error);

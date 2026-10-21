@@ -18,7 +18,7 @@ layout(set = 0, binding = 9) uniform sampler2D sceneCopy;              // the HD
 layout(set = 0, binding = 10) uniform sampler2D detail;                // RG: ripple slope, B: noise, A: cells
 layout(set = 0, binding = 11) uniform sampler2D gameTexture;           // the game's water texture
 layout(set = 0, binding = 12) uniform sampler2D envAtlas;              // the environment probe (env_common.glsl)
-layout(set = 0, binding = 2, std430) readonly buffer Feet { FootSegment feet[]; };   // the grid: the falls' feet
+layout(set = 0, binding = 2, std430) readonly buffer Feet { FootSegment feet[]; };   // the grid and the surface: the falls' feet
 layout(set = 0, binding = 14) uniform sampler2D cloudShadow;   // the clouds' (rvk clouds.cpp)
 layout(set = 0, binding = 15) uniform sampler2D terrainSunMap; // the terrain's shade (rvk terrain_sun.cpp)
 
@@ -267,7 +267,7 @@ float Ggx(vec3 N, vec3 V, vec3 L, float rough)
 
 void main()
 {
-    bool mesh = W.time.z > 0.5;
+    bool mesh = W.time.z > 0.5 && W.time.z < 1.5;   // the game's steep triangles (the surface, 2, shades as the grid)
     if (int(W.sky.w) == 4) {                    // RANDYVK_WATER_DEBUG=4: the grid, unmasked
         float sd = texelFetch(sceneDepth, ivec2(gl_FragCoord.xy), 0).r;
         outScene = vec4(sd < gl_FragCoord.z ? 1.0 : 0.0, fract(vRest.x * 0.1), fract(vRest.z * 0.1), 1.0);

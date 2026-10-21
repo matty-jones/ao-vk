@@ -4,12 +4,14 @@
 // vertices from the ProcessVertices call (rvk_device.cpp) and, at the game's first draw of them in the frame, hands
 // them here instead (DrawWater); the game's draws of them are skipped.
 //
-// The game's water triangles are huge (it subdivides only edges over 10000 units), so they can't carry waves. We draw
-// a polar grid around the camera instead (water.vert: rings growing geometrically, as dense as their distance needs;
-// one mesh, no cracks), lifted onto the water by a water map - the game's flat triangles rasterised top-down into an
-// image (R: the surface's height, G: water here) - and moved by Gerstner waves. Each connected body is baked flat at
-// its own level (the game hangs shore aprons and skirts below the surface, which the coarse far grid would turn into
-// terraces - "mountains of water"). Steep triangles (falls) are drawn as they are (mesh mode).
+// The surface is the game's own flat triangles (docs/water-mesh-plan.md): welded, stitched where coarse ones meet fine
+// ones and split until no edge is over 32 units (water_surface.cpp, once per mesh), then tessellated by distance on the
+// GPU and moved by Gerstner waves (water_surface.*) - exactly where the game has its water, every layer of it, the
+// depth test sorting out what shows. Steep triangles (falls, shore steps) are drawn as they are (mesh mode), falls as
+// sheets of their own. The water map - the flat triangles rasterised top-down (R: the surface's height, G: water here)
+// - tells the disturbance field where the water is; with RVK_WaterMesh off (or without tessellation) a polar grid round
+// the camera is lifted onto it instead (water.vert), each connected body baked flat at its own level (the game hangs
+// shore aprons and skirts below the surface, which the coarse far grid would turn into terraces).
 //
 // Drawn where the game draws its water, in the scene's rendering: what is under and behind the water must be known,
 // so the scene's colour and depth are copied first (once a frame) and the water drawn opaque over them (water.frag:
@@ -80,6 +82,15 @@ const uint32_t kWaterVertSpirv[] = {
 const uint32_t kWaterFragSpirv[] = {
 #include "water.frag.inc"
 };
+const uint32_t kSurfaceVertSpirv[] = {
+#include "water_surface.vert.inc"
+};
+const uint32_t kSurfaceTescSpirv[] = {
+#include "water_surface.tesc.inc"
+};
+const uint32_t kSurfaceTeseSpirv[] = {
+#include "water_surface.tese.inc"
+};
 const uint32_t kSprayVertSpirv[] = {
 #include "water_spray.vert.inc"
 };
@@ -108,6 +119,9 @@ struct WaterFrame {
                                                  // z: how fast the falls fall (RVK_WaterSpeed), w: the rain
     float storm[4];                              // a storm: x how hard (0..1+), y the gusts' strength, zw the gusts'
                                                  // frame (wind.glsl WindAxes)
+    float surface[4];                            // the surface from the game's triangles: x the waves' height before
+                                                 // each body's size; y, z an edge's segment length near and per unit of
+                                                 // distance; w the most segments an edge is split into
 };
 
 // A fall's foot as the grid's foam and the spray read it (binding 2; water_common.glsl FootSegment): a segment of where
@@ -281,13 +295,17 @@ uint64_t HashWater(const Device::WaterVertex* v, uint32_t count, const uint16_t*
 bool Device::CreateWaterResources(std::string* error)
 {
     DestroyWaterResources();
-    // One pushed set: 0 the block, 2 the mesh's vertices, 4 the frame lights, 5 the sun's shadows, 7 the water map, 8
-    // the scene's depth, 9 the scene, 10 the detail texture, 11 the game's texture, 12 the environment probe's atlas, 13 the disturbance field,
-    // 14 the clouds' shadow, 15 the terrain's shade (terrain_sun.cpp).
-    const uint32_t numbers[13] = {0, 2, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-    VkDescriptorSetLayoutBinding b[13] = {};
-    const VkShaderStageFlags both = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    for (int i = 0; i < 13; ++i) {
+    // One pushed set: 0 the block, 2 the mesh's vertices (the grid and the surface: the falls' feet), 3 the surface's
+    // vertices, 4 the frame lights, 5 the sun's shadows, 7 the water map, 8 the scene's depth, 9 the scene, 10 the
+    // detail texture, 11 the game's texture, 12 the environment probe's atlas, 13 the disturbance field, 14 the clouds'
+    // shadow, 15 the terrain's shade (terrain_sun.cpp).
+    const uint32_t numbers[14] = {0, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    VkDescriptorSetLayoutBinding b[14] = {};
+    // (The surface's patches read the block, the frame lights and the scene's depth in their tessellation stages.)
+    const VkShaderStageFlags both = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT |
+                                    (m_tessSupported ? VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+                                                           VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT : 0);
+    for (int i = 0; i < 14; ++i) {
         b[i].binding = numbers[i];
         b[i].descriptorCount = 1;
         b[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -295,10 +313,11 @@ bool Device::CreateWaterResources(std::string* error)
     }
     b[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     b[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    b[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    b[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    b[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     VkDescriptorSetLayoutCreateInfo sl{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     sl.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-    sl.bindingCount = 13;
+    sl.bindingCount = 14;
     sl.pBindings = b;
     if (!Check(vkCreateDescriptorSetLayout(m_device, &sl, nullptr, &m_waterSetLayout), "vkCreateDescriptorSetLayout",
                error))
@@ -371,6 +390,35 @@ bool Device::CreateWaterResources(std::string* error)
         ci.layout = m_waterLayout;
         ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, &m_waterPipeline),
                    "vkCreateGraphicsPipelines", error);
+        // The surface from the game's triangles: the same, as tessellated patches of 3 (water_surface.*). Without
+        // tessellation, or should it fail, the grid is drawn.
+        VkShaderModule surfVert = VK_NULL_HANDLE, surfTesc = VK_NULL_HANDLE, surfTese = VK_NULL_HANDLE;
+        std::string surfaceError;
+        if (ok && m_tessSupported && module(kSurfaceVertSpirv, sizeof(kSurfaceVertSpirv), &surfVert) &&
+            module(kSurfaceTescSpirv, sizeof(kSurfaceTescSpirv), &surfTesc) &&
+            module(kSurfaceTeseSpirv, sizeof(kSurfaceTeseSpirv), &surfTese)) {
+            VkPipelineShaderStageCreateInfo surfStages[4] = {
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, surfVert, "main", nullptr},
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, surfTesc, "main", nullptr},
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, surfTese, "main", nullptr},
+                {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, frag, "main", nullptr},
+            };
+            VkPipelineTessellationStateCreateInfo ts{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
+            ts.patchControlPoints = 3;
+            VkPipelineInputAssemblyStateCreateInfo patches{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+            patches.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+            VkGraphicsPipelineCreateInfo sci = ci;
+            sci.stageCount = 4;
+            sci.pStages = surfStages;
+            sci.pInputAssemblyState = &patches;
+            sci.pTessellationState = &ts;
+            if (!Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &sci, nullptr, &m_waterSurfacePipeline),
+                       "vkCreateGraphicsPipelines (surface)", &surfaceError))
+                Log("water surface from the game's triangles unavailable (the grid instead): %s\n", surfaceError.c_str());
+        }
+        if (surfVert) vkDestroyShaderModule(m_device, surfVert, nullptr);
+        if (surfTesc) vkDestroyShaderModule(m_device, surfTesc, nullptr);
+        if (surfTese) vkDestroyShaderModule(m_device, surfTese, nullptr);
         // The falls' spray: the same set, its own shaders; blended over the scene's colour (premultiplied), depth
         // tested but not written. (All targets blend alike - no independent blending - the shader gives the others
         // nothing: premultiplied 0 leaves them as they are.) Without it the falls only lose their spray.
@@ -434,6 +482,7 @@ void Device::DestroyWaterResources()
     for (WaterMap& m : m_waterMaps)
         if (m.texture) DestroyTextureNow(m.texture);
     m_waterMaps.clear();
+    m_waterSurfaces.clear();
     m_waterFalls.clear();
     m_waterFoot.clear();
     if (m_waterDetail) { DestroyTextureNow(m_waterDetail); m_waterDetail = nullptr; }
@@ -460,6 +509,7 @@ void Device::DestroyWaterResources()
     if (m_waterRepeatSampler) { vkDestroySampler(m_device, m_waterRepeatSampler, nullptr); m_waterRepeatSampler = VK_NULL_HANDLE; }
     if (m_waterPipeline) { vkDestroyPipeline(m_device, m_waterPipeline, nullptr); m_waterPipeline = VK_NULL_HANDLE; }
     if (m_waterSprayPipeline) { vkDestroyPipeline(m_device, m_waterSprayPipeline, nullptr); m_waterSprayPipeline = VK_NULL_HANDLE; }
+    if (m_waterSurfacePipeline) { vkDestroyPipeline(m_device, m_waterSurfacePipeline, nullptr); m_waterSurfacePipeline = VK_NULL_HANDLE; }
     if (m_waterLayout) { vkDestroyPipelineLayout(m_device, m_waterLayout, nullptr); m_waterLayout = VK_NULL_HANDLE; }
     if (m_waterSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_waterSetLayout, nullptr); m_waterSetLayout = VK_NULL_HANDLE; }
     m_waterDepthW = m_waterDepthH = 0;
@@ -512,15 +562,14 @@ const Device::WaterGrid* Device::WaterGridFor(uint32_t segments)
 
 // The water map of a mesh (made the first time it is seen; the last few kept): its flat triangles rasterised
 // top-down. steep: the triangles left out (falls), as indices into the mesh.
-Device::WaterMap* Device::WaterMapFor(const WaterVertex* v, uint32_t count, const uint16_t* idx, uint32_t icount,
-                                      std::vector<uint32_t>& steep)
+// The game's triangles sorted: flat ones (the surface; index triples) and steep ones (falls, shore steps).
+void Device::SplitWaterTriangles(const WaterVertex* v, uint32_t count, const uint16_t* idx, uint32_t icount,
+                                 std::vector<uint32_t>& flatOut, std::vector<uint32_t>& steep)
 {
     steep.clear();
+    flatOut.clear();
     struct Tri { uint32_t a, b, c; };
     std::vector<Tri> flat;
-    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
-    float flatLoY = 1e30f, flatHiY = -1e30f;         // the flat triangles' height span (a step = mountains)
-    double heightSum = 0.0;
     std::vector<float> flatArea;
     for (uint32_t t = 0; t + 2 < icount; t += 3) {
         uint32_t i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
@@ -602,6 +651,19 @@ Device::WaterMap* Device::WaterMapFor(const WaterVertex* v, uint32_t count, cons
         }
         flat.swap(keep);
     }
+    flatOut.reserve(flat.size() * 3);
+    for (const Tri& tr : flat) flatOut.insert(flatOut.end(), {tr.a, tr.b, tr.c});
+}
+
+// The water map (the grid's surface, and where the disturbance field finds water) of the flat triangles.
+Device::WaterMap* Device::WaterMapFor(uint64_t key, const WaterVertex* v, const std::vector<uint32_t>& flatIdx)
+{
+    struct Tri { uint32_t a, b, c; };
+    std::vector<Tri> flat(flatIdx.size() / 3);
+    for (size_t t = 0; t < flat.size(); ++t) flat[t] = {flatIdx[t * 3], flatIdx[t * 3 + 1], flatIdx[t * 3 + 2]};
+    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+    float flatLoY = 1e30f, flatHiY = -1e30f;         // the flat triangles' height span (a step = mountains)
+    double heightSum = 0.0;
     for (const Tri& tr : flat) {
         const float* p0 = v[tr.a].pos;
         const float* p1 = v[tr.b].pos;
@@ -618,7 +680,6 @@ Device::WaterMap* Device::WaterMapFor(const WaterVertex* v, uint32_t count, cons
     }
     if (flat.empty())
         return nullptr;
-    const uint64_t key = HashWater(v, count, idx, icount);
     for (WaterMap& m : m_waterMaps)
         if (m.key == key) {
             m.lastFrame = m_frameNumber;
@@ -680,6 +741,11 @@ Device::WaterMap* Device::WaterMapFor(const WaterVertex* v, uint32_t count, cons
                     continue;
                 float y = l0 * a[1] + l1 * b[1] + l2 * c[1];
                 size_t idx = size_t(z) * w + x;
+                // Water over water: the highest surface, the one seen from above. A playfield's mesh can hold a sheet
+                // under the whole land (Borealis: at y 10, hidden by the ground) beneath its rivers; written last, it
+                // put the river under the ground (user, 2026-10-21).
+                if (pixels[idx * 4 + 1] && heights[idx] >= y - m.base)
+                    continue;
                 heights[idx] = y - m.base;
                 pixels[idx * 4 + 0] = 0;             // the height is written once the levels are known (below)
                 pixels[idx * 4 + 1] = one;           // water here
@@ -775,16 +841,47 @@ Device::WaterMap* Device::WaterMapFor(const WaterVertex* v, uint32_t count, cons
     uint32_t flatLo = 255, flatHi = 0, steepLo = 255, steepHi = 0;
     for (const Tri& t : flat)
         for (uint32_t i : {t.a, t.b, t.c}) { uint32_t a = v[i].colour >> 24; flatLo = std::min(flatLo, a); flatHi = std::max(flatHi, a); }
-    for (uint32_t i : steep) { uint32_t a = v[i].colour >> 24; steepLo = std::min(steepLo, a); steepHi = std::max(steepHi, a); }
+    for (uint32_t i : m_waterSteep) { uint32_t a = v[i].colour >> 24; steepLo = std::min(steepLo, a); steepHi = std::max(steepHi, a); }
     WaterLog("water map %016llx: %u flat + %u steep triangles, %.0f x %.0f units, %zu bodies at y %.2f..%.2f, "
              "%u x %u texels of %.2f; vertex alpha flat %u..%u, steep %u..%u; flat triangle heights %.2f..%.2f",
-             (unsigned long long)key, m.flatTriangles, uint32_t(steep.size() / 3), double(ex), double(ez),
+             (unsigned long long)key, m.flatTriangles, uint32_t(m_waterSteep.size() / 3), double(ex), double(ez),
              bodyLevel.size(), double(m.base),
              bodyLevel.empty() ? double(m.base)
                                : double(m.base + (*std::max_element(bodyLevel.begin(), bodyLevel.end()) - minLevel)),
-             w, h, double(texel), flatLo, flatHi, steep.empty() ? 0u : steepLo, steepHi,
+             w, h, double(texel), flatLo, flatHi, m_waterSteep.empty() ? 0u : steepLo, steepHi,
              double(flatLoY), double(flatHiY));
     return &m_waterMaps.back();
+}
+
+// The surface from the game's own triangles for this mesh (water_surface.cpp), made the first time it is seen; the last
+// few kept, as the maps are (the game hands over a few variants of its mesh as the camera moves).
+const water::Surface* Device::WaterSurfaceFor(uint64_t key, const WaterVertex* v, uint32_t count,
+                                              const std::vector<uint32_t>& flat, const std::vector<uint32_t>& steep)
+{
+    static_assert(sizeof(WaterVertex) == sizeof(water::InVertex), "water::InVertex is Device::WaterVertex");
+    if (flat.empty())
+        return nullptr;
+    for (WaterSurface& s : m_waterSurfaces)
+        if (s.key == key) {
+            s.lastFrame = m_frameNumber;
+            return &s.surface;
+        }
+    if (m_waterSurfaces.size() >= 4)
+        m_waterSurfaces.erase(std::min_element(m_waterSurfaces.begin(), m_waterSurfaces.end(),
+                                               [](const WaterSurface& a, const WaterSurface& b) { return a.lastFrame < b.lastFrame; }));
+    WaterSurface s;
+    s.key = key;
+    s.lastFrame = m_frameNumber;
+    const auto start = std::chrono::steady_clock::now();
+    water::BuildSurface(reinterpret_cast<const water::InVertex*>(v), count, flat, steep, s.surface);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    const water::Surface& w = s.surface;
+    WaterLog("water surface %016llx: %u flat triangles -> %zu patches, %zu vertices (%u welded, %u triangles stitched, "
+             "%u rounds of splitting), %u bodies (the largest %.0f across), y %.2f..%.2f; %.1f ms",
+             (unsigned long long)key, w.inTriangles, w.indices.size() / 3, w.vertices.size(), w.welded, w.stitched,
+             w.splitRounds, w.bodies, double(w.largestBody), double(w.lo[1]), double(w.hi[1]), ms);
+    m_waterSurfaces.push_back(std::move(s));
+    return &m_waterSurfaces.back().surface;
 }
 
 void Device::WaterLog(const char* fmt, ...)
@@ -1504,8 +1601,14 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
         return;
     ++m_frameDraw;
     std::vector<uint32_t>& steep = m_waterSteep;
-    WaterMap* map = WaterMapFor(vertices, vertexCount, indices, indexCount, steep);
-    if (!map && steep.empty())
+    std::vector<uint32_t>& flat = m_waterFlat;
+    SplitWaterTriangles(vertices, vertexCount, indices, indexCount, flat, steep);
+    const uint64_t key = HashWater(vertices, vertexCount, indices, indexCount);
+    WaterMap* map = WaterMapFor(key, vertices, flat);   // (the grid's surface; where the disturbance field finds water)
+    // The surface: the game's own flat triangles, tessellated and waved (RVK_WaterMesh) - else the grid over the map.
+    const water::Surface* surface =
+        m_waterParams.mesh && m_waterSurfacePipeline ? WaterSurfaceFor(key, vertices, vertexCount, flat, steep) : nullptr;
+    if (!map && !surface && steep.empty())
         return;
     // None of it in view - each of the game's triangles, raised and lowered by the tallest waves, outside the camera's
     // frustum: nothing is drawn, and the scene's copy, the disturbance's step and the grid's draw go unpaid (a lake
@@ -1533,7 +1636,7 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     const WaterParams& P = m_waterParams;
     const uint32_t quality = std::clamp(P.quality, 1u, 3u);
     const uint32_t segments = quality == 1 ? 128u : quality == 2 ? 224u : 320u;
-    const WaterGrid* grid = map ? WaterGridFor(segments) : nullptr;
+    const WaterGrid* grid = map && !surface ? WaterGridFor(segments) : nullptr;
     Frame& f = m_frames[m_frameIndex];
     VkCommandBuffer cmd = f.main;
     FlushGroup();                                // the scene's batched draws go first (and its profile class ends)
@@ -1585,6 +1688,12 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
         wf.storm[3] = frame[1];
     }
     wf.wind[3] = 0.35f + 0.65f * body;
+    // The surface's waves: each body's size scales them (its vertices carry it); its edges split to about the grid's
+    // spacing at that distance (2 pi / its segments), a fifth of a unit up close, 64 segments at most.
+    wf.surface[0] = P.waves * (1.0f + 0.8f * stormy);
+    wf.surface[1] = 0.2f;
+    wf.surface[2] = 6.2831853f / float(segments);
+    wf.surface[3] = 64.0f;
     if (m_terrainSun[0] + m_terrainSun[1] + m_terrainSun[2] > 0.0f) {
         std::memcpy(wf.sunColour, m_terrainSun, 16);
         std::memcpy(wf.sunDir, m_terrainSun + 4, 16);
@@ -1736,8 +1845,10 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     wf.fall2[1] = P.fallChurn;
     wf.fall2[2] = P.fallSpeed;
     wf.fall2[3] = m_rain;                        // (last frame's: the rain is worked out at the scene's end)
-    EnsureRingSpace(4 * (sizeof(WaterFrame) + 256) + sizeof(FrameLights) + VkDeviceSize(vertexCount) * sizeof(MeshVertexOut) +
-                    shore.size() * 4 + sheetBytes + kFootMax * 32 + 1024);
+    const VkDeviceSize surfaceBytes =
+        surface ? surface->vertices.size() * sizeof(water::SurfaceVertex) + surface->indices.size() * 4 + 512 : 0;
+    EnsureRingSpace(5 * (sizeof(WaterFrame) + 256) + sizeof(FrameLights) + VkDeviceSize(vertexCount) * sizeof(MeshVertexOut) +
+                    shore.size() * 4 + sheetBytes + surfaceBytes + kFootMax * 32 + 1024);
     if (m_frameLightsDirty || m_frameLightsGeneration != m_ringGeneration)
         WriteFrameLights();
     void* meshCpu = nullptr;
@@ -1760,11 +1871,11 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_waterPipeline);
 
     // kind 1, mesh mode: vertices from meshAt (meshSize bytes), indices idx (idxCount); 0: the grid; 2: the spray
-    // (idxCount vertices, no indices).
+    // (idxCount vertices, no indices); 3: the surface (as mesh mode, its vertices water::SurfaceVertex, as patches).
     auto draw = [&](int kind, VkDeviceSize meshAt, VkDeviceSize meshSize, const uint32_t* idx, uint32_t idxCount) {
-        const bool meshMode = kind == 1;
+        const bool meshMode = kind == 1 || kind == 3;
         WaterFrame block = wf;
-        block.time[2] = meshMode ? 1.0f : 0.0f;
+        block.time[2] = kind == 3 ? 2.0f : meshMode ? 1.0f : 0.0f;
         if (!meshMode && map) {
             block.map[0] = map->origin[0];
             block.map[1] = map->origin[1];
@@ -1800,7 +1911,10 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
         Texture* mapTex = (!meshMode && map) ? map->texture : m_waterDetail;
         Texture* gameTex = m_textures[0] ? m_textures[0] : m_waterDetail;
         VkDescriptorBufferInfo blockInfo{f.ring, blockOffset, sizeof(WaterFrame)};
-        VkDescriptorBufferInfo meshInfo{f.ring, meshAt, meshSize};
+        // (The surface: its vertices at 3, the falls' feet at 2 as the grid has them. Otherwise 3 is unread.)
+        VkDescriptorBufferInfo meshInfo = kind == 3 ? VkDescriptorBufferInfo{f.ring, footOffset, footBytes}
+                                                    : VkDescriptorBufferInfo{f.ring, meshAt, meshSize};
+        VkDescriptorBufferInfo surfaceInfo{f.ring, meshAt, meshSize};
         VkDescriptorBufferInfo lightsInfo{f.ring, m_frameLightsOffset, sizeof(FrameLights)};
         VkDescriptorImageInfo shadowInfo{m_shadowSampler, m_shadowView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo mapInfo{m_linearSampler, mapTex->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -1816,9 +1930,9 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
         const bool terrainMap = m_terrainSunMap && m_terrainSunMap->m_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkDescriptorImageInfo terrainInfo{m_linearSampler, terrainMap ? m_terrainSunMap->m_view : m_blackTexture->m_view,
                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet writes[13] = {};
-        const uint32_t bindings[13] = {0, 2, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-        for (int i = 0; i < 13; ++i) {
+        VkWriteDescriptorSet writes[14] = {};
+        const uint32_t bindings[14] = {0, 2, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 3};
+        for (int i = 0; i < 14; ++i) {
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].descriptorCount = 1;
             writes[i].dstBinding = bindings[i];
@@ -1840,7 +1954,9 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
         writes[10].pImageInfo = &simInfo;
         writes[11].pImageInfo = &cloudInfo;
         writes[12].pImageInfo = &terrainInfo;
-        vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_waterLayout, 0, 13, writes);
+        writes[13].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[13].pBufferInfo = &surfaceInfo;
+        vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_waterLayout, 0, 14, writes);
         if (kind == 2) {
             vkCmdDraw(cmd, idxCount, 1, 0, 0);
         } else if (meshMode) {
@@ -1856,8 +1972,17 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
             m_waterTriangles += uint64_t(rings) * segments * 2;
         }
     };
-    if (map && grid)
+    if (surface) {
+        void* cpu = nullptr;
+        const VkDeviceSize bytes = surface->vertices.size() * sizeof(water::SurfaceVertex);
+        const VkDeviceSize at = Allocate(bytes, 256, &cpu);
+        std::memcpy(cpu, surface->vertices.data(), size_t(bytes));
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_waterSurfacePipeline);
+        draw(3, at, bytes, surface->indices.data(), uint32_t(surface->indices.size()));
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_waterPipeline);
+    } else if (map && grid) {
         draw(0, footOffset, footBytes, nullptr, 0);
+    }
     if (!shore.empty())
         draw(1, meshOffset, meshBytes, shore.data(), uint32_t(shore.size()));
     for (const WaterFall* w : sheets) {

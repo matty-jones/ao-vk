@@ -1,10 +1,10 @@
 // The water (rvk/water.cpp): the per-draw block, the water map and the waves - shared by water.vert and water.frag.
 //
-// The game's water is a few huge flat triangles per body. We draw a camera-centred polar grid instead (dense near the
-// camera, coarser with distance: no cracks, one mesh), lifted onto the water by the water map - a top-down image of
-// the game's triangles: R the surface's height (relative to W.mapInfo.x, each connected body flattened to its own
-// level), G whether there is water there - and moved by a sum of Gerstner waves. Small ripples are normals only (the
-// detail texture, in water.frag).
+// The surface is the game's own flat triangles, tessellated by distance and moved by a sum of Gerstner waves
+// (water_surface.*, W.time.z 2). Without tessellation, or with RVK_WaterMesh off, a camera-centred polar grid instead
+// (water.vert, W.time.z 0), lifted onto the water by the water map - a top-down image of the game's triangles: R the
+// surface's height (relative to W.mapInfo.x, each connected body flattened to its own level), G whether there is water
+// there. Small ripples are normals only (the detail texture, in water.frag).
 #include "frame_lights.glsl"                    // FL (binding 4): the sun, its cascades, the TAA jitter
 
 layout(set = 0, binding = 0) uniform WaterFrame {
@@ -38,6 +38,9 @@ layout(set = 0, binding = 0) uniform WaterFrame {
                         // z: how fast they fall (RVK_WaterSpeed); w: how hard it rains (rvk rain.cpp, 0..1)
     vec4 storm;         // a storm (rvk water.cpp): x how hard (rough water: taller waves, whitecaps, gust patches), y
                         // the gusts' strength, zw the gusts' frame (wind.glsl WindAxes)
+    vec4 surface;       // the surface from the game's triangles (W.time.z 2, water_surface.*): x the waves' height before
+                        // each body's size (RVK_WaterWaves, the storm); y, z an edge's segment length near and per unit
+                        // of distance (RVK_WaterQual); w the most segments an edge is split into
 } W;
 
 // A fall's foot (rvk/water.cpp m_waterFoot): a segment of where it meets the pool - a: x0 y0 z0 x1; b: y1 z1, the way
@@ -102,12 +105,30 @@ float FallSpeed(float along)
 // The linear view depth of a depth buffer value.
 float ViewZ(float d) { return W.proj.y / (min(d, 0.9999999) - W.proj.x); }
 
-// The waves: a sum of Gerstner waves around the wind's direction. Each wave is faded out where the grid is too coarse
-// for it (spacing: the grid's vertex spacing there), so distant water doesn't alias into noise. Returns the
-// displacement; n: the surface normal (unnormalised); fold: the surface's compression (1 flat, near 0 at a sharp
-// crest: where the foam gathers).
+// How much the waves calm down where the water is shallow - judged from the scene's depth (behind the water, at the
+// rest point) where it is on the screen; elsewhere not at all.
+float Shallow(vec3 rest)
+{
+    vec4 c = W.viewProj * vec4(rest, 1.0);
+    if (c.w <= 0.05)
+        return 1.0;
+    vec2 ndc = c.xy / c.w;
+    if (any(greaterThan(abs(ndc), vec2(1.0))))
+        return 1.0;
+    vec2 uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    float d = textureLod(sceneDepth, uv, 0.0).r;
+    if (d >= 1.0)
+        return 1.0;
+    float behind = ViewZ(d) - c.w;              // how far the view ray goes on under the surface
+    return smoothstep(0.0, 2.5, behind);
+}
+
+// The waves: a sum of Gerstner waves around the wind's direction. Each wave is faded out where the mesh is too coarse
+// for it (spacing: the vertex spacing there), so distant water doesn't alias into noise. scale: their height; wavelength:
+// how long they are (a pond's short, the sea's long). Returns the displacement; n: the surface normal
+// (unnormalised); fold: the surface's compression (1 flat, near 0 at a sharp crest: where the foam gathers).
 const int kWaves = 8;
-vec3 Waves(vec2 xz, float t, float spacing, float scale, out vec3 n, out float fold)
+vec3 Waves(vec2 xz, float t, float spacing, float scale, float wavelength, out vec3 n, out float fold)
 {
     // Wavelengths (world units, x W.wind.w), angles off the wind (radians), relative heights, phases.
     const float lambda[kWaves] = float[](31.0, 23.0, 17.0, 11.5, 7.7, 5.3, 3.7, 2.6);
@@ -122,7 +143,7 @@ vec3 Waves(vec2 xz, float t, float spacing, float scale, out vec3 n, out float f
     // a swing of the wind's direction raced the waves about): dot(d, xz) = cos(angle) along + sin(angle) across.
     vec2 aa = vec2(dot(xz, wd), dot(xz, vec2(-wd.y, wd.x))) + FL.windFrame.xy;
     for (int i = 0; i < kWaves; ++i) {
-        float L = lambda[i] * W.wind.w;
+        float L = lambda[i] * wavelength;
         float fade = 1.0 - smoothstep(L * 0.18, L * 0.4, spacing);
         if (fade <= 0.0)
             continue;

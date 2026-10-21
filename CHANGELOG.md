@@ -6,6 +6,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- The water's surface is now built from the game's own water: rivers, lakes and pools sit exactly where the game puts
+  them, at every level, instead of being redrawn from a map that lost some of them (dry riverbeds, water under the
+  ground, walls of water) in places it hadn't seen before. The waves calm down towards the shores and the falls, and
+  each body of water gets waves for its size. `RVK_WaterMesh` (Water, on) switches back to the older surface.
 - Tree crowns look round: `RVK_CrownSky` (Lighting, 0 to 1) lights them as the sky does - their tops brighter,
   their undersides and insides darker - and lets the leaves facing the sun keep their shading instead of all reaching
   the same flat brightness. A tree is about as bright overall as before.
@@ -48,6 +52,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Chain-link fences' sun shadows flickered between the mesh pattern and solid panels while the mouse pointer was
   hidden (after turning the camera with the mouse), on the frames that redrew the interface. Fences, grilles and
   leaves now keep the holes in their shadows every frame.
+- Rivers missing in Borealis: the canyons under the bridges showed dry sand where the game has water. The playfield
+  keeps a second sheet of water hidden under the land, and the river was put at its height, under the ground.
 
 ### Diagnostics
 - Frame dumps also save AMD's indirect light (`-brixgi.bmp`, with `RVK_GiMode 1`) and the surfaces AMD's effects read

@@ -153,6 +153,7 @@ Setting g_settings[] = {
     {"RVK_WaterOn", "New water", "Water",    Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_WaterStyle", "Look (game-like to realistic)",  "Water",     Float, 0, 1, 0.05f, 0.5f, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterQual",  "Quality (1 low, 2 medium, 3 high)",                        "Water",     Int,   1, 3, 1, 2, nullptr, 0, "RVK_WaterOn"},
+    {"RVK_WaterMesh",  "Surface from the game's own triangles (off: the older grid)", "Water", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterWaves", "Wave height",                                              "Water",     Float, 0, 3, 0.1f, 0.3f, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterRipple","Ripples",                                                  "Water",     Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterSwim",  "Wake strength (characters in the water)",                  "Water",     Float, 0, 3, 0.1f, 2, nullptr, 0, "RVK_WaterOn"},
@@ -881,6 +882,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         w.enable = V("RVK_WaterOn") != 0.0f;
         w.style = V("RVK_WaterStyle");
         w.quality = uint32_t(V("RVK_WaterQual"));
+        w.mesh = V("RVK_WaterMesh") != 0.0f;
         w.waves = V("RVK_WaterWaves");
         w.ripples = V("RVK_WaterRipple");
         w.swimRipples = V("RVK_WaterSwim");

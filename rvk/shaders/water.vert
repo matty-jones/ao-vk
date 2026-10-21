@@ -1,5 +1,6 @@
 #version 450
-// The water's surface (rvk/water.cpp). Grid mode: vertex v of a polar grid around the camera - ring v / segments
+// The water (rvk/water.cpp), except its surface from the game's triangles (water_surface.*). Grid mode (RVK_WaterMesh
+// off): vertex v of a polar grid around the camera - ring v / segments
 // (ring 0 the centre), segment v % segments - placed on the water map's surface and moved by the waves. Mesh mode
 // (W.time.z = 1): the game's own triangles (its steep ones: falls), from the vertex buffer as they are.
 #include "water_common.glsl"
@@ -20,24 +21,6 @@ layout(location = 6) out float vSpacing;    // the grid's spacing here (world)
 layout(location = 7) out float vAlpha;      // mesh mode: the game's vertex alpha (its shore fade); grid: 1
 layout(location = 8) out vec3 vFlowN;       // mesh mode: a fall's smooth normal (MeshVertex)
 layout(location = 9) out vec4 vFlow;        // mesh mode: a fall's along, across, fall, edge (MeshVertex)
-
-// How much the waves calm down where the water is shallow - judged from the scene's depth (behind the water, at the
-// rest point) where it is on the screen; elsewhere not at all.
-float Shallow(vec3 rest)
-{
-    vec4 c = W.viewProj * vec4(rest, 1.0);
-    if (c.w <= 0.05)
-        return 1.0;
-    vec2 ndc = c.xy / c.w;
-    if (any(greaterThan(abs(ndc), vec2(1.0))))
-        return 1.0;
-    vec2 uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    float d = textureLod(sceneDepth, uv, 0.0).r;
-    if (d >= 1.0)
-        return 1.0;
-    float behind = ViewZ(d) - c.w;              // how far the view ray goes on under the surface
-    return smoothstep(0.0, 2.5, behind);
-}
 
 void main()
 {
@@ -82,8 +65,8 @@ void main()
         float scale = W.wind.z * edge * mix(0.25, 1.0, Shallow(rest));
         vec3 dn, dummyN;
         float dummyF;
-        vec3 off = Waves(xz, W.time.x, spacing, scale, dn, fold);
-        vec3 offPrev = Waves(xz, W.time.y, spacing, scale, dummyN, dummyF);
+        vec3 off = Waves(xz, W.time.x, spacing, scale, W.wind.w, dn, fold);
+        vec3 offPrev = Waves(xz, W.time.y, spacing, scale, W.wind.w, dummyN, dummyF);
         p = rest + off;
         prevP = rest + offPrev;
         n = dn;

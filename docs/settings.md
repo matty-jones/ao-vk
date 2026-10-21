@@ -15,7 +15,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-341 settings, 166 of them in the settings window.
+342 settings, 167 of them in the settings window.
 
 ## Sections
 
@@ -25,7 +25,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Debug](#debug) (7)
 - [Terrain](#terrain) (22)
 - [Plants](#plants) (38)
-- [Water](#water) (22)
+- [Water](#water) (23)
 - [Weather](#weather) (35)
 - [Smoke](#smoke) (12)
 - [Sky](#sky) (45)
@@ -182,6 +182,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_WaterOn` | New water | on / off | on | window; game value off |
 | `RVK_WaterStyle` | New water: look (game-like to realistic) | 0 .. 1 | 0.5 | window; switch `RVK_WaterOn` |
 | `RVK_WaterQual` | Quality (1 low, 2 medium, 3 high) | 1 .. 3 | 2 | window; switch `RVK_WaterOn` |
+| `RVK_WaterMesh` | Surface from the game's own triangles (off: the older grid) | on / off | on | window; switch `RVK_WaterOn` |
 | `RVK_WaterWaves` | New water: wave height | 0 .. 3 | 0.3 | window; switch `RVK_WaterOn` |
 | `RVK_WaterRipple` | New water: ripples | 0 .. 2 | 1 | ini only; switch `RVK_WaterOn` |
 | `RVK_WaterSwim` | Wake strength (characters in the water) | 0 .. 3 | 2 | ini only; switch `RVK_WaterOn` |
