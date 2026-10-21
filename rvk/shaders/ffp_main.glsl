@@ -823,6 +823,67 @@ void main()
         gDiffuse.rgb = clamp(vDiffuse.rgb + vMatAmbient * shade, 0.0, 1.0);
         shadeSun = true;
     }
+    // The stage textures, the native ground's lightmap among them, ahead of the lighting: they don't need it, and done
+    // after it the ground's map and relief were held through it. (A rock takes its shade here: texShade 1 after it -
+    // the lighting takes the shade as it was, texShadeLit.)
+    const float texShadeLit = texShade;
+    // (The ground's base pass: its texture as terrain.glsl lays it.)
+    const bool terrainBasePass = terrainMapped && D.terrainAt.w < 1.5;
+    vec4 t0 = terrainBasePass ? TerrainBase(D.texIdx.x, bindlessSamplers[D.sampIdx.x], terrain) : Sample(0u);
+    // The native ground's lightmap read where the pixel is (its cell from world x, z), not where its triangle's corners
+    // say: a cliff's cells are split corner to corner and each half spread the light its own way - dark wedges up the
+    // face. Read so, a cliff's light runs evenly down it, as the baked texel says.
+    // On a cliff, blurred over the cells round it (by its steepness): one texel a cell stretched up a face of 40 units
+    // turned the cells' light into hard triangles where the face crosses from a dark cell to a lit one.
+    vec3 sandGlint = vec3(0.0), sandMean = vec3(1.0);   // (the glints and the sand's colour they shine against)
+    if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
+        const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
+        t0 = NativeLightmapAt(at);
+        if (terrain.side > 0.01 && !terrain.clutter) {   // (not the rocks on it: they stand on its flat)
+            vec4 blur = vec4(0.0);
+            for (int j = -1; j <= 1; ++j)
+                for (int i = -1; i <= 1; ++i) blur += NativeLightmapAt(at + vec2(i, j) * 1.5 / lmSize);
+            t0 = mix(t0, blur / 9.0, terrain.side);
+        }
+        // (The rocks on it: shaped by the sun now, its shadow on its part only - NativeRockLight.)
+        if (terrain.clutter) {
+            t0.rgb *= NativeRockLight(vNormalW.xyz, t0.g, texShade);
+            texShade = 1.0;
+        } else {
+            // (In its own relief's shadow - a ripple's lee, the gap between stones: the lightmap's sun share of it.)
+            // (The sand's glints: where the lightmap says the sun reaches - the shadow map's shade comes after. Added
+            // past the stages, which clip at 1: below.)
+            // (Whether the sun reaches it: on sand, our own shadows say - the map's, the ground turned from the sun, the
+            // terrain's - not the bake's cell: a low sun's bake has cells in shade where the sun now isn't hidden, and
+            // the ripples in them lost their troughs' shadows, square pale patches among shaded ripples - the user's
+            // rvk-frame-160817/160823, the sun 2 degrees up. Elsewhere, and without our shadows, the bake's.)
+            const float bakedSun = NativeSunShare(vNormalW.xyz, false, t0.g);
+            const float sunShare = gSunVisibilityValid
+                ? mix(bakedSun, gCasterVisibility * gGroundAway * gTerrainVisibility, NativeSand(terrain.uv[0])) : bakedSun;
+            sandGlint = FL.sunColor.rgb * (SandGlint(ground, terrain.uv[0], vPosW, vNormalW.xyz, terrain.px, terrain.py) *
+                                           gParallaxSun * sunShare);
+            sandMean = NativeMean(terrain.uv[0]);
+            const float dunes = NativeSand(terrain.uv[0]) * clamp(FL.sand.y, 0.0, 1.0);   // (on sand: NativeSandLight)
+            const vec3 turn = dunes > 0.0 ? mix(vec3(NativeSunTurn(vNormalW.xyz, t0.g)), NativeSandLight(vNormalW.xyz, t0.g), dunes)
+                                          : vec3(NativeSunTurn(vNormalW.xyz, t0.g));
+            // (Its relief's own shadow takes the sun's part of the light, not the sky's - kSandSun's share, as the
+            // dunes' light: taking it all, a footprint's floor and the ripples' troughs went near black.)
+            t0.rgb *= turn * mix(1.0, gParallaxSun, 0.75 * sunShare);
+        }
+    }
+    vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
+    if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
+    if (terrainBasePass && TerrainNative()) {
+        // (The grit where the parallax met the ground: its cells' coordinates moved, the world point with them.)
+        const vec3 at = vPosW + vec3((terrain.uv[0] - ground.cell).x, 0.0, (terrain.uv[0] - ground.cell).y) / max(D.terrain.x, 1e-6);
+        t0.rgb = SandRippleTone(TerrainGrain(t0.rgb, terrain, ground.tiles || ground.sand > 0.0 ? at : vPosW), ground,
+                                terrain.uv[0]);
+    }
+    // (What the end needs of the ground's map, taken now: the map and the relief go before the lighting, which needs
+    // the most registers there are - the ground's build spilled while both were held through it.)
+    const bool pickedCell = FL.pick.x > 0.5 && terrainMapped && TerrainNative() && !terrain.clutter &&
+                            NativeCell(terrain.uv[0]).x + 1u == uint(FL.pick.x + 0.5);
+    const bool pebbleAlbedo = terrainMapped && terrain.pebble;
     if ((C.flags.x & F_PERPIXEL) != 0u) {
         // Interpolated normals shrink between vertices; restore the length the vertex path lights with
         // (1 with NORMALIZENORMALS, otherwise whatever the world matrix made of the vertex normal).
@@ -902,13 +963,13 @@ void main()
         }
         vec3 ambient = vec3(0.0), diff = vec3(0.0), spec = vec3(0.0), diffL = vec3(0.0), specL = vec3(0.0);
         // Sunlight is shadowed: by the receiver's shade, or in the ground's lighting pass by the lightmap's.
-        float sunScale = ((C.flags.x & F_SHADOWTEX) != 0u ? texShade * moonShade : shadeSun ? shade : 1.0) * gParallaxSun;
+        float sunScale = ((C.flags.x & F_SHADOWTEX) != 0u ? texShadeLit * moonShade : shadeSun ? shade : 1.0) * gParallaxSun;
         AccumulateLights(vPosW, n, sunScale, localScale, ambient, diff, spec, diffL, specL);
         // PBR: metals have no diffuse light; the occlusion map takes ambient light away.
         float kd = gPbrOn ? 1.0 - gPbrMetal : 1.0, kAmb = gPbrOn ? kd * gPbrAo : 1.0;
         // The ground's lighting pass (F_SHADOWTEX): the shadow takes the global ambient and emissive part along
         // with the lightmap, leaving only the lights' own contribution: (lightmap + ambient) * shadow + lights.
-        vec3 base = (vMatEmissive + vMatAmbient * C.ambient.rgb * kAmb) * texShade;
+        vec3 base = (vMatEmissive + vMatAmbient * C.ambient.rgb * kAmb) * texShadeLit;
         vec3 lit = base + vMatAmbient * ambient * kAmb + vDiffuse.rgb * diff * kd, litSpec = vSpecular.rgb * spec;
         vec3 local = vDiffuse.rgb * diffL * kd, localSpec = vSpecular.rgb * specL;
         if (gPbrOn) {
@@ -935,7 +996,7 @@ void main()
         if (dot(FL.sunColor.rgb, FL.sunColor.rgb) > 0.0 && len2 > 0.0) {
             float ndl = max(dot(normalize(n), -normalize(FL.sunDir.xyz)), 0.0);
             if ((C.flags.x & F_SHADOWTEX) != 0u) {
-                gSunShare = 0.6 * ndl * texShade * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y);
+                gSunShare = 0.6 * ndl * texShadeLit * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y);
             } else {
                 const vec3 kLuma = vec3(0.3, 0.59, 0.11);
                 float sunPart = dot(vDiffuse.rgb * FL.sunColor.rgb, kLuma) * ndl * sunScale;
@@ -961,57 +1022,6 @@ void main()
             gDiffuse = clamp(vec4(lit + local, vDiffuse.a), 0.0, 1.0);
             gSpecular = clamp(vec4(litSpec + localSpec, vSpecular.a), 0.0, 1.0);
         }
-    }
-    // (The ground's base pass: its texture as terrain.glsl lays it.)
-    const bool terrainBasePass = terrainMapped && D.terrainAt.w < 1.5;
-    vec4 t0 = terrainBasePass ? TerrainBase(D.texIdx.x, bindlessSamplers[D.sampIdx.x], terrain) : Sample(0u);
-    // The native ground's lightmap read where the pixel is (its cell from world x, z), not where its triangle's corners
-    // say: a cliff's cells are split corner to corner and each half spread the light its own way - dark wedges up the
-    // face. Read so, a cliff's light runs evenly down it, as the baked texel says.
-    // On a cliff, blurred over the cells round it (by its steepness): one texel a cell stretched up a face of 40 units
-    // turned the cells' light into hard triangles where the face crosses from a dark cell to a lit one.
-    vec3 sandGlint = vec3(0.0);
-    if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
-        const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
-        t0 = NativeLightmapAt(at);
-        if (terrain.side > 0.01 && !terrain.clutter) {   // (not the rocks on it: they stand on its flat)
-            vec4 blur = vec4(0.0);
-            for (int j = -1; j <= 1; ++j)
-                for (int i = -1; i <= 1; ++i) blur += NativeLightmapAt(at + vec2(i, j) * 1.5 / lmSize);
-            t0 = mix(t0, blur / 9.0, terrain.side);
-        }
-        // (The rocks on it: shaped by the sun now, its shadow on its part only - NativeRockLight.)
-        if (terrain.clutter) {
-            t0.rgb *= NativeRockLight(vNormalW.xyz, t0.g, texShade);
-            texShade = 1.0;
-        } else {
-            // (In its own relief's shadow - a ripple's lee, the gap between stones: the lightmap's sun share of it.)
-            // (The sand's glints: where the lightmap says the sun reaches - the shadow map's shade comes after. Added
-            // past the stages, which clip at 1: below.)
-            // (Whether the sun reaches it: on sand, our own shadows say - the map's, the ground turned from the sun, the
-            // terrain's - not the bake's cell: a low sun's bake has cells in shade where the sun now isn't hidden, and
-            // the ripples in them lost their troughs' shadows, square pale patches among shaded ripples - the user's
-            // rvk-frame-160817/160823, the sun 2 degrees up. Elsewhere, and without our shadows, the bake's.)
-            const float bakedSun = NativeSunShare(vNormalW.xyz, false, t0.g);
-            const float sunShare = gSunVisibilityValid
-                ? mix(bakedSun, gCasterVisibility * gGroundAway * gTerrainVisibility, NativeSand(terrain.uv[0])) : bakedSun;
-            sandGlint = FL.sunColor.rgb * (SandGlint(ground, terrain.uv[0], vPosW, vNormalW.xyz, terrain.px, terrain.py) *
-                                           gParallaxSun * sunShare);
-            const float dunes = NativeSand(terrain.uv[0]) * clamp(FL.sand.y, 0.0, 1.0);   // (on sand: NativeSandLight)
-            const vec3 turn = dunes > 0.0 ? mix(vec3(NativeSunTurn(vNormalW.xyz, t0.g)), NativeSandLight(vNormalW.xyz, t0.g), dunes)
-                                          : vec3(NativeSunTurn(vNormalW.xyz, t0.g));
-            // (Its relief's own shadow takes the sun's part of the light, not the sky's - kSandSun's share, as the
-            // dunes' light: taking it all, a footprint's floor and the ripples' troughs went near black.)
-            t0.rgb *= turn * mix(1.0, gParallaxSun, 0.75 * sunShare);
-        }
-    }
-    vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
-    if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
-    if (terrainBasePass && TerrainNative()) {
-        // (The grit where the parallax met the ground: its cells' coordinates moved, the world point with them.)
-        const vec3 at = vPosW + vec3((terrain.uv[0] - ground.cell).x, 0.0, (terrain.uv[0] - ground.cell).y) / max(D.terrain.x, 1e-6);
-        t0.rgb = SandRippleTone(TerrainGrain(t0.rgb, terrain, ground.tiles || ground.sand > 0.0 ? at : vPosW), ground,
-                                terrain.uv[0]);
     }
 #ifdef RVK_GLOW
     // The surface's own colour, for the indirect light it reflects: lit draws through the stages under white light,
@@ -1071,7 +1081,7 @@ void main()
                                                 : 1.0) *
                            FL.sand3.y * (1.0 - FL.rainNear.y);
     if (glintSun > 0.0 && any(greaterThan(sandGlint, vec3(0.0)))) {
-        current.rgb += sandGlint * glintSun / max(NativeMean(terrain.uv[0]), vec3(0.08));
+        current.rgb += sandGlint * glintSun / max(sandMean, vec3(0.08));
         if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
     }
     if (!shadeSun)
@@ -1253,8 +1263,7 @@ void main()
     }
     // Texture picking (Ctrl+Shift+I): the picked texture's draws in yellow for a few seconds.
     // (The ground drawn natively: the cells laid with the picked tile.)
-    if ((D.mat.z & MAT_PICKED) != 0u ||
-        (FL.pick.x > 0.5 && terrainMapped && TerrainNative() && !terrain.clutter && NativeCell(terrain.uv[0]).x + 1u == uint(FL.pick.x + 0.5)))
+    if ((D.mat.z & MAT_PICKED) != 0u || pickedCell)
         current.rgb = mix(current.rgb, vec3(1.0, 0.85, 0.1) * max(dot(current.rgb, vec3(0.3, 0.59, 0.11)), 0.35) * 2.0, 0.7);
     // PBR debug views (RVK_PbrDebug). 7: the scene, tinted where surfaces have maps - green a PBR material (lit with
     // it), blue only a normal map, magenta an albedo map (any draw), orange where an emissive map gives off light.
@@ -1332,7 +1341,7 @@ void main()
     }
     // Blended with this fragment's alpha like the colour (kept by multiplying and additive passes, see the blend state).
     // (Its alpha read by the indirect light only: the native ground's pebbles mark themselves 0.5 there - gi.frag.)
-    outAlbedo = vec4(clamp(albedo, 0.0, 1.0), terrainMapped && terrain.pebble ? 0.5 : current.a);
+    outAlbedo = vec4(clamp(albedo, 0.0, 1.0), pebbleAlbedo ? 0.5 : current.a);
     // The game's blob shadow (drawn: indoors, no sun shadows to replace it): a shade laid on the surface - its colour
     // darkened, nothing else of it changed (blended by alpha 0: kept). Its own lamp share, surface colour and glow
     // stamped the floor round every table and character with patches the later passes lit wrongly - coloured, hard-

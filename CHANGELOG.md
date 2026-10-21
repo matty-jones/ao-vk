@@ -49,6 +49,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### Changed
 - Faster on the GPU wherever buildings, characters and plants fill the view: they no longer share the ground's heavy
   shader build, so the graphics card works on more of their pixels at once (a city's scene ~27% less GPU time).
+- The ground draws faster on the GPU too (~14% less of its time): its shader no longer holds the ground's texture
+  layout through the lighting, so the graphics card keeps a third more of its pixels in flight.
 
 ### Fixed
 - Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken
