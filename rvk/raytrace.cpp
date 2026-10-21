@@ -10,6 +10,10 @@
 // (TLAS), placed relative to the camera (in double): rays start at the eye's origin, exact at the world's thousands of
 // units.
 //
+// Characters (skinned on the GPU, skin_gpu.cpp): each solid piece a BLAS of its own, refitted every frame it is drawn
+// from that frame's skinned vertices (built again when its counts change), an instance where it is drawn - in that
+// frame's TLAS only.
+//
 // The playfield's placed objects (statels.cpp: every static object it places, from its own list) are instances too,
 // once their placement is confirmed - their solid pieces, each piece's BLAS built when one of its places first comes
 // within range: the static world whole, not only what the game draws (and has drawn since it came near).
@@ -23,6 +27,7 @@
 #include <cmath>
 #include <cstring>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rvk {
@@ -50,7 +55,8 @@ constexpr double kRange = 1500.0;                // instances this near the came
 // Instance masks: what casts the sun's shadows, and the ground (which casts none: its lightmap has the hills' shade, as
 // for the shadow map - shadow.cpp IsTerrain).
 constexpr uint8_t kMaskCaster = 0x01, kMaskGround = 0x02;
-constexpr uint64_t kStatelMeshSeed = 0x5354454C4D455348ull, kStatelPlaceSeed = 0x5354454C504C4143ull;
+constexpr uint64_t kStatelMeshSeed = 0x5354454C4D455348ull, kStatelPlaceSeed = 0x5354454C504C4143ull,
+                   kSkinnedSeed = 0x534B494E4E454400ull;
 
 struct RtBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
@@ -139,6 +145,28 @@ struct Device::RtState {
         RtBuffer buffer;
     };
     std::vector<Dead> dead;
+    // Characters' pieces (RtNoteSkinned): their BLAS (by the piece's key), this frame's draws of them, and the keys in
+    // this frame's TLAS (RtTraced).
+    struct Skinned {
+        VkAccelerationStructureKHR as = VK_NULL_HANDLE;
+        RtBuffer storage;
+        uint32_t vertexCount = 0, triangles = 0;
+        VkDeviceSize buildScratch = 0, updateScratch = 0;
+        uint64_t lastFrame = 0;
+        bool built = false;
+    };
+    std::unordered_map<uint64_t, Skinned> skinned;
+    struct SkinnedDraw {
+        const void* job;                         // (drawn again this frame - another pass: the same instance)
+        uint64_t key;
+        VkDeviceAddress vertices, indices;
+        uint32_t vertexCount, triangles;
+        double world[3][4];
+        double centre[3];                        // its box's middle, placed (the bones may place it, not the world)
+    };
+    std::vector<SkinnedDraw> skinnedDraws;
+    uint64_t skinnedFrame = ~0ull;
+    std::unordered_set<uint64_t> tracedSkinned;
     // The placed objects' (statels.cpp): their pack's load, which kinds were confirmed; the meshes and places made.
     uint32_t statelGen = ~0u;
     bool statelCasting[2] = {};
@@ -200,6 +228,7 @@ void Device::DestroyRt()
     };
     for (RtState::Dead& d : s->dead) kill(d.as, d.buffer);
     for (auto& [key, m] : s->meshes) kill(m.as, m.storage);
+    for (auto& [key, k] : s->skinned) kill(k.as, k.storage);
     kill(s->tlas, s->tlasStorage);
     kill(VK_NULL_HANDLE, s->scratch);
     for (RtBuffer& b : s->instanceBuf) kill(VK_NULL_HANDLE, b);
@@ -296,12 +325,61 @@ uint64_t Device::RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t s
     return place;
 }
 
+// A character's solid piece skinned on the GPU, drawn: its vertices in this frame's skin arena (32 bytes each, the
+// position first), its indices in its mesh's buffer. Taken into this frame's TLAS (RtUpdate) - if it comes before it
+// is built. Its key (its shadow caster's: RtTraced).
+uint64_t Device::RtNoteSkinned(const void* job, VkBuffer arena, VkDeviceSize vertexOffset, uint32_t vertexCount,
+                               VkBuffer meshBuffer, VkDeviceSize indexOffset, uint32_t indexCount)
+{
+    RtState* s = m_rt;
+    if (s->failed || !arena || !meshBuffer || indexCount < 3 || !vertexCount || s->tlasFrame == m_frameNumber)
+        return 0;
+    if (s->skinnedFrame != m_frameNumber) {
+        s->skinnedDraws.clear();
+        s->skinnedFrame = m_frameNumber;
+    }
+    // The piece's key, kept from frame to frame (its BLAS refitted): its mesh and its character - the game makes a new
+    // job each frame it skins one - and, for two of one mesh on one character (or of characters it can't tell apart),
+    // which of them this is in the frame's order.
+    const skin::Job* j = static_cast<const skin::Job*>(job);
+    const uint64_t base = MixKey(MixKey(kSkinnedSeed, uint64_t(reinterpret_cast<uintptr_t>(j->source.get()))), m_drawOwner);
+    uint64_t key = base;
+    for (const RtState::SkinnedDraw& d : s->skinnedDraws) {
+        if (d.job == job) return d.key;          // (drawn again this frame: one instance)
+        if (d.key == key) key = MixKey(key, 1);  // (the next of that mesh on that character)
+    }
+    auto address = [&](VkBuffer b) {
+        VkBufferDeviceAddressInfo ai{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+        ai.buffer = b;
+        return vkGetBufferDeviceAddress(m_device, &ai);
+    };
+    RtState::SkinnedDraw d{};
+    d.job = job;
+    d.key = key;
+    d.vertices = address(arena) + vertexOffset;
+    d.indices = address(meshBuffer) + indexOffset;
+    d.vertexCount = vertexCount;
+    d.triangles = indexCount / 3;
+    const auto& w = m_world.m;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c) d.world[r][c] = w[c][r];
+    for (int r = 0; r < 3; ++r) {
+        const double m[3] = {0.5 * (double(j->boundsMin[0]) + j->boundsMax[0]), 0.5 * (double(j->boundsMin[1]) + j->boundsMax[1]),
+                             0.5 * (double(j->boundsMin[2]) + j->boundsMax[2])};
+        d.centre[r] = d.world[r][0] * m[0] + d.world[r][1] * m[1] + d.world[r][2] * m[2] + d.world[r][3];
+    }
+    s->skinnedDraws.push_back(d);
+    return key;
+}
+
 // A caster in the rays: its instance is there, casts, and its mesh is built (or being built this frame).
 bool Device::RtTraced(uint64_t place) const
 {
     const RtState* s = m_rt;
     if (!s || !place)
         return false;
+    if (s->tracedSkinned.count(place))
+        return true;
     auto i = s->instances.find(place);
     if (i == s->instances.end() || !(i->second.mask & kMaskCaster))
         return false;
@@ -505,10 +583,11 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         for (int k = 0; k < 3; ++k)
             s->eye[k] = -(double(v[3][0]) * v[k][0] + double(v[3][1]) * v[k][1] + double(v[3][2]) * v[k][2]);
     }
-    // (This frame's arena uploads - the upload commands, submitted first - and the last frame's builds and reads.)
+    // (This frame's arena uploads and characters' skinning - the upload commands, submitted first - and the last
+    // frame's builds and reads.)
     Barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT | kBuild | kRayStages,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, kBuild,
-            kAsRW | VK_ACCESS_2_SHADER_READ_BIT);
+            VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR,
+            kBuild, kAsRW | VK_ACCESS_2_SHADER_READ_BIT);
 
     // The new meshes' BLAS, a budget of triangles at a time.
     std::vector<VkAccelerationStructureGeometryKHR> geoms;
@@ -575,6 +654,85 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
     }
     infos.resize(building.size());
 
+    // This frame's characters' pieces: built the first time (and when their counts change), refitted after.
+    std::vector<VkAccelerationStructureGeometryKHR> skinGeoms;
+    std::vector<VkAccelerationStructureBuildGeometryInfoKHR> skinInfos;
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> skinRanges;
+    std::vector<VkDeviceSize> skinScratchAt;
+    std::vector<const RtState::SkinnedDraw*> skinDrawn;
+    if (s->skinnedFrame == m_frameNumber) {
+        skinGeoms.resize(s->skinnedDraws.size());
+        skinInfos.resize(s->skinnedDraws.size());
+        skinRanges.resize(s->skinnedDraws.size());
+        skinScratchAt.resize(s->skinnedDraws.size());
+        for (const RtState::SkinnedDraw& d : s->skinnedDraws) {
+            const double dx = d.centre[0] - s->eye[0], dy = d.centre[1] - s->eye[1], dz = d.centre[2] - s->eye[2];
+            if (dx * dx + dy * dy + dz * dz > kRange * kRange)
+                continue;
+            RtState::Skinned& k = s->skinned[d.key];
+            if (k.as && (k.vertexCount != d.vertexCount || k.triangles != d.triangles)) {
+                s->dead.push_back({DeathTag(), k.as, k.storage});
+                k = {};
+            }
+            const size_t i = skinDrawn.size();
+            VkAccelerationStructureGeometryKHR& g = skinGeoms[i];
+            g = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+            g.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+            g.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+            auto& t = g.geometry.triangles;
+            t.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+            t.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+            t.vertexData.deviceAddress = d.vertices;
+            t.vertexStride = 32;
+            t.maxVertex = d.vertexCount - 1;
+            t.indexType = VK_INDEX_TYPE_UINT16;
+            t.indexData.deviceAddress = d.indices;
+            VkAccelerationStructureBuildGeometryInfoKHR& bi = skinInfos[i];
+            bi = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+            bi.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+            bi.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR |
+                       VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+            bi.geometryCount = 1;
+            bi.pGeometries = &g;
+            if (!k.as) {
+                VkAccelerationStructureBuildSizesInfoKHR sz{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+                vkGetAccelerationStructureBuildSizesKHR(m_device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &bi,
+                                                        &d.triangles, &sz);
+                if (!MakeBuffer(m_allocator, m_device, &k.storage, sz.accelerationStructureSize,
+                                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false))
+                    break;
+                VkAccelerationStructureCreateInfoKHR ci{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+                ci.buffer = k.storage.buffer;
+                ci.size = sz.accelerationStructureSize;
+                ci.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+                vkCreateAccelerationStructureKHR(m_device, &ci, nullptr, &k.as);
+                k.vertexCount = d.vertexCount;
+                k.triangles = d.triangles;
+                k.buildScratch = sz.buildScratchSize;
+                k.updateScratch = sz.updateScratchSize;
+            }
+            bi.mode = k.built ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+            bi.srcAccelerationStructure = k.built ? k.as : VK_NULL_HANDLE;
+            bi.dstAccelerationStructure = k.as;
+            skinScratchAt[i] = scratchNeed;
+            scratchNeed = AlignUp(scratchNeed + (k.built ? k.updateScratch : k.buildScratch), m_asScratchAlign);
+            skinRanges[i] = {d.triangles, 0, 0, 0};
+            k.lastFrame = m_frameNumber;
+            skinDrawn.push_back(&d);
+        }
+        skinInfos.resize(skinDrawn.size());
+    }
+    // (Pieces not drawn for a while: gone.)
+    if ((m_frameNumber & 63) == 0)
+        for (auto it = s->skinned.begin(); it != s->skinned.end();) {
+            if (it->second.lastFrame + 120 < m_frameNumber) {
+                s->dead.push_back({DeathTag(), it->second.as, it->second.storage});
+                it = s->skinned.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
     // The TLAS's instances: those near the camera whose mesh is (or is now being) built, placed relative to the eye.
     RtBuffer& ib = s->instanceBuf[m_frameIndex];
     std::vector<VkAccelerationStructureInstanceKHR> inst;
@@ -605,6 +763,23 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         v.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
         v.accelerationStructureReference = m.address;
         inst.push_back(v);
+    }
+    s->tracedSkinned.clear();
+    for (const RtState::SkinnedDraw* d : skinDrawn) {
+        const RtState::Skinned& k = s->skinned[d->key];
+        VkAccelerationStructureDeviceAddressInfoKHR ai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+        ai.accelerationStructure = k.as;
+        VkAccelerationStructureInstanceKHR v{};
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) v.transform.matrix[r][c] = float(d->world[r][c]);
+            v.transform.matrix[r][3] = float(d->world[r][3] - s->eye[r]);
+        }
+        v.instanceCustomIndex = uint32_t(d->key) & 0xFFFFFFu;
+        v.mask = kMaskCaster;
+        v.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+        v.accelerationStructureReference = vkGetAccelerationStructureDeviceAddressKHR(m_device, &ai);
+        inst.push_back(v);
+        s->tracedSkinned.insert(d->key);
     }
     const uint32_t count = uint32_t(inst.size());
     const VkDeviceSize instBytes = std::max<VkDeviceSize>(1, count) * sizeof(VkAccelerationStructureInstanceKHR);
@@ -665,14 +840,21 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         }
     }
     const VkDeviceAddress scratchBase = AlignUp(s->scratch.address, m_asScratchAlign);
-    if (!building.empty()) {
+    if (!building.empty() || !skinDrawn.empty()) {
         std::vector<const VkAccelerationStructureBuildRangeInfoKHR*> rangePtrs(building.size());
         for (size_t i = 0; i < building.size(); ++i) {
             infos[i].pGeometries = &geoms[i];
             infos[i].scratchData.deviceAddress = scratchBase + scratchAt[i];
             rangePtrs[i] = &ranges[i];
         }
-        vkCmdBuildAccelerationStructuresKHR(cmd, uint32_t(building.size()), infos.data(), rangePtrs.data());
+        for (size_t i = 0; i < skinDrawn.size(); ++i) {
+            skinInfos[i].pGeometries = &skinGeoms[i];
+            skinInfos[i].scratchData.deviceAddress = scratchBase + skinScratchAt[i];
+            infos.push_back(skinInfos[i]);
+            rangePtrs.push_back(&skinRanges[i]);
+        }
+        vkCmdBuildAccelerationStructuresKHR(cmd, uint32_t(infos.size()), infos.data(), rangePtrs.data());
+        for (const RtState::SkinnedDraw* d : skinDrawn) s->skinned[d->key].built = true;
         for (uint64_t key : building) {
             RtState::Mesh& m = s->meshes[key];
             m.built = true;
@@ -692,9 +874,10 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
     s->tlasFrame = m_frameNumber;
     if (m_frameNumber >= s->logFrame + 600) {
         s->logFrame = m_frameNumber;
-        Log("ray tracing: %u meshes built (%.1f MB, %llu triangles), %zu waiting; %zu instances, %u in the TLAS",
+        Log("ray tracing: %u meshes built (%.1f MB, %llu triangles), %zu waiting; %zu instances, %u in the TLAS (%zu of "
+            "them characters' pieces, %zu drawn)",
             s->builtMeshes, double(s->meshBytes) / 1048576.0, (unsigned long long)s->meshTriangles, s->toBuild.size(),
-            s->instances.size(), count);
+            s->instances.size(), count, skinDrawn.size(), s->skinnedFrame == m_frameNumber ? s->skinnedDraws.size() : 0);
     }
     return true;
 }

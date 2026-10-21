@@ -3642,6 +3642,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         vbOffset = m_drawGpu->vertexOffset;
         ibOffset = m_drawGpu->mesh->indexOffset;
         dt.motion[2] = float(vbOffset / layout.stride);
+        // A character's solid piece into the ray tracing (raytrace.cpp RtNoteSkinned; its shadow caster then only in
+        // the map's untraced layers if the rays lack it). Cut-out pieces (hair, fringes) stay the map's.
+        if (m_rt && m_drawSkin && primitive == d3d::TriangleList && indices && m_target == m_scene && !m_external &&
+            m_rs[d3d::RS_ZENABLE] && m_rs[d3d::RS_ZWRITEENABLE] && !m_rs[d3d::RS_ALPHABLENDENABLE] &&
+            (!m_rs[d3d::RS_ALPHATESTENABLE] || !m_textures[0] || m_textures[0]->m_opaque))
+            m_drawRtPlace = RtNoteSkinned(m_drawSkin, m_frames[m_frameIndex].skinArena, vbOffset, vertexCount,
+                                          m_drawGpu->mesh->buffer, ibOffset, indexCount);
         RecordShadowCaster(primitive, fvf, layout.stride, nullptr, vertexCount, vbOffset, indices, indices ? indexCount : 0,
                            ibOffset, m_frames[m_frameIndex].skinArena, m_drawGpu->mesh->buffer);
     } else if (m_drawStaticBuffer) {

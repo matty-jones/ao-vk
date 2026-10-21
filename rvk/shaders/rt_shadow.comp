@@ -5,7 +5,8 @@
 // ray towards a point of the sun's disc (a new one each frame; the disc as wide as the shadow map's softness makes its
 // penumbrae) into the ray tracing's casters - the static world, not the ground (instance mask 1: the ground casts no
 // shadow of its own, as in the map). Averaged over frames: each pixel's history found where the camera saw its point
-// last frame, dropped where the depth there disagrees. Out: visibility, view depth, and the mean distance to what the
+// last frame, dropped where the depth there disagrees, and held within what this frame's rays round it saw (a moving
+// character's shadow doesn't trail: where all of them were lit the history can't keep a shadow, and the reverse). Out: visibility, view depth, and the mean distance to what the
 // rays hit (rt_shadow_blur.comp widens its filter with it - a penumbra widens away from its caster).
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
@@ -29,18 +30,64 @@ vec3 ViewPoint(vec2 pix, float d)
     return vec3(ndc.x * z / P.proj.z, ndc.y * z / P.proj.w, z);
 }
 
+shared float sLit[8][8];                         // this frame's ray per pixel of the group (-1: none - the sky, off)
+
+// The pixel's ray: lit (1) or not, and how far its hit.
+float Trace(ivec2 pix, ivec2 size, float d, vec3 v, out float hit);
+
 void main()
 {
-    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy), local = ivec2(gl_LocalInvocationID.xy);
     ivec2 size = ivec2(P.size.xy);
-    if (pix.x >= size.x || pix.y >= size.y) return;
-    float d = texelFetch(depthTex, pix, 0).r;
+    bool inside = pix.x < size.x && pix.y < size.y;
+    float d = inside ? texelFetch(depthTex, pix, 0).r : 1.0;
+    vec3 v = ViewPoint(vec2(pix) + 0.5, d);
+    float hit = 0.0;
+    float lit = d < 1.0 ? Trace(pix, size, d, v, hit) : 1.0;
+    sLit[local.y][local.x] = d < 1.0 ? lit : -1.0;
+    barrier();
+    if (!inside) return;
     if (d >= 1.0) {                              // the sky
         imageStore(outHistory, pix, vec4(1.0, 1e6, 0.0, 0.0));
         imageStore(outRaw, pix, vec4(1.0, 1e6, 0.0, 0.0));
         return;
     }
-    vec3 v = ViewPoint(vec2(pix) + 0.5, d);
+    // What the rays round it saw (5 x 5, within the group).
+    float lo = lit, hi = lit;
+    for (int y = -2; y <= 2; ++y)
+        for (int x = -2; x <= 2; ++x) {
+            ivec2 q = local + ivec2(x, y);
+            if (any(lessThan(q, ivec2(0))) || any(greaterThan(q, ivec2(7)))) continue;
+            float l = sLit[q.y][q.x];
+            if (l < 0.0) continue;
+            lo = min(lo, l);
+            hi = max(hi, l);
+        }
+    // Last frame's, where the camera saw this point then.
+    float frames = 1.0, meanHit = hit, vis = lit;
+    if (P.misc.x > 0.5) {
+        vec2 ndc = vec2((float(pix.x) + 0.5) / P.size.x * 2.0 - 1.0, 1.0 - (float(pix.y) + 0.5) / P.size.y * 2.0);
+        vec4 prev = P.reproject * vec4(ndc, d, 1.0);
+        vec2 then = vec2((prev.x / prev.w + 1.0) * 0.5 * P.size.x, (1.0 - prev.y / prev.w) * 0.5 * P.size.y);
+        if (prev.w > 0.0 && all(greaterThanEqual(then, vec2(0.0))) && all(lessThan(then, P.size.xy))) {
+            vec4 h = texelFetch(history, ivec2(then), 0);
+            float zThen = prev.w;                // (D3D: clip w is the view depth)
+            if (abs(h.g - zThen) < 0.02 * zThen + 0.05) {
+                float kept = clamp(h.r, lo, hi);
+                // (Held in: the history no longer agrees - start the average over, from a few frames' worth.)
+                frames = abs(kept - h.r) > 0.25 ? 4.0 : min(h.b + 1.0, P.misc.z);
+                vis = mix(kept, lit, 1.0 / frames);
+                // (The hit distance: of the hits alone - a lit sample says nothing about it.)
+                meanHit = lit < 0.5 ? (h.a > 0.0 ? mix(h.a, hit, 0.25) : hit) : h.a;
+            }
+        }
+    }
+    imageStore(outHistory, pix, vec4(vis, v.z, frames, meanHit));
+    imageStore(outRaw, pix, vec4(vis, v.z, meanHit, frames));
+}
+
+float Trace(ivec2 pix, ivec2 size, float d, vec3 v, out float hit)
+{
     // The surface's normal from the depth: of the two neighbours each way, the nearer in depth (not across an edge).
     vec3 l = ViewPoint(vec2(pix) + vec2(-0.5, 0.5), texelFetch(depthTex, clamp(pix - ivec2(1, 0), ivec2(0), size - 1), 0).r);
     vec3 r = ViewPoint(vec2(pix) + vec2(1.5, 0.5), texelFetch(depthTex, clamp(pix + ivec2(1, 0), ivec2(0), size - 1), 0).r);
@@ -62,7 +109,8 @@ void main()
     vec3 dir = normalize(L + (t * cos(a) + cross(L, t) * sin(a)) * (rr * P.size.z));
     // Off the surface (more far off, where the depth's step is coarser), and a little towards the sun.
     vec3 origin = p + n * (0.03 + 0.002 * v.z) + dir * 0.02;
-    float lit = 1.0, hit = 0.0;
+    float lit = 1.0;
+    hit = 0.0;
     if (dot(n, L) > -0.05) {                     // (turned from the sun: the scene's light handles it)
         rayQueryEXT q;
         rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0x01, origin, 0.0, dir,
@@ -73,23 +121,5 @@ void main()
             hit = rayQueryGetIntersectionTEXT(q, true);
         }
     }
-    // Last frame's, where the camera saw this point then.
-    float frames = 1.0, meanHit = hit, vis = lit;
-    if (P.misc.x > 0.5) {
-        vec2 ndc = vec2((float(pix.x) + 0.5) / P.size.x * 2.0 - 1.0, 1.0 - (float(pix.y) + 0.5) / P.size.y * 2.0);
-        vec4 prev = P.reproject * vec4(ndc, d, 1.0);
-        vec2 then = vec2((prev.x / prev.w + 1.0) * 0.5 * P.size.x, (1.0 - prev.y / prev.w) * 0.5 * P.size.y);
-        if (prev.w > 0.0 && all(greaterThanEqual(then, vec2(0.0))) && all(lessThan(then, P.size.xy))) {
-            vec4 h = texelFetch(history, ivec2(then), 0);
-            float zThen = prev.w;                // (D3D: clip w is the view depth)
-            if (abs(h.g - zThen) < 0.02 * zThen + 0.05) {
-                frames = min(h.b + 1.0, P.misc.z);
-                vis = mix(h.r, lit, 1.0 / frames);
-                // (The hit distance: of the hits alone - a lit sample says nothing about it.)
-                meanHit = lit < 0.5 ? (h.a > 0.0 ? mix(h.a, hit, 0.25) : hit) : h.a;
-            }
-        }
-    }
-    imageStore(outHistory, pix, vec4(vis, v.z, frames, meanHit));
-    imageStore(outRaw, pix, vec4(vis, v.z, meanHit, frames));
+    return lit;
 }

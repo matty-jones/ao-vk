@@ -9,6 +9,8 @@
 #include "material_maps.h"
 
 #include <chrono>
+#include <memory>
+#include <utility>
 #include <thread>
 #include <cmath>
 #include <cstdio>
@@ -3971,7 +3973,10 @@ Matrix Offset()
 // statels) loaded as in the game, the camera above (X, Y, Z), a flat lit ground at Y and one cube of the "game's"
 // (shadows need a caster drawn) - the placed objects' shadows fall on the ground though nothing draws them.
 // Mode 2 (the default here: the demo draws none of them to confirm the placement), 0 for the scene without them.
+// --statel-skinned: a "character" skinned on the GPU (DrawSkinned, as the game's) walking round the cube - an 8-sided
+// column on one bone, the bone moved each frame (a new job each frame, as the game makes them).
 std::string g_statelPack;
+bool g_statelSkinned = false;
 uint32_t g_statelPlayfield = 0, g_statelMode = 2;
 float g_statelAt[3] = {};
 
@@ -3986,6 +3991,27 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
     std::vector<VtxMesh> cube;
     std::vector<uint16_t> cubeIdx;
     AddCube(cube, cubeIdx, x - 6.0f, y + 0.5f, z - 6.0f, 0.5f);
+    auto column = std::make_shared<rvk::skin::Source>();
+    for (int k = 0; k < 8; ++k)
+        for (int e = 0; e < 2; ++e) {
+            const float a = float(k) * kPi / 4.0f, cx = 0.4f * std::cos(a), cz = 0.4f * std::sin(a), cy = e ? 1.8f : 0.0f;
+            rvk::skin::TriVertex v{};
+            v.posA[0] = v.posB[0] = v.bind[0] = cx;
+            v.posA[1] = v.posB[1] = v.bind[1] = cy;
+            v.posA[2] = v.posB[2] = v.bind[2] = cz;
+            v.normal[0] = std::cos(a);
+            v.normal[2] = std::sin(a);
+            v.boneA = v.boneB = 0;
+            v.weightA = 1.0f;
+            column->vertices.push_back(v);
+        }
+    for (int k = 0; k < 8; ++k) {
+        const uint16_t a = uint16_t(2 * k), b = uint16_t(2 * ((k + 1) % 8));
+        const uint16_t q[6] = {a, uint16_t(a + 1), b, b, uint16_t(a + 1), uint16_t(b + 1)};
+        column->indices.insert(column->indices.end(), q, q + 6);
+    }
+    column->Finish();
+    column->gameIndices = column->indices.data();
     for (int frame = 0; frame < frames; ++frame) {
         if (frame == frames - 1) {
             dev.RequestScreenshot(shot);
@@ -4011,6 +4037,7 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
         sun.type = LIGHT_DIRECTIONAL;
         sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
         sun.direction = {0.55f, -0.7f, 0.45f};
+        if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};   // (--sun-dir)
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
@@ -4026,6 +4053,23 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
         dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
         dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cube.data(), uint32_t(cube.size()), cubeIdx.data(),
                                  uint32_t(cubeIdx.size()));
+        if constexpr (requires { dev.DrawSkinned(0u, 0u, std::declval<rvk::skin::Job&>(), 0u, 0u, nullptr, 0u); }) {
+            if (g_statelSkinned) {               // the column walking round the cube, a turn in 240 frames
+                const float t = float(frame) * 2.0f * kPi / 240.0f;
+                rvk::skin::Bone bone{{1, 0, 0, 0, 1, 0, 0, 0, 1, x - 6.0f + 3.0f * std::cos(t), y, z - 6.0f + 3.0f * std::sin(t)}};
+                auto palette = std::make_shared<rvk::skin::Palette>();
+                palette->Set(&bone, 1);
+                rvk::skin::Job job;
+                job.source = column;
+                job.bones = palette;
+                job.ComputeBounds();
+                dev.SetTexture(0, nullptr);
+                dev.SetDrawVisual(uint32_t(VisualKind::Character), "column", 7);
+                dev.DrawSkinned(TriangleList, rvk::skin::kVertexFvf, job, 0, uint32_t(column->vertices.size()),
+                                column->indices.data(), uint32_t(column->indices.size()));
+                dev.SetDrawVisual(0, nullptr);
+            }
+        }
         dev.EndFrame();
     }
 }
@@ -4716,6 +4760,7 @@ int main(int argc, char** argv)
             shadows = true;
         }
         else if (a == "--statel-mode" && i + 1 < argc) g_statelMode = uint32_t(std::atoi(argv[++i]));
+        else if (a == "--statel-skinned") g_statelSkinned = true;
         else if (a == "--point-shadow-test") pointShadowTest = true;
         else if (a == "--world-offset" && i + 3 < argc) { for (int k = 0; k < 3; ++k) g_off[k] = float(std::atof(argv[++i])); }
         else if (a == "--point-shadow-slab") g_slabTest = pointShadowTest = pointShadowSun = shadows = true;

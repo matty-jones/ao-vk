@@ -3305,6 +3305,9 @@ private:
     uint64_t RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t stride, uint32_t vertexCount, VkBuffer ib,
                         uint32_t indexCount, bool ground);
     uint64_t m_drawRtPlace = 0;                  // this draw's (RtNoteDraw), for its shadow caster
+    // A character's piece skinned on the GPU (draw.cpp): its BLAS refitted this frame, an instance where it is drawn.
+    uint64_t RtNoteSkinned(const void* job, VkBuffer arena, VkDeviceSize vertexOffset, uint32_t vertexCount,
+                           VkBuffer meshBuffer, VkDeviceSize indexOffset, uint32_t indexCount);
     bool RtTraced(uint64_t place) const;         // that instance is in the rays (its BLAS built)
     uint64_t RtStatelPlace(uint32_t item) const; // a placed object's piece's instance key (statels.cpp), 0 = none
     void RenderRtShadow(uint32_t cause);         // at the pre-pass's end: the rays' sun mask (Frame::rays)

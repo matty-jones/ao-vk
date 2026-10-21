@@ -16,9 +16,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   three times `RVK_AoRadius`. Buildings and the ground occlude; characters and plants don't yet.
 - Ray-traced sun shadows on GPUs with ray tracing: `RVK_RtShadow 1` (Shadows). Buildings, walls and rocks cast exact
   shadows that are sharp where they touch the ground and soften with distance, with no shadow-map blockiness, and
-  every placed object of the playfield casts, seen or not. Characters, plants and cut-outs (fences, leaves) still
-  cast from the shadow map; grass, water and glass still take the map's shadows. Needs the sun's shadows and the
-  depth pre-pass on.
+  every placed object of the playfield casts, seen or not. Characters cast traced shadows too (hair and other
+  cut-out parts from the map); plants and cut-outs (fences, leaves) still cast from the shadow map, and grass, water
+  and glass still take the map's shadows. Ray-traced ambient occlusion (`RVK_AoMode 2`) sees characters as well.
+  Needs the sun's shadows and the depth pre-pass on.
 - Variable rate shading: `RVK_Vrs 1` (Effects) shades flat and fast-moving parts of the scene in 2 x 2 blocks, for
   more frames per second on GPUs that support it (AMD's FidelityFX VRS). `RVK_VrsCutoff` (ini) sets how readily.
 - AMD's indirect light to try: `RVK_GiMode 1` (Effects, under Indirect light) traces bounce light through a model of

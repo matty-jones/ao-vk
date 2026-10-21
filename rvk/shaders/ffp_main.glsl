@@ -374,7 +374,9 @@ float RtShadowMask()
     uint img = (bits & 0xFFFFFu) - 1u, smp = (bits >> 20) & 0xFFu;
     vec2 m = texelFetch(sampler2D(texImages[img], bindlessSamplers[smp]), ivec2(gl_FragCoord.xy), 0).rg;
     float z = FL.rtShadow.z / (gl_FragCoord.z - FL.rtShadow.y);
-    return abs(m.g - z) < 0.01 * z + 0.05 ? m.r : -1.0;
+    // (The pre-pass's own surfaces match to the mask's half-float depth, ~0.05 %; a thing in front of one - a character's
+    // foot on the ground - by more.)
+    return abs(m.g - z) < 0.002 * z + 0.01 ? m.r : -1.0;
 }
 #endif
 
