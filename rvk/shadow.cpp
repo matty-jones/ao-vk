@@ -586,9 +586,8 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
         // remembered under another's key is what made the wall's shadow come and go - sun42).
         if (DrawStatelCasting(vertexCount, indexCount)) {
             ++m_statelCoveredThisFrame;
-            auto stale = m_casterCache.find(key);
-            if (stale != m_casterCache.end())
-                ForgetCachedCaster(stale);
+            if (m_casterCache.count(key))
+                ForgetCachedCaster(key);
             return;
         }
     }
@@ -597,9 +596,8 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
     if (object && object->cached && object->cachedEpoch == m_casterCacheEpoch && !m_objectVerify) {
         remembered = object->cached;
     } else {
-        auto cached = m_casterCache.find(key);
-        if (cached != m_casterCache.end()) {
-            remembered = &cached->second;
+        if (CachedCaster* cached = m_casterCache.find(key)) {
+            remembered = cached;
             if (object && object->cached && object->cachedEpoch == m_casterCacheEpoch && object->cached != remembered &&
                 m_objectMismatches++ < 20)
                 Log("object cache: remembered caster %016llx kept at another entry", (unsigned long long)key);
@@ -844,7 +842,8 @@ void Device::CacheCaster(uint64_t key, const ShadowCaster& c, const void* vertic
     std::memcpy(dst, vertices, vbBytes);
     if (c.indexCount)
         std::memcpy(dst + indexAt, indices, size_t(c.indexCount) * 2);
-    m_casterCache.emplace(key, e);
+    if (m_casterCache.emplace(key, e))
+        ++m_casterCacheEpoch;                    // (the entries moved: the objects' pointers to them go)
     AddCoverMesh(key, e, vertices, indices);
     if (m_cacheTraceLines < 300 && m_frameNumber > 600) {   // (churn: see UpdateCasterCache)
         ++m_cacheTraceLines;
@@ -854,16 +853,18 @@ void Device::CacheCaster(uint64_t key, const ShadowCaster& c, const void* vertic
     }
 }
 
-void Device::ForgetCachedCaster(std::unordered_map<uint64_t, CachedCaster>::iterator it)
+void Device::ForgetCachedCaster(uint64_t key)
 {
-    ArenaFree(it->second.chunk, it->second.slot, it->second.slotBytes);   // reused once the GPU is done with it
-    auto cover = m_coverMeshes.find(it->first);
+    CachedCaster* e = m_casterCache.find(key);
+    if (!e) return;
+    ArenaFree(e->chunk, e->slot, e->slotBytes);  // reused once the GPU is done with it
+    auto cover = m_coverMeshes.find(key);
     if (cover != m_coverMeshes.end()) {
         m_coverTriangles -= cover->second.tri.size() / 9;
         m_coverMeshes.erase(cover);
         ++m_coverMeshGen;
     }
-    m_casterCache.erase(it);
+    m_casterCache.erase(key);                    // (the last entry moved into its place)
     ++m_casterCacheEpoch;                        // (the objects' pointers to remembered casters: ObjectEntry::cached)
 }
 
@@ -921,9 +922,11 @@ void Device::UpdateCasterCache()
         it = it->second.lastFrame == m_frameNumber ? std::next(it) : m_casterStreaks.erase(it);
     if (!m_frameEyeValid)
         return;
-    for (auto it = m_casterCache.begin(); it != m_casterCache.end();) {
-        CachedCaster& e = it->second;
-        auto next = std::next(it);
+    // (By index: forgetting one moves the last into its place, which is looked at next.)
+    for (size_t i = 0; i < m_casterCache.size();) {
+        const uint64_t key = m_casterCache.entries[i].first;
+        CachedCaster& e = m_casterCache.entries[i].second;
+        bool forgot = false;
         if (e.lastSeen != m_frameNumber) {
             float d2 = 0.0f;
             for (int j = 0; j < 3; ++j) {
@@ -938,7 +941,8 @@ void Device::UpdateCasterCache()
             const float forget = CasterKeepRange() * (4.0f / 3.0f);
             if (d2 > forget * forget) {
                 ++m_forgottenFar;
-                ForgetCachedCaster(it);
+                ForgetCachedCaster(key);
+                forgot = true;
             } else if (m_frameViewProjValid && d2 < 20.0f * 20.0f && m_frameNumber - e.lastSeen >= 60 &&
                        BoxInClip(centre, centre, m_frameViewProj, true) == 1) {
                 // (Gone only when near - within 20 units - and unseen in view a second: the game doesn't draw all it
@@ -948,15 +952,16 @@ void Device::UpdateCasterCache()
                 if (m_cacheTraceLines < 300) {   // (churn: forgotten as unseen in view, remembered again later)
                     ++m_cacheTraceLines;
                     Log("caster cache frame %llu: forgot %016llx (in view, not drawn) box (%.1f %.1f %.1f)..(%.1f %.1f %.1f) "
-                        "v %u, unseen %llu frames", (unsigned long long)m_frameNumber, (unsigned long long)it->first,
+                        "v %u, unseen %llu frames", (unsigned long long)m_frameNumber, (unsigned long long)key,
                         double(e.boundsMin[0]), double(e.boundsMin[1]), double(e.boundsMin[2]), double(e.boundsMax[0]),
                         double(e.boundsMax[1]), double(e.boundsMax[2]), e.vertexCount,
                         (unsigned long long)(m_frameNumber - e.lastSeen));
                 }
-                ForgetCachedCaster(it);
+                ForgetCachedCaster(key);
+                forgot = true;
             }
         }
-        it = next;
+        if (!forgot) ++i;
     }
 }
 

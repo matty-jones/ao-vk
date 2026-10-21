@@ -1803,7 +1803,48 @@ private:
     static constexpr size_t kSwaySamples = 80;
     // (at: where it stood when the streak began; moved: it has moved since - a thing that moves isn't remembered.)
     struct CasterStreak { uint64_t lastFrame = 0; uint32_t count = 0; float at[3] = {}; bool moved = false; };
-    std::unordered_map<uint64_t, CachedCaster> m_casterCache;
+    // The remembered casters, dense (a frame walks all of them: CollectShadowItems, UpdateCasterCache - through a
+    // node map that was most of their time), found by key through an index. Erasing moves the last entry into the
+    // gap, growing may move them all (emplace says so): pointers into it hold only while m_casterCacheEpoch stays.
+    struct CasterCacheStore {
+        using Entry = std::pair<uint64_t, CachedCaster>;   // (key, entry), as a map's
+        std::vector<Entry> entries;
+        std::unordered_map<uint64_t, uint32_t> index;
+        size_t size() const { return entries.size(); }
+        void clear() { entries.clear(); index.clear(); }
+        size_t count(uint64_t key) const { return index.count(key); }
+        CachedCaster* find(uint64_t key)
+        {
+            auto it = index.find(key);
+            return it == index.end() ? nullptr : &entries[it->second].second;
+        }
+        // True: the entries moved (the vector grew).
+        bool emplace(uint64_t key, const CachedCaster& e)
+        {
+            if (index.count(key)) return false;
+            const bool moves = entries.size() == entries.capacity();
+            index.emplace(key, uint32_t(entries.size()));
+            entries.emplace_back(key, e);
+            return moves;
+        }
+        void erase(uint64_t key)
+        {
+            auto it = index.find(key);
+            if (it == index.end()) return;
+            const uint32_t at = it->second;
+            index.erase(it);
+            if (at + 1 != entries.size()) {
+                entries[at] = std::move(entries.back());
+                index[entries[at].first] = at;
+            }
+            entries.pop_back();
+        }
+        std::vector<Entry>::iterator begin() { return entries.begin(); }
+        std::vector<Entry>::iterator end() { return entries.end(); }
+        std::vector<Entry>::const_iterator begin() const { return entries.begin(); }
+        std::vector<Entry>::const_iterator end() const { return entries.end(); }
+    };
+    CasterCacheStore m_casterCache;
     // Placed objects (statels.cpp): every piece of the playfield's static objects, placed; a grid (x, z) over them.
     // (opaque: of a cut-out piece's mask, the share kept by its alpha test - a roof's cut-out mostly whole, a canopy's
     // leaves not; 1 for a solid piece.)
@@ -1876,7 +1917,7 @@ private:
     void NoteBatch(uint64_t key);
     uint32_t m_meshStaticDraws = 0, m_meshHashedDraws = 0;   // frame dump: DrawMeshInfo by snapshot vs by content hash
     void UpdateCasterCache();
-    void ForgetCachedCaster(std::unordered_map<uint64_t, CachedCaster>::iterator it);
+    void ForgetCachedCaster(uint64_t key);
     void ForgetCasterTexture(Texture* texture);
     static double SwayClock();
     static void TickFixedClock();
