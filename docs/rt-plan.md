@@ -108,6 +108,19 @@ Built after (2026-10-21, all on `amd-fx`):
   a hit the screen shows takes the scene's colour there, one it doesn't the environment probe towards the hit (what
   the camera has seen that way, lit), a miss leaves the scene's own. No hit shading of its own.
 
+- `RVK_VolLamps` (volume.frag, not ray traced but asked for with these): every point and spot light's light in the
+  air - closed form without a shadow cube, marched through its cube with one (shafts).
+- Clustered lighting not built: the frame lights' x/z grid (draw.cpp BuildLightGrid) already culls per draw, and
+  the game used ~50 lights at most in the user's logs ("point shadows: 8 of 50 candidate lights") against the 64
+  the frame holds.
+- Found on the way: with AMD's GI or the traced AO on (their scene normals), AMD's SSSR had run in place of our
+  reflections whatever RVK_SsrMode said (hdr.cpp; fixed).
+
+GPU time, the native ground at 960 x 960 (rvk_demo, the game open in the background - approximate; base 1.99 ms
+with our AO, GI and reflections): RVK_RtShadow +0.30 (trace and TLAS +0.15, scene +0.07, untraced layers +0.08);
+RVK_AoMode 2 +0.32 (pass 0.22 vs ours 0.03, structures 0.13); RVK_RtReflect +0.12; all three +0.54. AMD's: CACAO
++0.07, Brixelizer GI +0.47, SSSR +0.30, VRS -0.37 (the scene 1.35 -> 0.98).
+
 ## 4. AMD's denoiser for shadows (A/B, optional)
 
 The SDK's Denoiser has a shadows mode (the hybrid shadows sample: ray hits as 32-bit masks of 8 x 4 pixel tiles,
