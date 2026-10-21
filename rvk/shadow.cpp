@@ -580,7 +580,7 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
     c.rtPlace = m_drawRtPlace;
     m_casters.push_back(c);
     if (VisualKind(c.kind) == VisualKind::Static) {
-        if (m_statelVerified[0] == 0 || m_statelVerified[1] == 0)
+        if ((m_statelVerified[0] == 0 || m_statelVerified[1] == 0) && m_statelMode < 2)   // (mode 2 casts unconfirmed)
             CheckStatelDraw(m_world, vertexCount, indexCount);   // (statels.cpp: is our placement the game's?)
         // A piece of a placed object, which casts from the playfield's list wherever it is: not remembered (one
         // remembered under another's key is what made the wall's shadow come and go - sun42).
