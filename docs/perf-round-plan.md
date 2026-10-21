@@ -35,7 +35,7 @@ registers and spilled 144 bytes - 12 warps a core of 48 (25% occupancy) - for ev
 | Spot lights' cubes: only the faces and casters their cone reaches | no false negative in 120k random tests; spot test pictures identical (60/100/170 deg) |
 
 | Spot lights: grass outside the cone left out of their cubes (and not stopping a cube being kept); the cone test without acos/asin; the casters' hash a word at a time | 3 floodlights over the city bench: grass blades into cubes 60.6k -> 37.6k a frame; point scan 0.18 -> 0.09 ms (the byte-wise hash had made it 0.5 on some runs) |
-| The native ground's rocks in 64-unit blocks, each culled by the view alone (the ranges still the patch's: the same rocks drawn) | ground bench scene 1.98 -> 1.85 ms, total 3.54 -> 3.40 |
+| The native ground's rocks in 32-unit blocks, each culled alone - by the view, each cascade, each cube face (the ranges still the patch's: the same rocks drawn) | ground bench total 3.54 -> 3.37 ms; a scree slope (pf800 file) sun shadows 0.12 -> 0.09, total 2.95 -> 2.90. The user's Borealis dump: rock patches were 97% / 93% of cascades 0 / 1's indices |
 
 City bench overall: GPU 4.08 -> 3.43 ms, render thread 6.0 -> ~5.5 ms. `RANDYVK_FULL_SHADER=1` draws every draw with
 the full shader build, `RANDYVK_SPOT_CONE=0` renders spot lights' cubes whole (comparisons).

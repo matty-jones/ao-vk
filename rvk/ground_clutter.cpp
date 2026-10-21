@@ -33,10 +33,11 @@ constexpr float kKeep = 450.0f;                // ... and kept made within this
 constexpr float kSmallRange = 90.0f;           // ... the small ones (under kSmall across) within this
 constexpr float kSmall = 0.45f;
 constexpr int kMakeAtOnce = 2;                 // patches' rocks made at a time (on workers) at most
-// A patch's rocks in blocks of this many cells a side, each a mesh of its own culled alone: a patch is 256 units
-// across, and culled whole it drew every rock in it - those behind the camera and ~450 units off - wherever a corner
-// of it came into view within kRange (the ground bench's rocks ~0.45 ms of its 2 ms scene, much of it rocks unseen).
-constexpr uint32_t kBlockCells = 16;
+// A patch's rocks in blocks of this many cells a side (32 units), each a mesh of its own culled alone, in the view
+// and in each sun cascade and cube face: a patch is 256 units across, and culled whole it drew every rock in it -
+// those behind the camera and ~450 units off - wherever a corner of it came into view within kRange, and every rock
+// of it into each cascade it touched (at Borealis's bridges ~95% of the nearest cascades' triangles were rocks).
+constexpr uint32_t kBlockCells = 8;
 // The frustum's test of a block widened by this (world units): a rock just outside the view still casts its shadow
 // into it.
 constexpr float kBlockMargin = 10.0f;
