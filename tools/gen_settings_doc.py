@@ -84,6 +84,9 @@ def main():
         if now != old:
             was.setdefault(now, []).append(old)
     by_name = {s["name"]: s for s in settings}
+    pair = r'\{' + STRING + r',\s*' + STRING + r'\}'
+    costs = dict(re.findall(pair, block(src, "const Cost kCosts[] = {")))
+    choice_names = dict(re.findall(pair, block(src, "const Cost kChoiceNames[] = {")))
     knobs = set(re.findall(r'^\s*X\((\w+),', open(RVK_H, encoding="utf-8").read(), re.M))
 
     def hidden(s):
@@ -98,7 +101,11 @@ def main():
         if s["type"] == "Colour":
             return "RRGGBB"
         if s["type"] == "Choice" and s["choices"]:
-            return " / ".join(s["choices"].split())
+            values = s["choices"].split()
+            names = choice_names.get(s["name"], "").split("|")
+            if len(names) == len(values):
+                values = [v if v == n or v + "%" == n else f"{v} ({n})" for v, n in zip(values, names)]
+            return " / ".join(values)
         return f"{fmt(s['min'], s['type'])} .. {fmt(s['max'], s['type'])}"
 
     sections = []
@@ -117,7 +124,9 @@ def main():
            "  stay. A feature's on / off switch (its *switch* below) does the same for the settings under it.",
            "- Presets (Original, Classic+, Modern, Ultra) set every setting outside General; Modern is the defaults.",
            "- A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.",
-           "- *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).", "",
+           "- *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).",
+           "- *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at",
+           "  75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.", "",
            f"{len(settings)} settings, {sum(1 for s in settings if not hidden(s))} of them in the settings window.", ""]
     out.append("## Sections")
     out.append("")
@@ -126,7 +135,8 @@ def main():
         out.append(f"- [{sec}](#{sec.lower().replace(' ', '-')}) ({n})")
     out.append("")
     for sec in sections:
-        out += [f"## {sec}", "", "| Setting | What it does | Values | Default | Notes |", "| --- | --- | --- | --- | --- |"]
+        out += [f"## {sec}", "", "| Setting | What it does | Values | Default | Cost | Notes |",
+                "| --- | --- | --- | --- | --- | --- |"]
         for s in [x for x in settings if x["section"] == sec]:
             notes = []
             notes.append("ini only" if hidden(s) else "window")
@@ -147,9 +157,15 @@ def main():
                 label = f"{parent['label'].split(' (')[0]}: {label[0].lower() + label[1:]}"
             label = label.replace("|", "\\|")
             out.append(f"| `{s['name']}` | {label} | {value_range(s)} | {fmt(s['default'], s['type'])} | "
-                       f"{'; '.join(notes)} |")
+                       f"{costs.get(s['name'], '')} | {'; '.join(notes)} |")
         out.append("")
     text = "\n".join(out)
+    missing = [s["name"] for s in settings if not hidden(s) and s["name"] not in costs]
+    unknown = [n for n in list(costs) + list(choice_names) if n not in by_name]
+    if missing or unknown:
+        # (Every setting the window shows says what it costs: players asked where their frame rate goes.)
+        sys.exit("kCosts: no cost for " + ", ".join(missing) if missing else "kCosts / kChoiceNames: no such setting "
+                 + ", ".join(unknown))
     if "--check" in sys.argv:
         current = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else ""
         if current != text:

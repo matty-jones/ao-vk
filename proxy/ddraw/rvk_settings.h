@@ -16,7 +16,9 @@ class ThreadedDevice;
 // RvkSettings_Count() settings, described by RvkSettings_Get(index); RvkSettings_Set(name, value) changes one
 // (clamped to its range, applied at once, saved). Bool settings are 0 / 1, int ones whole numbers, choice ones one
 // of `choices`. Version 2 added type 3 (choice) and the fields from `parent` on (a version 1 caller's smaller size
-// gets the others).
+// gets the others). Fields added later at the end (`cost`, `choiceNames`) are filled when the caller's size takes
+// them, so the version stays 2: an older caller gets what it knows, an older renderer leaves the new ones as the
+// caller set them (null).
 extern "C" {
 struct RvkSettingInfo {
     uint32_t size;              // sizeof(RvkSettingInfo), set by the caller
@@ -28,6 +30,8 @@ struct RvkSettingInfo {
     float value, defaultValue;
     const char* parent;         // the bool switching the feature this belongs to (null: none)
     const char* choices;        // choice: the allowed values separated by spaces
+    const char* cost;           // what it costs the frame, for players ("GPU: high", "no cost"; null: not said)
+    const char* choiceNames;    // choice: a name for each of `choices`, in order, separated by '|' (null: the values)
 };
 uint32_t RvkSettings_Version();
 uint32_t RvkSettings_Count();

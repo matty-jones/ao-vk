@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <vector>
@@ -473,7 +474,7 @@ const char* const kHidden[] = {
     "RVK_GrassWidth", "RVK_GrassVary", "RVK_GrassGlow", "RVK_GrassGusts", "RVK_TrailTime", "RVK_TrailShade",
     "RVK_GrassEven", "RVK_SunCascade", "RVK_StaticShad", "RVK_PtDay", "RVK_Knee", "RVK_HdrRoom", "RVK_LutAmount",
     "RVK_BloomThr", "RVK_BloomOcc", "RVK_AoRadius", "RVK_GiRadius", "RVK_VolShafts", "RVK_VolRays", "RVK_VolLand",
-    "RVK_SunSize", "RVK_SunBleed", "RVK_VrsCutoff", "RVK_SssrThick", "RVK_GiDebug", "RVK_GiSky", "RVK_RtDebug", "RVK_SsrWater", "RVK_SsrGloss", "RVK_SsrWet", "RVK_MBlurNear", "RVK_DofMacro",
+    "RVK_SunSize", "RVK_SunBleed", "RVK_GiDebug", "RVK_RtDebug", "RVK_SsrWater", "RVK_SsrGloss", "RVK_SsrWet", "RVK_MBlurNear", "RVK_DofMacro",
     "RVK_DofRadius", "RVK_DofRange", "RVK_PartUniform", "RVK_PartAbsSize", "RVK_PartSize", "RVK_PartTrailMx",
     "RVK_PartLife", "RVK_PartCurl", "RVK_PartScale", "RVK_PartSwirl", "RVK_PartPull", "RVK_PartDrag", "RVK_PartSpeed",
     "RVK_PartAdapt", "RVK_PartFollow", "RVK_PartCore",
@@ -499,6 +500,222 @@ bool Hidden(const Setting& s)
     const Setting* parent = s.parent && !AlwaysOn(s.parent) ? Find(s.parent) : nullptr;
     return parent && Hidden(*parent);
 }
+
+// What each setting in the settings window costs the frame, shown after its label so players can tell where their
+// frame rate and GPU time go. The bands are GPU time a frame at 1920 x 1080 (2560 x 1440 at 75% render scale) on an
+// RTX 4070 Ti, from in-game logs and rvk_demo sweeps of the native ground: low under 0.3 ms, medium 0.3 to 1 ms, high
+// over 1 ms; "more with the value" where the cost follows a slider, "no cost" where the setting only changes the look
+// of work done anyway. AOReloaded's Renderer tab explains the bands; keep the two in step.
+struct Cost { const char* name; const char* text; };
+const Cost kCosts[] = {
+    // General
+    {"RVK_Enhance", "GPU: all of the below (off: the cheapest)"},
+    {"RVK_UiRate", "saves GPU and CPU: 30 or 60 cheaper than every frame"},
+    {"RVK_PerfHud", "no cost"},
+    {"RVK_AlienMap", "no cost"},
+    {"RVK_DetailRange", "CPU and GPU: more with the value"},
+    {"RVK_ViewRange", "CPU and GPU: more with the value"},
+    // Lighting
+    {"RVK_Darkness", "no cost"},
+    {"RVK_PixelLight", "GPU: low"},
+    {"RVK_PtLight", "no cost"},
+    {"RVK_CharLight", "no cost"},
+    {"RVK_TessOn", "GPU: low"},
+    {"RVK_Tess", "no cost"},
+    {"RVK_Aniso", "GPU: low"},
+    // Materials
+    {"RVK_BumpOn", "GPU: low"},
+    {"RVK_Bump", "no cost"},
+    {"RVK_NormalMaps", "GPU: low"},
+    {"RVK_NormalStr", "no cost"},
+    {"RVK_Parallax", "GPU: low"},
+    {"RVK_DepthSteps", "GPU: low, more with the value"},
+    {"RVK_Pbr", "GPU: low"},
+    {"RVK_PbrSpec", "no cost"},
+    {"RVK_PbrEnv", "no cost"},
+    {"RVK_Albedo", "video memory: more textures"},
+    // Terrain
+    {"RVK_GroundOn", "GPU: medium (in place of the game's ground)"},
+    {"RVK_GroundAo", "no cost"},
+    {"RVK_GroundSun", "no cost"},
+    {"RVK_GroundRocks", "GPU: medium, more with the value"},
+    {"RVK_Pebbles", "GPU: low"},
+    {"RVK_SandRipple", "GPU: low"},
+    {"RVK_SandPrints", "GPU: low"},
+    {"RVK_RippleDepth", "no cost"},
+    {"RVK_RippleSoft", "no cost"},
+    {"RVK_DuneLight", "no cost"},
+    {"RVK_SandGlint", "no cost"},
+    {"RVK_GroundGrain", "GPU: low"},
+    {"RVK_GroundBlend", "GPU: low"},
+    {"RVK_GroundTess", "GPU: low"},
+    {"RVK_CliffDepth", "GPU: low"},
+    {"RVK_GroundFar", "video memory: 32 a lot"},
+    {"RVK_GroundRange", "CPU: more with the value"},
+    {"RVK_CliffTex", "GPU: low"},
+    {"RVK_CliffRock", "no cost"},
+    {"RVK_TileHide", "GPU: low"},
+    {"RVK_GroundVary", "no cost"},
+    // Plants
+    {"RVK_SwayOn", "GPU: low"},
+    {"RVK_Sway", "no cost"},
+    {"RVK_PushOn", "GPU: low"},
+    {"RVK_GrassPush", "no cost"},
+    {"RVK_FolEdges", "GPU: low"},
+    {"RVK_FolDither", "no cost"},
+    {"RVK_GrassOn", "GPU: medium, high in thick grass"},
+    {"RVK_GrassDist", "GPU: more with the value"},
+    {"RVK_GrassBlades", "GPU: more with the value"},
+    {"RVK_GrassHeight", "GPU: more with the value"},
+    {"RVK_GrassBright", "no cost"},
+    {"RVK_GrassFlower", "no cost"},
+    {"RVK_GrassTrail", "GPU: low"},
+    {"RVK_LeafOn", "GPU: medium, high in forests"},
+    {"RVK_LeafDensity", "GPU: more with the value"},
+    {"RVK_LeafDist", "GPU: more with the value"},
+    {"RVK_LeafFall", "GPU: low"},
+    // Water
+    {"RVK_WaterOn", "GPU: low, medium on a large lake or the sea"},
+    {"RVK_WaterStyle", "no cost"},
+    {"RVK_WaterQual", "GPU: more with the value"},
+    {"RVK_WaterMesh", "no cost"},
+    {"RVK_WaterWaves", "no cost"},
+    // Weather
+    {"RVK_WeatherOn", "GPU: low, medium in storms"},
+    {"RVK_RainForce", "GPU: medium while it rains"},
+    {"RVK_RainAmount", "GPU: more with the value"},
+    {"RVK_StormForce", "GPU: medium while it storms"},
+    {"RVK_StormThick", "no cost"},
+    {"RVK_HeatFlash", "no cost"},
+    {"RVK_SandForce", "GPU: medium in a sandstorm"},
+    // Smoke
+    {"RVK_SmokeOn", "GPU: medium, high near many fires"},
+    {"RVK_SmokeQual", "GPU: more with the value"},
+    {"RVK_SmokeThick", "no cost"},
+    // Sky
+    {"RVK_CloudsOn", "GPU: medium"},
+    {"RVK_ProcSky", "GPU: low"},
+    {"RVK_SkyZone", "no cost"},
+    {"RVK_SkyBright", "no cost"},
+    {"RVK_Twilight", "no cost"},
+    {"RVK_BlueHour", "no cost"},
+    {"RVK_SkyGlow", "no cost"},
+    {"RVK_Afterglow", "no cost"},
+    {"RVK_StarFade", "no cost"},
+    {"RVK_Stars", "GPU: low"},
+    {"RVK_StarBright", "no cost"},
+    {"RVK_Galaxy", "no cost"},
+    {"RVK_Meteors", "no cost"},
+    {"RVK_Aurora", "GPU: low"},
+    {"RVK_AuroraForce", "GPU: low"},
+    {"RVK_Rainbow", "no cost"},
+    {"RVK_Cirrus", "GPU: low"},
+    {"RVK_CloudShadow", "GPU: low"},
+    {"RVK_CloudSteps", "GPU: more with the value"},
+    {"RVK_CloudCover", "no cost"},
+    {"RVK_CloudQual", "GPU: more with the value"},
+    {"RVK_CloudMorph", "no cost"},
+    // Shadows
+    {"RVK_SunShadow", "GPU: high outdoors by day"},
+    {"RVK_RtShadow", "GPU: medium"},
+    {"RVK_SunRes", "GPU and video memory: more with the value"},
+    {"RVK_SunStrength", "no cost"},
+    {"RVK_SunDist", "GPU: more with the value"},
+    {"RVK_SunSoft", "GPU: low"},
+    {"RVK_GrassShadow", "GPU: medium in grass"},
+    {"RVK_ContactOn", "GPU: low"},
+    {"RVK_Contact", "no cost"},
+    {"RVK_PtOn", "GPU: very high in towns at night"},
+    {"RVK_PtShadows", "GPU: more with the value"},
+    {"RVK_PtRes", "GPU and video memory: more with the value"},
+    {"RVK_PtStrength", "no cost"},
+    // Effects
+    {"RVK_BloomOn", "GPU: low"},
+    {"RVK_Bloom", "no cost"},
+    {"RVK_BloomWide", "no cost"},
+    {"RVK_NeonSat", "no cost"},
+    {"RVK_AoOn", "GPU: low (ray traced: medium)"},
+    {"RVK_Ao", "no cost"},
+    {"RVK_AoMode", "GPU: AMD's a little more, ray traced medium"},
+    {"RVK_GiOn", "GPU: low (AMD's: high)"},
+    {"RVK_Gi", "no cost"},
+    {"RVK_GiMode", "GPU: AMD's high - about 1 ms more"},
+    {"RVK_GiSky", "no cost"},
+    {"RVK_VolOn", "GPU: medium"},
+    {"RVK_Volume", "no cost"},
+    {"RVK_VolHaze", "no cost"},
+    {"RVK_VolLamps", "GPU: low, medium by many lamps"},
+    {"RVK_DuskRays", "GPU: low"},
+    {"RVK_DesertAir", "no cost"},
+    {"RVK_HeatShimmer", "GPU: low"},
+    {"RVK_Sun", "no cost"},
+    {"RVK_Atmos", "GPU: low"},
+    {"RVK_Mist", "no cost"},
+    {"RVK_FogBanks", "GPU: low"},
+    {"RVK_DawnLight", "no cost"},
+    {"RVK_MornHaze", "no cost"},
+    {"RVK_SsrOn", "GPU: low (AMD's: medium)"},
+    {"RVK_Ssr", "no cost"},
+    {"RVK_RtReflect", "GPU: low to medium"},
+    {"RVK_SsrMode", "GPU: AMD's about 0.25 ms more"},
+    {"RVK_SssrThick", "no cost"},
+    {"RVK_Vrs", "saves GPU: about 0.5 ms"},
+    {"RVK_VrsCutoff", "saves GPU: more with the value"},
+    {"RVK_MBlurOn", "GPU: low"},
+    {"RVK_MBlurObj", "GPU: low"},
+    {"RVK_MBlur", "no cost"},
+    // Anti-aliasing
+    {"RVK_Taa", "GPU: low (FSR: medium) - and it lets Render scale save"},
+    {"RVK_Sharpen", "no cost"},
+    {"RVK_RenderScale", "saves GPU: the biggest saving - lower is much faster"},
+    {"RVK_FrameGen", "GPU: medium - about twice the frames shown"},
+    {"RVK_Upscaler", "GPU: FSR about 0.5 ms more than ao-vk's own"},
+    {"RVK_Fxaa", "GPU: low"},
+    // Colour grading, depth of field, particles
+    {"RVK_GradeOn", "no cost"},
+    {"RVK_Saturation", "no cost"},
+    {"RVK_Contrast", "no cost"},
+    {"RVK_Warmth", "no cost"},
+    {"RVK_NightTint", "no cost"},
+    {"RVK_Vignette", "no cost"},
+    {"RVK_GoldenHour", "no cost"},
+    {"RVK_NeonNight", "no cost"},
+    {"RVK_Exposure", "no cost"},
+    {"RVK_Dof", "GPU: low"},
+    {"RVK_DofBokeh", "GPU: low"},
+    {"RVK_DofNear", "GPU: low"},
+    {"RVK_DofFar", "no cost"},
+    {"RVK_DofAmount", "no cost"},
+    {"RVK_DofFocus", "no cost"},
+    {"RVK_Particles", "GPU: low"},
+    {"RVK_PartCount", "GPU: more with the value"},
+    {"RVK_PartBright", "no cost"},
+    {"RVK_PartTrail", "GPU: low"},
+};
+
+// Names for a choice setting's values in the settings window, in the order of its `choices`.
+const Cost kChoiceNames[] = {
+    {"RVK_UiRate", "every frame|30|60|90|120"},
+    {"RVK_Aniso", "off|2x|4x|8x|16x"},
+    {"RVK_GroundFar", "8 (the game's)|16|32"},
+    {"RVK_Stars", "the game's|ours"},
+    {"RVK_CloudQual", "low|medium|high|ultra"},
+    {"RVK_AoMode", "ours|AMD CACAO|ray traced"},
+    {"RVK_GiMode", "ours|AMD Brixelizer"},
+    {"RVK_SsrMode", "ours|AMD SSSR"},
+    {"RVK_Vrs", "off|on"},
+    {"RVK_RenderScale", "100%|85%|75%|67%|50%"},
+    {"RVK_Upscaler", "ao-vk's TAA|AMD FSR 2.2|AMD FSR 3.1"},
+};
+
+const char* Lookup(const Cost* table, size_t n, const char* name)
+{
+    for (size_t i = 0; i < n; ++i)
+        if (std::strcmp(table[i].name, name) == 0) return table[i].text;
+    return nullptr;
+}
+const char* CostOf(const char* name) { return Lookup(kCosts, std::size(kCosts), name); }
+const char* ChoiceNamesOf(const char* name) { return Lookup(kChoiceNames, std::size(kChoiceNames), name); }
 
 float Stored(const char* name) { Setting* s = Find(name); return s ? s->value : 0.0f; }
 
@@ -1433,6 +1650,8 @@ bool Info(uint32_t index, RvkSettingInfo* out, bool* hidden)
     out->defaultValue = s.defaultValue;
     out->parent = AlwaysOn(s.parent) ? nullptr : s.parent;
     out->choices = s.choices;
+    out->cost = CostOf(s.name);
+    out->choiceNames = ChoiceNamesOf(s.name);
     if (hidden) *hidden = Hidden(s);
     return true;
 }
@@ -1477,9 +1696,13 @@ int RvkSettings_Get(uint32_t index, RvkSettingInfo* out)
     out->step = s.step;
     out->value = s.value;
     out->defaultValue = s.defaultValue;
-    if (out->size >= sizeof(RvkSettingInfo)) {
+    if (out->size >= offsetof(RvkSettingInfo, cost)) {
         out->parent = AlwaysOn(s.parent) ? nullptr : s.parent;   // (grouped by their section instead)
         out->choices = s.choices;
+    }
+    if (out->size >= sizeof(RvkSettingInfo)) {
+        out->cost = CostOf(s.name);
+        out->choiceNames = ChoiceNamesOf(s.name);
     }
     return 1;
 }

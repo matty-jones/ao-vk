@@ -399,7 +399,7 @@ std::string Label(const RvkSettingInfo& s)
     return s.label;
 }
 
-// "Bloom = 0.6   0 .. 2, default 0.6   Bloom strength [Effects]"
+// "Bloom = 0.6   0 .. 2, default 0.6   Bloom strength [Effects]   [no cost]"
 std::string Describe(const SettingRef& r)
 {
     const RvkSettingInfo& s = r.info;
@@ -409,6 +409,7 @@ std::string Describe(const SettingRef& r)
         t += C(cWarn) + " (trying " + FormatValue(s, tried->second) + ", not saved)";
     t += C(cDim) + "   " + Range(s) + ", default " + FormatValue(s, s.defaultValue) + "   " + C(cText) + Label(s) + C(cDim) +
          " [" + s.section + (r.hidden ? ", randy-vk.ini only" : "") + "]";
+    if (s.cost) t += C(cDim) + "   [" + s.cost + "]";
     const std::string why = NoEffect(s);
     if (!why.empty()) t += C(cWarn) + "   no effect: " + why;
     return t;

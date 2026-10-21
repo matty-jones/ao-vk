@@ -45,6 +45,12 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   the world's buildings and ground (FidelityFX Brixelizer GI), so light reflects off walls and slopes that are off
   screen or hidden too. `RVK_Gi` still sets its strength. In randy-vk.ini, `RVK_GiDebug` 1 shows that model and 2 the
   light alone; `RVK_GiSky` adds the sky's light to it.
+- The settings window (AOReloaded's Renderer and Advanced tabs) says what every setting costs: a tag after each one,
+  such as [GPU: high] or [no cost], from GPU time measured at 1920 x 1080. A note under the frame rate cap explains a
+  graphics card at 100% (normal while the frame rate is under the cap) and what lowers it. The choices show names
+  instead of numbers (ours / AMD CACAO / ray traced, FSR 2.2 / FSR 3.1, off / 16x, ...), and AMD's tuning moved from
+  randy-vk.ini into the Advanced tab: `RVK_SssrThick`, `RVK_GiSky` and `RVK_VrsCutoff`. The console shows the cost
+  too. Needs the matching AOReloaded.
 
 ### Changed
 - Faster on the GPU wherever buildings, characters and plants fill the view: they no longer share the ground's heavy
