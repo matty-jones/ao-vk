@@ -258,6 +258,8 @@ struct DeviceInfo {
     X(SandTint, m_sandTint, 0)                        /* the land tinted by a sandstorm's light, x */ \
     X(SunSoft, m_sunSoftness, L)                      /* sun shadows' softening with distance (0 hard) */ \
     X(CrownShade, m_crownShade, L)                    /* tree crowns lit as one rounded mass (0..1) */ \
+    X(CrownSky, m_crownSky, L)                        /* crowns' ambient as the sky's: from above (0..1) */ \
+    X(CrownDepth, m_crownDepth, L)                    /* sunlight through crowns by their depth (0..1) */ \
     X(NightGlow, m_nightGlow, C|L)                    /* windows, signs and screens glowing at night, x */ \
     X(MoonLight, m_moonLight, C|L)                    /* the moon's light, x (night.cpp) */ \
     X(Mist, m_mist, 0)                                /* valley mist, x (mist.cpp) */ \
@@ -593,6 +595,7 @@ public:
         m_frameLightsDirty = true;
     }
     float m_crownShade = 1.0f;
+    float m_crownSky = 1.0f, m_crownDepth = 1.0f;   // RVK_CrownSky, RVK_CrownDepth (ffp.vert, ffp_main.glsl; FL.foliage)
     // RVK_GrassShadow: the blades cast the sun's shadow (into its nearest cascade: onto the ground and each other).
     void SetGrassShadows(bool on) { m_grassShadows = on; }
     // RVK_GrassEven: the blades' colour from one green (1) rather than the ground texel under each (0); baked.

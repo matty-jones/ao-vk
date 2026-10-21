@@ -15,12 +15,12 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-339 settings, 166 of them in the settings window.
+341 settings, 166 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (8)
-- [Lighting](#lighting) (17)
+- [Lighting](#lighting) (19)
 - [Materials](#materials) (14)
 - [Debug](#debug) (7)
 - [Terrain](#terrain) (22)
@@ -63,6 +63,8 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_LeafLightOn` | Sunlight through leaves | on / off | on | ini only |
 | `RVK_LeafLight` | Sunlight through leaves: strength | 0.25 .. 2 | 1 | ini only; switch `RVK_LeafLightOn`; game value 0 |
 | `RVK_CrownShade` | Tree crowns lit as one rounded mass (darker inside, each tree's colour its own) | 0 .. 1 | 1 | ini only; game value 0; knob |
+| `RVK_CrownSky` | Tree crowns lit by the sky from above (brighter tops, darker undersides) | 0 .. 1 | 1 | ini only; game value 0; knob |
+| `RVK_CrownDepth` | Sunlight through tree crowns fades with their depth (bright thin rims, dark middles) | 0 .. 1 | 1 | ini only; switch `RVK_LeafLightOn`; game value 0; knob |
 | `RVK_PtLight` | Lamp and fire brightness | 0.25 .. 2 | 0.25 | window; game value 1 |
 | `RVK_CharLight` | Character light brightness | 0.1 .. 2 | 0.25 | window; game value 1 |
 | `RVK_TessOn` | Tessellation | on / off | on | window |

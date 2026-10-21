@@ -61,6 +61,8 @@ Setting g_settings[] = {
     {"RVK_LeafLightOn","Sunlight through leaves",                                  "Lighting",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_LeafLight",  "Strength",                                                 "Lighting",         Float, 0.25f, 2, 0.25f, 1, nullptr, 0, "RVK_LeafLightOn"},
     {"RVK_CrownShade", "Tree crowns lit as one rounded mass (darker inside, each tree's colour its own)", "Lighting", Float, 0, 1, 0.1f, 1, nullptr, 0},
+    {"RVK_CrownSky",   "Tree crowns lit by the sky from above (brighter tops, darker undersides)", "Lighting", Float, 0, 1, 0.1f, 1, nullptr, 0},
+    {"RVK_CrownDepth", "Sunlight through tree crowns fades with their depth (bright thin rims, dark middles)", "Lighting", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_LeafLightOn"},
     {"RVK_PtLight", "Lamp and fire brightness", "Lighting",         Float, 0.25f, 2, 0.05f, 0.25f, nullptr, 0},
     {"RVK_CharLight", "Character light brightness", "Lighting",  Float, 0.1f, 2, 0.05f, 0.25f, nullptr, 0},
     {"RVK_TessOn", "Tessellation", "Lighting",         Bool,  0, 1, 1, 1, nullptr, 0},
@@ -425,7 +427,7 @@ Setting* Find(const char* name)
 // so switching it back on restores them). Settings not listed here only tune something these switch off.
 struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
-    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_GroundOn", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_Pebbles", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
+    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_GroundOn", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_Pebbles", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_CrownSky", 0}, {"RVK_CrownDepth", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_FolDither", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_RenderScale", 100}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
@@ -466,7 +468,7 @@ const char* const kHidden[] = {
     "RVK_SkyDayTop", "RVK_SkyDayLow", "RVK_SkyDuskSun", "RVK_SkyDuskAway", "RVK_SkyDuskTop",
     "RVK_SkyBlueTop", "RVK_SkyBlueLow", "RVK_SkyNightTop", "RVK_SkyNightLow", "RVK_Twinkle", "RVK_AuroraCol",
     // the Advanced tab: tuning past what most players change
-    "RVK_CrownShade", "RVK_TessLevel", "RVK_TessDist", "RVK_PbrSsr", "RVK_PbrAo", "RVK_PbrProbe", "RVK_PbrGlow",
+    "RVK_CrownShade", "RVK_CrownSky", "RVK_CrownDepth", "RVK_TessLevel", "RVK_TessDist", "RVK_PbrSsr", "RVK_PbrAo", "RVK_PbrProbe", "RVK_PbrGlow",
     "RVK_GrassWidth", "RVK_GrassVary", "RVK_GrassGlow", "RVK_GrassGusts", "RVK_TrailTime", "RVK_TrailShade",
     "RVK_GrassEven", "RVK_SunCascade", "RVK_StaticShad", "RVK_PtDay", "RVK_Knee", "RVK_HdrRoom", "RVK_LutAmount",
     "RVK_BloomThr", "RVK_BloomOcc", "RVK_AoRadius", "RVK_GiRadius", "RVK_VolShafts", "RVK_VolRays", "RVK_VolLand",

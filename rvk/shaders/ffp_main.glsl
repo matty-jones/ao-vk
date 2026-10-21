@@ -566,6 +566,22 @@ float CasterFade()
     return FL.shadowParams.y > 0.0 ? ShadowStrength(length(vPosW - C.eyePos.xyz)) / FL.shadowParams.y : 0.0;
 }
 
+// RVK_CrownDepth: how much of the sun's light gets through a crown to a point - by the stretch it crossed from the first
+// thing it hit over the point (the cascades' depths) to here, in world units: exp(-d / 1.5) - a leaf at a crown's thin
+// rim takes most of it, one deep inside little, one under another crown or a wall none. -1: no cascade covers it.
+float CrownThrough(vec3 posW)
+{
+    int count = int(FL.shadowParams.z);
+    for (int c = 0; c < count; ++c) {
+        vec4 sc = FL.shadowViewProj[c] * vec4(posW, 1.0);
+        vec3 ndc = sc.xyz / sc.w;
+        if (max(abs(ndc.x), abs(ndc.y)) >= 0.98 || ndc.z <= 0.0 || ndc.z >= 1.0) continue;
+        float d = texture(shadowDepths, vec3(ndc.xy * 0.5 + 0.5, float(c))).r;
+        return exp(-max(ndc.z - d, 0.0) * FL.cascadeDepth[c] / 1.5);
+    }
+    return -1.0;
+}
+
 float gSunVisibility = 1.0;          // SunVisibility(vPosW, vNormalW) when computed (main)
 bool gSunVisibilityValid = false;
 
@@ -926,6 +942,13 @@ void main()
                 gSunShare = clamp(sunPart * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y) / max(dot(lit + local, kLuma), 1e-3), 0.0, 1.0);
             }
         }
+        // RVK_CrownSky: a crown's light rolls off towards 1 from 0.6 rather than stopping dead there: the game's ambient
+        // (0.46 in a city) and the sun went past 1 on every leaf facing the sun more than halfway, and the clamp made the
+        // whole lit side of the crown one flat light (a noon dump: its leaves' light at 1.04 and below, little between).
+        if (D.leaf.w > 0.0 && FL.foliage.x > 0.0) {
+            vec3 over = max(lit - 0.6, vec3(0.0));
+            lit = mix(lit, min(lit, 0.6) + 0.4 * (1.0 - exp(-over / 0.4)), FL.foliage.x);
+        }
         if ((C.flags.x & F_OVERBRIGHT) != 0u) {
             // The game's lighting is clamped as D3D does; the frame lights add on top, up to the headroom. Under a
             // bright sun a surface is already near 1, and a light (and its shadow) would otherwise barely show on
@@ -1061,7 +1084,9 @@ void main()
     // this point (their coarse mip's alpha) are leaves - not walls drawn the same way.
     bool sun = dot(FL.sunColor.rgb, FL.sunColor.rgb) > 0.0 && dot(FL.sunDir.xyz, FL.sunDir.xyz) > 0.0;
     if ((C.flags.x & F_FOLIAGE) != 0u && sun && FL.effects.x > 0.0 && dot(vNormalW.xyz, vNormalW.xyz) > 0.0) {
-        float holes = smoothstep(0.97, 0.75, NeighbourhoodAlpha(vTex0.xy));
+        // (A crown the leaves know - D.leaf - is a tree's whatever its texture: a dense canopy's coarse mip is nearly
+        // solid, and the test let next to none of its light through - user, 2026-10-21: RVK_LeafLight did nothing.)
+        float holes = D.leaf.w != 0.0 ? 1.0 : smoothstep(0.97, 0.75, NeighbourhoodAlpha(vTex0.xy));
         if (holes > 0.0) {
             vec3 L = -normalize(FL.sunDir.xyz), toEye = normalize(C.eyePos.xyz - vPosW);
             vec3 nf = normalize(vNormalW.xyz);
@@ -1070,9 +1095,18 @@ void main()
             if (through + glare > 0.0) {
                 // The sun's visibility on the lit side: the shadow already computed for the surface (a second,
                 // opposite-side search only darkened back-lit leaves and cost another few taps).
-                float visible = (FL.shadowParams.x <= 0.5 ? 1.0 : gSunVisibilityValid ? mix(1.0, gSunVisibility, CasterFade()) : 1.0) *
-                                TerrainSun(vPosW);   // (low sun: leaves under the mountains don't glow)
-                current.rgb += t0.rgb * FL.sunColor.rgb * ((0.5 * through + 0.7 * glare) * visible * holes * FL.effects.x);
+                float visible = FL.shadowParams.x <= 0.5 ? 1.0 : gSunVisibilityValid ? mix(1.0, gSunVisibility, CasterFade()) : 1.0;
+                // RVK_CrownDepth: rather by how much crown the light crossed to get here (the surface's own shadow
+                // let only the outermost leaves facing the sun glow), and deeper in colour - light through a leaf is
+                // its colour twice over (its colour squared, over its brightness: about as bright).
+                vec3 tint = t0.rgb;
+                if (FL.foliage.y > 0.0) {
+                    float t = FL.shadowParams.x > 0.5 ? CrownThrough(vPosW) : -1.0;
+                    if (t >= 0.0) visible = mix(visible, mix(1.0, t, CasterFade()), FL.foliage.y);
+                    tint = mix(tint, tint * tint / max(dot(tint, vec3(0.3, 0.59, 0.11)), 0.04), FL.foliage.y);
+                }
+                visible *= TerrainSun(vPosW);    // (low sun: leaves under the mountains don't glow)
+                current.rgb += tint * FL.sunColor.rgb * ((0.5 * through + 0.7 * glare) * visible * holes * FL.effects.x);
             }
         }
     }

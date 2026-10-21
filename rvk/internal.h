@@ -205,6 +205,8 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // << 20 (the float's bits; 0 none), y, z the world camera's projection m22, m32
     float volume2[4];              // the volumetric light, more (volume.frag): x the lamps' light in the air
                                    // (RVK_VolLamps; 0 none); y, z, w unused
+    float foliage[4];              // plants' light (docs/sss-plan.md): x crowns' ambient from above (RVK_CrownSky), y the
+                                   // sunlight through crowns by their depth (RVK_CrownDepth); z, w unused
     GpuLight lights[kFrameLights];
 };
 

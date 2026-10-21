@@ -4544,6 +4544,7 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
         sun.type = LIGHT_DIRECTIONAL;
         sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
         sun.direction = {0.45f, -0.75f, 0.5f};
+        if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};   // (--sun-dir)
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);

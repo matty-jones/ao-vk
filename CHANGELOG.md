@@ -6,6 +6,12 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- Tree crowns look round: `RVK_CrownSky` (Lighting, 0 to 1) lights them as the sky does - their tops brighter,
+  their undersides and insides darker - and lets the leaves facing the sun keep their shading instead of all reaching
+  the same flat brightness. A tree is about as bright overall as before.
+- Sunlight through tree crowns follows their depth: `RVK_CrownDepth` (Lighting, under Sunlight through leaves, 0 to 1).
+  With the sun behind a tree, its thin edges and gaps glow and its dense middle stays dark, in the deeper yellow-green
+  of light through leaves; leaves under another tree's crown or behind a wall get none.
 - AMD's reflections to try: `RVK_SsrMode 1` (Effects, under Reflections) swaps our screen-space reflections for
   AMD's FidelityFX SSSR - glossy surfaces get blurred reflections instead of none, and they are denoised over frames.
   Off by default (0: ours).
@@ -35,6 +41,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   the world's buildings and ground (FidelityFX Brixelizer GI), so light reflects off walls and slopes that are off
   screen or hidden too. `RVK_Gi` still sets its strength. In randy-vk.ini, `RVK_GiDebug` 1 shows that model and 2 the
   light alone; `RVK_GiSky` adds the sky's light to it.
+
+### Fixed
+- Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken
+  for walls drawn the same way. Every tree crown now lets the light through.
 
 ### Diagnostics
 - Frame dumps also save AMD's indirect light (`-brixgi.bmp`, with `RVK_GiMode 1`) and the surfaces AMD's effects read
