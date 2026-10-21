@@ -203,6 +203,8 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // every surface's normal into the motion vectors' zw (SceneNormalsWanted); w unused
     float rtShadow[4];             // ray-traced sun shadows (raytrace.cpp): x the mask's bindless image + 1 | sampler
                                    // << 20 (the float's bits; 0 none), y, z the world camera's projection m22, m32
+    float volume2[4];              // the volumetric light, more (volume.frag): x the lamps' light in the air
+                                   // (RVK_VolLamps; 0 none); y, z, w unused
     GpuLight lights[kFrameLights];
 };
 

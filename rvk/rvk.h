@@ -280,7 +280,8 @@ struct DeviceInfo {
     X(GiSky, m_giSky, 0)                              /* ... the sky's light on rays that miss (0: bounce only) */ \
     X(RtDebug, m_rtDebug, 0)                          /* ray tracing's view: 1 what its rays hit (raytrace.cpp) */ \
     X(RtShadow, m_rtShadow, 0)                        /* the sun's shadows ray traced (raytrace.cpp; 0 off) */ \
-    X(RtReflect, m_rtReflect, 0)                      /* reflections the screen lacks ray traced (raytrace.cpp) */
+    X(RtReflect, m_rtReflect, 0)                      /* reflections the screen lacks ray traced (raytrace.cpp) */ \
+    X(VolLamps, m_volLamps, 0)                        /* the lamps' light in the air (volume.frag; 0 none) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
@@ -3303,6 +3304,7 @@ private:
     bool RtShadowWanted() const { return m_rayQuery && m_rtShadow >= 0.5f && m_shadows && m_prepassOn; }
     // RVK_RtReflect 1: where our screen-space reflections find nothing, a ray (raytrace.cpp RenderRtReflect).
     float m_rtReflect = 0.0f;
+    float m_volLamps = 0.0f;                     // RVK_VolLamps (volume.frag: FL.volume2.x)
     bool RtReflectWanted() const { return m_rayQuery && m_rtReflect >= 0.5f && m_ssr > 0.0f; }
     bool RtReflectReady() const;                 // this frame's structures and its pass are there (else no misses marked)
     void RenderRtReflect(VkCommandBuffer cmd);

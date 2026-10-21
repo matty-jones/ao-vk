@@ -25,6 +25,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   screen-space reflections find nothing - what stands off the screen's edge, behind a wall, behind the camera -
   a ray finds it: wet ground and glossy floors reflect cliffs and buildings that were cut off before. Things the
   camera hasn't looked at lately reflect as the sky around them.
+- Lamps light the air: `RVK_VolLamps` (Effects, under Volumetric light; 0 = off, up to 2) gives every point and spot
+  light a glow in the air round it, thicker in fog banks; a lamp with a shadow cube casts shafts through it - dark
+  where a crate or a wall blocks its light.
 - Variable rate shading: `RVK_Vrs 1` (Effects) shades flat and fast-moving parts of the scene in 2 x 2 blocks, for
   more frames per second on GPUs that support it (AMD's FidelityFX VRS). `RVK_VrsCutoff` (ini) sets how readily.
 - AMD's indirect light to try: `RVK_GiMode 1` (Effects, under Indirect light) traces bounce light through a model of

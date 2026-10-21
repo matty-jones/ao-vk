@@ -469,6 +469,8 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
         fl->rtShadow[2] = m_aoProjValid ? m_aoProj.m[3][2] : 0.0f;
         fl->rtShadow[3] = 0.0f;
     }
+    fl->volume2[0] = std::clamp(m_volLamps, 0.0f, 4.0f);
+    fl->volume2[1] = fl->volume2[2] = fl->volume2[3] = 0.0f;
     std::memcpy(fl->skyRing, m_skyRing, sizeof(fl->skyRing));
     std::memcpy(fl->skyUp, m_skyUp, sizeof(fl->skyUp));
     if (!OwnSkyFog()) {                          // (indoors too: the zone's fog colour, not our sky's horizon)

@@ -10,6 +10,21 @@ layout(set = 0, binding = 1) uniform sampler2DArrayShadow shadowMap;
 layout(set = 0, binding = 2) uniform sampler2D cloudShadow;   // the clouds' (rvk clouds.cpp; FL.clouds: where, if any)
 layout(set = 0, binding = 3) uniform sampler2D terrainSun;    // the terrain's shade from a low sun (rvk terrain_sun.cpp)
 layout(set = 0, binding = 5) uniform sampler2D cloudCover;    // this frame's clouds (alpha: their cover; the sunset rays)
+layout(set = 0, binding = 6) uniform samplerCubeArrayShadow pointShadowMaps;   // the lamps' shadow cubes (pointshadow.cpp)
+
+// Lit by a lamp with a shadow cube (l.spot.z = cube + 1): 1, or 0 behind what it shades - one comparison tap. As
+// ffp_main.glsl PointShadow: depth along the face's axis, near kPointShadowNear, far = the light's range.
+const float kPointShadowNear = 0.25;
+float LampVisible(Light l, vec3 q)
+{
+    vec3 d = q - l.position.xyz;
+    vec3 a = abs(d);
+    float w = max(a.x, max(a.y, a.z));
+    if (w <= kPointShadowNear) return 1.0;
+    float f = l.direction.w, nr = kPointShadowNear;
+    float ref = f / (f - nr) - f * nr / ((f - nr) * w);
+    return texture(pointShadowMaps, vec4(d, l.spot.z - 1.0), ref);
+}
 
 // At a point of the air: 1 in the sun, 0 under the terrain hiding a low sun (FL.terrainSun: where, its weight).
 float TerrainSunAt(vec3 q)
@@ -192,6 +207,51 @@ void main()
                 light += FL.sky[3].rgb * (4.0 * f * (1.0 - f) * fade * 0.25 * dusk);
             }
         }
+    }
+
+    // The lamps' light in the air (RVK_VolLamps): each point and spot light's scattered along the ray, inside its range
+    // and up to the surface - in closed form (even air, the light falling off with the square of the distance: the
+    // integral is an arc tangent), so no march. A spot's only where the ray's nearest approach is inside its cone.
+    // A lamp with a shadow cube is marched instead, through it: shafts where things block its light. Thicker in the
+    // fog banks.
+    if (FL.volume2.x > 0.0) {
+        vec3 lamps = vec3(0.0);
+        uint n = min(FL.info.x, 64u);
+        for (uint i = 0u; i < n; ++i) {
+            Light l = FL.lights[i];
+            uint type = uint(l.position.w + 0.5);
+            if (type != 1u && type != 2u) continue;
+            float range = l.direction.w;
+            vec3 rel = l.position.xyz - P.eye.xyz;
+            float t0 = dot(rel, dir);
+            float h2 = max(dot(rel, rel) - t0 * t0, 0.0);
+            if (range <= 0.0 || h2 >= range * range) continue;
+            float chord = sqrt(range * range - h2);
+            float a = max(t0 - chord, 0.0), b = min(t0 + chord, dist);
+            if (b <= a) continue;
+            float hh = sqrt(h2 + 0.3);           // (a core: no point of infinite light at the lamp)
+            float glow;
+            if (l.spot.z > 0.5) {                // (12 steps, offset per pixel and frame: blurred and averaged)
+                const int kSteps = 12;
+                float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.0383, 0.0711))) + P.params.z);
+                float stepLen = (b - a) / float(kSteps), sum = 0.0;
+                for (int k = 0; k < kSteps; ++k) {
+                    float t = a + (float(k) + noise) * stepLen;
+                    float s = t - t0;
+                    sum += LampVisible(l, P.eye.xyz + dir * t) / (hh * hh + s * s);
+                }
+                glow = sum * stepLen;
+            } else {
+                glow = (atan((b - t0) / hh) - atan((a - t0) / hh)) / hh;
+            }
+            glow *= 1.0 - smoothstep(0.4 * range, range, sqrt(h2));
+            if (type == 2u) {
+                vec3 near = normalize(P.eye.xyz + dir * clamp(t0, a, b) - l.position.xyz);
+                glow *= smoothstep(l.spot.y, l.spot.x, dot(near, normalize(l.direction.xyz)));
+            }
+            lamps += l.diffuse.rgb * glow;
+        }
+        light += lamps * (0.03 * FL.volume2.x * (1.0 + 3.0 * FL.fogBanks.w));
     }
 
     outVolume = vec4(light, viewZ);

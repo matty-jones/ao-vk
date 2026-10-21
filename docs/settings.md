@@ -15,7 +15,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-338 settings, 165 of them in the settings window.
+339 settings, 166 of them in the settings window.
 
 ## Sections
 
@@ -30,7 +30,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Smoke](#smoke) (12)
 - [Sky](#sky) (45)
 - [Shadows](#shadows) (17)
-- [Effects](#effects) (56)
+- [Effects](#effects) (57)
 - [Tone mapping](#tone-mapping) (2)
 - [Anti-aliasing](#anti-aliasing) (6)
 - [Colour grading](#colour-grading) (10)
@@ -359,6 +359,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_VolHaze` | Volumetric light: haze | 0.25 .. 4 | 0.5 | window; switch `RVK_VolOn` |
 | `RVK_VolShafts` | Shaft contrast (0 = physical) | 0 .. 3 | 1 | ini only; switch `RVK_VolOn` |
 | `RVK_VolRays` | Light rays through gaps in the clouds | 0 .. 3 | 1 | ini only; switch `RVK_VolOn` |
+| `RVK_VolLamps` | Lamps' light in the air: a glow round each lamp, thicker in fog and mist (0: none) | 0 .. 2 | 0 | window; switch `RVK_VolOn`; knob |
 | `RVK_DuskRays` | Sunset rays: beams fanning from a low sun through the clouds and over the hills (0: none) | 0 .. 2 | 1 | window; switch `RVK_VolOn`; game value 0; knob |
 | `RVK_VolLand` | Haze over distant land (cool, as the air makes it) | 0 .. 1 | 0.1 | ini only; game value 0 |
 | `RVK_DesertAir` | Deserts: dusty air in fair weather - far dunes paler and warmer, a pale band along the horizon (0 = none) | 0 .. 1 | 1 | window; game value 0 |
