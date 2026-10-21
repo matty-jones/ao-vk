@@ -1013,7 +1013,8 @@ bool Device::CreatePipelines(std::string* error)
         return false;
     if (m_bindless) {
         // (Also the tessellation stages: the native ground's cliffs' rock pushed out of their faces, ffp.tese.)
-        const VkShaderStageFlags stages = m_tessSupported ? vsfstess : vsfs;
+        // (And compute with ray tracing: the rays test a cut-out's texture at their hits - raytrace.cpp.)
+        const VkShaderStageFlags stages = (m_tessSupported ? vsfstess : vsfs) | (m_rayQuery ? VK_SHADER_STAGE_COMPUTE_BIT : 0);
         VkDescriptorSetLayoutBinding bb[2] = {
             {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kMaxBindlessImages, stages, nullptr},
             {1, VK_DESCRIPTOR_TYPE_SAMPLER, kMaxBindlessSamplers, stages, nullptr},

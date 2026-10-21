@@ -88,6 +88,16 @@ bool MakeBuffer(VmaAllocator allocator, VkDevice device, RtBuffer* b, VkDeviceSi
 
 VkDeviceSize AlignUp(VkDeviceSize v, VkDeviceSize a) { return (v + a - 1) / a * a; }
 
+// A TLAS instance's geometry for a ray's hit on it (rt_common.glsl RtGeo, std430): its vertices' and indices' (16-bit)
+// addresses, its vertices' stride, a cut-out's texture coordinates' place, texture (bindless image + 1 | sampler << 20;
+// 0: solid) and alpha reference.
+struct GeoRecord {
+    uint32_t vertices[2], indices[2];
+    uint32_t stride, uvOffset, texture;
+    float alphaRef;
+};
+static_assert(sizeof(GeoRecord) == 32, "rt_common.glsl RtGeo");
+
 // One global barrier.
 void Barrier(VkCommandBuffer cmd, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
              VkAccessFlags2 dstAccess)
@@ -128,9 +138,13 @@ struct Device::RtState {
         double centre[3], radius;
         uint32_t id;                             // (the debug view's colour)
         uint8_t mask;                            // kMaskCaster / kMaskGround
+        Texture* texture;                        // a cut-out's: its alpha tested at the rays' hits (null: solid)
+        float alphaRef;                          // ... kept where over this (0..1)
+        uint32_t uvOffset;                       // ... its texture coordinates' place in a vertex
     };
     std::unordered_map<uint64_t, Instance> instances;
     std::unordered_multimap<uint64_t, uint64_t> bySlot;   // SlotKey -> mesh
+    std::unordered_multimap<Texture*, uint64_t> byTexture;   // a cut-out's texture -> its instances
     std::unordered_map<uint64_t, VkDeviceAddress> chunkAddress;
     Placements placements;
     std::vector<uint64_t> toBuild;
@@ -139,6 +153,8 @@ struct Device::RtState {
     RtBuffer tlasStorage;
     uint32_t tlasCapacity = 0, tlasCount = 0;
     RtBuffer instanceBuf[kFramesInFlight];
+    // Per TLAS instance (by its index), what a ray's hit on it needs to test a cut-out's alpha (rt_common.glsl RtGeo).
+    RtBuffer geoBuf[kFramesInFlight];
     struct Dead {
         uint64_t tag;
         VkAccelerationStructureKHR as;
@@ -232,6 +248,7 @@ void Device::DestroyRt()
     kill(s->tlas, s->tlasStorage);
     kill(VK_NULL_HANDLE, s->scratch);
     for (RtBuffer& b : s->instanceBuf) kill(VK_NULL_HANDLE, b);
+    for (RtBuffer& b : s->geoBuf) kill(VK_NULL_HANDLE, b);
     for (RtBuffer& b : s->shadowParams) kill(VK_NULL_HANDLE, b);
     for (VkPipeline p : {s->debugPipeline, s->aoPipeline, s->shadowPipeline, s->blurPipeline})
         if (p) vkDestroyPipeline(m_device, p, nullptr);
@@ -250,7 +267,7 @@ void Device::DestroyRt()
 // An opaque draw of retained static geometry (draw.cpp, its arena buffers in m_drawStaticBuffer / ib): a mesh, and an
 // instance of it where it is drawn. Its instance's key (its shadow caster's: RtTraced), 0 when its place isn't kept.
 uint64_t Device::RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t stride, uint32_t vertexCount, VkBuffer ib,
-                            uint32_t indexCount, bool ground)
+                            uint32_t indexCount, bool ground, Texture* cutout, float alphaRef, uint32_t uvOffset)
 {
     RtState* s = m_rt;
     if (s->failed || primitive != d3d::TriangleList || indexCount < 3 || !vertices || stride < 12 || !ib)
@@ -320,9 +337,27 @@ uint64_t Device::RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t s
     inst.radius = std::sqrt(r2);
     inst.id = s->nextId++ & 0xFFFFFFu;
     inst.mask = ground ? kMaskGround : kMaskCaster;
+    inst.texture = cutout;
+    inst.alphaRef = alphaRef;
+    inst.uvOffset = uvOffset;
     s->instances[place] = inst;
     it->second.places.push_back(place);
+    if (cutout)
+        s->byTexture.emplace(cutout, place);
     return place;
+}
+
+// A texture going (DestroyTexture): the cut-outs tested against it go too.
+void Device::RtForgetTexture(Texture* texture)
+{
+    RtState* s = m_rt;
+    auto range = s->byTexture.equal_range(texture);
+    for (auto it = range.first; it != range.second; ++it) {
+        auto i = s->instances.find(it->second);
+        if (i != s->instances.end() && i->second.texture == texture)
+            s->instances.erase(i);
+    }
+    s->byTexture.erase(range.first, range.second);
 }
 
 // A character's solid piece skinned on the GPU, drawn: its vertices in this frame's skin arena (32 bytes each, the
@@ -418,7 +453,7 @@ void Device::RtForgetSlot(VkBuffer buffer, VkDeviceSize offset)
 
 // The placed objects' pieces (statels.cpp) as meshes and instances, made again when their pack is loaded or a kind's
 // placement is confirmed (as their shadows wait for it: a decode gone wrong would trace things turned the wrong way).
-// Solid pieces only - the cut-outs (fences' wire, leaves) stay the shadow map's.
+// The cut-out pieces (fences' wire, leaves) with their alpha masks, tested at the rays' hits.
 void Device::RtSyncStatels()
 {
     RtState* s = m_rt;
@@ -453,7 +488,7 @@ void Device::RtSyncStatels()
     for (uint32_t i = 0; i < m_statelItems.size(); ++i) {
         const StatelItem& item = m_statelItems[i];
         const StatelPiece& piece = m_statelPieces[item.piece];
-        if (!casting[item.kind] || piece.texture || piece.indexCount < 3 || !piece.vertexCount)
+        if (!casting[item.kind] || piece.indexCount < 3 || !piece.vertexCount)
             continue;
         const uint64_t key = MixKey(kStatelMeshSeed ^ m_statelGeneration, item.piece);
         if (!s->meshes.count(key)) {
@@ -481,8 +516,13 @@ void Device::RtSyncStatels()
         inst.radius = std::sqrt(r2);
         inst.id = s->nextId++ & 0xFFFFFFu;
         inst.mask = kMaskCaster;
+        inst.texture = piece.texture;            // (its alpha mask: white, the mask in alpha)
+        inst.alphaRef = piece.alphaRef <= 1.0f ? piece.alphaRef : piece.alphaRef / 255.0f;
+        inst.uvOffset = 12;
         const uint64_t place = RtStatelPlace(i);
         s->instances[place] = inst;
+        if (piece.texture)
+            s->byTexture.emplace(piece.texture, place);
         s->statelPlaces.push_back(place);
     }
     Log("ray tracing: %zu placed objects' pieces (%zu meshes) from the playfield's list", s->statelPlaces.size(),
@@ -507,17 +547,19 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
             li.pBindings = b;
             VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes};
             VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-            pl.setLayoutCount = 1;
-            pl.pSetLayouts = set;
+            VkDescriptorSetLayout sets[2] = {VK_NULL_HANDLE, m_bindlessSetLayout};   // (set 1: the cut-outs' textures)
+            pl.setLayoutCount = 2;
+            pl.pSetLayouts = sets;
             pl.pushConstantRangeCount = 1;
             pl.pPushConstantRanges = &push;
             VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
             mi.codeSize = codeBytes;
             mi.pCode = code;
             VkShaderModule module = VK_NULL_HANDLE;
-            bool made = vkCreateDescriptorSetLayout(m_device, &li, nullptr, set) == VK_SUCCESS &&
-                        vkCreatePipelineLayout(m_device, &pl, nullptr, layout) == VK_SUCCESS &&
-                        vkCreateShaderModule(m_device, &mi, nullptr, &module) == VK_SUCCESS;
+            bool made = vkCreateDescriptorSetLayout(m_device, &li, nullptr, set) == VK_SUCCESS;
+            sets[0] = *set;
+            made = made && vkCreatePipelineLayout(m_device, &pl, nullptr, layout) == VK_SUCCESS &&
+                   vkCreateShaderModule(m_device, &mi, nullptr, &module) == VK_SUCCESS;
             if (made) {
                 VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
                 ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT,
@@ -529,33 +571,37 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
             return made;
         };
         const VkShaderStageFlags comp = VK_SHADER_STAGE_COMPUTE_BIT;
-        const VkDescriptorSetLayoutBinding debugBindings[2] = {
+        const VkDescriptorSetLayoutBinding debugBindings[3] = {
             {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, comp, nullptr},
-            {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr}};
-        const VkDescriptorSetLayoutBinding aoBindings[7] = {
+            {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr},
+            {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, comp, nullptr}};
+        const VkDescriptorSetLayoutBinding aoBindings[8] = {
             {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, comp, nullptr},
             {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
             {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
             {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
             {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
             {5, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr},
-            {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr}};
-        const bool ok = pipeline(debugBindings, 2, 80, kRtDebugSpirv, sizeof(kRtDebugSpirv), &s->setLayout, &s->layout,
+            {6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr},
+            {7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, comp, nullptr}};
+        const bool ok = m_bindlessSetLayout && m_bindlessSet &&
+                        pipeline(debugBindings, 3, 80, kRtDebugSpirv, sizeof(kRtDebugSpirv), &s->setLayout, &s->layout,
                                  &s->debugPipeline) &&
-                        pipeline(aoBindings, 7, 112, kRtAoSpirv, sizeof(kRtAoSpirv), &s->aoSetLayout, &s->aoLayout,
+                        pipeline(aoBindings, 8, 112, kRtAoSpirv, sizeof(kRtAoSpirv), &s->aoSetLayout, &s->aoLayout,
                                  &s->aoPipeline);
         // RVK_RtShadow's trace (rt_shadow.comp) and blur (rt_shadow_blur.comp).
-        const VkDescriptorSetLayoutBinding shadowBindings[6] = {
+        const VkDescriptorSetLayoutBinding shadowBindings[7] = {
             {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, comp, nullptr},
             {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
             {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
             {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr},
             {4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr},
-            {5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, comp, nullptr}};
+            {5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, comp, nullptr},
+            {6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, comp, nullptr}};
         const VkDescriptorSetLayoutBinding blurBindings[2] = {
             {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, comp, nullptr},
             {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, comp, nullptr}};
-        if (ok && !(pipeline(shadowBindings, 6, 16, kRtShadowSpirv, sizeof(kRtShadowSpirv), &s->shadowSetLayout,
+        if (ok && !(pipeline(shadowBindings, 7, 16, kRtShadowSpirv, sizeof(kRtShadowSpirv), &s->shadowSetLayout,
                              &s->shadowLayout, &s->shadowPipeline) &&
                     pipeline(blurBindings, 2, 16, kRtShadowBlurSpirv, sizeof(kRtShadowBlurSpirv), &s->blurSetLayout,
                              &s->blurLayout, &s->blurPipeline))) {
@@ -736,7 +782,25 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
     // The TLAS's instances: those near the camera whose mesh is (or is now being) built, placed relative to the eye.
     RtBuffer& ib = s->instanceBuf[m_frameIndex];
     std::vector<VkAccelerationStructureInstanceKHR> inst;
+    std::vector<GeoRecord> geo;                  // (parallel to inst)
     inst.reserve(s->instances.size());
+    geo.reserve(s->instances.size());
+    const uint32_t cutSampler = FixedSamplerSlot(0, m_bumpSampler);   // (repeating)
+    auto record = [&](VkDeviceAddress vertices, VkDeviceAddress indices, uint32_t stride, Texture* texture,
+                      float alphaRef, uint32_t uvOffset) {
+        GeoRecord g{};
+        g.vertices[0] = uint32_t(vertices);
+        g.vertices[1] = uint32_t(vertices >> 32);
+        g.indices[0] = uint32_t(indices);
+        g.indices[1] = uint32_t(indices >> 32);
+        g.stride = stride;
+        g.uvOffset = uvOffset;
+        const uint32_t image = texture ? BindlessImage(texture) : ~0u;
+        g.texture = texture && image < (1u << 20) - 1 && cutSampler < 256 ? (image + 1) | cutSampler << 20 : 0;
+        g.alphaRef = alphaRef;
+        geo.push_back(g);
+        return g.texture != 0;
+    };
     for (const auto& [place, in] : s->instances) {
         const double dx = in.centre[0] - s->eye[0], dy = in.centre[1] - s->eye[1], dz = in.centre[2] - s->eye[2];
         const double reach = kRange + in.radius;
@@ -760,7 +824,9 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         }
         v.instanceCustomIndex = in.id;
         v.mask = in.mask;
-        v.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+        const bool cut = record(m.vertices, m.indices, m.stride, in.texture, in.alphaRef, in.uvOffset);
+        v.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
+                  (cut ? VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR);
         v.accelerationStructureReference = m.address;
         inst.push_back(v);
     }
@@ -779,6 +845,7 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         v.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
         v.accelerationStructureReference = vkGetAccelerationStructureDeviceAddressKHR(m_device, &ai);
         inst.push_back(v);
+        record(d->vertices, d->indices, 32, nullptr, 0.0f, 0);
         s->tracedSkinned.insert(d->key);
     }
     const uint32_t count = uint32_t(inst.size());
@@ -794,6 +861,19 @@ bool Device::RtUpdate(VkCommandBuffer cmd)
         }
     }
     if (count) std::memcpy(ib.mapped, inst.data(), size_t(count) * sizeof(inst[0]));
+    RtBuffer& gb = s->geoBuf[m_frameIndex];
+    const VkDeviceSize geoBytes = std::max<VkDeviceSize>(1, count) * sizeof(GeoRecord);
+    if (gb.size < geoBytes) {
+        if (gb.buffer) s->dead.push_back({DeathTag(), VK_NULL_HANDLE, gb});
+        gb = {};
+        if (!MakeBuffer(m_allocator, m_device, &gb, geoBytes * 3 / 2 + 4096, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true) ||
+            !gb.mapped) {
+            s->failed = true;
+            Log("ray tracing: no memory for its instances' records");
+            return false;
+        }
+    }
+    if (count) std::memcpy(gb.mapped, geo.data(), size_t(count) * sizeof(GeoRecord));
     VkAccelerationStructureGeometryKHR tg{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
     tg.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
     tg.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
@@ -937,18 +1017,22 @@ bool Device::RenderRtAo(VkCommandBuffer cmd)
         {m_pointSampler, prev->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         {VK_NULL_HANDLE, next->m_view, VK_IMAGE_LAYOUT_GENERAL},
         {VK_NULL_HANDLE, s->aoOut->m_view, VK_IMAGE_LAYOUT_GENERAL}};
-    VkWriteDescriptorSet wr[7] = {};
-    for (uint32_t i = 0; i < 7; ++i) {
+    const VkDescriptorBufferInfo geos{s->geoBuf[m_frameIndex].buffer, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet wr[8] = {};
+    for (uint32_t i = 0; i < 8; ++i) {
         wr[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         wr[i].dstBinding = i;
         wr[i].descriptorCount = 1;
         wr[i].descriptorType = i == 0 ? VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
                              : i < 5  ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-                                      : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        if (i > 0) wr[i].pImageInfo = &images[i - 1];
+                             : i < 7  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                      : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (i > 0 && i < 7) wr[i].pImageInfo = &images[i - 1];
     }
     wr[0].pNext = &as;
-    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->aoLayout, 0, 7, wr);
+    wr[7].pBufferInfo = &geos;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->aoLayout, 0, 8, wr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->aoLayout, 1, 1, &m_bindlessSet, 0, nullptr);
     vkCmdPushConstants(cmd, s->aoLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
     vkCmdDispatch(cmd, (w + 7) / 8, (h + 7) / 8, 1);
     s->aoCurrent ^= 1;
@@ -1053,20 +1137,24 @@ void Device::RenderRtShadow(uint32_t cause)
         {VK_NULL_HANDLE, next->m_view, VK_IMAGE_LAYOUT_GENERAL},
         {VK_NULL_HANDLE, s->shadowRaw->m_view, VK_IMAGE_LAYOUT_GENERAL}};
     const VkDescriptorBufferInfo ubo{params->buffer, 0, sizeof(Params)};
-    VkWriteDescriptorSet wr[6] = {};
-    for (uint32_t i = 0; i < 6; ++i) {
+    const VkDescriptorBufferInfo geos{s->geoBuf[m_frameIndex].buffer, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet wr[7] = {};
+    for (uint32_t i = 0; i < 7; ++i) {
         wr[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         wr[i].dstBinding = i;
         wr[i].descriptorCount = 1;
         wr[i].descriptorType = i == 0 ? VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
                              : i < 3  ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                              : i < 5  ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                                      : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                             : i < 6  ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                                      : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         if (i > 0 && i < 5) wr[i].pImageInfo = &images[i - 1];
     }
     wr[0].pNext = &as;
     wr[5].pBufferInfo = &ubo;
-    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->shadowLayout, 0, 6, wr);
+    wr[6].pBufferInfo = &geos;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->shadowLayout, 0, 7, wr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->shadowLayout, 1, 1, &m_bindlessSet, 0, nullptr);
     vkCmdDispatch(cmd, (w + 7) / 8, (h + 7) / 8, 1);
     s->shadowCurrent ^= 1;
     s->shadowFrame = m_frameNumber;
@@ -1137,7 +1225,9 @@ void Device::RenderRtDebug(VkCommandBuffer cmd)
     as.accelerationStructureCount = 1;
     as.pAccelerationStructures = &s->tlas;
     VkDescriptorImageInfo out{VK_NULL_HANDLE, s->debug->m_view, VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet wr[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    const VkDescriptorBufferInfo geos{s->geoBuf[m_frameIndex].buffer, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet wr[3] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                  {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
     wr[0].pNext = &as;
     wr[0].dstBinding = 0;
     wr[0].descriptorCount = 1;
@@ -1146,7 +1236,12 @@ void Device::RenderRtDebug(VkCommandBuffer cmd)
     wr[1].descriptorCount = 1;
     wr[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     wr[1].pImageInfo = &out;
-    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->layout, 0, 2, wr);
+    wr[2].dstBinding = 2;
+    wr[2].descriptorCount = 1;
+    wr[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    wr[2].pBufferInfo = &geos;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->layout, 0, 3, wr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s->layout, 1, 1, &m_bindlessSet, 0, nullptr);
     vkCmdPushConstants(cmd, s->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
     vkCmdDispatch(cmd, (w + 7) / 8, (h + 7) / 8, 1);
     Transition(cmd, s->debug, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);

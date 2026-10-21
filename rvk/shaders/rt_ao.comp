@@ -1,5 +1,7 @@
 #version 460
 #extension GL_EXT_ray_query : require
+#define RT_GEO_BINDING 7
+#include "rt_common.glsl"
 // RVK_AoMode 2 (raytrace.cpp): ray-traced ambient occlusion. Per pixel, two rays over the surface's hemisphere
 // (cosine-weighted: the light a surface takes in comes mostly from in front of it) into the ray tracing's structures,
 // out to a reach of a few units; a hit occludes by how near it is. Unlike the screen's AO it sees what the screen
@@ -58,8 +60,8 @@ void main()
         float from = 0.0;
         for (int k = 0; k < 3; ++k) {
             rayQueryEXT q;
-            rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0xFF, origin, from, dir, reach);
-            while (rayQueryProceedEXT(q)) {}
+            rayQueryInitializeEXT(q, tlas, gl_RayFlagsNoneEXT, 0xFF, origin, from, dir, reach);
+            RtProceed(q);
             if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT)
                 break;
             float hit = rayQueryGetIntersectionTEXT(q, true);

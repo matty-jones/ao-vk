@@ -2920,10 +2920,21 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                             (!m_textures[0] || m_textures[0]->m_opaque) && !CharacterDraw(fvf, vertexCount));
         if (solid && m_brix)
             BrixNoteDraw(primitive, fvf, vertices, layout.stride, vertexCount, staticIb, indexCount);
+        // A still cut-out (a fence's wire, a grille, a still plant): alpha-tested against its texture - the rays test
+        // its texture's alpha at their hits (raytrace.cpp). Not one that sways (its vertex shader moves it).
+        const uint32_t alphaFunc = m_rs[d3d::RS_ALPHAFUNC];
+        const bool cutout = !solid && !IsTerrain(fvf) &&
+                            (kind == VisualKind::Static || kind == VisualKind::Room || kind == VisualKind::Unknown) &&
+                            m_rs[d3d::RS_ALPHATESTENABLE] && !m_rs[d3d::RS_ALPHABLENDENABLE] && m_textures[0] &&
+                            !(m_drawSway[3] > 0.5f) && layout.offset[4] >= 0 && m_tss[0][d3d::TSS_TEXCOORDINDEX] == 0 &&
+                            (alphaFunc == d3d::CMP_GREATER || alphaFunc == d3d::CMP_GREATEREQUAL) &&
+                            !CharacterDraw(fvf, vertexCount);
         // (Its shadow caster: drawn into the untraced layers only if the rays lack it. A piece of a placed object the
         // rays already hold from the playfield's list - raytrace.cpp RtSyncStatels - isn't taken twice.)
-        if (solid && m_rt && !(kind == VisualKind::Static && DrawStatelCasting(vertexCount, indexCount)))
-            m_drawRtPlace = RtNoteDraw(primitive, vertices, layout.stride, vertexCount, staticIb, indexCount, IsTerrain(fvf));
+        if ((solid || cutout) && m_rt && !(kind == VisualKind::Static && DrawStatelCasting(vertexCount, indexCount)))
+            m_drawRtPlace = RtNoteDraw(primitive, vertices, layout.stride, vertexCount, staticIb, indexCount, IsTerrain(fvf),
+                                       cutout ? m_textures[0] : nullptr, float(m_rs[d3d::RS_ALPHAREF] & 0xFF) / 255.0f,
+                                       uint32_t(layout.offset[4]));
     }
 
     // Two-pass foliage: the queued edges go before a draw that writes no depth (the effects drawn over the scene came

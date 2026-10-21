@@ -3302,8 +3302,11 @@ private:
     bool RtShadowWanted() const { return m_rayQuery && m_rtShadow >= 0.5f && m_shadows && m_prepassOn; }
     bool RtWanted() const { return m_rayQuery && (m_rtDebug >= 0.5f || RtAoWanted() || RtShadowWanted()); }
     // (Its instance's key when the draw's place is kept - else 0.)
+    // (cutout: its texture, alpha-tested at the rays' hits - alpha over alphaRef, at uvOffset in its vertices.)
     uint64_t RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t stride, uint32_t vertexCount, VkBuffer ib,
-                        uint32_t indexCount, bool ground);
+                        uint32_t indexCount, bool ground, Texture* cutout = nullptr, float alphaRef = 0.0f,
+                        uint32_t uvOffset = 0);
+    void RtForgetTexture(Texture* texture);      // (its cut-outs' instances go: DestroyTexture)
     uint64_t m_drawRtPlace = 0;                  // this draw's (RtNoteDraw), for its shadow caster
     // A character's piece skinned on the GPU (draw.cpp): its BLAS refitted this frame, an instance where it is drawn.
     uint64_t RtNoteSkinned(const void* job, VkBuffer arena, VkDeviceSize vertexOffset, uint32_t vertexCount,

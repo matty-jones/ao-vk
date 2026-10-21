@@ -1,5 +1,7 @@
 #version 460
 #extension GL_EXT_ray_query : require
+#define RT_GEO_BINDING 6
+#include "rt_common.glsl"
 // RVK_RtShadow 1 (raytrace.cpp RenderRtShadow): the sun's shadows ray traced, from the depth pre-pass's depth before
 // the scene is shaded (the scene shader takes the result where its fragment is the pre-pass's surface). Per pixel, one
 // ray towards a point of the sun's disc (a new one each frame; the disc as wide as the shadow map's softness makes its
@@ -113,9 +115,9 @@ float Trace(ivec2 pix, ivec2 size, float d, vec3 v, out float hit)
     hit = 0.0;
     if (dot(n, L) > -0.05) {                     // (turned from the sun: the scene's light handles it)
         rayQueryEXT q;
-        rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT, 0x01, origin, 0.0, dir,
+        rayQueryInitializeEXT(q, tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0x01, origin, 0.0, dir,
                               P.misc.y);
-        while (rayQueryProceedEXT(q)) {}
+        RtProceed(q);
         if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionTriangleEXT) {
             lit = 0.0;
             hit = rayQueryGetIntersectionTEXT(q, true);
