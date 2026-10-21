@@ -2062,14 +2062,10 @@ void Device::DrawGrassTiles(VkCommandBuffer cmd)
             const float x1 = x0 + kGrassTileSize, z1 = z0 + kGrassTileSize;
             const float y0 = t.minY - 1.0f, y1 = t.maxY + tall;
             const size_t n = std::min<size_t>(m_frameLightSpheres.size(), 64);
-            for (size_t i = 0; i < n; ++i) {
-                const LightSphere& s = m_frameLightSpheres[i];
-                const float dx = std::max({x0 - s.x, 0.0f, s.x - x1});
-                const float dz = std::max({z0 - s.z, 0.0f, s.z - z1});
-                const float dy = std::max({y0 - s.y, 0.0f, s.y - y1});
-                if (dx * dx + dy * dy + dz * dz <= s.r2)
+            const float lo[3] = {x0, y0, z0}, hi[3] = {x1, y1, z1};
+            for (size_t i = 0; i < n; ++i)
+                if (LightReachesBox(m_frameLightSpheres[i], lo, hi))   // (a spot light: only where its cone reaches)
                     mask |= uint64_t(1) << i;
-            }
         }
         const uint32_t mask2[2] = {uint32_t(mask), uint32_t(mask >> 32)};
         if (mask2[0] != lastMask[0] || mask2[1] != lastMask[1]) {

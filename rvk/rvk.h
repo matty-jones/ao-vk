@@ -3140,6 +3140,7 @@ private:
         bool spot = false;
     };
     std::vector<LightSphere> m_frameLightSpheres;  // the frame lights' spheres in FrameLights order (light masks)
+    bool LightReachesBox(const LightSphere& l, const float mn[3], const float mx[3]) const;   // (draw.cpp)
     uint32_t m_pusherSeenMax = 0;                // the most pushers any frame in the window had (the grass's log)
     // A coarse x/z grid over those lights, so a draw's mask tests only the lights near it, not all of them (a busy
     // scene captures up to kFrameLights): per cell the mask of the lights whose sphere reaches into it, over the

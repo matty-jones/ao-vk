@@ -1442,6 +1442,27 @@ void Device::BuildLightGrid()
     }
 }
 
+// Whether a frame light reaches a world box: its sphere does, and a spot light's cone does too (a floodlight's range -
+// 1,041 units over Borealis's bridges - reached every draw: every pixel tried it, and no draw got the shader build
+// without the lights' loop).
+bool Device::LightReachesBox(const LightSphere& l, const float mn[3], const float mx[3]) const
+{
+    const float dx = std::max(std::max(mn[0] - l.x, l.x - mx[0]), 0.0f);
+    const float dy = std::max(std::max(mn[1] - l.y, l.y - mx[1]), 0.0f);
+    const float dz = std::max(std::max(mn[2] - l.z, l.z - mx[2]), 0.0f);
+    if (dx * dx + dy * dy + dz * dz > l.r2)
+        return false;
+    if (!l.spot)
+        return true;
+    Cone cone{};
+    std::memcpy(cone.axis, l.axis, sizeof(cone.axis));
+    cone.cosHalf = l.cosHalf;
+    cone.sinHalf = l.sinHalf;
+    cone.on = true;
+    const float at[3] = {l.x, l.y, l.z};
+    return BoxInCone(mn, mx, at, cone);
+}
+
 // The frame lights (light override) whose sphere reaches the draw's world bounding box, as a 64-bit mask for the
 // shader - instead of every pixel trying all of them. All set when the box is unknown (external geometry).
 void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount, uint32_t out[4])
@@ -1486,28 +1507,10 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
     const LightSphere* spheres = m_frameLightSpheres.data();
     count = std::min<uint32_t>(count, uint32_t(m_frameLightSpheres.size()));
     uint64_t hits = 0;
-    // Its sphere reaches the box, and a spot light's cone does too (a floodlight's range - 1,041 units over Borealis's
-    // bridges - reached every draw: every pixel tried it, and no draw got the build without the lights' loop).
-    auto Reaches = [&](const LightSphere& l) {
-        float dx = std::max(std::max(wmn[0] - l.x, l.x - wmx[0]), 0.0f);
-        float dy = std::max(std::max(wmn[1] - l.y, l.y - wmx[1]), 0.0f);
-        float dz = std::max(std::max(wmn[2] - l.z, l.z - wmx[2]), 0.0f);
-        if (dx * dx + dy * dy + dz * dz > l.r2)
-            return false;
-        if (!l.spot)
-            return true;
-        Cone cone{};
-        std::memcpy(cone.axis, l.axis, sizeof(cone.axis));
-        cone.cosHalf = l.cosHalf;
-        cone.sinHalf = l.sinHalf;
-        cone.on = true;
-        const float at[3] = {l.x, l.y, l.z};
-        return BoxInCone(wmn, wmx, at, cone);
-    };
     auto Test = [&](uint32_t k) {
         if (hits >> k & 1)
             return;
-        if (Reaches(spheres[k]))
+        if (LightReachesBox(spheres[k], wmn, wmx))
             hits |= uint64_t(1) << k;
     };
     // The candidates: the lights of the grid cells the box covers (clipped to the grid), plus the ones too large for
@@ -1546,7 +1549,7 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
     if (m_lightMaskVerify) {                     // the same mask from every light: a check while bringing the grid up
         uint64_t brute = 0;
         for (uint32_t k = 0; k < count; ++k)
-            if (Reaches(spheres[k])) brute |= uint64_t(1) << k;
+            if (LightReachesBox(spheres[k], wmn, wmx)) brute |= uint64_t(1) << k;
         if (brute != hits) ++m_lightMaskDiff;
         hits = brute;
     }
