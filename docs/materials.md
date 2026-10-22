@@ -21,9 +21,12 @@ docs/live-meshes-plan.md.
 1010006 ground (1010021/22), 1010011 character skins (1010019/20). `<id>_<suffix>` works for any type.
 
 **Texture packs**: `<client>\randy-vk\packs\<name>\` holds the same names (a released texture pack is one such
-folder; ao-assets `pack` makes the zips). A texture's maps all come from one place: the workbench's `live\` preview
-(hot reload), else `materials\` if it has any file for that texture, else the first pack (by folder name) that has
-one. Packs are read once at startup; the log names each (`materials: pack 'ao-vk-textures', N files`).
+folder; ao-assets `pack` makes the zips, and an ao-assets authored pack installs itself as one). A texture's maps all
+come from one place: the workbench's `live\` preview (hot reload), else the first folder that has any file for that
+texture, in the order `packs\order.txt` gives - folder names, one a line, `materials` for `materials\`, `#` comments -
+and then the folders it leaves out (`materials\`, then packs by folder name: without the file, `materials\` wins as
+before). A static mesh's atlas and its `_mesh.rvkm` geometry (an authored pack's remodels) are found the same way.
+Packs are read once at startup; the log names each (`materials: pack 'ao-vk-textures', N files`) and the order.
 
 ao-assets makes and collects these files (its `docs/blender-workflow.md`):
 - `python -m aoassets material-template <texture or model> [--luma|--relief] [--pbr [--roughness R] [--metallic M]]`

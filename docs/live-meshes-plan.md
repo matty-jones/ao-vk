@@ -6,8 +6,9 @@ own. Two things in the renderer make that visible in the running game:
 - **Mesh atlas**: maps named after the mesh, `1010001_<id>_d.png` / `_n` / `_orm` / `_e` / `_h` (from `live\`,
   `materials\` or a pack, as any texture's maps), drawn on every sub-mesh of that mesh instead of its material's
   texture.
-- **Live geometry**: `live\1010001_<id>_mesh.rvkm` (hot reload only), the sub-meshes drawn instead of the mesh's own,
-  so a save in Blender shows up within a second, without rdb.db being written.
+- **Live geometry**: `1010001_<id>_mesh.rvkm` in `live\` (hot reloaded), `materials\` or a pack (an ao-assets authored
+  pack's remodels: read at startup, found as the maps are), the sub-meshes drawn instead of the mesh's own, so a save
+  in Blender shows up within a second, and a pack can carry new geometry, without rdb.db being written.
 
 ## Knowing which mesh a sub-mesh is
 

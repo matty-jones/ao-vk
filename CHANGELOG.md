@@ -10,6 +10,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   in Blender or Substance Painter shows its own texture (with its normal, roughness / metal and glow maps) instead
   of the shared game textures it used. A mesh you are editing also shows its new shape in the running game within a
   second of each save, before it is applied (live preview, hot reload on). `RVK_LiveMeshes` (Materials, on).
+- Texture packs can hold remodelled meshes: a pack folder in `randy-vk\packs\` with a mesh's new shape and its own
+  texture shows them without any change to the game's files (ao-assets authored packs install themselves there).
+  `randy-vk\packs\order.txt` decides which pack wins where two change the same texture or mesh ("materials" stands
+  for `randy-vk\materials`); without it nothing changes. `RVK_LiveMeshes` switches the meshes off.
 - The water's surface is now built from the game's own water: rivers, lakes and pools sit exactly where the game puts
   them, at every level, instead of being redrawn from a map that lost some of them (dry riverbeds, water under the
   ground, walls of water) in places it hadn't seen before. The waves calm down towards the shores and the falls, and

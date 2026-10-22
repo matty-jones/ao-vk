@@ -11,13 +11,15 @@
 //                        in place of this canopy texture's cards, and its normal map (ao-assets leaf-art --install)
 //   <id>_<suffix>        any of these for any type (fallback)
 // A static mesh (1010001 / 1010026) can have them too, named after the mesh: its atlas, a texture of its own drawn on
-// every sub-mesh of it instead of their materials' textures (ao-assets' own UVs); and, in live\ only,
-// <type>_<id>_mesh.rvkm: geometry drawn instead of its sub-meshes (docs/live-meshes-plan.md). RVK_LiveMeshes.
+// every sub-mesh of it instead of their materials' textures (ao-assets' own UVs); and <type>_<id>_mesh.rvkm: geometry
+// drawn instead of its sub-meshes (docs/live-meshes-plan.md; an authored pack's remodels). RVK_LiveMeshes.
 // ao-assets writes these names (python -m aoassets material-template / import).
 //
 // Texture packs: <client>\randy-vk\packs\<name>\ hold the same names (a released pack is one such folder). A
-// texture's maps all come from one place: live\ (preview), else materials\ if it has any file for it, else the first
-// pack (by folder name) that has. Packs are read once at startup (not hot reloaded).
+// texture's maps all come from one place: live\ (preview), else the first folder that has any file for it, in the
+// order packs\order.txt gives (folder names, one a line; "materials" is materials\; '#' starts a comment), the
+// folders it doesn't name after it - materials\ first, then packs by folder name. So a hand-made pack listed before
+// "materials" wins over the maps applied there. Packs are read once at startup (not hot reloaded).
 //
 // Hot reload (RANDYVK_HOTRELOAD=1): both materials\ and live\ (the ao-assets workbench's previews of checked-out
 // assets) are watched; when a texture's files change, its maps are decoded again and replace what every surface of it
@@ -36,6 +38,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
@@ -151,6 +154,7 @@ struct Folder {
 };
 Folder g_mat, g_live;                         // materials\ (applied maps), live\ (workbench previews, hot reload only)
 std::vector<Folder> g_packs;                  // packs\<name>\ (released texture packs), by name
+std::vector<const Folder*> g_order;           // materials\ and the packs, in the order they are searched (Scan)
 std::unordered_set<uint64_t> g_liveKeys;      // texture ids with any file in live\ (their maps come from there only)
 bool g_scanned = false;
 bool g_hot = false;                           // RANDYVK_HOTRELOAD=1
@@ -209,13 +213,47 @@ void ScanPacks(const std::string& root)
     } while (FindNextFileA(h, &fd));
     FindClose(h);
     std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return Lower(a) < Lower(b); });
+    std::vector<std::string> kept;
     for (const std::string& name : names) {
         Folder f;
         f.dir = root + name + "\\";
         ScanFolder(f);
         RvkLog("materials: pack '%s', %u files", name.c_str(), unsigned(f.files.size()));
-        if (!f.files.empty())
+        if (!f.files.empty()) {
             g_packs.push_back(std::move(f));
+            kept.push_back(Lower(name));
+        }
+    }
+    // The search order: order.txt's names first (as written), then materials\ and the packs it leaves out.
+    std::vector<std::string> listed;
+    if (FILE* f = std::fopen((root + "order.txt").c_str(), "r")) {
+        char line[256];
+        while (std::fgets(line, sizeof(line), f)) {
+            std::string name(line);
+            name = name.substr(0, name.find('#'));
+            while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+            while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) name.erase(0, 1);
+            if (!name.empty()) listed.push_back(Lower(name));
+        }
+        std::fclose(f);
+    }
+    auto folderNamed = [&](const std::string& name) -> const Folder* {
+        if (name == "materials") return &g_mat;
+        for (size_t i = 0; i < kept.size(); ++i)
+            if (kept[i] == name) return &g_packs[i];
+        return nullptr;
+    };
+    g_order.clear();
+    auto add = [](const Folder* f) {
+        if (f && std::find(g_order.begin(), g_order.end(), f) == g_order.end()) g_order.push_back(f);
+    };
+    for (const std::string& name : listed) add(folderNamed(name));
+    add(&g_mat);
+    for (const Folder& pack : g_packs) add(&pack);
+    if (!listed.empty() || !g_packs.empty()) {
+        std::string order;
+        for (const Folder* f : g_order) order += (order.empty() ? "" : ", ") + (f == &g_mat ? std::string("materials") : f->dir);
+        RvkLog("materials: searched in this order: %s%s", order.c_str(), listed.empty() ? "" : " (packs\\order.txt)");
     }
 }
 
@@ -260,12 +298,14 @@ std::string FindIn(const Folder& f, uint32_t type, uint32_t id, const char* suff
     return {};
 }
 
+bool IsMeshType(uint32_t type);
+
 bool HasAny(const Folder& f, uint32_t type, uint32_t id)
 {
     for (const char* suffix : kSuffixes)
         if (!FindIn(f, type, id, suffix).empty())
             return true;
-    return false;
+    return IsMeshType(type) && !FindIn(f, type, id, "_mesh.rvkm").empty();
 }
 
 // Where a texture's maps come from (see the top of the file).
@@ -274,10 +314,10 @@ const Folder& FolderFor(uint32_t type, uint32_t id)
     Scan();
     if (g_liveKeys.count(KeyOf(type, id)))
         return g_live;
-    if (!g_packs.empty() && !HasAny(g_mat, type, id))
-        for (const Folder& pack : g_packs)
-            if (HasAny(pack, type, id))
-                return pack;
+    if (!g_packs.empty())
+        for (const Folder* f : g_order)
+            if (HasAny(*f, type, id))
+                return *f;
     return g_mat;
 }
 
@@ -854,9 +894,9 @@ std::string DescribeMesh(uint32_t visual, uint32_t owner, uint32_t kind, std::st
 // ---------------------------------------------------------------- mesh atlases and live geometry
 // docs/live-meshes-plan.md. A static mesh's own maps (<type>_<id>_d.png ... named after the mesh: ao-assets' own
 // UVs) make its atlas: an rvk texture of one pixel with those maps attached (the albedo drawn instead of the pixel),
-// drawn on every sub-mesh of the mesh in place of their materials' textures. live\<type>_<id>_mesh.rvkm (hot reload)
-// holds geometry drawn instead of its sub-meshes. Both find the sub-mesh by its tag: the loaded mesh's SimpleMeshes are
-// tagged as it is read (rvk_RTriMeshArchive -> TagMeshes; the native SimpleMesh copy keeps the tag), a tag naming
+// drawn on every sub-mesh of the mesh in place of their materials' textures. <type>_<id>_mesh.rvkm (live\ - hot
+// reloaded - materials\ or a pack, as the maps) holds geometry drawn instead of its sub-meshes. Both find the sub-mesh
+// by its tag: the loaded mesh's SimpleMeshes are tagged as it is read (MeshRead -> TagMeshes; the native SimpleMesh copy keeps the tag), a tag naming
 // {mesh, piece (its RTriMeshData_t's name), sub-mesh index}.
 namespace {
 
@@ -894,14 +934,12 @@ void UpdateOverrides()
     rnative::device::SetMeshOverrides(any);
 }
 
-// live\<type>_<id>_mesh.rvkm (ao-assets livemesh.py writes it): "RVKM", u32 version 1, u32 pieces; each piece u16 name
+// <type>_<id>_mesh.rvkm (ao-assets livemesh.py writes it): "RVKM", u32 version 1, u32 pieces; each piece u16 name
 // length, name, u32 sub-mesh index, fvf, vertex count, index count, the vertices, u16 indices.
 bool LoadLiveGeometry(MeshEntry& e, uint32_t type, uint32_t id)
 {
     e.pieces.clear();
-    if (!g_hot)
-        return false;
-    const std::string path = FindIn(g_live, type, id, "_mesh.rvkm");
+    const std::string path = FindMap(type, id, "_mesh.rvkm");   // (live\, else materials\ / the packs: FolderFor)
     if (path.empty())
         return false;
     std::vector<uint8_t> data;
