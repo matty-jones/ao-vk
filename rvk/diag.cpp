@@ -252,6 +252,17 @@ void Device::EndFrameDump()
                  m_shadowAnimatedDrawn, m_shadowCulled, m_shadowCollectMs, m_shadowCullMs, m_shadowDrawMs,
                  m_shadowGroupCalls);
     {
+        // The plants' pushers this frame (FillPushers: the characters where they are now, then their trails), of all
+        // the push points: grass standing up through a character means it wasn't among them.
+        size_t heads = 0;
+        for (const PushPoint& t : m_pushTrail) heads += t.head ? 1 : 0;
+        std::fprintf(m_dumpFile, "# pushers: %zu of %zu push points (%zu characters' heads):", m_framePushers.size(),
+                     m_pushTrail.size(), heads);
+        for (const FramePusher& fp : m_framePushers)
+            std::fprintf(m_dumpFile, " (%.1f %.1f %.1f)", fp.p[0], fp.p[1], fp.p[2]);
+        std::fprintf(m_dumpFile, "\n");
+    }
+    {
         // The cameras the casters were drawn with (the world's: most casters), and the projection this frame's
         // receivers were tested against (the last frame's world camera's): differing, no draw took the sun's shadow.
         uint32_t world = 0;

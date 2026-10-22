@@ -1238,9 +1238,13 @@ void Device::FillPushers(detail::FrameLights* fl, const float eye[3])
     struct Item { float key; const PushPoint* p; };
     std::vector<Item> items;
     items.reserve(m_pushTrail.size());
+    // The characters where they are now (heads seen this frame) first, nearest the camera first; then the trail points,
+    // fresher and nearer first. Ranked together, a few walkers near the camera dropped enough trail points to take
+    // every slot from the player's own character a dozen units away (zoomed out): the grass stood up through it.
     for (const PushPoint& t : m_pushTrail) {
         float dx = t.x - eye[0], dy = t.y - eye[1], dz = t.z - eye[2];
-        items.push_back({std::sqrt(dx * dx + dy * dy + dz * dz) + 4.0f * float(now - t.time), &t});
+        const bool here = t.head && now - t.time < 0.1;
+        items.push_back({(here ? 0.0f : 1e4f) + std::sqrt(dx * dx + dy * dy + dz * dz) + 4.0f * float(now - t.time), &t});
     }
     uint32_t used = std::min<uint32_t>(uint32_t(items.size()), detail::kPushers);
     std::partial_sort(items.begin(), items.begin() + used, items.end(),
