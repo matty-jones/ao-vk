@@ -679,8 +679,8 @@ const rnative::device::Direct kDirect{&DirectApplyStates, &DirectGameSection, &D
 
 void DirectAttach(RDevice* device)
 {
-    static const bool testIds = (InstallTestMeshIds(), true);
-    (void)testIds;
+    static const bool meshIds = (InstallMeshIds(), true);
+    (void)meshIds;
     g_directDevice = device;
     rnative::device::SetDirect(&kDirect);
 }

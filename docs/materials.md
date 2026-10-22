@@ -43,8 +43,8 @@ pick frame, so they are hit like anything else. rvk_demo `--pbr-test --pick X Y`
 
 **Ctrl+Shift+J**: the same for the mesh under the cursor - `pick: RDB mesh 1010001:3545` (a character: `RDB character
 model 1010002:5900`; a piece a character wears names it too). randy-vk learns the ids while DisplaySystem loads: the
-exported RCATMesh_t constructor (characters) and RTriMesh_t::Archive (each static mesh read from its .abiff) are hooked
-and find the RDBCATMesh_t / RDBMesh_t being loaded on the caller's stack (the log's `meshes:` lines). The meshes in the
+exported RCATMesh_t constructor (characters) and the native RTriMesh_t(archive) constructor (each static mesh read from
+its .abiff; `[Native] Scene` on) are hooked and find the RDBCATMesh_t / RDBMesh_t being loaded on the caller's stack (the log's `meshes:` lines). The meshes in the
 world are clones sharing the loaded mesh's data (RTriMesh_t +0x184), so a picked mesh is looked up by its data. Both picks also go to `logs/last-pick.txt`, which the ao-assets workbench
 follows (it jumps to the asset). `RANDYVK_PICK_AT=frame,x,y,I|J` picks without the keys (tests).
 

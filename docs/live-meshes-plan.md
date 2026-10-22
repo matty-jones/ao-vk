@@ -11,7 +11,10 @@ own. Two things in the renderer make that visible in the running game:
 
 ## Knowing which mesh a sub-mesh is
 
-`rvk_RTriMeshArchive` (rvk_materials.cpp) already learns each loaded static mesh's id. It now also tags the mesh's
+`MeshRead` (rvk_materials.cpp; the read hook of the native RTriMesh_t(archive) constructor, so `[Native] Scene` on)
+learns each loaded static mesh's id from the RDBMesh_t being loaded on the stack. (The first version hooked the
+exported `RTriMesh_t::Archive`, which is the const one that writes a mesh out and never runs in the game: only the
+harness, naming its meshes with `RANDYVK_STATIC_ID`, ever saw a tag.) It also tags the mesh's
 SimpleMeshes: tag = an entry {mesh key, piece name (its RTriMeshData_t's RResource name), sub-mesh index}. The tag lives
 in randy_native (`meshdata::SetTag` / `Tag`): a SimpleMesh copy keeps it (MeshCopy - the clones the world draws share
 the loaded data; lightmap copies clone the SimpleMeshes), its destructor drops it. No tags are kept while

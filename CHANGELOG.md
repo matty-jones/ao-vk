@@ -77,6 +77,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Static meshes are now recognised in the game: live geometry and own-UV atlases from the ao-assets workbench didn't
+  show on them, and Ctrl+Shift+J on a static mesh couldn't name it (it gave its texture and counts instead).
 - Texture and mesh picking (Ctrl+Shift+I / Ctrl+Shift+J) picked whatever was up and to the left of the cursor when
   `RVK_RenderScale` is below 100 (75 by default), often an object behind the one pointed at; it now picks what is under
   the cursor.

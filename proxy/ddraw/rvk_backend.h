@@ -100,7 +100,7 @@ struct MeshOverride {
 };
 bool FindMeshOverride(uint32_t tag, MeshOverride* out);
 void SetLiveMeshes(bool on);                       // RVK_LiveMeshes
-void InstallTestMeshIds();                         // RANDYVK_STATIC_ID (tests): meshes read by the harness identified
+void InstallMeshIds();                             // static meshes identified as the game reads them (MeshRead)
 
 // One lock around every call into the rvk backend: the game may use DirectDraw from more than one thread
 // (D3D serialises internally too). Recursive, since methods call each other. Logs each new thread once.

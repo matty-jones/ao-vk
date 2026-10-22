@@ -708,8 +708,8 @@ void HotReload()
 // +0x0C id; the hooks below find the one being loaded on the caller's stack (as RTextureFromCreator finds an
 // RDBGroundTexture_t).
 // - Characters: DisplaySystem builds them with randy's exported RCATMesh_t(parent) constructor: the visual is known.
-// - Static meshes are read from the .abiff's object archive; DisplaySystem's mesh classes call the exported base
-//   RTriMesh_t::Archive on each mesh there. The meshes placed in the world are clones of those (their virtual Clone,
+// - Static meshes are read from the .abiff's object archive through the RTriMesh_t(archive) constructor (the native
+//   one: MeshRead, its read hook). The meshes placed in the world are clones of those (their virtual Clone,
 //   no export), which share the loaded mesh's data (RTriMesh_t +0x184, RVisualData_t; CloneMeshData un-shares it):
 //   the loaded mesh's data is remembered, and a picked mesh is looked up by its data.
 namespace {
@@ -1090,31 +1090,46 @@ void SetLiveMeshes(bool on)
 
 using namespace rvkproxy;
 
-// RTriMesh_t::Archive(ObjectArchive_c*) const - a static mesh read from its .abiff - and RCATMesh_t::RCATMesh_t(RRefFrame_t*)
-// - a character being built: mesh identity (above).
-// RANDYVK_STATIC_ID=T:ID: the meshes tests read from an archive themselves (no DisplaySystem, so no RDBMesh_t to find)
-// are that mesh (randy_harness --static).
+// The native RTriMesh_t(archive) constructor's read hook - a static mesh read from its .abiff - and
+// RCATMesh_t::RCATMesh_t(RRefFrame_t*) - a character being built: mesh identity (above).
 namespace {
-void TestMeshRead(void* triMesh)
+// Every static mesh the game reads goes through the native RTriMesh_t(archive) constructor ([Native] Scene on): the
+// RDBMesh_t being loaded is on the stack there. (The exported RTriMesh_t::Archive hooked below is the const one - it
+// writes a mesh out - and never runs in the game: statics went unidentified, so their live geometry, atlases and
+// Ctrl+Shift+J names never showed.) RANDYVK_STATIC_ID=T:ID names every mesh read that one instead (randy_harness
+// --static: no DisplaySystem, so nothing on the stack to find).
+__declspec(noinline) void MeshRead(void* triMesh)
 {
-    static const uint64_t id = [] {
+    static const uint64_t testId = [] {
         char v[32] = {};
         unsigned t = 0, i = 0;
         return GetEnvironmentVariableA("RANDYVK_STATIC_ID", v, sizeof(v)) && std::sscanf(v, "%u:%u", &t, &i) == 2
                    ? uint64_t(t) << 32 | i : uint64_t(0);
     }();
+    // (Its cost, in the log's lines at 1, 2, 4, ... meshes: the stack search reads through ReadProcessMemory.)
+    static LARGE_INTEGER freq;
+    static double totalMs;
+    static unsigned reads;
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
+    const uint64_t id = testId ? testId : FindLoading(_AddressOfReturnAddress(), false);
+    QueryPerformanceCounter(&t1);
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    totalMs += double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(freq.QuadPart);
+    if ((++reads & (reads - 1)) == 0)
+        RvkLog("meshes: %u static meshes read, %.1f ms finding their ids in all", reads, totalMs);
     uint32_t data = 0;
     SafeCopy(static_cast<const uint8_t*>(triMesh) + kVisualData, &data, 4);
-    Remember(triMesh, data, id, "static (RANDYVK_STATIC_ID)");
+    static const unsigned index = ComIndex("rvk::Meshes");
+    ComScope scope(index);
+    Remember(triMesh, data, id, testId ? "static (RANDYVK_STATIC_ID)" : "static");
     if (id && data) TagMeshes(reinterpret_cast<void*>(uintptr_t(data)), id);
 }
 }  // namespace
 
-void rvkproxy::InstallTestMeshIds()
+void rvkproxy::InstallMeshIds()
 {
-    char v[4] = {};
-    if (GetEnvironmentVariableA("RANDYVK_STATIC_ID", v, sizeof(v)))
-        rnative::mesh::SetReadHook(&TestMeshRead);
+    rnative::mesh::SetReadHook(&MeshRead);
 }
 
 extern "C" void __fastcall rvk_RTriMeshArchive(const void* self, void*, void* archive)
