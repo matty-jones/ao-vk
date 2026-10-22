@@ -77,6 +77,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Texture and mesh picking (Ctrl+Shift+I / Ctrl+Shift+J) picked whatever was up and to the left of the cursor when
+  `RVK_RenderScale` is below 100 (75 by default), often an object behind the one pointed at; it now picks what is under
+  the cursor.
 - Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken
   for walls drawn the same way. Every tree crown now lets the light through.
 - Chain-link fences' sun shadows flickered between the mesh pattern and solid panels while the mouse pointer was

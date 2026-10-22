@@ -4037,7 +4037,11 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
     if ((primitive != d3d::TriangleList && primitive != d3d::TriangleStrip && primitive != d3d::TriangleFan) ||
         layout.offset[0] < 0 || !m_target || !m_viewport.width || !m_viewport.height)
         return;
-    const float tx = m_pickX * float(m_target->m_width), ty = m_pickY * float(m_target->m_height);
+    // The cursor in the viewport's pixels: the game's viewport is in back-buffer pixels, also on a scaled scene
+    // (RVK_RenderScale) - the scene's own size put the pick up and left of the cursor, on whatever was there.
+    const bool scaled = m_target == m_scene && SceneScaled();
+    const float tx = m_pickX * float(m_target->m_width) / (scaled ? SceneScaleX() : 1.0f);
+    const float ty = m_pickY * float(m_target->m_height) / (scaled ? SceneScaleY() : 1.0f);
     const float px = (tx - float(m_viewport.x)) / float(m_viewport.width) * 2.0f - 1.0f;
     const float py = 1.0f - (ty - float(m_viewport.y)) / float(m_viewport.height) * 2.0f;
     if (std::fabs(px) > 1.0f || std::fabs(py) > 1.0f)
