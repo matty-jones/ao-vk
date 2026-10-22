@@ -12,6 +12,11 @@ load):
 | `<type>_<id>_d.png` | albedo (diffuse colour): drawn **instead of** the game's texture wherever it is used, alpha included (cut-outs and shadows use its alpha) |
 | `<type>_<id>_e.png` | emissive: the light the surface gives off (black = none), added after its lighting; beyond white with HDR, so it blooms |
 
+**Mesh atlases and live geometry**: a static mesh's own maps, named after the mesh (`1010001_<id>_d.png`, `_n`,
+`_orm`, `_e`, `_h`), are drawn on every sub-mesh of that mesh instead of its materials' textures (ao-assets' own UVs);
+`live\1010001_<id>_mesh.rvkm` (hot reload) is drawn instead of its sub-meshes. `RVK_LiveMeshes`;
+docs/live-meshes-plan.md.
+
 `<type>` is the full-quality table, which also covers the lower quality levels: 1010004 world (1010016/17),
 1010006 ground (1010021/22), 1010011 character skins (1010019/20). `<id>_<suffix>` works for any type.
 

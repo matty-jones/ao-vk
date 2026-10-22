@@ -658,11 +658,29 @@ void DirectInterfaceEnd()
         dev->InterfaceEnd();
 }
 
+uint32_t DirectMeshBegin(void* d3dDevice, uint32_t tag, void* d3dVertexBuffer, uint32_t vertexCount)
+{
+    if (!g_directDevice || d3dDevice != static_cast<IDirect3DDevice7*>(g_directDevice))
+        return 0;
+    auto* vb = d3dVertexBuffer ? static_cast<RVertexBuffer*>(static_cast<IDirect3DVertexBuffer7*>(d3dVertexBuffer))
+                               : nullptr;
+    return g_directDevice->MeshBegin(tag, vb, vertexCount);
+}
+
+void DirectMeshEnd(void* d3dDevice)
+{
+    if (g_directDevice && d3dDevice == static_cast<IDirect3DDevice7*>(g_directDevice))
+        g_directDevice->MeshEnd();
+}
+
 const rnative::device::Direct kDirect{&DirectApplyStates, &DirectGameSection, &DirectDrawIndexedVB,
-                                      &DirectBlobShadowsReplaced, &DirectInterfaceBegin, &DirectInterfaceEnd};
+                                      &DirectBlobShadowsReplaced, &DirectInterfaceBegin, &DirectInterfaceEnd,
+                                      &DirectMeshBegin, &DirectMeshEnd};
 
 void DirectAttach(RDevice* device)
 {
+    static const bool testIds = (InstallTestMeshIds(), true);
+    (void)testIds;
     g_directDevice = device;
     rnative::device::SetDirect(&kDirect);
 }
@@ -759,6 +777,137 @@ HRESULT RDevice::DoDrawIndexedPrimitive(D3DPRIMITIVETYPE type, DWORD fvf, LPVOID
     NoteVisual(dev);
     dev->DrawIndexedPrimitive(type, fvf, verts, vcount, idx, icount);
     return D3D_OK;
+}
+
+namespace {
+// Bytes into a vertex of `fvf` where its D3DCOLOR diffuse is (position, then the normal when it has one).
+uint32_t DiffuseOffset(uint32_t fvf) { return 12 + ((fvf & D3DFVF_NORMAL) ? 12 : 0); }
+
+// For each of `piece`'s vertices the nearest of `count` positions (stride apart): a grid of the positions' bounds, the
+// cells around a vertex searched ring by ring until the best found can't be beaten.
+void NearestVertices(LivePiece& piece, const uint8_t* positions, uint32_t stride, uint32_t count)
+{
+    piece.nearest.assign(piece.vertexCount, 0);
+    piece.nearestCount = count;
+    if (!count) return;
+    auto at = [&](const uint8_t* base, uint32_t s, uint32_t i) { return reinterpret_cast<const float*>(base + size_t(i) * s); };
+    float lo[3], hi[3];
+    for (int k = 0; k < 3; ++k) lo[k] = hi[k] = at(positions, stride, 0)[k];
+    for (uint32_t i = 1; i < count; ++i)
+        for (int k = 0; k < 3; ++k) {
+            lo[k] = std::min(lo[k], at(positions, stride, i)[k]);
+            hi[k] = std::max(hi[k], at(positions, stride, i)[k]);
+        }
+    const int n = std::max(1, std::min(32, int(std::cbrt(double(count)))));
+    float cell[3];
+    for (int k = 0; k < 3; ++k) cell[k] = std::max((hi[k] - lo[k]) / float(n), 1e-4f);
+    auto cellOf = [&](const float* p, int k) { return std::clamp(int((p[k] - lo[k]) / cell[k]), 0, n - 1); };
+    std::vector<std::vector<uint32_t>> grid(size_t(n) * n * n);
+    for (uint32_t i = 0; i < count; ++i) {
+        const float* q = at(positions, stride, i);
+        grid[(size_t(cellOf(q, 0)) * n + cellOf(q, 1)) * n + cellOf(q, 2)].push_back(i);
+    }
+    const float minCell = std::min({cell[0], cell[1], cell[2]});
+    for (uint32_t v = 0; v < piece.vertexCount; ++v) {
+        const float* p = at(piece.vertices.data(), piece.stride, v);
+        const int c[3] = {cellOf(p, 0), cellOf(p, 1), cellOf(p, 2)};
+        float best = 3.4e38f;
+        uint32_t found = 0;
+        for (int ring = 0; ring < n; ++ring) {
+            for (int x = c[0] - ring; x <= c[0] + ring; ++x)
+                for (int y = c[1] - ring; y <= c[1] + ring; ++y)
+                    for (int z = c[2] - ring; z <= c[2] + ring; ++z) {
+                        if (x < 0 || y < 0 || z < 0 || x >= n || y >= n || z >= n) continue;
+                        if (std::max({std::abs(x - c[0]), std::abs(y - c[1]), std::abs(z - c[2])}) != ring) continue;
+                        for (uint32_t i : grid[(size_t(x) * n + y) * n + z]) {
+                            const float* q = at(positions, stride, i);
+                            const float d = (p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) +
+                                            (p[2] - q[2]) * (p[2] - q[2]);
+                            if (d < best) best = d, found = i;
+                        }
+                    }
+            const float reach = float(ring) * minCell;   // nothing in a farther ring is nearer than this
+            if (best < 3.4e38f && best <= reach * reach) break;
+        }
+        piece.nearest[v] = found;
+    }
+}
+}  // namespace
+
+uint32_t RDevice::MeshBegin(uint32_t tag, RVertexBuffer* vb, uint32_t vertexCount)
+{
+    MeshOverride o;
+    rvk::ThreadedDevice* dev = g_rvk.device;
+    if (!dev || !FindMeshOverride(tag, &o))
+        return 0;
+    m_meshAtlas = o.atlas != nullptr;
+    m_meshStage1 = false;
+    if (o.atlas) {                                 // the atlas as a plain texture x diffuse stage
+        dev->SetTexture(0, o.atlas);
+        dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        dev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        dev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+        dev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        dev->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+        // A two-stage material's colour texture on stage 1 ((glow mask + diffuse) x texture): the atlas has it all.
+        // (An environment map's stage, added, stays.)
+        if (m_textures[1] && m_tss[1][D3DTSS_COLOROP] == D3DTOP_MODULATE) {
+            dev->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+            dev->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+            m_meshStage1 = true;
+        }
+    }
+    if (!o.pieces)
+        return o.atlas ? 1 : 0;
+    const bool colours = vb && vertexCount && vertexCount <= vb->desc.dwNumVertices && (vb->desc.dwFVF & D3DFVF_DIFFUSE);
+    for (LivePiece& piece : *o.pieces) {
+        if (!piece.vertexCount || piece.indices.empty())
+            continue;                              // (this sub-mesh's material went to another one)
+        const uint8_t* verts = piece.vertices.data();
+        uint32_t fvf = piece.fvf;
+        if (colours) {
+            // Lightmapped statics get their colours copied into the buffer before each draw (a mesh without colours
+            // in its file gets them added when it is lit: the buffer has them, the piece may not): each new vertex
+            // takes its nearest original vertex's.
+            if (piece.nearestCount != vertexCount)
+                NearestVertices(piece, vb->Bytes(), vb->stride, vertexCount);
+            fvf = piece.fvf | D3DFVF_DIFFUSE;
+            const uint32_t stride = rvk::ThreadedDevice::FvfStride(fvf), at = DiffuseOffset(fvf);
+            const uint32_t from = DiffuseOffset(vb->desc.dwFVF), had = (piece.fvf & D3DFVF_DIFFUSE) ? 4 : 0;
+            m_meshScratch.resize(size_t(piece.vertexCount) * stride);
+            for (uint32_t v = 0; v < piece.vertexCount; ++v) {
+                const uint8_t* src = piece.vertices.data() + size_t(v) * piece.stride;
+                uint8_t* dst = m_meshScratch.data() + size_t(v) * stride;
+                std::memcpy(dst, src, at);
+                std::memcpy(dst + at, vb->Bytes() + size_t(piece.nearest[v]) * vb->stride + from, 4);
+                std::memcpy(dst + at + 4, src + at + had, piece.stride - at - had);
+            }
+            verts = m_meshScratch.data();
+        }
+        CountBackendDraw();
+        g_rvk.Frame();
+        NoteVisual(dev);
+        dev->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, fvf, verts, piece.vertexCount, piece.indices.data(),
+                                  uint32_t(piece.indices.size()));
+    }
+    return 2;
+}
+
+void RDevice::MeshEnd()
+{
+    rvk::ThreadedDevice* dev = g_rvk.device;
+    if (!dev || !m_meshAtlas)
+        return;
+    dev->SetTexture(0, TextureOf(m_textures[0]));  // the device's own state back (the game's DeviceState never knew)
+    for (D3DTEXTURESTAGESTATETYPE t : {D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2, D3DTSS_ALPHAOP,
+                                       D3DTSS_ALPHAARG1, D3DTSS_ALPHAARG2})
+        dev->SetTextureStageState(0, t, m_tss[0][t]);
+    if (m_meshStage1) {
+        dev->SetTextureStageState(1, D3DTSS_COLOROP, m_tss[1][D3DTSS_COLOROP]);
+        dev->SetTextureStageState(1, D3DTSS_ALPHAOP, m_tss[1][D3DTSS_ALPHAOP]);
+    }
+    m_meshAtlas = m_meshStage1 = false;
 }
 
 HRESULT RDevice::DoDrawPrimitiveVB(D3DPRIMITIVETYPE type, LPDIRECT3DVERTEXBUFFER7 iface, DWORD start, DWORD count, DWORD)

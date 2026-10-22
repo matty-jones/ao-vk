@@ -83,6 +83,25 @@ std::string DescribeTexture(const rvk::Texture* texture, std::string* reference 
 // What a picked visual was made from: "RDB mesh 1010001:3545" (reference: "T:ID"), see rvk_materials.cpp.
 std::string DescribeMesh(uint32_t visual, uint32_t owner, uint32_t kind, std::string* reference = nullptr);
 
+// Mesh atlases and live geometry (rvk_materials.cpp, docs/live-meshes-plan.md): what is drawn instead for a tagged
+// static sub-mesh (rnative::meshdata::Tag). RVK_LiveMeshes off: nothing.
+struct LivePiece {
+    uint32_t fvf = 0, stride = 0, vertexCount = 0;
+    std::vector<uint8_t> vertices;
+    std::vector<uint16_t> indices;
+    // A lightmapped mesh's colours: each vertex's nearest vertex in the original sub-mesh (made at the first draw from
+    // a buffer of `nearestCount` vertices).
+    std::vector<uint32_t> nearest;
+    uint32_t nearestCount = 0;
+};
+struct MeshOverride {
+    rvk::Texture* atlas = nullptr;                 // drawn in place of the material's texture (null: its own)
+    std::vector<LivePiece>* pieces = nullptr;      // drawn instead of its geometry (null: its own; empty: nothing)
+};
+bool FindMeshOverride(uint32_t tag, MeshOverride* out);
+void SetLiveMeshes(bool on);                       // RVK_LiveMeshes
+void InstallTestMeshIds();                         // RANDYVK_STATIC_ID (tests): meshes read by the harness identified
+
 // One lock around every call into the rvk backend: the game may use DirectDraw from more than one thread
 // (D3D serialises internally too). Recursive, since methods call each other. Logs each new thread once.
 class ComScope {
@@ -385,6 +404,10 @@ public:
     void ApplyStates(const rnative::device::StateChange* changes, uint32_t count);
     // DrawIndexedPrimitiveVB of a native mesh (the direct channel): the same as the COM call, but indices unchanged
     // since `indexGeneration` (a native triangle list's) are kept as a snapshot the renderer retains on the GPU.
+    // A tagged static sub-mesh's draw (the direct channel's meshBegin / meshEnd): its atlas bound, or its live
+    // geometry drawn instead (FindMeshOverride). -> 0 / 1 / 2 as rnative::device::Direct::meshBegin.
+    uint32_t MeshBegin(uint32_t tag, RVertexBuffer* vb, uint32_t vertexCount);
+    void MeshEnd();
     HRESULT DrawIndexedVBRetained(D3DPRIMITIVETYPE type, RVertexBuffer* vb, DWORD start, DWORD vcount, const WORD* idx,
                                   DWORD icount, uint64_t indexGeneration);
     // A draw of the game's water (RVertexBuffer::water): handed to the renderer as our water (the first this frame) or
@@ -441,6 +464,8 @@ private:
     D3DMATERIAL7 m_material{};
     std::vector<std::pair<D3DLIGHT7, BOOL>> m_lights;
     std::vector<rvk::ThreadedDevice::StateItem> m_stateItems;   // ApplyStates' scratch
+    bool m_meshAtlas = false, m_meshStage1 = false;   // MeshBegin bound an atlas (and turned stage 1 off)
+    std::vector<uint8_t> m_meshScratch;            // MeshBegin: a live piece with the lightmap's colours
     // DrawIndexedVBRetained's kept index arrays, by where they are and how many.
     struct KeptIndices {
         std::shared_ptr<const std::vector<uint8_t>> data;

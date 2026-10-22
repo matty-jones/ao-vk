@@ -38,8 +38,22 @@ struct Direct {
     // this frame - false: the renderer shows the last one drawn (its interface layer, RVK_UiRate). end after it.
     bool (*interfaceBegin)();
     void (*interfaceEnd)();
+    // Around a tagged static sub-mesh's draw (meshdata::Tag; docs/live-meshes-plan.md), while SetMeshOverrides(true):
+    // begin returns 0 to draw it as it is, 1 as it is and then call end (the backend changed its texture), 2 drawn
+    // instead by the backend, then end. vertexBuffer: the IDirect3DVertexBuffer7 it is drawn from.
+    uint32_t (*meshBegin)(void* d3dDevice, uint32_t tag, void* d3dVertexBuffer, uint32_t vertexCount);
+    void (*meshEnd)(void* d3dDevice);
 };
 void SetDirect(const Direct* direct);       // null: none (the backend's device is gone)
+
+// Whether any tagged sub-mesh has something drawn instead (the backend says so when its override files change): only
+// then do native mesh draws look their tag up.
+void SetMeshOverrides(bool any);
+bool MeshOverrides();
+// The direct channel's meshBegin / meshEnd for a draw through `render` (render_t) from `buffer` (a VertexBuffer_c):
+// 0 without it.
+uint32_t MeshBegin(void* render, uint32_t tag, void* buffer, uint32_t vertexCount);
+void MeshEnd(void* render);
 
 // True when the renderer draws its own shadows instead of the game's blob shadows (direct channel on): the blob
 // shadows' per-frame work (cat_skin.cpp: its callback over skinned positions) can be skipped.

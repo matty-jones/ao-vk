@@ -6,6 +6,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- Meshes from the ao-assets workbench can have a texture of their own: a building or prop unwrapped again and painted
+  in Blender or Substance Painter shows its own texture (with its normal, roughness / metal and glow maps) instead
+  of the shared game textures it used. A mesh you are editing also shows its new shape in the running game within a
+  second of each save, before it is applied (live preview, hot reload on). `RVK_LiveMeshes` (Materials, on).
 - The water's surface is now built from the game's own water: rivers, lakes and pools sit exactly where the game puts
   them, at every level, instead of being redrawn from a map that lost some of them (dry riverbeds, water under the
   ground, walls of water) in places it hadn't seen before. The waves calm down towards the shores and the falls, and

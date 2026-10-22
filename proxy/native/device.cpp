@@ -609,6 +609,24 @@ void SetDirect(const Direct* direct) { g_direct = direct; }
 
 bool BlobShadowsReplaced() { return g_directOn && g_direct && g_direct->blobShadowsReplaced && g_direct->blobShadowsReplaced(); }
 
+namespace {
+bool g_meshOverrides;                               // SetMeshOverrides
+}  // namespace
+
+void SetMeshOverrides(bool any) { g_meshOverrides = any; }
+bool MeshOverrides() { return g_meshOverrides && g_direct && g_direct->meshBegin; }
+
+uint32_t MeshBegin(void* render, uint32_t tag, void* buffer, uint32_t vertexCount)
+{
+    if (!MeshOverrides() || !render || !buffer) return 0;
+    return g_direct->meshBegin(Device(render), tag, D3dVb(buffer), vertexCount);
+}
+
+void MeshEnd(void* render)
+{
+    if (g_direct && g_direct->meshEnd && render) g_direct->meshEnd(Device(render));
+}
+
 bool InterfaceBegin() { return !g_directOn || !g_direct || !g_direct->interfaceBegin || g_direct->interfaceBegin(); }
 void InterfaceEnd() { if (g_directOn && g_direct && g_direct->interfaceEnd) g_direct->interfaceEnd(); }
 

@@ -17,13 +17,13 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-342 settings, 170 of them in the settings window.
+343 settings, 171 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (8)
 - [Lighting](#lighting) (19)
-- [Materials](#materials) (14)
+- [Materials](#materials) (15)
 - [Debug](#debug) (7)
 - [Terrain](#terrain) (22)
 - [Plants](#plants) (38)
@@ -94,6 +94,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PbrProbe` | PBR materials: environment probe | 0 .. 1 | 1 |  | ini only; switch `RVK_Pbr` |
 | `RVK_PbrGlow` | PBR materials: emissive map brightness | 0 .. 8 | 1 |  | ini only; switch `RVK_Pbr` |
 | `RVK_Albedo` | Enhanced textures | on / off | on | video memory: more textures | window; game value off |
+| `RVK_LiveMeshes` | Meshes with a texture of their own and live edits from the ao-assets workbench | on / off | on | no cost (only meshes that have one) | window; game value off |
 
 ## Debug
 
