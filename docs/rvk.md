@@ -61,14 +61,16 @@
   2.96 with all of them dithered (3.21 with `RVK_FolEdges` off).
 - **Zone hand-over** (settings `RVK_ZoneFade`, General, on; `RVK_ZoneHoldMax`, ini only, 1.5 s;
   docs/zone-handover-plan.md): at a zone change the game presents 0.5 to 1.5 s of frames without 3D, then the new zone
-  fills in. The teleport calls (proxy/native/zone.cpp, `[Native] Zone`) arm rvk/handover.cpp: each 3D frame's finished
-  scene (EndScene, after the post passes, before name labels and the interface) is copied while armed. The first
-  frame without 3D starts the hold. The held picture (handover.frag: pushed in by 3%, softened, dimmed to 85%, a
+  fills in. Each 3D frame's finished scene (EndScene, after the post passes, before name labels and the interface) is
+  copied into one of two images by turns (about 0.05 ms of GPU time at 1440p). The teleport calls
+  (proxy/native/zone.cpp, `[Native] Zone`) arm rvk/handover.cpp with the one before the latest:
+  `n3EngineClient_t::StartTeleport` stops the old playfield at once, and the frame it came in can already be drawn
+  without the world (held, that one was black). The first frame without 3D starts the hold. The held picture (handover.frag: pushed in by 3%, softened, dimmed to 85%, a
   quarter of its colour out) is laid over every frame's scene, blank or the new zone's. While held, frames without 3D
   end their scene at the interface's first draw too, so the interface stays over the picture. Frame generation is
-  off under it, and name labels are left out. The new zone counts as settled after 20 frames and 0.3 s, with its native
-  ground in (or 60 frames) and its last 10 frame times even. Then the picture fades out over 0.5 s; moving the camera
-  fades it in 0.25 s, and `RVK_ZoneHoldMax` after the first 3D frame caps the wait. It needs the HDR scene
+  off under it, and name labels are left out. The new zone counts as settled after 10 frames and 0.15 s, with its native
+  ground in (or 30 frames) and its last 10 frame times even. Then the picture fades out over 0.35 s; moving the camera
+  fades it in 0.2 s, and `RVK_ZoneHoldMax` after the first 3D frame caps the wait. It needs the HDR scene
   (`RVK_Hdr`). `rvk_demo --handover-test` runs a zone change, with shots before, during the hold, under it, mid-fade
   and after.
 - **Interface refresh rate** (setting `RVK_UiRate`, General; 0 = every frame, the default): GUI.dll's drawing of the

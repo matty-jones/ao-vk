@@ -3290,8 +3290,11 @@ private:
     static constexpr uint32_t kHandoverFrames = 10;   // the new zone's frame times looked at for steadiness
     struct {
         Handover state = Handover::Idle;
-        Texture* image = nullptr;                // the held picture (the output's size)
-        bool captured = false, cameraSet = false;
+        Texture* shots[2] = {};                  // the latest two 3D frames' finished scenes (the output's size)
+        uint64_t shotFrame[2] = {};              // ... their frame numbers
+        int latest = -1;                         // ... the newer one (-1: none)
+        Texture* image = nullptr;                // the held picture: one of them
+        bool cameraSet = false;
         double armed = 0, holdStart = 0, first3D = 0, fadeStart = 0, fadeLength = 0.5, lastFrame = 0;   // (s)
         uint32_t frames3D = 0, frameCount = 0;
         float frameMs[kHandoverFrames] = {};

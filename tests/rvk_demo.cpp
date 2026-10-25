@@ -4322,7 +4322,8 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
 
 
 // The zone hand-over (--handover-test; handover.cpp, RVK_ZoneFade): a zone change as the game makes one at 60 frames a
-// second. 20 frames of a warm scene with a teleport after 10, 40 frames without 3D (a window of the interface only),
+// second. 18 frames of a warm scene, 2 of the world already stopped (black, the cubes only - n3EngineClient_t::
+// StartTeleport's; its signal comes after the first of them), 40 frames without 3D (a window of the interface only),
 // then a blue scene seen from elsewhere (a camera jump). The old scene's picture must stay up over the blank frames and
 // the new scene's first ones, then fade into it. Shots (<shot>-<name>.bmp): before (the old zone), hold (the blank
 // frames), hidden (the new zone drawn under the held picture), fade, after (the new zone).
@@ -4357,13 +4358,14 @@ void RunHandoverTest(D& dev, int frames, const std::string& shot)
         }
         if (frame == frames - 1)
             dev.RequestScreenshot(shot);
-        if (frame == 10)
+        if (frame == 19)
             dev.ZoneSignal(rvk::kZoneTeleport);
+        const bool stopped = frame >= 18 && frame < 20;
         const bool blank = frame >= 20 && frame < 60;
         const bool second = frame >= 60;
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
-        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, second ? 0xFF203050 : 0xFF806040, 1.0f);
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, stopped ? 0xFF000000 : second ? 0xFF203050 : 0xFF806040, 1.0f);
         if (!blank) {
             const Vector eye = second ? Vector{14.0f, 9.0f, -16.0f} : Vector{-14.0f, 7.0f, -18.0f};
             dev.SetTransform(View, LookAtLH(eye, {0, 0, 0}, {0, 1, 0}));
@@ -4394,7 +4396,8 @@ void RunHandoverTest(D& dev, int frames, const std::string& shot)
             const float r = 60.0f;
             VtxMesh q[4] = {{-r, 0, -r, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {r, 0, -r, 0, 1, 0, 0xFFFFFFFF, 30, 0},
                             {r, 0, r, 0, 1, 0, 0xFFFFFFFF, 30, 30}, {-r, 0, r, 0, 1, 0, 0xFFFFFFFF, 0, 30}};
-            dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
+            if (!stopped)
+                dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cubes.data(), uint32_t(cubes.size()), cubeIdx.data(),
                                      uint32_t(cubeIdx.size()));
             dev.SetRenderState(RS_LIGHTING, 0);
