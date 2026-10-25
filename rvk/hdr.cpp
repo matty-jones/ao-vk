@@ -110,6 +110,9 @@ const uint32_t kFxaaSpirv[] = {
 const uint32_t kUiCompositeSpirv[] = {
 #include "ui_composite.frag.inc"
 };
+const uint32_t kHandoverSpirv[] = {
+#include "handover.frag.inc"
+};
 const uint32_t kMotionBlurSpirv[] = {
 #include "motion_blur.frag.inc"
 };
@@ -352,6 +355,7 @@ bool Device::CreateHdrResources(std::string* error)
                          &m_uiCompositePipeline) &&
               fullscreen(kUiCompositeSpirv, sizeof(kUiCompositeSpirv), kColorFormat, 4, m_bloomLayout,
                          &m_uiOverlayPipeline) &&
+              fullscreen(kHandoverSpirv, sizeof(kHandoverSpirv), kColorFormat, 2, m_bloomLayout, &m_handoverPipeline) &&
               fullscreen(kMotionBlurSpirv, sizeof(kMotionBlurSpirv), kColorFormat, false, m_bloomLayout, &m_motionPipeline) &&
               fullscreen(kTileMaxSpirv, sizeof(kTileMaxSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_tileMaxPipeline) &&
@@ -434,7 +438,7 @@ void Device::DestroyHdrResources()
                           &m_atmosViewPipeline, &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
                           &m_gbufferPipeline, &m_sssrResolvePipeline, &m_cacaoPackPipeline, &m_sssrEnvPipeline, &m_brixPackPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
-                          &m_uiOverlayPipeline,
+                          &m_uiOverlayPipeline, &m_handoverPipeline,
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,
@@ -642,8 +646,9 @@ void Device::EndScene()
     if (taa && !(scaled && m_upscaler == 1 && RenderFsr2(cmd, upscaled, taaParams)) &&
         !(scaled && m_upscaler == 2 && RenderFsr3(cmd, upscaled, taaParams)))
         RenderTaa(cmd, upscaled, taaParams);
-    if (taa && m_fg)
-        FgPrepare(cmd, taaParams);               // (RVK_FrameGen: the scene's depth and motion for the generated frame)
+    if (taa && m_fg && !HandoverShown())
+        FgPrepare(cmd, taaParams);               // (RVK_FrameGen: the scene's depth and motion for the generated frame;
+                                                 // none under a zone change's held picture - handover.cpp)
     if (fxaa) {
         // Into the main target, or - with motion blur - into an image of its own that the blur then reads (the two
         // swap: m_tonemapped is what the blur reads).
@@ -667,6 +672,7 @@ void Device::EndScene()
                            sizeof(motion), false);
     }
     ProfileMark("motion blur");
+    HandoverScene(cmd);                          // RVK_ZoneFade: a zone change's held picture over the scene
     // (A frame dump: the in-between images too - not every frame of a run.)
     if (m_dumpFile && m_dumpBurstIndex == 0 && !m_dumpOpenPath.empty())
         DumpTargets(m_dumpOpenPath.substr(0, m_dumpOpenPath.rfind('.')));
@@ -682,7 +688,7 @@ void Device::EndScene()
     m_constantsDirty = true;
     if (m_inFrame)
         BeginRenderingOn(m_target);
-    if (m_inFrame && m_target == m_ldrMain) {
+    if (m_inFrame && m_target == m_ldrMain && !HandoverOpaque()) {   // (not the new zone's labels on the old picture)
         // (RVK_FrameGen: into a layer the swapchain lays over the frames - interpolated, they smeared.)
         if (m_fgUiLayer && !m_heldLabels.empty() && FgLabelsBegin()) {
             DrawHeldLabels();

@@ -11,5 +11,9 @@ namespace rnative::zone {
 void Install();
 // A presented frame (the game's thread), with the renderer's count of frames in a row without 3D (it lags a frame).
 void Frame(uint32_t framesWithout3D);
+// What the teleport calls said since the last call (the zone hand-over, rvk handover.cpp): kTeleport a teleport began
+// (StartTeleportTry succeeded, or n3EngineClient_t::StartTeleport), kTeleportFailed it failed.
+enum : uint32_t { kTeleport = 1, kTeleportFailed = 2 };
+uint32_t TakeSignals();
 
 }  // namespace rnative::zone

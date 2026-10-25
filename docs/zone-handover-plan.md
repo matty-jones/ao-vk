@@ -60,6 +60,31 @@ designs:
 The lines are `native: zone: +<ms> ...` in `randy-vk.log`. The kinds of zone change to cover are a border crossing,
 a whompah, the grid, death and resurrection, a door between indoors and outdoors, and login.
 
+### Found (2026-10-25, in game)
+
+It is case B. The game presents at its full rate through every zone change; its frames just have no 3D. No loading
+screen is shown at a zone change; GUI.dll's is only at login (kind 0, about 5 s).
+
+| zone change | frames without 3D | longest frame |
+| --- | --- | --- |
+| Newland Desert -> 567, border | 0.91 s | 98 ms |
+| 567 -> Newland Desert | 0.83 s | 86 ms |
+| Newland Desert -> 1187 | 1.25 s | 80 ms |
+| 1187 -> Newland Desert | 1.09 s | 166 ms |
+| Newland Desert -> 560 | 1.31 s | 179 ms |
+| 560 -> Newland Desert | 0.49 s | 83 ms |
+| login (the loading screen) | 5.2 s | 419 ms |
+
+The timeline of a zone change:
+
+1. `StartTeleportTry` returns true (a border, a whompah). The grid and some others go straight to `StartTeleport`.
+2. Within 10 to 50 ms, the last 3D frame.
+3. `StartTeleport` 0 to 400 ms later: the old playfield stops (0 ms).
+4. `NewPlayfield` 0.15 to 1 s after that (4 to 60 ms).
+5. The first 3D frame 0.3 to 0.7 s later, after a few slow frames (60 to 180 ms: our ground, statels, mesh ids).
+
+All of it runs on the game thread. So the hold needs no presenting of its own: each blank frame shows it.
+
 ## Phase 1: hold
 
 - `rvk/handover.cpp` (state in `rvk.h`).

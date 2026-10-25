@@ -6,6 +6,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- Zone changes no longer freeze on a blank picture: the last view of the zone you leave stays up, slowly drifting
+  and dimming, while the next one loads, then fades into the new zone once it has settled, its ground and lighting
+  already in place. The interface stays up throughout, and moving the camera ends the wait at once. `RVK_ZoneFade`
+  (General) switches it off.
 - A character's own light (a lamp or glowing item it wears) can be kept from casting that character's shadow on the
   ground and walls around it: switch off `RVK_OwnShadow` (Shadows, under point light shadows). Everything else still
   casts in that light, the other characters near it included, and lamps still shadow everyone.

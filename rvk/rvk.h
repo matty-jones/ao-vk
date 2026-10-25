@@ -285,7 +285,8 @@ struct DeviceInfo {
     X(RtDebug, m_rtDebug, 0)                          /* ray tracing's view: 1 what its rays hit (raytrace.cpp) */ \
     X(RtShadow, m_rtShadow, 0)                        /* the sun's shadows ray traced (raytrace.cpp; 0 off) */ \
     X(RtReflect, m_rtReflect, 0)                      /* reflections the screen lacks ray traced (raytrace.cpp) */ \
-    X(VolLamps, m_volLamps, 0)                        /* the lamps' light in the air (volume.frag; 0 none) */
+    X(VolLamps, m_volLamps, 0)                        /* the lamps' light in the air (volume.frag; 0 none) */ \
+    X(ZoneHoldMax, m_zoneHoldMax, 0)                  /* the longest a zone change hides the new zone once it draws (s) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
@@ -302,14 +303,17 @@ struct DeviceInfo {
     X(HillShade, m_hillShade, 0)                      /* the terrain shaded from a low sun */ \
     X(LightRig, m_lightRig, C)                        /* one light for day and night (light_rig.cpp) */ \
     X(GroundOne, m_groundOnePass, C)                  /* the native ground drawn in one pass, not two */ \
-    X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */
+    X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */ \
+    X(ZoneFade, m_zoneFade, 0)                        /* a zone change holds the old zone's picture, fades into the new */
 enum class Knob : uint32_t {
 #define RVK_KNOB_NAME(name, member, refresh) name,
     RVK_FLOAT_KNOBS(RVK_KNOB_NAME) RVK_BOOL_KNOBS(RVK_KNOB_NAME)
 #undef RVK_KNOB_NAME
     Count
 };
-int KnobByName(const char* setting);             // "RVK_Mist" -> Knob::Mist; -1: not a knob
+int KnobByName(const char* setting);
+// Device::ZoneSignal's bits (the zone hand-over, handover.cpp; from proxy/native/zone.cpp's teleport hooks).
+enum : uint32_t { kZoneTeleport = 1, kZoneTeleportFailed = 2 };             // "RVK_Mist" -> Knob::Mist; -1: not a knob
 
 class Device {
 public:
@@ -755,6 +759,10 @@ public:
     void SetSkyTime(double t) { m_skyTime = t; }
     // The playfield the game is in (its resource id; 0 none): its climate leans the sky (sky.cpp SkyZoneLean).
     void SetSkyPlayfield(uint32_t playfield);
+    // The zone hand-over (handover.cpp, RVK_ZoneFade): kZoneTeleport a teleport began (the old zone's picture is kept
+    // from here), kZoneTeleportFailed it failed.
+    void ZoneSignal(uint32_t signal);
+    bool HandoverFading() const;                 // (tests)
     void SetEffectGlow(float gain) { if (m_effectGlow != gain) { m_effectGlow = gain; m_constantsDirty = true; } }
     float EffectGlow() const { return m_effectGlow; }
     float BloomStrength() const { return m_bloomStrength; }
@@ -3272,6 +3280,27 @@ private:
     uint32_t RenderScaleNow() const { return TaaActive() && m_framesWithout3D < 60 ? m_renderScaleWanted : 100u; }
     uint32_t m_framesWithout3D = 0;              // frames in a row whose scene drew no 3D (EndFrame)
     std::atomic<uint32_t> m_framesWithout3DShared{0};   // the same, for the game thread (FramesWithout3D)
+    // The zone hand-over (handover.cpp, docs/zone-handover-plan.md, RVK_ZoneFade): the old zone's last picture held over
+    // the blank frames of a zone change and the new zone's first ones, then faded out.
+    void HandoverScene(VkCommandBuffer cmd);     // (EndScene, after the post passes)
+    bool HandoverShown() const;                  // the held picture is over the frame's scene (whole or fading)
+    bool HandoverOpaque() const;                 // ... whole
+    void DestroyHandover();
+    enum class Handover : uint8_t { Idle, Armed, Holding, Fading };
+    static constexpr uint32_t kHandoverFrames = 10;   // the new zone's frame times looked at for steadiness
+    struct {
+        Handover state = Handover::Idle;
+        Texture* image = nullptr;                // the held picture (the output's size)
+        bool captured = false, cameraSet = false;
+        double armed = 0, holdStart = 0, first3D = 0, fadeStart = 0, fadeLength = 0.5, lastFrame = 0;   // (s)
+        uint32_t frames3D = 0, frameCount = 0;
+        float frameMs[kHandoverFrames] = {};
+        float eye[3] = {}, forward[3] = {};      // the camera at the new zone's first 3D frame
+        const NativeGround* groundAtArm = nullptr;   // a different one: the new zone's ground is in
+    } m_ho;
+    VkPipeline m_handoverPipeline = VK_NULL_HANDLE;
+    bool m_zoneFade = true;                      // RVK_ZoneFade
+    float m_zoneHoldMax = 1.5f;                  // RVK_ZoneHoldMax: the longest the new zone stays hidden once it draws (s)
     void ApplyRenderScale();
     // The scene is smaller than the output: the TAA upscales it, and the depth is brought up to the output size
     // after it (UpsampleDepth).

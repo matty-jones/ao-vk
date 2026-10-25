@@ -1003,6 +1003,11 @@ void ThreadedDevice::LoadStatels(const char* path, uint32_t playfield)
     Enqueue([this, p, playfield](const uint8_t*) { m_device.LoadStatels(p.c_str(), playfield); });
 }
 
+void ThreadedDevice::ZoneSignal(uint32_t signal)
+{
+    Enqueue([this, signal](const uint8_t*) { m_device.ZoneSignal(signal); });
+}
+
 void ThreadedDevice::SetSkyPlayfield(uint32_t playfield)
 {
     Enqueue([this, playfield](const uint8_t*) { m_device.SetSkyPlayfield(playfield); });

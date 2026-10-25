@@ -105,6 +105,7 @@ public:
     void LoadStatels(const char* path, uint32_t playfield);                   // (the path copied)
     void SetStatelMode(uint32_t mode);
     void SetSkyPlayfield(uint32_t playfield);
+    void ZoneSignal(uint32_t signal);          // (Device::ZoneSignal: a teleport began or failed)
     void SetGrassField(bool on, float distance, float density, float height, bool texOnly);
     void SetGrassStyle(float variety, float flowers, float glow, float gusts, bool trails);
     void SetGrassTrailLook(float seconds, float shade);

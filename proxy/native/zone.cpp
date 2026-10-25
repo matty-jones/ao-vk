@@ -31,6 +31,7 @@ LARGE_INTEGER g_freq;
 std::atomic<int64_t> g_windowStart{0}, g_lastEvent{0};
 std::atomic<uint32_t> g_lines{0};
 DWORD g_gameThread;
+std::atomic<uint32_t> g_signals{0};                // TakeSignals
 
 // The game's globals, read from the hooked code (moved with the module).
 const volatile uint32_t* g_playfieldId;             // N3: n3EngineClient_t's current playfield (GetPlayfield's)
@@ -149,6 +150,8 @@ bool __fastcall TeleportTryHook(void* self, void* edx)
     // Called every frame while the game tries: only its outcome changing is logged.
     static int last = -1;
     const bool ok = g_teleportTry(self, edx);
+    if (ok)
+        g_signals.fetch_or(kTeleport, std::memory_order_relaxed);
     if (int(ok) != last) {
         last = ok;
         Event("StartTeleportTry -> %s", ok ? "true" : "false");
@@ -165,12 +168,14 @@ void __fastcall TeleportConfirmedHook(void* self, void* edx)
 void __fastcall TeleportFailedHook(void* self, void* edx)
 {
     Event("StartTeleportFailed");
+    g_signals.fetch_or(kTeleportFailed, std::memory_order_relaxed);
     g_teleportFailed(self, edx);
 }
 
 void __fastcall StartTeleportHook(void* self, void* edx)
 {
     Event("StartTeleport (the old playfield stops)");
+    g_signals.fetch_or(kTeleport, std::memory_order_relaxed);
     const int64_t t0 = Now();
     g_startTeleport(self, edx);
     Event("StartTeleport done (%.0f ms)", Ms(Now() - t0));
@@ -308,6 +313,11 @@ void Install()
             m.install(module);
         }
     }
+}
+
+uint32_t TakeSignals()
+{
+    return g_signals.exchange(0, std::memory_order_relaxed);
 }
 
 void Frame(uint32_t framesWithout3D)

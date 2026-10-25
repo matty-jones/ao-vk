@@ -4321,6 +4321,110 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
 }
 
 
+// The zone hand-over (--handover-test; handover.cpp, RVK_ZoneFade): a zone change as the game makes one at 60 frames a
+// second. 20 frames of a warm scene with a teleport after 10, 40 frames without 3D (a window of the interface only),
+// then a blue scene seen from elsewhere (a camera jump). The old scene's picture must stay up over the blank frames and
+// the new scene's first ones, then fade into it. Shots (<shot>-<name>.bmp): before (the old zone), hold (the blank
+// frames), hidden (the new zone drawn under the held picture), fade, after (the new zone).
+bool g_handoverTest = false;
+
+template <typename D>
+void RunHandoverTest(D& dev, int frames, const std::string& shot)
+{
+    auto warmPixels = Checker(64, 8, 0xFFD0A070, 0xFF906040);
+    auto bluePixels = Checker(64, 8, 0xFF7090D0, 0xFF405080);
+    Texture* warm = dev.CreateTexture(64, 64, warmPixels.data());
+    Texture* blue = dev.CreateTexture(64, 64, bluePixels.data());
+    std::vector<VtxMesh> cubes;
+    std::vector<uint16_t> cubeIdx;
+    for (int i = 0; i < 5; ++i)
+        AddCube(cubes, cubeIdx, -8.0f + 4.0f * float(i), 1.0f, float(i % 2) * 3.0f, 1.0f);
+    frames = std::max(frames, 200);
+    const struct { int frame; const char* name; } kShots[] = {{15, "before"}, {45, "hold"}, {70, "hidden"},
+                                                               {frames - 1, "after"}};
+    int fadeShot = -1;
+    for (int frame = 0; frame < frames; ++frame) {
+        for (const auto& s : kShots)
+            if (frame == s.frame) {
+                std::string name = shot;
+                name.insert(name.size() - 4, std::string("-") + s.name);
+                dev.RequestScreenshot(name);
+            }
+        if (frame == fadeShot) {
+            std::string name = shot;
+            name.insert(name.size() - 4, "-fade");
+            dev.RequestScreenshot(name);
+        }
+        if (frame == frames - 1)
+            dev.RequestScreenshot(shot);
+        if (frame == 10)
+            dev.ZoneSignal(rvk::kZoneTeleport);
+        const bool blank = frame >= 20 && frame < 60;
+        const bool second = frame >= 60;
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, second ? 0xFF203050 : 0xFF806040, 1.0f);
+        if (!blank) {
+            const Vector eye = second ? Vector{14.0f, 9.0f, -16.0f} : Vector{-14.0f, 7.0f, -18.0f};
+            dev.SetTransform(View, LookAtLH(eye, {0, 0, 0}, {0, 1, 0}));
+            dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.5f, 600.0f));
+            dev.SetTransform(World, Identity());
+            dev.SetRenderState(RS_ZENABLE, 1);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+            dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_AMBIENT, 0xFF606060);
+            dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_MATERIAL);
+            Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+            dev.SetMaterial(mat);
+            Light sun{};
+            sun.type = LIGHT_DIRECTIONAL;
+            sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
+            sun.direction = {0.55f, -0.7f, 0.45f};
+            dev.SetLight(0, sun);
+            dev.LightEnable(0, true);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+            dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+            dev.SetTexture(0, second ? blue : warm);
+            dev.SetRenderState(RS_LIGHTING, 1);
+            const float r = 60.0f;
+            VtxMesh q[4] = {{-r, 0, -r, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {r, 0, -r, 0, 1, 0, 0xFFFFFFFF, 30, 0},
+                            {r, 0, r, 0, 1, 0, 0xFFFFFFFF, 30, 30}, {-r, 0, r, 0, 1, 0, 0xFFFFFFFF, 0, 30}};
+            dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cubes.data(), uint32_t(cubes.size()), cubeIdx.data(),
+                                     uint32_t(cubeIdx.size()));
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.LightEnable(0, false);
+        }
+        // The interface, every frame: a window (its layer), as the game's.
+        dev.SetRenderState(RS_ZENABLE, 0);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+        dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+        dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+        dev.SetTexture(0, nullptr);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
+        dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+        dev.InterfaceBegin(true);
+        VtxRhwDiffuse window[4] = {{20, 20, 0, 1, 0xE0304060}, {220, 20, 0, 1, 0xE0304060},
+                                   {20, 90, 0, 1, 0xE0304060}, {220, 90, 0, 1, 0xE0304060}};
+        dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, window, 4);
+        dev.InterfaceEnd();
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.EndFrame();
+        if (fadeShot < 0 && dev.HandoverFading())
+            fadeShot = frame + 15;               // (about half way through the half-second fade)
+        Sleep(16);
+    }
+    dev.DestroyTexture(warm);
+    dev.DestroyTexture(blue);
+}
+
 // Point light shadow test (--point-shadow-test): night, a lamp among cubes. Left half: lit ground (per-pixel); right
 // half: the ground the way Anarchy Online draws it (unlit base pass + lightmap and lights multiplying pass). A small
 // cube around the lamp (its housing) must not cast; the cubes around it must, in every direction (all cube faces).
@@ -5020,6 +5124,7 @@ int main(int argc, char** argv)
         else if (a == "--pixel-lighting") pixelLighting = true;
         else if (a == "--lighting-debug") lightingDebug = true;
         else if (a == "--hide-ui") g_hideUi = true;
+        else if (a == "--handover-test") { g_handoverTest = true; hdr = true; }
         else if (a == "--light-override") lightOverride = true;
         else if (a == "--shadows") shadows = true;
         else if (a == "--shadow-test") shadowTest = shadows = true;
@@ -5647,6 +5752,8 @@ int main(int argc, char** argv)
         else RunDemo(tdev, windowed, stress, frames, shot);
     } else if (!g_statelPack.empty()) {
         RunStatelTest(dev, frames, shot, dump);
+    } else if (g_handoverTest) {
+        RunHandoverTest(dev, frames, shot);
     } else if (!g_leafTrees.empty()) {
         RunLeafScene(dev, frames, shot, dump);
     } else if (g_grassBench) {

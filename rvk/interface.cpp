@@ -22,7 +22,9 @@ void Device::InterfaceSceneEnd()
         m_particleOrphanTrigger = "the interface";
         DrawOrphanParticles();
     }
-    if (m_scenePhase && m_target == m_scene && m_sceneSaw3D) {
+    // (Under a zone change's held picture the scene ends here even without 3D: the picture goes over the scene, the
+    // interface over the picture - handover.cpp.)
+    if (m_scenePhase && m_target == m_scene && (m_sceneSaw3D || HandoverShown())) {
         m_sceneEndDraw = m_dumpDraw;
         m_sceneEndFvf = 0;
         EndScene();
