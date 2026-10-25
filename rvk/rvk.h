@@ -3302,6 +3302,18 @@ private:
         const NativeGround* groundAtArm = nullptr;   // a different one: the new zone's ground is in
     } m_ho;
     VkPipeline m_handoverPipeline = VK_NULL_HANDLE;
+    // Shop portals, phase 0 (portal_diag.cpp, docs/shop-portal-plan.md): a playfield's pieces as first drawn after
+    // arriving in it.
+    void PortalDiagPlayfield(uint32_t playfield);
+    void PortalDiagDraw(uint32_t fvf, uint32_t vertexCount, uint32_t indexCount);
+    void PortalDiagFrame();
+    struct {
+        bool active = false, cameraLogged = false;
+        uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;
+        uint32_t byKind[16] = {};
+        double start = 0, lastSummary = 0;
+        std::unordered_set<uint64_t> seen;
+    } m_pd;
     bool m_zoneFade = true;                      // RVK_ZoneFade
     float m_zoneHoldMax = 1.5f;                  // RVK_ZoneHoldMax: the longest the new zone stays hidden once it draws (s)
     void ApplyRenderScale();

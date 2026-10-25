@@ -91,6 +91,7 @@ void Device::SetSkyPlayfield(uint32_t playfield)
     if (playfield == m_skyPlayfield)
         return;
     m_skyPlayfield = playfield;
+    PortalDiagPlayfield(playfield);              // (shop portals' phase 0: portal_diag.cpp)
     m_skyZoneLean = 0.0f;
     for (const ZoneSky& z : kZoneSkies)
         if (z.playfield == playfield)

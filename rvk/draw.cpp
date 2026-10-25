@@ -2907,6 +2907,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount, true);
     }
     DrawMeshInfo(fvf, layout.stride, vertices, vertexCount, indices, indexCount);
+    PortalDiagDraw(fvf, vertexCount, indexCount);   // (shop portals' phase 0: portal_diag.cpp)
     ProfileDrawSection("draw: setup (mesh info)", since);
     NoteMeshPiece();                             // (mesh ids: which mesh the object drawing is)
     // The object's entry in the per-object cache (objects.cpp): a static mesh at its world matrix.
@@ -4150,7 +4151,11 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
     }
     // A dungeon room hit (VisualKind::Room): the hit triangle and those joined to it by shared vertices - the room's
     // vertices aren't shared between the tile pieces placed in it, so that is the piece's sub-mesh as placed.
-    if (hit == ~0u || VisualKind(m_drawVisualKind) != VisualKind::Room || primitive != d3d::TriangleList || !indices)
+    // The same for a draw of the black texture behind shop doorways (1010004:6014, shop portals' phase 0): the doorway
+    // quad, logged in the world (portal_diag.cpp's numbers' counterpart outdoors).
+    const bool doorway = m_textures[0] && m_textures[0]->m_rdbId == 6014;
+    if (hit == ~0u || (VisualKind(m_drawVisualKind) != VisualKind::Room && !doorway) ||
+        primitive != d3d::TriangleList || !indices)
         return;
     auto corner = [&](uint32_t tri, int j) { return uint32_t(indices[tri * 3 + j]); };
     auto put = [&](uint32_t tri) {
@@ -4184,6 +4189,38 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
                 if (std::find(vertices_.begin(), vertices_.end(), v) == vertices_.end()) vertices_.push_back(v);
         }
     }
+    if (!doorway)
+        return;
+    const auto& w = m_world.m;
+    auto world = [&](uint32_t v, float out[3]) {
+        float p[3];
+        std::memcpy(p, base + size_t(v) * layout.stride + layout.offset[0], 12);
+        for (int j = 0; j < 3; ++j)
+            out[j] = p[0] * w[0][j] + p[1] * w[1][j] + p[2] * w[2][j] + w[3][j];
+    };
+    float mn[3] = {1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f, -1e30f, -1e30f};
+    std::string corners;
+    for (uint32_t v : vertices_) {
+        float p[3];
+        world(v, p);
+        for (int j = 0; j < 3; ++j) { mn[j] = std::min(mn[j], p[j]); mx[j] = std::max(mx[j], p[j]); }
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), " (%.2f %.2f %.2f)", double(p[0]), double(p[1]), double(p[2]));
+        corners += buf;
+    }
+    float a[3], b[3], c[3];
+    world(corner(hit, 0), a);
+    world(corner(hit, 1), b);
+    world(corner(hit, 2), c);
+    const float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, t[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+    float nrm[3] = {u[1] * t[2] - u[2] * t[1], u[2] * t[0] - u[0] * t[2], u[0] * t[1] - u[1] * t[0]};
+    const float len = std::sqrt(nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]);
+    for (float& x : nrm) x = len > 0.0f ? x / len : 0.0f;
+    Log("portal diag: picked a black doorway piece: %u triangles of %u in the draw (%u vertices), centre (%.2f %.2f %.2f), "
+        "size (%.2f %.2f %.2f), normal (%.3f %.3f %.3f), corners%s",
+        m_pickBestTriangleCount, triangles, vertexCount, double(0.5f * (mn[0] + mx[0])), double(0.5f * (mn[1] + mx[1])),
+        double(0.5f * (mn[2] + mx[2])), double(mx[0] - mn[0]), double(mx[1] - mn[1]), double(mx[2] - mn[2]),
+        double(nrm[0]), double(nrm[1]), double(nrm[2]), corners.c_str());
 }
 
 }  // namespace rvk
