@@ -4408,8 +4408,8 @@ void RunPortalView(D& dev, int frames, const std::string& shot)
 }
 
 // The capture's side (--portal-capture-test DIR): a small room as the game draws a shop's - its walls and floor tagged
-// as rooms, boxes as props - in a playfield of its own (4242), drawn for 5 s; the capture saves it to DIR\4242.rvkp once
-// quiet, which --portal-view then draws.
+// as rooms, boxes as props - in a playfield of its own (4242), left after 0.8 s (before the capture's quiet spell: it
+// saves on leaving) for an empty one; the capture writes DIR\4242.rvkp, which --portal-view then draws.
 std::string g_portalCaptureDir;
 
 template <typename D>
@@ -4426,13 +4426,20 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
     AddCube(room, roomIdx, 0.0f, 3.0f, 8.0f, 8.0f);   // (the room: seen from inside)
     for (int i = 0; i < 4; ++i)
         AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
-    frames = std::max(frames, 330);
+    frames = std::max(frames, 120);
     for (int frame = 0; frame < frames; ++frame) {
-        if (frame == frames - 1)
+        if (frame == 40)
             dev.RequestScreenshot(shot);
+        if (frame == 50)
+            dev.SetSkyPlayfield(0);              // (left: a zone change's blank frames)
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
         dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF000000, 1.0f);
+        if (frame >= 50) {
+            dev.EndFrame();
+            Sleep(16);
+            continue;
+        }
         dev.SetTransform(View, LookAtLH({0.0f, 1.8f, 0.5f}, {0.0f, 1.65f, 1.5f}, {0, 1, 0}));
         dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
         dev.SetTransform(World, Identity());

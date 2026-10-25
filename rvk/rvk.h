@@ -3315,7 +3315,9 @@ private:
     void PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
                            const uint16_t* indices, uint32_t indexCount);
     void PortalCaptureFrame();                   // (BeginFrame, before anything is recorded)
-    void PortalCaptureSave();
+    struct PortalCaptureState;
+    void PortalCaptureSave(PortalCaptureState& state);
+    void PortalCaptureReadBack(PortalCaptureState& state);
     void PortalForgetTexture(Texture* texture);  // (DestroyTexture)
     bool ReadTexturesLevel0(const std::vector<Texture*>& textures, std::vector<std::vector<uint8_t>*>& out);   // (outside a frame)
     struct PortalDoor { float base[3], axis[3]; char name[48]; };
@@ -3328,8 +3330,9 @@ private:
         std::vector<PortalDoor> doors;
         float arrival[3] = {}, roomCentre[3] = {};
         uint32_t roomPieces = 0, unsaved = 0;
-        double lastNew = 0.0;
-    } m_pc;
+        double lastNew = 0.0, lastSave = 0.0;
+    };
+    PortalCaptureState m_pc, m_pcLeaving;        // (leaving: saved at the next frame's start)
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;
