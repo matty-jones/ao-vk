@@ -310,6 +310,7 @@ bool Device::IsCarrierItem(const CapturedLight& c, const ShadowItem& item)
 
 void Device::FindCarriers()
 {
+    constexpr uint8_t kOwnerHeld = 10;           // frames a light keeps its carrier's owner with the carrier missed
     // Each run's box (union of its casters') and lowest origin, for the held-item test below.
     uint32_t groups = 0;
     for (const ShadowItem& it : m_shadowItems)
@@ -373,6 +374,8 @@ void Device::FindCarriers()
     for (CapturedLight& c : m_lightsCur) {
         c.hasCarrier = false;
         c.owner = 0;
+        c.carrierOwner = 0;
+        c.ownerHeld = 0;
         c.carrierGroup = ~0u;
         c.carrierGroups.clear();
         if (c.light.range < 1.0f)
@@ -388,7 +391,29 @@ void Device::FindCarriers()
                 float d2 = dx * dx + dy * dy + dz * dz;
                 if (d2 < bestD2) { bestD2 = d2; owner = s.owner; }
             }
-            c.owner = owner;
+            // The game's light hangs under a character's frames or next to it under a small parent - not always the
+            // one wearing it (a dump: a big piece 0.7 to the side named, the body under the light not, so with
+            // RVK_OwnShadow off the body still cast, coming and going with the pose). A body standing under the light
+            // (origin 1.5-2.6 below, within 0.5 sideways: the walk sways it) whose owner isn't the one named is taken.
+            if (owner) {
+                float under = 0.5f * 0.5f, namedD2 = 1e30f;
+                uint32_t body = 0;
+                gather(p.x, p.z, 0.5f, true);
+                inOrder();
+                for (uint32_t idx : nearby) {
+                    const ShadowItem& it = m_shadowItems[idx];
+                    const float dy = it.world.m[3][1] - p.y;
+                    const float extent = std::max(std::max(it.boundsMax[0] - it.boundsMin[0], it.boundsMax[1] - it.boundsMin[1]), it.boundsMax[2] - it.boundsMin[2]);
+                    if (!it.owner || dy <= -2.6f || dy >= -1.5f || extent >= 3.0f)
+                        continue;
+                    const float dx = it.world.m[3][0] - p.x, dz = it.world.m[3][2] - p.z, d2 = dx * dx + dz * dz;
+                    if (it.owner == owner) namedD2 = std::min(namedD2, d2);
+                    else if (d2 < under) { under = d2; body = it.owner; }
+                }
+                if (body && namedD2 > under)
+                    owner = body;
+            }
+            c.owner = c.carrierOwner = owner;
             if (owner) {
                 std::vector<uint8_t> linked(groups, 0);
                 auto from = std::lower_bound(byOwner.begin(), byOwner.end(), std::pair<uint32_t, uint32_t>{owner, 0u});
@@ -410,7 +435,7 @@ void Device::FindCarriers()
             }
             // (Not one of the game's lights this frame, or none of its owner's pieces cast: found as below, by
             // where the character stands under it - the player's own light, seen without a carrier in a dump.)
-            c.owner = 0;
+            c.owner = c.carrierOwner = 0;
         }
         // The same light last frame (it moves with its character, a little per frame) and who carried it.
         const CapturedLight* prev = nullptr;
@@ -432,6 +457,10 @@ void Device::FindCarriers()
         inOrder();
         for (uint32_t idx : nearby) {
             const ShadowItem& it = m_shadowItems[idx];   // (drawn: remembered copies may stand where it was)
+            // (With the draws' owners known, only a character's piece: a shop's terminal under a ceiling lamp made
+            // the lamp a character's - dimmed to RVK_CharLight, and with RVK_OwnShadow off its shadow gone.)
+            if (exact && !it.owner)
+                continue;
             float dy = it.world.m[3][1] - p.y;
             if (dy <= -2.6f || dy >= 0.3f)       // where IsCarrierPart looks for the carrier's parts
                 continue;
@@ -461,9 +490,26 @@ void Device::FindCarriers()
             c.carrier[1] = it.world.m[3][1];
             c.carrier[2] = it.world.m[3][2];
             c.carrierGroup = it.group;
+            c.carrierOwner = it.owner;           // (its character, exactly: the runs below can take in a neighbour's)
         }
-        if (!c.hasCarrier)
+        if (!c.hasCarrier) {
+            // Missed for a frame (running, the light swings out from the body): the owner the same light had is
+            // kept a few frames, or with RVK_OwnShadow off the character's shadow flickered back on as it ran.
+            const CapturedLight* held = nullptr;
+            float heldBest = 1.0f;
+            for (const CapturedLight& q : m_lightsPrev) {
+                if (!q.carrierOwner || q.ownerHeld >= kOwnerHeld || q.light.range != c.light.range)
+                    continue;
+                float dx = q.light.position.x - p.x, dy = q.light.position.y - p.y, dz = q.light.position.z - p.z;
+                float d = dx * dx + dy * dy + dz * dz;
+                if (d < heldBest) { heldBest = d; held = &q; }
+            }
+            if (held) {
+                c.carrierOwner = held->carrierOwner;
+                c.ownerHeld = uint8_t(held->ownerHeld + 1);
+            }
             continue;
+        }
 
         // The game doesn't draw a character in one go: its head, body and weapon pieces can each be a run of their
         // own, with other characters' pieces in between (dumps: player head, NPC body, player body). A run is the
@@ -686,8 +732,14 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             s = {};
             continue;
         }
-        const d3d::Light& l = m_lightsCur[candidates[slots[k].candidate].index].light;
+        const CapturedLight& lit = m_lightsCur[candidates[slots[k].candidate].index];
+        const d3d::Light& l = lit.light;
         float pos[3] = {l.position.x, l.position.y, l.position.z};
+        // RVK_OwnShadow off: a character's own light (a lamp it wears) leaves the character out of its cube - no
+        // shadow of it thrown round its feet. Its pieces are known by their owner (FindCarriers: the game's light's
+        // carrier, else the owner of the body found under it) - not by its runs of draws, which take in a character
+        // standing close (it lost its shadow: user's dumps); only without an owner by where they stand.
+        const bool leaveCarrier = !m_carrierCasts && (lit.hasCarrier || lit.carrierOwner);
         // A spot light: only the faces and casters its cone reaches (SpotCone) - a floodlight looking down drew all six
         // faces with every caster within its range (1,041 units over Borealis's bridges).
         static const bool coneOff = [] { const char* v = std::getenv("RANDYVK_SPOT_CONE"); return v && *v == '0'; }();
@@ -740,14 +792,18 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             if (d2 > l.range * l.range)
                 continue;
             uint32_t i = m_shadowOrder[n];
-            // A lamp's housing (small, around the light) would shadow everything around it. Characters always
-            // cast, the one carrying the light too (telling its pieces apart from others' proved unreliable;
-            // FindCarriers now only serves CarriedLight). Big objects (buildings, platforms with their pillars) cast
+            // A lamp's housing (small, around the light) would shadow everything around it. Characters cast, the one
+            // carrying the light too unless RVK_OwnShadow is off (above). Big objects (buildings, platforms with their pillars) cast
             // even when their box contains the light; the near plane clips geometry right at the light.
             float extent = std::max(std::max(box[3] - box[0], box[4] - box[1]), box[5] - box[2]);
             bool housing = d2 == 0.0f && extent < 1.5f;              // smaller than a character
             if (housing)
                 continue;
+            if (leaveCarrier) {
+                const ShadowItem& it = m_shadowItems[i];
+                if (lit.carrierOwner ? it.owner == lit.carrierOwner : IsCarrierPart(lit, it.world, it.boundsMin, it.boundsMax))
+                    continue;
+            }
             uint32_t faces = CubeFaceMask(box, box + 3, pos, kPointShadowNear) & coneFaces;
             if (!faces || (cone.on && !BoxInCone(box, box + 3, pos, cone)))
                 continue;

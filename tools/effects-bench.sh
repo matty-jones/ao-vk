@@ -22,7 +22,7 @@ for name in ${(ko)scenes}; do
   [[ $name =~ $filter ]] || continue
   for r in $(seq $reps); do
     log=$out/$name.$r.log
-    ( cd $out && WINEPREFIX=$HOME/.wine-prk WINEDEBUG=-all timeout 300 wine $exe --frames 1210 --fixed-clock 7 --shot $name.bmp ${=scenes[$name]} ${=RVK_BENCH_EXTRA} > $log 2>&1 )
+    ( cd $out && WINEPREFIX=$HOME/.wine-prk WINEDEBUG=-all timeout 300 $root/tools/wine-hidden.sh wine $exe --frames 1210 --fixed-clock 7 --shot $name.bmp ${=scenes[$name]} ${=RVK_BENCH_EXTRA} > $log 2>&1 )
     line=$(grep 'gpu ms:' $log | sed -n 2p)
     total=$(echo $line | grep -oE 'total [0-9.]+' )
     fx=$(echo $line | tr '|' '\n' | grep -E 'smoke|rain|water|particle|scene |depth' | grep -vE ' 0\.00' | tr -s ' ' | tr '\n' '|')

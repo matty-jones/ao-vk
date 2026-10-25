@@ -4,6 +4,7 @@
 # (tools/city-compare.py). Headless under Wine, no validation layer (it would skew the times).
 # Usage: tools/city-bench.sh OUT_DIR [BASELINE_DIR]     (the baseline of 2026-10-14: build/rb-base)
 cd "$(dirname "$0")/.." || exit 1
+hidden=$PWD/tools/wine-hidden.sh                 # (no windows on the desktop: RVK_DEMO_VISIBLE=1 to see them)
 [ $# -ge 1 ] || { echo "usage: $0 OUT_DIR [BASELINE_DIR]"; exit 1; }
 out=$1
 base=${2:-}
@@ -12,7 +13,7 @@ exe=$PWD/build/linux-release/rvk_demo.exe
 export WINEPREFIX=${WINEPREFIX:-$HOME/.wine-prk} WINEDEBUG=-all
 run() {
     name=$1; shift
-    (cd "$out" && timeout 300 wine "$exe" "$@" > "$name.txt" 2>&1)
+    (cd "$out" && timeout 300 "$hidden" wine "$exe" "$@" > "$name.txt" 2>&1)
     echo "$name: exit $?"
 }
 run city --city-bench --pixel-lighting --frames 120 --city-warm 20 --shot city.bmp --dump city-dump.txt

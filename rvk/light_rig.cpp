@@ -54,7 +54,7 @@ void Device::UpdateLightRig()
         r.gameSun = m_sunLuminance;
         r.gameAmbient = std::max(m_sceneAmbient, 0.0f);
         r.sunGain = r.skyGain = 1.0f;
-        r.landGain = 1.0f;
+        r.landGain = r.meter = 1.0f;
         m_rigAdaptSet = m_rigGainSet = false;
         return;
     }
@@ -166,6 +166,33 @@ void Device::UpdateLightRig()
         r.landGame = game > 0.0f ? game / noonGame : 1.0f;
         const float target = std::clamp(r.landTarget / std::max(r.landGame, 1e-3f), 0.2f, 1.5f);
         r.landGain = m_rigGainSet ? r.landGain + (target - r.landGain) * (1.0f - std::exp(-m_frameDt / 1.5f)) : target;
+        // The camera's metering on top, for everything alike (the land, the sky, the clouds, lamps): the whole view's
+        // brightness over the land's (scene_luma.comp, every other frame each), against the zone's by day (the sun
+        // over ~25 degrees, steady) - its RVK_Metering power (0.5: the square root) taken off. A sunset sky much
+        // brighter than the land takes the exposure down - the land towards silhouettes -, a view as by day leaves it;
+        // at most x0.4, eased over ~1.5 s.
+        const bool fresh = m_viewLumaFrame != ~0ull && m_viewLumaFrame + 30 >= m_frameNumber && m_viewLuma > 0.0f &&
+                           m_landLumaFrame != ~0ull && m_landLumaFrame + 30 >= m_frameNumber && m_landLuma > 0.0f;
+        constexpr float kDayView = 0.92f;
+        float meterTarget = 1.0f;
+        r.metered = fresh;
+        if (fresh) {
+            r.view = m_viewLuma / m_landLuma;
+            if (steady && h > 0.42f) {
+                const float k = z.viewDay ? 1.0f - std::exp(-m_frameDt / 10.0f) : 1.0f;
+                z.view += (r.view - z.view) * k;
+                z.viewDay = true;
+            }
+            // (A zone not yet seen by day - a session started at dusk, or the zone first entered at night: a usual
+            // day's view, 0.92 of the land in the demo's, until it is; never its night's own view, darker than its
+            // land, every dawn read against it as too bright.) (Only down: a view darker than by day - the night's sky
+            // darker than its land - lifted the nights lighter than the land's exposure set them.) The power is
+            // RVK_Metering (0: off).
+            r.viewRef = z.viewDay ? z.view : -1.0f;
+            const float ref = z.viewDay ? z.view : kDayView;
+            meterTarget = std::clamp(std::pow(std::max(r.view / std::max(ref, 1e-3f), 1e-3f), -m_metering), 0.4f, 1.0f);
+        }
+        r.meter = m_rigGainSet ? r.meter + (meterTarget - r.meter) * (1.0f - std::exp(-m_frameDt / 1.5f)) : meterTarget;
         m_rigGainSet = true;
     }
     // Exposed, in the zone's units.
@@ -179,14 +206,17 @@ void Device::UpdateLightRig()
         Log("light rig: sun up %.3f (%.1f deg); physical: sun %.3g sky %.3g moon %.3g, land %.3g lux -> adapt x%.3g "
             "(alpha %.2f); storm %.2f; zone %u (%s: sun %.2f sky %.2f); exposed: key %.3f (%s) ambient %.3f, key "
             "share %.2f; the game now: sun %.2f ambient %.2f -> gains sun %.2f sky %.2f; the ground's baked sky %.2f %.2f "
-            "%.2f (%s); land exposure x%.2f (target %.2f of noon, the game's light %.2f of its noon)",
+            "%.2f (%s); land exposure x%.2f (target %.2f of noon, the game's light %.2f of its noon); camera x%.2f "
+            "(%s: the view %.2f x the land, by day %.2f)",
             double(h), double(std::asin(std::clamp(h, -1.0f, 1.0f)) * 57.29578f), double(r.sunN), double(r.sky),
             double(r.moonN), double(r.land), double(r.adapt), double(alpha), double(r.storm), r.zone,
             r.zoneMeasured ? "measured" : "default", double(r.zoneSun), double(r.zoneSky), double(r.key),
             r.keySun >= 0.5f ? "the sun" : "the moon", double(r.ambient), double(r.keyShare), double(r.gameSun),
             double(r.gameAmbient), double(r.sunGain), double(r.skyGain), double(r.groundSky[0]), double(r.groundSky[1]),
             double(r.groundSky[2]), r.groundKnown ? "its lightmap" : "unknown: the grass captures it",
-            double(r.landGain), double(r.landTarget), double(r.landGame));
+            double(r.landGain), double(r.landTarget), double(r.landGame), double(r.meter),
+            !r.metered ? "no measure yet" : r.viewRef > 0.0f ? "metered" : "metered against a usual day: the zone not seen by day",
+            double(r.view), double(r.viewRef));
 }
 
 bool Device::RigGameLight(const d3d::Light& game, d3d::Light* out) const

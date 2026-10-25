@@ -6,6 +6,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- A character's own light (a lamp or glowing item it wears) can be kept from casting that character's shadow on the
+  ground and walls around it: switch off `RVK_OwnShadow` (Shadows, under point light shadows). Everything else still
+  casts in that light, the other characters near it included, and lamps still shadow everyone.
 - Meshes from the ao-assets workbench can have a texture of their own: a building or prop unwrapped again and painted
   in Blender or Substance Painter shows its own texture (with its normal, roughness / metal and glow maps) instead
   of the shared game textures it used. A mesh you are editing also shows its new shape in the running game within a
@@ -68,6 +71,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   characters are lit by the same night sky as the ground around them, no longer at about half its brightness. How
   dark the land gets now follows the light of the hour, as eyes adapt: a moonlit night is lighter than a moonless
   one, and the darkness floor's slow brightening is gone (`RVK_Darkness` still sets how dark).
+- The land, sky and clouds share one exposure, metered like a camera's: when the view holds much more bright sky
+  than the zone's daytime balance (looking into a sunset), the whole picture comes down a little together. It only
+  ever darkens, never below 0.4 of the exposure; a zone not yet seen by day is metered against a usual day.
+  `RVK_Metering` (Lighting) sets how strongly (0 turns it off).
 - Faster on the GPU wherever buildings, characters and plants fill the view: they no longer share the ground's heavy
   shader build, and those no lamp reaches skip the lamps' code as well, so the graphics card works on more of their
   pixels at once (a city's scene by day about half the GPU time).
@@ -88,6 +95,15 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Inside shops and other rooms, the props and characters were much darker than the walls and floor around them.
+  Lamp brightness (`RVK_PtLight`) now only applies outdoors: in a room the lamps are its light, at the game's strength.
+- A ceiling lamp over a shop terminal or other prop could be taken for a light a character carries, dimmed to
+  `RVK_CharLight`, and with `RVK_OwnShadow` off the prop under it cast no shadow.
+- At night in open zones, a lit strip ran round the whole horizon just under the sky, with a hard top edge and the
+  far hills dark against it: the game's cloud sheets that sit below eye level, far off, showed there. They're no
+  longer drawn under the horizon.
+- With ray-traced ambient occlusion (`RVK_AoMode` 2), the shading slid a few pixels behind walls and corners while
+  strafing, and slid back once the camera stopped.
 - By night, grass growing right behind a tree trunk (or anything else solid) showed in front of it. The grass was drawn
   with the camera the game had set last for its night effects, not the world's.
 - With depth of field on (`RVK_Dof`), the glow a lamp makes in the air (a character's own light at night, in rain or

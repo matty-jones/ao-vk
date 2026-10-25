@@ -592,7 +592,7 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
         }
         m_frameLightSpheres.push_back(sphere);
         FillGpuLight(c.light, c.cosHalfTheta, c.cosHalfPhi, fl->lights[k],
-                     m_pointLightScale + (m_charLightScale - m_pointLightScale) * c.carried);
+                     LampScale() + (m_charLightScale - LampScale()) * c.carried);
         fl->lights[k].ambient[3] = c.carried > 0.5f ? 1.0f : 0.0f;   // carried by a character (F_CHARACTER draws)
         uint32_t cube = PointShadowLayer(c.light);
         fl->lights[k].spot[2] = float(cube);                        // its cube shadow map + 1, 0 = none
@@ -857,20 +857,22 @@ bool Device::SwayParams(uint32_t primitive, uint32_t fvf, uint32_t stride, const
 // whose vertices are new this frame. A static mesh is new on the frame it first appears too, so a candidate counts
 // only if its fingerprint isn't drawn again the next frame (UpdatePushTrail) - the feet lag two frames.
 // A game light's intensity setting: directional ones as they are; a point / spot light carried by a character
-// (the captured lights' carriers, matched by position and range) at m_charLightScale, others at m_pointLightScale.
+// (the captured lights' carriers, matched by position and range) at m_charLightScale, others at LampScale (a room's
+// lamps at the game's strength: a shop's props had a quarter of the light its walls and floor have baked in).
 float Device::LightScale(const d3d::Light& l) const
 {
     if (l.type == d3d::LIGHT_DIRECTIONAL)
         return 1.0f;
-    if (m_charLightScale != m_pointLightScale)
+    const float lamp = LampScale();
+    if (m_charLightScale != lamp)
         for (const CapturedLight& c : m_lightsPrev) {
             if (c.carried <= 0.0f || c.light.range != l.range) continue;
             float dx = c.light.position.x - l.position.x, dy = c.light.position.y - l.position.y,
                   dz = c.light.position.z - l.position.z;
             if (dx * dx + dy * dy + dz * dz < 1.0f)
-                return m_pointLightScale + (m_charLightScale - m_pointLightScale) * c.carried;
+                return lamp + (m_charLightScale - lamp) * c.carried;
         }
-    return m_pointLightScale;
+    return lamp;
 }
 
 // Phong tessellation of characters (RVK_Tess): the level for this draw, 0 for none. Characters are drawn as

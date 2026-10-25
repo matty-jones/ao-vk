@@ -259,6 +259,7 @@ struct DeviceInfo {
     X(SandTint, m_sandTint, 0)                        /* the land tinted by a sandstorm's light, x */ \
     X(SunSoft, m_sunSoftness, L)                      /* sun shadows' softening with distance (0 hard) */ \
     X(CrownShade, m_crownShade, L)                    /* tree crowns lit as one rounded mass (0..1) */ \
+    X(Metering, m_metering, 0)                        /* the camera's metering: how far a bright view takes the exposure down (0 off) */ \
     X(CrownSky, m_crownSky, L)                        /* crowns' ambient as the sky's: from above (0..1) */ \
     X(CrownDepth, m_crownDepth, L)                    /* sunlight through crowns by their depth (0..1) */ \
     X(NightGlow, m_nightGlow, C|L)                    /* windows, signs and screens glowing at night, x */ \
@@ -290,6 +291,7 @@ struct DeviceInfo {
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
     X(FolEdges, m_foliageEdges, 0)                    /* plants' soft edges in a second pass */ \
     X(OwnLight, m_carrierLit, C)                      /* a character's own light lights the character */ \
+    X(OwnShadow, m_carrierCasts, 0)                   /* a character casts a shadow in its own light */ \
     X(Fxaa, m_fxaa, 0)                                /* FXAA while TAA is off */ \
     X(StormTint, m_stormTint, 0)                      /* the game's storm sheet drawn */ \
     X(StormFlash, m_stormFlash, 0)                    /* the game's lightning glow drawn */ \
@@ -1109,6 +1111,7 @@ private:
     bool m_constantsDirty = true;
     bool m_pixelLighting = false, m_lightingDebug = false, m_lightOverride = false;
     bool m_carrierLit = true;
+    bool m_carrierCasts = true;                  // RVK_OwnShadow: off, a carried light's cube leaves out its carrier
     float m_lightHeadroom = 1.0f;
     float m_bump = 0.0f;
     bool m_normalMaps = true;
@@ -1339,6 +1342,8 @@ private:
         float carrier[3] = {};
         float carried = 0.0f;                    // 0..1: counted as a character's light (smoothed over frames)
         uint32_t owner = 0;                      // its carrier (SetDrawVisual owner) when the scene's lights are known
+        uint32_t carrierOwner = 0;               // the carrier's owner: owner, else that of the piece found under it
+        uint8_t ownerHeld = 0;                   // frames carrierOwner has been kept with the carrier not found
     };
     // End of frame: for each light, the character carrying it - the body origin nearest under it. The game places a
     // character's light up to ~0.4 sideways off the body while it moves, so a fixed radius around the light either
@@ -1525,6 +1530,10 @@ private:
     float m_darkGain = 1.0f;                     // the floor's exposure gain, eased
     float m_landLuma = -1.0f;                    // the land's brightness as shown, last measured (scene_luma.comp)
     uint64_t m_landLumaFrame = ~0ull;            // ... when
+    float m_viewLuma = -1.0f;                    // the whole view's (sky too) in the scene, last measured (the light rig;
+                                                 // m_landLuma then the land's alone, as the scene has it)
+    uint64_t m_viewLumaFrame = ~0ull;
+    bool m_lumaView[kFramesInFlight] = {};       // the measure in that slot is the whole view's
     VkPipeline m_lumaPipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_lumaLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_lumaSetLayout = VK_NULL_HANDLE;
@@ -1771,6 +1780,10 @@ private:
         // lightmap round the camera and its ambient). Storms are left out of both: their darkness is in our lighting.
         // In place of the night's darkening by NightAmount and RVK_Darkness, and the darkness floor.
         float landTarget = 1.0f, landGame = 1.0f, landGain = 1.0f;
+        // The camera's metering (the one exposure for everything, on top of the land's): the whole view's brightness
+        // over the land's (view), the zone's by day (viewRef), the exposure from them (meter: tone mapping's).
+        float view = -1.0f, viewRef = 1.0f, meter = 1.0f;
+        bool metered = false;
         // The zone's day light (its game sun's and ambient's luma, the ambient at noon): what the rig is in units of.
         uint32_t zone = 0;
         float zoneSun = 1.0f, zoneSky = 0.4f;
@@ -1783,7 +1796,10 @@ private:
         float sunFade = 1.0f;
     };
     LightRig m_rig;
-    struct RigZone { float sun = 1.0f, sky = 0.4f, land = 1.0f; bool landSeen = false; };
+    struct RigZone {
+        float sun = 1.0f, sky = 0.4f, land = 1.0f, view = 1.0f;
+        bool landSeen = false, viewDay = false;
+    };
     std::unordered_map<uint32_t, RigZone> m_rigZones;   // each zone's day light, measured by day
     bool m_rigAdaptSet = false, m_rigGainSet = false;
     double m_rigSteadySince = -1.0;              // since when the zone and the game's ambient have been seen steadily
@@ -1833,6 +1849,7 @@ private:
     uint32_t m_memoryTraceFrames = 0;            // (frames left of the counts' trace)
     bool m_hillShade = true;                     // RVK_HillShade: the terrain's shade from a low sun (terrain_sun.cpp)
     bool m_lightRig = true;                      // RVK_LightRig: one light for day and night (light_rig.cpp)
+    float m_metering = 0.5f;                     // RVK_Metering: the camera metering's power of the view over the land
     TerrainSettings m_terrainSettings;           // RVK_Terrain*: the ground's own texturing (terrain.cpp)
     bool m_shadowViewDebug = false;              // RVK_ShadowView: the sun shadow map's say painted on the scene
     // The next draws only cast (native mesh.cpp: static meshes the game culled, within the shadows' reach): recorded as
@@ -3184,6 +3201,9 @@ private:
     void DestroyLeafResources();
     float m_pointLightScale = 1.0f, m_charLightScale = 1.0f;   // SetPointLightIntensity
     float LightScale(const d3d::Light& l) const;
+    // RVK_PtLight for a lamp: outdoors only. In a room's playfield (no sun) the lamps are the room's light - its walls
+    // and floor have theirs baked in at the game's strength - so the things in it take them at the game's strength too.
+    float LampScale() const { return m_cond.sunKnown ? m_pointLightScale : 1.0f; }
     bool FoliageFar() const;                  // pieces per 0.3 world units (0 = plants drawn as the game gives them)
     bool DrawFartherThan(float distance) const;  // the current draw's box beyond `distance` from the camera
     void SubdividePlant(uint32_t& primitive, uint32_t fvf, const detail::FvfLayout& layout, const void*& vertices,

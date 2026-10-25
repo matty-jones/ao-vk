@@ -579,7 +579,7 @@ void Device::EndScene()
     for (Texture*& lut : m_lut)
         if (!lut) lut = CreateLut(16, nullptr);
     // (With the light rig its land exposure takes the darkness floor's place: tonemap.frag.)
-    float params[16] = {m_tonemapKnee, m_exposure * (m_rig.on ? 1.0f : m_darkGain), bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
+    float params[16] = {m_tonemapKnee, m_exposure * (m_rig.on ? m_rig.meter : m_darkGain), bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
                         m_bloomDepth ? m_bloomOverNearer : -1.0f, m_aoProj.m[2][2], m_aoProj.m[3][2],
                         gi ? m_giStrength : 0.0f,
                         float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0) | (m_aoFull ? 32 : 0) |

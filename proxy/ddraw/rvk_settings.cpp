@@ -74,6 +74,7 @@ Setting g_settings[] = {
 
     {"RVK_HillShade",   "The terrain's shade from a low sun (valleys under mountains)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_LightRig",    "One light for day and night (off: the old night lighting)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_Metering",    "Camera metering: a view brighter than the land (a sunset sky) darkens the picture, as a camera does (0 = off)", "Lighting", Float, 0, 2, 0.1f, 0.5f, nullptr, 0, "RVK_LightRig"},
     {"RVK_BumpOn", "Generated bump maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Bump", "Strength", "Materials",         Float, 0.25f, 4, 0.25f, 0.25f, "RANDYVK_BUMP", 0, "RVK_BumpOn"},
     {"RVK_NormalMaps", "Normal maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
@@ -297,6 +298,7 @@ Setting g_settings[] = {
     {"RVK_PtRes",      "Resolution (per face)",                 "Shadows",          Choice, 256, 2048, 1, 512, nullptr, 0, "RVK_PtOn", "256 512 1024 2048"},
     {"RVK_PtStrength", "Darkness", "Shadows",          Float, 0, 1, 0.05f, 1, "RANDYVK_POINT_SHADOW_STRENGTH", 0, "RVK_PtOn"},
     {"RVK_PtDay",      "Strength in daylight (fraction)",                          "Shadows",          Float, 0, 1, 0.05f, 1, "RANDYVK_POINT_SHADOW_DAY", 0, "RVK_PtOn"},
+    {"RVK_OwnShadow",  "A character's own light (a lamp it wears) casts the character's shadow", "Shadows", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_PtOn"},
 
     {"RVK_Hdr", "Off-screen scene for every effect (0: none - the game's own drawing)", "Effects",  Bool,  0, 1, 1, 1, "RANDYVK_HDR", 0},
     {"RVK_Knee", "Tone mapping knee (1 = only clip)", "Tone mapping",  Float, 0.5f, 1, 0.05f, 0.85f, "RANDYVK_TONEMAP_KNEE", 0, "RVK_Hdr"},
@@ -439,7 +441,7 @@ const Vanilla kVanilla[] = {
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
     {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_Rainbow", 0}, {"RVK_ViewRange", 1},
-    {"RVK_LightRig", 0},
+    {"RVK_LightRig", 0}, {"RVK_Metering", 0},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -633,6 +635,7 @@ const Cost kCosts[] = {
     {"RVK_PtShadows", "GPU: more with the value"},
     {"RVK_PtRes", "GPU and video memory: more with the value"},
     {"RVK_PtStrength", "no cost"},
+    {"RVK_OwnShadow", "no cost"},
     // Effects
     {"RVK_BloomOn", "GPU: low"},
     {"RVK_Bloom", "no cost"},
@@ -680,6 +683,7 @@ const Cost kCosts[] = {
     {"RVK_Saturation", "no cost"},
     {"RVK_Contrast", "no cost"},
     {"RVK_LightRig", "no cost"},
+    {"RVK_Metering", "no cost"},
     {"RVK_Warmth", "no cost"},
     {"RVK_NightTint", "no cost"},
     {"RVK_Vignette", "no cost"},

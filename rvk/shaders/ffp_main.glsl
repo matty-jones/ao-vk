@@ -1252,7 +1252,10 @@ void main()
     bool cloudSheet = (D.mat.z & MAT_CLOUDSHEET) != 0u;
     if (cloudSheet) {
         current.rgb = CloudSheet(Sample(0u));
-        current.a = clamp(current.a * FL.cloudSky.w, 0.0, 1.0);
+        // (None below the horizon: the game puts some sheets under the eye, far off - behind the far hills, a lit
+        // strip under the horizon all round with a hard top edge, brighter than the night sky: user's dump.)
+        float above = smoothstep(-0.004, 0.012, normalize(vPosW - C.eyePos.xyz).y);
+        current.a = clamp(current.a * FL.cloudSky.w * above, 0.0, 1.0);
     }
     float fogF = 1.0;                                     // (how much of the surface shows through the fog)
     if ((C.flags.x & F_FOG) != 0u && !cloudSheet) {

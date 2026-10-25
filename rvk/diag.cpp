@@ -329,11 +329,11 @@ void Device::EndFrameDump()
             cube |= m_pointShadowLights[i].range == c.light.range &&
                     std::fabs(m_pointShadowLights[i].position[0] - c.light.position.x) < 1.0f &&
                     std::fabs(m_pointShadowLights[i].position[2] - c.light.position.z) < 1.0f;
-        if (!c.hasCarrier && !cube)
+        if (!c.hasCarrier && !c.carrierOwner && !cube)
             continue;
         const d3d::Vector& l = c.light.position;
-        std::fprintf(m_dumpFile, "# light (%.1f %.1f %.1f) r%.1f carrier%s:", l.x, l.y, l.z, c.light.range,
-                     c.owner ? " (the scene's, exact)" : "");
+        std::fprintf(m_dumpFile, "# light (%.1f %.1f %.1f) r%.1f carrier%s owner %08X%s:", l.x, l.y, l.z, c.light.range,
+                     c.owner ? " (the scene's, exact)" : "", c.carrierOwner, c.ownerHeld ? " (held from last frame)" : "");
         if (c.hasCarrier)
             std::fprintf(m_dumpFile, " g%u origin (%.2f %.2f %.2f), %.2f under the light;", c.carrierGroup,
                          c.carrier[0], c.carrier[1], c.carrier[2], l.y - c.carrier[1]);
@@ -496,10 +496,10 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
         m_dumpedLightValid[i] = true;
         const d3d::Light& l = s.light;
         std::fprintf(f, "L %zu: type %u pos (%.2f %.2f %.2f) dir (%.2f %.2f %.2f) range %.2f att %.3f/%.4f/%.5f"
-                        " diffuse (%.2f %.2f %.2f) ambient (%.2f %.2f %.2f)",
+                        " diffuse (%.2f %.2f %.2f) specular (%.2f %.2f %.2f) ambient (%.2f %.2f %.2f)",
                      i, uint32_t(l.type), l.position.x, l.position.y, l.position.z, l.direction.x, l.direction.y,
                      l.direction.z, l.range, l.attenuation0, l.attenuation1, l.attenuation2, l.diffuse.r, l.diffuse.g,
-                     l.diffuse.b, l.ambient.r, l.ambient.g, l.ambient.b);
+                     l.diffuse.b, l.specular.r, l.specular.g, l.specular.b, l.ambient.r, l.ambient.g, l.ambient.b);
         if (l.type == d3d::LIGHT_SPOT)           // (its cone: inner and outer, full angles in degrees, and falloff)
             std::fprintf(f, " cone %.1f/%.1f falloff %.2f", double(l.theta) * 57.29578, double(l.phi) * 57.29578,
                          double(l.falloff));
@@ -541,9 +541,12 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
             else std::fprintf(f, " %zu:%.1f", k, nearest[k]);
         }
         const d3d::Material& m = m_material;
-        std::fprintf(f, " | mat d(%.2f %.2f %.2f %.2f) a(%.2f %.2f %.2f) e(%.2f %.2f %.2f) src %u/%u/%u/%u cv %u amb %08X",
+        std::fprintf(f, " | mat d(%.2f %.2f %.2f %.2f) a(%.2f %.2f %.2f) e(%.2f %.2f %.2f)",
                      m.diffuse.r, m.diffuse.g, m.diffuse.b, m.diffuse.a, m.ambient.r, m.ambient.g, m.ambient.b,
-                     m.emissive.r, m.emissive.g, m.emissive.b, m_rs[d3d::RS_DIFFUSEMATERIALSOURCE],
+                     m.emissive.r, m.emissive.g, m.emissive.b);
+        if (m_rs[d3d::RS_SPECULARENABLE])        // (specular on: its colour and power)
+            std::fprintf(f, " s(%.2f %.2f %.2f) p %.1f", m.specular.r, m.specular.g, m.specular.b, m.power);
+        std::fprintf(f, " src %u/%u/%u/%u cv %u amb %08X", m_rs[d3d::RS_DIFFUSEMATERIALSOURCE],
                      m_rs[d3d::RS_AMBIENTMATERIALSOURCE], m_rs[d3d::RS_SPECULARMATERIALSOURCE],
                      m_rs[d3d::RS_EMISSIVEMATERIALSOURCE], m_rs[d3d::RS_COLORVERTEX], m_rs[d3d::RS_AMBIENT]);
     }

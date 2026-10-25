@@ -75,14 +75,31 @@ void main()
         }
     }
     float open = 1.0 - occlusion / float(kRays);
-    // Last frame's, where this point was then.
+    // Last frame's, where this point was then: between its four nearest pixels (bilinear), those whose depth agrees.
+    // (Not the nearest pixel alone: moving steadily, its half a pixel off lies the same way each frame and adds up over
+    // the frames averaged - the occlusion slid behind the geometry while strafing.)
     vec2 then = vec2(pix) + 0.5 - texelFetch(motion, pix, 0).xy;
     float frames = 1.0;
     if (P.frame.y > 0.5 && all(greaterThanEqual(then, vec2(0.0))) && all(lessThan(then, P.size.xy))) {
-        vec4 h = texelFetch(history, ivec2(then), 0);
-        if (abs(h.g - z) < 0.04 * z + 0.05) {
-            frames = min(h.b + 1.0, 16.0);
-            open = mix(h.r, open, 1.0 / frames);
+        vec2 at = then - 0.5;
+        ivec2 base = ivec2(floor(at));
+        vec2 f = at - vec2(base);
+        vec2 kept = vec2(0.0);                   // occlusion, frames - weighted
+        float weight = 0.0;
+        for (int k = 0; k < 4; ++k) {
+            ivec2 o = ivec2(k & 1, k >> 1);
+            ivec2 q = clamp(base + o, ivec2(0), ivec2(P.size.xy) - 1);
+            vec4 h = texelFetch(history, q, 0);
+            float wk = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+            if (abs(h.g - z) < 0.04 * z + 0.05 && wk > 0.0) {
+                kept += wk * h.rb;
+                weight += wk;
+            }
+        }
+        if (weight > 0.01) {
+            kept /= weight;
+            frames = min(kept.y + 1.0, 16.0);
+            open = mix(kept.x, open, 1.0 / frames);
         }
     }
     imageStore(outHistory, pix, vec4(open, z, frames, 0.0));

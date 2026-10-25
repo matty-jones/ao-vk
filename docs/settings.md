@@ -17,12 +17,12 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-344 settings, 172 of them in the settings window.
+346 settings, 174 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (8)
-- [Lighting](#lighting) (20)
+- [Lighting](#lighting) (21)
 - [Materials](#materials) (15)
 - [Debug](#debug) (7)
 - [Terrain](#terrain) (22)
@@ -31,7 +31,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Weather](#weather) (35)
 - [Smoke](#smoke) (12)
 - [Sky](#sky) (45)
-- [Shadows](#shadows) (17)
+- [Shadows](#shadows) (18)
 - [Effects](#effects) (57)
 - [Tone mapping](#tone-mapping) (2)
 - [Anti-aliasing](#anti-aliasing) (6)
@@ -76,6 +76,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_Aniso` | Texture filtering (anisotropic; 1 = off) | 1 (off) / 2 (2x) / 4 (4x) / 8 (8x) / 16 (16x) | 16 | GPU: low | window; game value 1; was env `RANDYVK_ANISOTROPY` |
 | `RVK_HillShade` | The terrain's shade from a low sun (valleys under mountains) | on / off | on |  | ini only; knob |
 | `RVK_LightRig` | One light for day and night (off: the old night lighting) | on / off | on | no cost | window; game value off; knob |
+| `RVK_Metering` | Camera metering: a view brighter than the land (a sunset sky) darkens the picture, as a camera does (0 = off) | 0 .. 2 | 0.5 | no cost | window; switch `RVK_LightRig`; game value 0; knob |
 
 ## Materials
 
@@ -335,6 +336,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PtRes` | Point light shadows: resolution (per face) | 256 / 512 / 1024 / 2048 | 512 | GPU and video memory: more with the value | window; switch `RVK_PtOn` |
 | `RVK_PtStrength` | Point light shadows: darkness | 0 .. 1 | 1 | no cost | window; switch `RVK_PtOn`; was env `RANDYVK_POINT_SHADOW_STRENGTH` |
 | `RVK_PtDay` | Point light shadows: strength in daylight (fraction) | 0 .. 1 | 1 |  | ini only; switch `RVK_PtOn`; was env `RANDYVK_POINT_SHADOW_DAY` |
+| `RVK_OwnShadow` | A character's own light (a lamp it wears) casts the character's shadow | on / off | on | no cost | window; switch `RVK_PtOn`; knob |
 
 ## Effects
 
