@@ -335,7 +335,9 @@ void Device::DrawPortals()
         const auto lights = m_lights;
         const d3d::Matrix world = m_world;
         const d3d::Material material = m_material;
-        const uint32_t kind = m_drawVisualKind;
+        const uint32_t kind = m_drawVisualKind, visual = m_drawVisual, owner = m_drawOwner;
+        m_drawVisual = 0;                        // (no game object's: not the last one the game drew)
+        m_drawOwner = 0;
         m_drawingPortal = true;
         m_portalScissor = box;
         // Behind the doorway's plane, from 0.15 in: the room's own entrance wall stands just behind its door's plane
@@ -379,13 +381,10 @@ void Device::DrawPortals()
             struct V { float x, y, z; uint32_t argb; };
             const float lift = 0.02f;            // (in front of the plane, towards the camera)
             const uint32_t argb = uint32_t(std::lround(shade * 255.0f)) << 24;
-            V quad[4];
-            for (int k = 0; k < 4; ++k) {
-                const int corner = k == 2 ? 3 : k == 3 ? 2 : k;   // (a strip)
-                quad[k] = {origin.x + (corner & 1 ? edgeU.x : 0.0f) + out[0] * lift,
-                           origin.y + (corner & 2 ? edgeV.y : 0.0f),
-                           origin.z + (corner & 1 ? edgeU.z : 0.0f) + out[2] * lift, argb};
-            }
+            V quad[4];                           // (a strip: bottom left, bottom right, top left, top right)
+            for (int k = 0; k < 4; ++k)
+                quad[k] = {origin.x + (k & 1 ? edgeU.x : 0.0f) + out[0] * lift, origin.y + (k & 2 ? edgeV.y : 0.0f),
+                           origin.z + (k & 1 ? edgeU.z : 0.0f) + out[2] * lift, argb};
             m_rs[d3d::RS_LIGHTING] = 0;
             m_rs[d3d::RS_ALPHABLENDENABLE] = 1;
             m_rs[d3d::RS_SRCBLEND] = d3d::BLEND_SRCALPHA;
@@ -419,6 +418,8 @@ void Device::DrawPortals()
         m_world = world;
         m_material = material;
         m_drawVisualKind = kind;
+        m_drawVisual = visual;
+        m_drawOwner = owner;
         m_constantsDirty = true;
         const uint64_t logKey = uint64_t(c.interior) << 32 ^
                                 uint32_t(std::lround(q.centre[0] * 10.0f) * 73856093 ^ std::lround(q.centre[2] * 10.0f));
