@@ -28,7 +28,8 @@ namespace {
 
 constexpr uint32_t kBlackTexture = 6014;   // 1010004:6014 blacktexture.png
 constexpr double kPendingFor = 30.0;       // a teleport's link waits this long for its room
-constexpr float kNearPlayer = 4.5f;        // the doorway walked through: this near the player (horizontally)
+constexpr float kNearPlayer = 8.0f;        // the doorway walked through: this near the player (horizontally) - a door's
+                                           // trigger is ~6 in front of a Fair Trade shop's doorway
 
 double Seconds()
 {
@@ -186,8 +187,8 @@ const Device::PortalLink* Device::PortalLinkFor(const BlackQuad& q, uint32_t pla
 // A teleport begins (ZoneSignal): the doorway the player stands in, if any - its link waits for the playfield arrived in.
 void Device::PortalLinkTeleport()
 {
-    if (PortalDir().empty())
-        return;
+    if (PortalDir().empty() || m_indoors)
+        return;                                  // (leaving a room: its own entrance isn't a doorway into anything)
     // The player: the characters' head nearest the camera, else the camera.
     float player[3] = {};
     bool have = false;
@@ -206,18 +207,20 @@ void Device::PortalLinkTeleport()
     if (!have)
         return;
     const BlackQuad* best = nullptr;
-    float bestD = kNearPlayer * kNearPlayer;
+    float bestD = kNearPlayer * kNearPlayer, nearest = 1e30f;
     for (const auto& [key, draw] : m_blackDraws) {
         if (draw.lastFrame + 60 < m_frameNumber) continue;
         for (const BlackQuad& q : draw.quads) {
             if (q.height < 1.5f || q.width < 0.7f || q.height > 6.0f || q.width > 6.0f) continue;   // (not a window)
             const float dx = q.centre[0] - player[0], dz = q.centre[2] - player[2];
+            nearest = std::min(nearest, dx * dx + dz * dz);
             if (dx * dx + dz * dz < bestD) { bestD = dx * dx + dz * dz; best = &q; }
         }
     }
     if (!best) {
-        Log("portal link: a teleport from (%.1f %.1f %.1f) in playfield %u, no doorway near", double(player[0]),
-            double(player[1]), double(player[2]), m_skyPlayfield);
+        Log("portal link: a teleport from (%.1f %.1f %.1f) in playfield %u, no doorway near (the nearest drawn %s)",
+            double(player[0]), double(player[1]), double(player[2]), m_skyPlayfield,
+            nearest < 1e29f ? (std::to_string(std::sqrt(nearest)).substr(0, 5) + " away").c_str() : "none");
         return;
     }
     m_portalPending = PortalPending{};

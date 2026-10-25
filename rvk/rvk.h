@@ -3331,6 +3331,7 @@ private:
         std::vector<PortalDoor> doors;
         float arrival[3] = {}, roomCentre[3] = {};
         uint32_t roomPieces = 0, unsaved = 0;
+        size_t bytes = 0;                        // its vertices, indices and textures so far
         double lastNew = 0.0, lastSave = 0.0;
     };
     PortalCaptureState m_pc, m_pcLeaving;        // (leaving: saved at the next frame's start)

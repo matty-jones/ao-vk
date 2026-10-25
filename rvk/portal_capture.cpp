@@ -29,7 +29,8 @@ namespace {
 
 constexpr double kQuiet = 1.5;             // seconds without a new piece before saving
 constexpr double kSaveEvery = 5.0;         // ... or this long since the last save, with new pieces
-constexpr size_t kMostPieces = 8192;       // a room's playfield: hundreds (a Fair Trade shop: ~280)
+constexpr size_t kMostPieces = 8192;       // a room's playfield: hundreds (a Fair Trade shop: ~320)
+constexpr size_t kMostBytes = 16u << 20;   // ... and a few MB (a Fair Trade shop: 4.5): a dungeon's isn't kept whole
 
 std::string g_portalDir;
 
@@ -69,6 +70,11 @@ void Device::PortalCapturePlayfield(uint32_t playfield)
     m_pc = PortalCaptureState{};
     if (!CaptureOn() || !playfield)
         return;
+    // Only a room walked into through a doorway (a link waits for it: portal_links.cpp), or one captured before - not
+    // every dungeon and mission (one indoor playfield's capture came to 51 MB).
+    const std::string path = g_portalDir + std::to_string(playfield) + ".rvkp";
+    if (!m_portalPending.active && !std::filesystem::exists(path))
+        return;
     m_pc.on = true;
     m_pc.capture = std::make_shared<portal::Capture>();
     m_pc.capture->playfield = playfield;
@@ -101,7 +107,7 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
         m_pc.roomsSeen = true;
     if (m_pc.terrainSeen || !vertices || !vertexCount || !stride || m_drawSkin || m_drawIsLabel || m_drawLeaves ||
         (kind != VisualKind::Room && kind != VisualKind::Static && kind != VisualKind::Unknown) ||
-        CharacterDraw(fvf, vertexCount) || m_pc.capture->pieces.size() >= kMostPieces)
+        CharacterDraw(fvf, vertexCount) || m_pc.capture->pieces.size() >= kMostPieces || m_pc.bytes >= kMostBytes)
         return;
     const auto& w = m_world.m;
     const char* name = "";
@@ -185,6 +191,7 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
             m_pc.capture->textures.push_back(std::move(ct));
             it = m_pc.textureIndex.emplace(t, index).first;
             m_pc.pending.emplace_back(t, index);
+            m_pc.bytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
         }
         p.texture[s] = it->second;
     }
@@ -196,6 +203,7 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
             m_pc.roomCentre[j] += c;
         }
     if (kind == VisualKind::Room) ++m_pc.roomPieces;
+    m_pc.bytes += p.vertices.size() + p.indices.size() * 2;
     m_pc.capture->pieces.push_back(std::move(p));
     m_pc.lastNew = Seconds();
     if (!m_pc.unsaved++)
