@@ -73,6 +73,7 @@ Setting g_settings[] = {
     {"RVK_Aniso", "Texture filtering (anisotropic; 1 = off)", "Lighting",         Choice, 1, 16, 1, 16, "RANDYVK_ANISOTROPY", 0, nullptr, "1 2 4 8 16"},
 
     {"RVK_HillShade",   "The terrain's shade from a low sun (valleys under mountains)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_LightRig",    "One light for day and night (off: the old night lighting)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_BumpOn", "Generated bump maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Bump", "Strength", "Materials",         Float, 0.25f, 4, 0.25f, 0.25f, "RANDYVK_BUMP", 0, "RVK_BumpOn"},
     {"RVK_NormalMaps", "Normal maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
@@ -438,6 +439,7 @@ const Vanilla kVanilla[] = {
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
     {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_Rainbow", 0}, {"RVK_ViewRange", 1},
+    {"RVK_LightRig", 0},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -677,6 +679,7 @@ const Cost kCosts[] = {
     {"RVK_GradeOn", "no cost"},
     {"RVK_Saturation", "no cost"},
     {"RVK_Contrast", "no cost"},
+    {"RVK_LightRig", "no cost"},
     {"RVK_Warmth", "no cost"},
     {"RVK_NightTint", "no cost"},
     {"RVK_Vignette", "no cost"},

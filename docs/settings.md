@@ -17,12 +17,12 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-343 settings, 171 of them in the settings window.
+344 settings, 172 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (8)
-- [Lighting](#lighting) (19)
+- [Lighting](#lighting) (20)
 - [Materials](#materials) (15)
 - [Debug](#debug) (7)
 - [Terrain](#terrain) (22)
@@ -75,6 +75,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_TessDist` | Up to this distance (world units) | 5 .. 60 | 16 |  | ini only; switch `RVK_TessOn` |
 | `RVK_Aniso` | Texture filtering (anisotropic; 1 = off) | 1 (off) / 2 (2x) / 4 (4x) / 8 (8x) / 16 (16x) | 16 | GPU: low | window; game value 1; was env `RANDYVK_ANISOTROPY` |
 | `RVK_HillShade` | The terrain's shade from a low sun (valleys under mountains) | on / off | on |  | ini only; knob |
+| `RVK_LightRig` | One light for day and night (off: the old night lighting) | on / off | on | no cost | window; game value off; knob |
 
 ## Materials
 

@@ -233,6 +233,7 @@ void Device::UpdateEnvironment(VkCommandBuffer cmd)
     UpdateMoon();
     UpdateMist();
     UpdateSkyModel();                            // (the sky's twilight and glow)
+    UpdateLightRig();                            // (the frame's light, day and night alike: light_rig.cpp)
     UpdateAtmosphere(cmd);                       // (our own sky's tables, for the next frame: atmosphere.cpp)
     UpdateTerrainSun(cmd);                       // (the terrain's shade from a low sun: terrain_sun.cpp)
 }

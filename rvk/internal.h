@@ -208,6 +208,8 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
                                    // (RVK_VolLamps; 0 none); y, z, w unused
     float foliage[4];              // plants' light (docs/sss-plan.md): x crowns' ambient from above (RVK_CrownSky), y the
                                    // sunlight through crowns by their depth (RVK_CrownDepth); z, w unused
+    float rigSky[4];               // the light rig (light_rig.cpp): rgb the sky's light the ground's lightmap holds, which
+                                   // lit things take too (by how far they face up); w unused
     GpuLight lights[kFrameLights];
 };
 
@@ -287,6 +289,10 @@ inline bool SameBytes(const void* a, const void* b, size_t n)
         if (p[i] != q[i]) return false;
     return true;
 }
+
+// How much of the sun's direct light a thunderstorm's deck takes at its fullest (StormOvercast 1): lighting.glsl,
+// ffp_main.glsl kStormSunTaken the same.
+constexpr float kStormSunTaken = 0.9f;
 
 // GLSL's smoothstep: 0 at a, 1 at b, eased between (a > b runs backwards).
 inline float Smoothstep(float a, float b, float x)

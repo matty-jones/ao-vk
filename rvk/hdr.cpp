@@ -578,18 +578,28 @@ void Device::EndScene()
     // params[8..15]: colour grading (identity lookup tables until the proxy loads others).
     for (Texture*& lut : m_lut)
         if (!lut) lut = CreateLut(16, nullptr);
-    float params[16] = {m_tonemapKnee, m_exposure * m_darkGain, bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
+    // (With the light rig its land exposure takes the darkness floor's place: tonemap.frag.)
+    float params[16] = {m_tonemapKnee, m_exposure * (m_rig.on ? 1.0f : m_darkGain), bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
                         m_bloomDepth ? m_bloomOverNearer : -1.0f, m_aoProj.m[2][2], m_aoProj.m[3][2],
                         gi ? m_giStrength : 0.0f,
                         float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0) | (m_aoFull ? 32 : 0) |
                               (gi && m_giFull ? 64 : 0))};
     GradingParams(params + 8);
-    // Depth of field blurs the scene with its ambient occlusion, indirect and volumetric light applied; the tone
-    // mapping then leaves them out.
-    bool dof = RenderDof(cmd, bloom, ao, gi, volume, params);
+    // Depth of field blurs the scene with its ambient occlusion and indirect light applied (they belong to its
+    // surfaces); the tone mapping then leaves them out. Not the volumetric light: it is in the air in front, and the
+    // tone mapping adds it after the haze, the mist and the storm's air - in the scene before them, a lamp's glow near
+    // the camera was hazed away as if it lay at the land behind it (the user: the trees behind a character's own light
+    // stood dark in its glow, sharp-edged, with RVK_Dof on).
+    float dofParams[16];
+    std::memcpy(dofParams, params, sizeof(dofParams));
+    dofParams[7] = float(int(dofParams[7]) & ~1);
+    bool dof = RenderDof(cmd, bloom, ao, gi, false, dofParams);
     ProfileMark("dof");
     Texture* scene = dof ? m_dofOut : m_scene;
-    if (dof) params[6] = params[7] = 0.0f;
+    if (dof) {
+        params[6] = 0.0f;
+        params[7] = float(volume ? 1 : 0);
+    }
     // With motion blur or anti-aliasing the tone mapping goes to an intermediate image: the anti-aliasing resolves
     // it (and sharpens it back into it, or into the main target), the blur reads it into the main target.
     // RVK_RenderScale: the tone mapping at the scene's size, the TAA bringing it up to the output's (with motion

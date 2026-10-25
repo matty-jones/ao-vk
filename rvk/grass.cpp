@@ -1897,8 +1897,19 @@ void Device::DrawGrassTiles(VkCommandBuffer cmd)
     }
     if (!m_grassPool || !m_grassIndex)
         return;
+    // The world's camera (the scene's first depth-writing 3D draw's, as the post passes and last frame's motion take
+    // it), not the last one set: by night the game draws its blob shadows last, with a projection of their own nudged
+    // towards the camera - the grass drawn with it came out nearer than it is, and blades just behind a tree trunk
+    // showed over it (the user: only by night, only next to the trunk).
+    const d3d::Matrix& view = m_aoProjValid ? m_aoView : m_view;
+    const d3d::Matrix& proj = m_aoProjValid ? m_aoProj : m_proj;
+    if (m_aoProjValid && m_frameNumber % 600 == 53 &&
+        (std::memcmp(&m_proj, &m_aoProj, sizeof(m_proj)) != 0 || std::memcmp(&m_view, &m_aoView, sizeof(m_view)) != 0))
+        Log("ground grass: the camera last set is not the world's (projection m22 %.6f m32 %.6f, the world's %.6f %.6f): "
+            "drawn with the world's", double(m_proj.m[2][2]), double(m_proj.m[3][2]), double(m_aoProj.m[2][2]),
+            double(m_aoProj.m[3][2]));
     // The visible tiles: in range and in the view frustum (the box of the roots, raised by the tallest blade).
-    const d3d::Matrix viewProj = MulMatrix(m_view, m_proj);
+    const d3d::Matrix viewProj = MulMatrix(view, proj);
     const auto& m = viewProj.m;
     float planes[5][4];                          // left, right, bottom, top, far: column 3 +- columns 0, 1, 2
     for (int j = 0; j < 4; ++j) {
@@ -1972,7 +1983,7 @@ void Device::DrawGrassTiles(VkCommandBuffer cmd)
     std::memcpy(gf.sunColour, m_terrainSun, sizeof(gf.sunColour) + sizeof(gf.sunDir));
     gf.look[2] = std::max(m_grassGlow, 0.0f);
     gf.look[3] = Gusts();
-    gf.lod[0] = float(m_scene->m_height) * 0.5f * m_proj.m[1][1];   // pixels per world unit at view depth 1
+    gf.lod[0] = float(m_scene->m_height) * 0.5f * proj.m[1][1];   // pixels per world unit at view depth 1
     gf.lod[1] = 1.0f;                            // blades at least a pixel wide
     // The frame lights (the sun, its cascades, the lights, the pushers) as of now, in this ring: the scene writes them
     // lazily, and an offset from an earlier ring would be another frame's data.

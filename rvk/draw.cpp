@@ -59,10 +59,6 @@ float AsFloat(uint32_t v)
     return f;
 }
 
-// How much of the sun's direct light a thunderstorm's deck takes at its fullest (StormOvercast 1): lighting.glsl,
-// ffp_main.glsl kStormSunTaken the same.
-constexpr float kStormSunTaken = 0.9f;
-
 constexpr uint32_t kBlendOverbright2x = 0x10000;   // pseudo D3D blend value: see Device::Overbright2x
 
 VkBlendFactor BlendFactor(uint32_t b)
@@ -457,7 +453,11 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     const float phase[4] = {m_cond.golden, m_cond.afterglow, m_cond.blueHour, m_cond.night};   // (the dusk's phases)
     std::memcpy(fl->phase, phase, sizeof(fl->phase));
     fl->cond[0] = m_cond.cloudNight;             // (cloud_light.glsl Night())
-    fl->cond[1] = fl->cond[2] = fl->cond[3] = 0.0f;
+    fl->cond[1] = m_rig.sunShare;                // (ffp_main RigOn, FlatShade; grass.vert)
+    fl->cond[2] = m_rig.on ? 1.0f : 0.0f;
+    for (int i = 0; i < 3; ++i) fl->rigSky[i] = m_rig.on ? m_rig.groundSky[i] : 0.0f;
+    fl->rigSky[3] = 0.0f;
+    fl->cond[3] = 0.0f;
     fl->screen[0] = SceneScaleX();
     fl->screen[1] = SceneScaleY();
     fl->screen[2] = SceneNormalsWanted() ? 1.0f : 0.0f;
@@ -3349,9 +3349,14 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         // (Lit things - buildings, rocks, characters - a quarter of it under a full storm, as the ground keeps a quarter
         // of its light (FlatShade: half its sun's share, its sky's halved): at a half, with the storm's soft sunlight -
         // lighting.glsl - over it, they stood out light against the dark land - user, 2026-10-19.)
+        // (By night the ground's share: no sun for the storm to spread over them, the ambient is nearly all their light,
+        // and at a quarter of it the buildings and rocks stood near black on land lit by its lightmap and half its
+        // ambient - user dumps rvk-frame-183522, -183647, a night storm in the desert.)
         const bool sky_ = VisualKind(m_drawVisualKind) == VisualKind::Sky;
         const bool groundLight = IsTerrain(fvf) && IsMultiplyPass();
-        const float sky = groundLight || sky_ ? StormSkyLight() : 1.0f - 0.75f * StormOvercast();
+        const float sky = groundLight || sky_ ? StormSkyLight()
+                                              : 1.0f - 0.75f * StormOvercast() +
+                                                    (StormSkyLight() - (1.0f - 0.75f * StormOvercast())) * m_cond.moonNight;
         for (int i = 0; i < 3; ++i) c.ambient[i] *= sky * (sky_ || groundLight ? 1.0f : m_dawnTint[1][i]);
     }
     ArgbToFloat(m_rs[d3d::RS_FOGCOLOR], c.fogColor);
@@ -3593,14 +3598,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             if (terrain && slot.light.type == d3d::LIGHT_DIRECTIONAL)
                 continue;
             // By night the game's light from under the ground fades out as the moon's comes in (night.cpp).
+            // (With the light rig: gone, and the sun faded over its last degrees - light_rig.cpp RigGameLight.)
             d3d::Light scaled;
-            const bool night = override && slot.light.type == d3d::LIGHT_DIRECTIONAL &&
-                               VisualKind(m_drawVisualKind) != VisualKind::Sky && MoonScaledGameLight(slot.light, &scaled);
+            const bool sky = VisualKind(m_drawVisualKind) == VisualKind::Sky;
+            const bool rigLit = override && !sky && RigGameLight(slot.light, &scaled);
+            const bool night = rigLit || (override && slot.light.type == d3d::LIGHT_DIRECTIONAL && !sky &&
+                                          !m_rig.on && MoonScaledGameLight(slot.light, &scaled));
             FillGpuLight(night ? scaled : slot.light, slot.cosHalfTheta, slot.cosHalfPhi, c.lights[lightCount++],
                          LightScale(slot.light));
             // The sun's light low in the sky warm (sky.cpp RVK_DawnLight): the game's directional light along the
             // sun's way - not other directional lights (effects' coloured ones), not the sky's own.
-            if (!night && slot.light.type == d3d::LIGHT_DIRECTIONAL && m_dawnTint[0][3] > 0.0f &&
+            if ((!night || rigLit) && slot.light.type == d3d::LIGHT_DIRECTIONAL && m_dawnTint[0][3] > 0.0f &&
                 VisualKind(m_drawVisualKind) != VisualKind::Sky) {
                 const d3d::Vector& d = slot.light.direction;
                 const float l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) *

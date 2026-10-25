@@ -24,7 +24,8 @@ layout(push_constant) uniform Push {
                         // full resolution (bit 32: AMD's, rvk cacao.cpp), the indirect light at full resolution
                         // (bit 64: AMD's, rvk brixelizer.cpp)
     vec4 grade;         // saturation, contrast, warmth (-1 cool .. 1 warm), lookup table amount
-    vec4 grade2;        // night (0 day .. 1 night), night tint, vignette, unused
+    vec4 grade2;        // night (0 day .. 1 night), night tint, vignette, the night's darkening (RVK_Darkness's; negative:
+                        // minus the light rig's land exposure)
     vec4 haze;          // the haze over the distant land (bit 16 only): rgb its colour, w how much (0: none)
     vec4 fog;           // x, y: the game's fog start and end (view depth); z: the valley mist's top over the eye,
                         // w: its density (per world unit; 0: none - rvk mist.cpp)

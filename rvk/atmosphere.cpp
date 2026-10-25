@@ -166,7 +166,7 @@ void Device::SkyKeyRatios(float out[4][3]) const
 // the ground x the Kasten-Young air mass): its colour at unit brightness, softened (a third of the reddening, in the
 // log: through the whole air at the horizon nearly no green or blue is left - the land would go blood red; a third
 // still turned the sand saturated orange at 3 degrees, so a fifth).
-void Device::SunThroughAir(float up, float out[3]) const
+void Device::SunThroughAir(float up, float out[3], float* transmittance) const
 {
     const float e = std::max(std::asin(std::clamp(up, -1.0f, 1.0f)) * 57.29578f, -0.5f);
     const float mass = 1.0f / (std::sin(e / 57.29578f) + 0.50572f * std::pow(e + 6.07995f, -1.6364f));
@@ -177,6 +177,13 @@ void Device::SunThroughAir(float up, float out[3]) const
     for (int i = 0; i < 3; ++i) out[i] = std::exp(-0.2f * column[i] * mass);
     const float l = std::max(0.3f * out[0] + 0.59f * out[1] + 0.11f * out[2], 1e-4f);
     for (int i = 0; i < 3; ++i) out[i] /= l;
+    // (The whole column, not a fifth of it: the light that reaches the ground - the colour above is softened for the
+    // look, the brightness is not.)
+    if (transmittance) {
+        float t[3];
+        for (int i = 0; i < 3; ++i) t[i] = std::exp(-column[i] * mass);
+        *transmittance = 0.3f * t[0] + 0.59f * t[1] + 0.11f * t[2];
+    }
 }
 
 // What the game fogs in its fog colour, under our own sky: into its horizon instead (the ring's mean) - the rain's

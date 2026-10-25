@@ -116,6 +116,8 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
                                 // 0 none); y, z, w unused
     vec4 foliage;               // plants' light (docs/sss-plan.md): x crowns' ambient from above (RVK_CrownSky), y the
                                 // sunlight through crowns by their depth (RVK_CrownDepth); z, w unused
+    vec4 rigSky;                // the light rig (rvk light_rig.cpp): rgb the sky's light the ground's lightmap holds,
+                                // which lit things take too (by how far they face up); w unused
     Light lights[64];
 } FL;
 

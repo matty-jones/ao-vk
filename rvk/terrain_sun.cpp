@@ -112,7 +112,8 @@ void Device::UpdateTerrainSun(VkCommandBuffer cmd)
     const float t = std::clamp((to[1] - 0.6f) / (0.85f - 0.6f), 0.0f, 1.0f);
     // (Going out over the sun's last ~3 degrees, as its light: over the ~2 under the horizon the hills' shade still lay
     // on the land as the moon took over, and went at once.)
-    const float down = std::clamp((to[1] + 0.005f) / 0.055f, 0.0f, 1.0f);
+    // (With the light rig the shade stays to the horizon: the sun's share of the light takes it away - FL.cond.y.)
+    const float down = m_rig.on ? 1.0f : std::clamp((to[1] + 0.005f) / 0.055f, 0.0f, 1.0f);
     m_tsWeight = m_hillShade ? (1.0f - t * t * (3.0f - 2.0f * t)) * down * down * (3.0f - 2.0f * down) : 0.0f;
     if (m_tsWeight <= 0.0f && !fog)
         return;

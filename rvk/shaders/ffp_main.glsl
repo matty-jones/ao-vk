@@ -352,15 +352,27 @@ vec3 DawnTint(vec3 n, float lit)
     return mix(FL.dawn[1].rgb, FL.dawn[0].rgb, reached);
 }
 
+// The light rig (rvk light_rig.cpp, docs/light-rig-plan.md): FL.cond.z 1 when on; FL.cond.y the sun's share of the
+// land's light (1 at noon, ~0.5 at 5 degrees up, none at the horizon: rvk LightRig sunShare). Off, the old day / night
+// switches.
+bool RigOn() { return FL.cond.z > 0.5; }
+
 float FlatShade()
 {
     // (A thunderstorm - FL.rainNear.y: the sun hidden as by cloud everywhere, more than a cloud's shadow takes - its
     // share of the land's light gone, so the shadows of things with it; and the sky's share halved, a storm's sky far
     // dimmer than the clear one the lightmap holds - rvk Device::StormSkyLight: a quarter of the light left.)
     float o = FL.rainNear.y;
-    return min(1.0 - (1.0 - gCasterVisibility) * ShadowStrength(length(vPosW - C.eyePos.xyz)) * (1.0 - o),
-               mix(TerrainShade(), 1.0, o)) *
-           (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o)) * (1.0 - 0.5 * o);
+    float things = min(1.0 - (1.0 - gCasterVisibility) * ShadowStrength(length(vPosW - C.eyePos.xyz)) * (1.0 - o),
+                       mix(TerrainShade(), 1.0, o));
+    if (!RigOn())
+        return things * (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o)) * (1.0 - 0.5 * o);
+    // With the rig: the sun's parts (things' shadows, the clouds', the storm taking the sun) by the sun's share of the
+    // light, the storm's dimmer sky whatever the hour - by night the moon's map's shadows are the moon's alone (the
+    // ground pass's moonShade), and the stormy land no longer brightens as the moon takes over at dusk.
+    float sun = FL.cond.y;
+    if (FL.moon.w > 0.5) things = 1.0;
+    return mix(1.0, things, sun) * (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o) * sun) * (1.0 - 0.5 * o);
 }
 
 int gShadowCascade = -1;                         // the cascade SunVisibilityCasters read (RVK_ShadowView)
@@ -818,7 +830,8 @@ void main()
     if ((C.flags.x & F_SHADOWTEX) != 0u) {
         if (FL.moon.w > 0.5)
             moonShade = shade;
-        else
+        // (With the rig the lightmap takes the storm and the clouds by night too: FlatShade.)
+        if (FL.moon.w <= 0.5 || RigOn())
             texShade = flatShade;
         shade = 1.0;
     }
@@ -972,6 +985,12 @@ void main()
         // Sunlight is shadowed: by the receiver's shade, or in the ground's lighting pass by the lightmap's.
         float sunScale = ((C.flags.x & F_SHADOWTEX) != 0u ? texShadeLit * moonShade : shadeSun ? shade : 1.0) * gParallaxSun;
         AccumulateLights(vPosW, n, sunScale, localScale, ambient, diff, spec, diffL, specL);
+        // The light rig: lit things take the sky's light the ground's lightmap holds (FL.rigSky: all of it by night,
+        // what the sun leaves by day) - before, they had only the global ambient, the ground that and its lightmap, and
+        // by night buildings and characters stood at about half the ground's light. By how far they face up: a sky's.
+        // (Not the ground itself, nor the sky.)
+        if (RigOn() && (C.flags.x & F_SHADOWTEX) == 0u && !terrainMapped && (D.mat.z & MAT_SKY) == 0u && len2 > 0.0)
+            ambient += FL.rigSky.rgb * (0.5 + 0.5 * normalize(n).y);
         // PBR: metals have no diffuse light; the occlusion map takes ambient light away.
         float kd = gPbrOn ? 1.0 - gPbrMetal : 1.0, kAmb = gPbrOn ? kd * gPbrAo : 1.0;
         // The ground's lighting pass (F_SHADOWTEX): the shadow takes the global ambient and emissive part along
@@ -1098,7 +1117,9 @@ void main()
     if (!shadeSun)
         // (By night the moon's: unlit, half of it - and a storm's dimming kept, as FlatShade has it by day: without,
         // the stormy land brightened the moment the moon took over at dusk.)
-        current.rgb *= FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) * (1.0 - kCloudSunShare * FL.rainNear.y) * (1.0 - 0.5 * FL.rainNear.y)
+        // (With the rig, FlatShade is the one formula day and night - by night the moon's shadow half again on it.)
+        current.rgb *= RigOn() ? flatShade * (FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) : 1.0)
+                     : FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) * (1.0 - kCloudSunShare * FL.rainNear.y) * (1.0 - 0.5 * FL.rainNear.y)
                                        : flatShade;
     // Sunlight through leaves: where the sun is behind a leaf (seen from the camera), its light comes through tinted
     // by the leaf, most looking into the sun; other leaves' shadows still block it. Only textures with holes around

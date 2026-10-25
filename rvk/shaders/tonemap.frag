@@ -463,7 +463,16 @@ void main()
     // Night (RVK_NightDark x how much it is night): darker - the darks and middle tones down, the sky more; what is
     // bright kept (lamps, windows, the moon, stars, moonlit cloud edges), so it stands out of the dark.
     float nightDark = P.grade2.x * P.grade2.w;
-    if (nightDark > 0.0) {
+    if (P.grade2.w < 0.0) {
+        // The light rig's land exposure (rvk light_rig.cpp): the same darks and middle tones down (or up), the bright
+        // kept - by the hour's physical light against the game's own, not by a night ramp. The sky a little more, as
+        // below, by as far as the land is taken down.
+        float g = -P.grade2.w;
+        float sky = smoothstep(0.7, 1.0, far);
+        float bright = smoothstep(mix(0.25, 0.35, sky), mix(0.8, 0.9, sky), dot(c, vec3(0.3, 0.59, 0.11)));
+        float down = g * mix(1.0, 0.8, sky * clamp((1.0 - g) / 0.38, 0.0, 1.0));
+        c *= mix(down, 1.0, bright);
+    } else if (nightDark > 0.0) {
         // (Nearer, from a lower brightness: lamp-lit ground keeps most of its light; the sky and clouds as tuned.)
         float sky = smoothstep(0.7, 1.0, far);
         float bright = smoothstep(mix(0.25, 0.35, sky), mix(0.8, 0.9, sky), dot(c, vec3(0.3, 0.59, 0.11)));

@@ -1258,6 +1258,10 @@ bool g_terrainPbr = false;        // --terrain-pbr: the bench's ground texture g
                                   // rough grass), per-pixel lighting, no grass field: the ground's PBR (MAT_BASE) path
 int g_grassBenchFilm = 0;         // --grass-bench-film N: ~60 frames a second, a screenshot every N (film_NNN.bmp)
 float g_grassBenchRise = 0.0f;    // --grass-bench-rise H: the camera H units higher
+float g_grassBenchLampAt = 3.0f; // --grass-bench-lamp-at D: the lamp D units ahead (5: behind the walker, which then
+                                  // shades the grass between it and the camera)
+float g_grassBenchBack = 0.0f;    // --grass-bench-back D: the camera D units back along its view (zoomed out: the
+                                  // walker, the target and the grass round them stay where they are)
 int g_grassBenchZoomAt = 0;        // --grass-bench-zoom F H: from frame F the camera H units higher instead
 float g_grassBenchZoomRise = 0.0f;
 float g_grassBenchPitch = -1.0f;  // --grass-bench-pitch R: the camera looking R radians down, raised to match (top-down)
@@ -2204,7 +2208,10 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
         const float rise = g_grassBenchZoomAt > 0 && frame >= g_grassBenchZoomAt ? g_grassBenchZoomRise : g_grassBenchRise;
         const float ey = height(ex, ez) + 1.0f + 6.0f * std::sin(pitch) + rise;
         const float fwd = 6.0f * std::cos(pitch);
-        dev.SetTransform(View, LookAtLH({ex, ey, ez}, {ex + fwd * std::cos(yaw), ey - 6.0f * std::sin(pitch), ez + fwd * std::sin(yaw)},
+        const float bx = -g_grassBenchBack * std::cos(pitch) * std::cos(yaw), bz = -g_grassBenchBack * std::cos(pitch) * std::sin(yaw);
+        const float by = g_grassBenchBack * std::sin(pitch);
+        dev.SetTransform(View, LookAtLH({ex + bx, ey + by, ez + bz},
+                                        {ex + fwd * std::cos(yaw), ey - 6.0f * std::sin(pitch), ez + fwd * std::sin(yaw)},
                                         {0, 1, 0}));
         dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.3f, 300.0f));
         dev.SetTransform(World, Identity());
@@ -2236,7 +2243,8 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         if (g_grassBenchLamp) {    // a warm lamp just over the grass, 3 units ahead, a little left (its shadows in view)
-            const float lx = ex + 3.0f * std::cos(yaw) + 0.8f * std::sin(yaw), lz = ez + 3.0f * std::sin(yaw) - 0.8f * std::cos(yaw);
+            const float at = g_grassBenchLampAt, off = at == 3.0f ? 0.8f : 0.0f;   // (behind the walker: in line)
+            const float lx = ex + at * std::cos(yaw) + off * std::sin(yaw), lz = ez + at * std::sin(yaw) - off * std::cos(yaw);
             Light lamp{};
             lamp.type = LIGHT_POINT;
             lamp.diffuse = {1.6f, 1.1f, 0.6f, 1};
@@ -2918,6 +2926,17 @@ float g_waterWaves = 1.0f;        // --water-waves W
 int g_waterQuality = 2;           // --water-quality 1..3
 bool g_waterOff = false;          // --water-off: the game's way instead (no DrawWater: a flat blended quad)
 bool g_waterNight = false;        // --water-night
+// --game-day (the water scenes): the game's own light by the sun's height, as its dusk log has it - the hour's lightmap
+// from the day's ~0.72 grey down to the night's dark blue 303040 between ~6 degrees up and ~3 under, its ambient from
+// 0.37 to 0.29, its directional light white at every height (pointing up once the sun is under: the game's night
+// light). Without it the sweep kept the day's lightmap and ambient and only dimmed the sun: no real night to measure.
+bool g_gameDay = false;
+// --rig-props: a static (RTriMesh_t, lit, textured with the ground's own texture) on dry ground near the camera, and
+// rig-props.txt beside the shots with the screen rects of its front face, its top and a patch of ground beside it:
+// the same albedo, so their brightness ratio is the lighting's (tools/sun-sweep.py: statics vs ground).
+bool g_rigProps = false;
+// --indoor: a room's playfield - no directional light at all (the renderer sees no sun), a dim ambient, two lamps.
+bool g_indoor = false;
 float g_waterZ = -1e6f;           // --water-z Z: the camera's z (default per scene)
 bool g_waterNoPrepass = false;    // --water-noprepass
 bool g_hudSprite = false;         // --hud-sprite: after the 3D, a screen sprite as the game's timer bars draw it (the
@@ -3115,6 +3134,19 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
     Texture* ground = dev.CreateTexture(64, 64, groundPixels.data());
     std::vector<uint32_t> lightmapPixels(64 * 64, g_waterNight ? 0xFF303040u : 0xFFB8B8B8u);
     Texture* lightmap = dev.CreateTexture(64, 64, lightmapPixels.data());
+    // --game-day: the hour's lightmap by the sun's height (gameDayW: 0 night .. 1 day), 16 steps of it.
+    auto gameDayW = [](float hs) {
+        const float t = std::clamp((hs + 0.05f) / 0.15f, 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    };
+    Texture* dayLightmaps[16] = {};
+    if (g_gameDay)
+        for (int k = 0; k < 16; ++k) {
+            const float w = float(k) / 15.0f;
+            const uint32_t rg = uint32_t(0x30 + (0xB8 - 0x30) * w + 0.5f), b = uint32_t(0x40 + (0xB8 - 0x40) * w + 0.5f);
+            std::vector<uint32_t> px(64 * 64, 0xFF000000u | rg << 16 | rg << 8 | b);
+            dayLightmaps[k] = dev.CreateTexture(64, 64, px.data());
+        }
     // The game's water texture stand-in (water5.png: a pale blue mottled pattern).
     std::vector<uint32_t> waterPixels(64 * 64);
     for (int y = 0; y < 64; ++y)
@@ -3192,6 +3224,28 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         box(25.0f, -2.0f, 70.0f, 8.0f, 6.0f, 3.0f, 0xFF606060);
         box(-6.0f, 1.2f, 15.0f, 1.0f, 1.0f, 1.0f, 0xFFC04030);                                         // a red crate
     }
+    // --rig-props: a static box on the dry slope 11 units ahead, a little left (its shadow falls to +x, away from the
+    // ground patch measured on its left), textured with the ground's texture at the same scale (world units / 6).
+    std::vector<VtxMesh> rigBox;
+    const float rigC[3] = {-4.0f, height(-4.0f, -14.0f) + 1.25f, -14.0f}, rigE[3] = {1.5f, 1.25f, 0.75f};
+    if (g_rigProps)
+        for (int axis = 0; axis < 3; ++axis)
+            for (int sign = -1; sign <= 1; sign += 2) {
+                const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+                float n[3] = {0, 0, 0};
+                n[axis] = float(sign);
+                auto corner = [&](float ua, float ub) {
+                    float p[3];
+                    p[axis] = rigC[axis] + float(sign) * rigE[axis];
+                    p[a] = rigC[a] + ua * rigE[a];
+                    p[b] = rigC[b] + ub * rigE[b];
+                    // (u, v across the face: x / z on the top, x or z with y on the sides)
+                    const float u = axis == 0 ? p[2] : p[0], v = axis == 1 ? p[2] : p[1];
+                    return VtxMesh{p[0], p[1], p[2], n[0], n[1], n[2], 0xFFFFFFFFu, u / 6.0f, v / 6.0f};
+                };
+                VtxMesh q[6] = {corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, -1), corner(1, 1), corner(-1, 1)};
+                rigBox.insert(rigBox.end(), q, q + 6);
+            }
     // The water, as the game has it: big flat triangles (the lake one square; the sea out to the horizon).
     const uint32_t tint = 0xCC00186A;
     std::vector<Device::WaterVertex> water;
@@ -3348,11 +3402,37 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};
         if (g_sweepSteps > 0) sun.direction = {sweepDir[0], sweepDir[1], sweepDir[2]};
         if (g_sunColourSet) sun.diffuse = {g_sunColour[0], g_sunColour[1], g_sunColour[2], 1};
-        if (g_sweepSteps > 0)
+        if (g_gameDay)
+            sun.diffuse = {1, 1, 1, 1};                  // (the game's: white at every height, the dusk log)
+        else if (g_sweepSteps > 0)
             sun.diffuse = {sun.diffuse.r * std::max(sweepDim, 0.15f), sun.diffuse.g * std::max(sweepDim, 0.2f),
                            sun.diffuse.b * std::max(sweepDim, 0.3f), 1};
         dev.SetLight(0, sun);
-        dev.LightEnable(0, true);
+        dev.LightEnable(0, !g_indoor);
+        // The sun's height as the game's light has it (the sine of its elevation: under the horizon, negative).
+        const float sunLen = std::max(std::sqrt(sun.direction.x * sun.direction.x + sun.direction.y * sun.direction.y +
+                                                sun.direction.z * sun.direction.z), 1e-6f);
+        const float sunHs = -sun.direction.y / sunLen, dayW = gameDayW(sunHs);
+        uint32_t ambient = g_waterNight ? 0xFF181C28u : 0xFF606468u;
+        if (g_gameDay) {
+            const float t = std::clamp((sunHs + 0.3f) / 0.6f, 0.0f, 1.0f);
+            const uint32_t a = uint32_t(255.0f * (0.29f + 0.08f * t * t * (3.0f - 2.0f * t)) + 0.5f);
+            ambient = 0xFF000000u | a << 16 | a << 8 | a;
+        }
+        if (g_indoor) {
+            ambient = 0xFF404040u;
+            for (int k = 0; k < 2; ++k) {
+                Light lamp{};
+                lamp.type = LIGHT_POINT;
+                lamp.diffuse = {1.0f, 0.85f, 0.6f, 1};
+                lamp.position = {eye.x + (k ? 5.0f : -5.0f), eye.y + 1.0f, eye.z + 10.0f};
+                lamp.range = 25.0f;
+                lamp.attenuation0 = 0.4f;
+                lamp.attenuation1 = 0.08f;
+                dev.SetLight(2 + k, lamp);
+                dev.LightEnable(2 + k, true);
+            }
+        }
         if (g_waterLamp) {
             Light lamp{};
             lamp.type = LIGHT_POINT;
@@ -3436,12 +3516,12 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
             dev.DrawPrimitive(TriangleList, kFvfTerrain, terrain.data() + at,
                               uint32_t(std::min<size_t>(kChunkVerts, terrain.size() - at)));
         dev.SetRenderState(RS_LIGHTING, 1);
-        dev.SetRenderState(RS_AMBIENT, g_waterNight ? 0xFF181C28 : 0xFF606468);
+        dev.SetRenderState(RS_AMBIENT, ambient);
         dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
         dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
         dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
         dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
-        dev.SetTexture(0, lightmap);
+        dev.SetTexture(0, g_gameDay ? dayLightmaps[std::clamp(int(dayW * 15.0f + 0.5f), 0, 15)] : lightmap);
         dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
         for (size_t at = 0; at < terrain.size(); at += kChunkVerts)
@@ -3458,6 +3538,65 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         dev.SetTexture(0, nullptr);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
         dev.DrawPrimitive(TriangleList, kFvfMesh, props.data(), uint32_t(props.size()));
+        if (g_rigProps) {
+            // Lit as the game's statics: white material, texture x lit colour (stage 0 MODULATE), a static visual.
+            dev.SetRenderState(RS_COLORVERTEX, 0);
+            dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_MATERIAL);
+            dev.SetRenderState(RS_AMBIENTMATERIALSOURCE, MCS_MATERIAL);
+            dev.SetMaterial(mat);
+            dev.SetTexture(0, ground);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t", 0, 0x2000u);
+            dev.DrawPrimitive(TriangleList, kFvfMesh, rigBox.data(), uint32_t(rigBox.size()));
+            dev.SetDrawVisual(0, nullptr);
+            dev.SetTexture(0, nullptr);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.SetRenderState(RS_COLORVERTEX, 1);
+            dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_COLOR1);
+            dev.SetRenderState(RS_AMBIENTMATERIALSOURCE, MCS_COLOR1);
+            if (frame == 0) {
+                // Where they are on the screen (0..1, x right, y down), each shrunk to its middle 60%.
+                const Matrix view = LookAtLH(eye, at, {0, 1, 0});
+                const Matrix proj = PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.3f, 2000.0f);
+                auto rect = [&](const float (*pts)[3], int count, float out[4]) {
+                    float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+                    for (int k = 0; k < count; ++k) {
+                        float v[4], c[4];
+                        for (int j = 0; j < 4; ++j)
+                            v[j] = pts[k][0] * view.m[0][j] + pts[k][1] * view.m[1][j] + pts[k][2] * view.m[2][j] + view.m[3][j];
+                        for (int j = 0; j < 4; ++j)
+                            c[j] = v[0] * proj.m[0][j] + v[1] * proj.m[1][j] + v[2] * proj.m[2][j] + v[3] * proj.m[3][j];
+                        const float sx = 0.5f * (c[0] / c[3] + 1.0f), sy = 0.5f * (1.0f - c[1] / c[3]);
+                        lo[0] = std::min(lo[0], sx); lo[1] = std::min(lo[1], sy);
+                        hi[0] = std::max(hi[0], sx); hi[1] = std::max(hi[1], sy);
+                    }
+                    for (int j = 0; j < 2; ++j) {
+                        const float m = 0.5f * (lo[j] + hi[j]), h = 0.3f * (hi[j] - lo[j]);
+                        out[j] = std::clamp(m - h, 0.0f, 1.0f);
+                        out[2 + j] = std::clamp(m + h, 0.0f, 1.0f);
+                    }
+                };
+                const float x0 = rigC[0] - rigE[0], x1 = rigC[0] + rigE[0], y0 = rigC[1] - rigE[1], y1 = rigC[1] + rigE[1];
+                const float z0 = rigC[2] - rigE[2], z1 = rigC[2] + rigE[2];
+                const float face[4][3] = {{x0, y0, z0}, {x1, y0, z0}, {x0, y1, z0}, {x1, y1, z0}};
+                const float top[4][3] = {{x0, y1, z0}, {x1, y1, z0}, {x0, y1, z1}, {x1, y1, z1}};
+                // (The ground just in front of it, nearer the camera: its shadow falls away from the camera.)
+                const float gx0 = rigC[0] - 0.5f, gx1 = rigC[0] + 1.5f, gz0 = z0 - 3.0f, gz1 = z0 - 1.0f;
+                const float patch[4][3] = {{gx0, height(gx0, gz0), gz0}, {gx1, height(gx1, gz0), gz0},
+                                           {gx0, height(gx0, gz1), gz1}, {gx1, height(gx1, gz1), gz1}};
+                float r[3][4];
+                rect(face, 4, r[0]);
+                rect(top, 4, r[1]);
+                rect(patch, 4, r[2]);
+                if (FILE* f = std::fopen("rig-props.txt", "w")) {
+                    const char* names[3] = {"face", "top", "ground"};
+                    for (int k = 0; k < 3; ++k)
+                        std::fprintf(f, "%s %.4f %.4f %.4f %.4f\n", names[k], double(r[k][0]), double(r[k][1]),
+                                     double(r[k][2]), double(r[k][3]));
+                    std::fclose(f);
+                }
+            }
+        }
         // A "character" swimming (--water-walker): a tall body in the lake, its feet under the surface, bobbing along.
         // Flagged a character (SetDrawVisual), so the renderer knows where it is - and ripples the water around it.
         if (g_waterWalker) {
@@ -5062,6 +5201,9 @@ int main(int argc, char** argv)
         else if (a == "--water-grid") g_waterGrid = true;
         else if (a == "--water-off") g_waterOff = true;
         else if (a == "--water-night") g_waterNight = true;
+        else if (a == "--game-day") g_gameDay = true;
+        else if (a == "--rig-props") g_rigProps = true;
+        else if (a == "--indoor") g_indoor = true;
         else if (a == "--moon-light" && i + 1 < argc) g_moonLight = float(std::atof(argv[++i]));
         else if ((a == "--darkness" || a == "--night-dark") && i + 1 < argc) g_darkness = float(std::atof(argv[++i]));
         else if (a == "--dark-floor" && i + 1 < argc) g_darkFloor = float(std::atof(argv[++i]));
@@ -5105,6 +5247,8 @@ int main(int argc, char** argv)
         else if (a == "--grass-bench-lamp") g_grassBenchLamp = true;
         else if (a == "--grass-bench-still") g_grassBenchStill = true;
         else if (a == "--grass-bench-rise" && i + 1 < argc) g_grassBenchRise = float(std::atof(argv[++i]));
+        else if (a == "--grass-bench-back" && i + 1 < argc) g_grassBenchBack = float(std::atof(argv[++i]));
+        else if (a == "--grass-bench-lamp-at" && i + 1 < argc) g_grassBenchLampAt = float(std::atof(argv[++i]));
         else if (a == "--grass-bench-zoom" && i + 2 < argc) {
             g_grassBenchZoomAt = std::atoi(argv[++i]);
             g_grassBenchZoomRise = float(std::atof(argv[++i]));

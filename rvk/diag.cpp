@@ -714,9 +714,58 @@ void Device::DumpTargets(const std::string& base)
         vkCmdCopyImageToBuffer(cmd, t->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r.buffer, 1, &region);
         reads.push_back(r);
     }
-    if (reads.empty())
+    // The depth buffer as the frame left it (the scene's and the ground grass's depth: what stood in front of what),
+    // copied out as view depths (<dump>-depth.bin: width, height, then a float per pixel, 1e5 for the sky) and shown
+    // by their log (<dump>-depth.bmp: black at 0.25 units, white at 1000 and the sky).
+    VkBuffer depthBuffer = VK_NULL_HANDLE;
+    VmaAllocation_T* depthAllocation = nullptr;
+    const float* depthData = nullptr;
+    const uint32_t dw = m_depthWidth, dh = m_depthHeight;
+    if (m_depth && m_depthLayout != VK_IMAGE_LAYOUT_UNDEFINED && dw && dh) {
+        VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bi.size = VkDeviceSize(dw) * dh * 4;
+        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        VmaAllocationCreateInfo ac{};
+        ac.usage = VMA_MEMORY_USAGE_AUTO;
+        ac.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo info{};
+        if (vmaCreateBuffer(m_allocator, &bi, &ac, &depthBuffer, &depthAllocation, &info) == VK_SUCCESS) {
+            depthData = static_cast<const float*>(info.pMappedData);
+            ImageBarrier(cmd, m_depth, VK_IMAGE_ASPECT_DEPTH_BIT, m_depthLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+            VkBufferImageCopy region{};
+            region.imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1};
+            region.imageExtent = {dw, dh, 1};
+            vkCmdCopyImageToBuffer(cmd, m_depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, depthBuffer, 1, &region);
+            ImageBarrier(cmd, m_depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_depthLayout,
+                         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+        }
+    }
+    if (reads.empty() && !depthData)
         return;
     SubmitAndWait();
+    if (depthData) {
+        // (D3D's projection: view depth = m32 / (d - m22), as tonemap.frag has it.)
+        const float m22 = m_aoProj.m[2][2], m32 = m_aoProj.m[3][2];
+        std::vector<float> z(size_t(dw) * dh);
+        std::vector<uint8_t> rgb(size_t(dw) * dh * 3);
+        for (size_t p = 0; p < z.size(); ++p) {
+            const float d = depthData[p];
+            z[p] = d >= 1.0f ? 1e5f : m32 / std::min(d - m22, -1e-9f);
+            const float t = std::clamp(std::log2(std::max(z[p], 0.25f) / 0.25f) / std::log2(4000.0f), 0.0f, 1.0f);
+            rgb[p * 3] = rgb[p * 3 + 1] = rgb[p * 3 + 2] = uint8_t(t * 255.0f + 0.5f);
+        }
+        DumpBmp(base + "-depth.bmp", dw, dh, rgb);
+        if (FILE* f = std::fopen((base + "-depth.bin").c_str(), "wb")) {
+            const uint32_t size[2] = {dw, dh};
+            std::fwrite(size, sizeof(size), 1, f);
+            std::fwrite(z.data(), sizeof(float), z.size(), f);
+            std::fclose(f);
+        }
+        vmaDestroyBuffer(m_allocator, depthBuffer, depthAllocation);
+    }
     for (const Read& r : reads) {
         const Texture* t = r.item->t;
         const uint32_t w = t->m_width, h = t->m_height;

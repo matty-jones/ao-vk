@@ -298,6 +298,7 @@ struct DeviceInfo {
     X(ShadowView, m_shadowViewDebug, L)               /* debug: the sun shadow map's light shown */ \
     X(AlienMap, m_alienMap, 0)                        /* AI missions' map on green */ \
     X(HillShade, m_hillShade, 0)                      /* the terrain shaded from a low sun */ \
+    X(LightRig, m_lightRig, C)                        /* one light for day and night (light_rig.cpp) */ \
     X(GroundOne, m_groundOnePass, C)                  /* the native ground drawn in one pass, not two */ \
     X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */
 enum class Knob : uint32_t {
@@ -1695,7 +1696,8 @@ private:
     int m_heapCheck = 0;                         // RVK_HeapCheck
     bool m_heapBroken = false;
     const char* m_heapLastOk = nullptr;
-    void SunThroughAir(float up, float out[3]) const;   // the sun's colour through the air (unit luma)
+    // The sun's colour through the air (unit luma); transmittance: how much of its light gets through (luma), if asked.
+    void SunThroughAir(float up, float out[3], float* transmittance = nullptr) const;
     void OurSkyFog(float rgb[3]) const;          // the scene fog's colour into our sky's horizon (its mean), if on
     bool ProcSkyReady() const;
     // What the game fogs fades into our sky's horizon instead of the zone's fog colour: our sky drawn, outdoors (the sun
@@ -1733,7 +1735,63 @@ private:
     };
     Conditions m_cond;
     void UpdateConditions();
-    float m_sunRising = 1.0f;                    // 1 rising .. 0 setting, eased (the trend over minutes)
+    // The light rig (light_rig.cpp, docs/light-rig-plan.md): one account of the frame's light, day and night alike -
+    // the sun, the sky and the moon by the sun's height (physical shapes: the air's transmittance, the sky's light
+    // through twilight), the storm's share taken from each, the eye's adaptation over all of it - in the game's units
+    // (each zone's own day light, measured by day, is what noon is) and exposed already: what a surface lit by it shows.
+    // So far only logged, beside what the game gives now (its sun and ambient: the gains the rig would apply).
+    struct LightRig {
+        bool on = false;          // a sun known (outdoors); off: the game's light as it is
+        float sunUp = 1.0f;       // the sun's height (m_cond.sunUp)
+        // Physical, relative to the noon sun's light on a surface facing it (sky: to the noon sky's on level ground).
+        float sunN = 1.0f;        // the sun's light on a surface facing it (the air's transmittance; its disc setting)
+        float sky = 1.0f;         // the sky's light on level ground
+        float moonN = 0.0f;       // the moon's on a surface facing it
+        float land = 1.0f;        // all of it on level ground, lux (the adaptation's measure)
+        float adapt = 1.0f;       // the eye's gain: (land / noon's) ^ -alpha, eased (RVK_Darkness: alpha)
+        // The key light: the sun or the moon, whichever lights more (they cross where both are next to none).
+        float keyDir[3] = {0.0f, -1.0f, 0.0f};   // the way its light travels
+        float keySun = 1.0f;      // 1 the sun's .. 0 the moon's
+        float storm = 0.0f;       // a thunderstorm's overcast (StormOvercast), taken from the sun and the sky alike
+        // Exposed, in the game's units: the key light on a surface facing it, the sky's light (an ambient), and the
+        // key's share of the light on level ground (what a shadow can take).
+        float key = 1.0f, ambient = 0.4f, keyShare = 0.7f;
+        // The sun's share of the land's light (its light on level ground over that and the sky's, clear air), over
+        // noon's: 1 at noon, ~0.5 with the sun 5 degrees up, none at the horizon - how much a shadow, a hill's shade, a
+        // cloud's take (FL.cond.y): the difference between sun and shade dies away as the sun goes down.
+        float sunShare = 1.0f;
+        // The ground's lightmap round the camera (its rgb, eased; the ground grass's capture of it) and the sky's part
+        // of it (all of it by night; by day what the sun's share leaves, physical; a storm's dimmer sky): the light
+        // the ground has over what lit things got - its baked sky -, given to them too (FL.rigSky).
+        float groundLight[3] = {}, groundSky[3] = {};
+        bool groundKnown = false;
+        // The land's exposure (RigLandGain, tonemap.frag: the darks and middle tones, the bright kept): the physical
+        // target for the hour - the clear sky's, sun's and moon's light over noon's, to the power 1 - alpha (the eye's
+        // adaptation) - over how bright the game's own light makes the land now, against the zone's noon (its
+        // lightmap round the camera and its ambient). Storms are left out of both: their darkness is in our lighting.
+        // In place of the night's darkening by NightAmount and RVK_Darkness, and the darkness floor.
+        float landTarget = 1.0f, landGame = 1.0f, landGain = 1.0f;
+        // The zone's day light (its game sun's and ambient's luma, the ambient at noon): what the rig is in units of.
+        uint32_t zone = 0;
+        float zoneSun = 1.0f, zoneSky = 0.4f;
+        bool zoneMeasured = false;
+        // What the game gives now (its sun's luma - by night its light from under the ground -, its ambient's) and the
+        // rig over it.
+        float gameSun = 0.0f, gameAmbient = 0.0f, sunGain = 1.0f, skyGain = 1.0f;
+        // The game's sun on lit things (RigGameLight): its own light down to ~10 degrees up, then the air's and its
+        // disc's setting - to none a degree under.
+        float sunFade = 1.0f;
+    };
+    LightRig m_rig;
+    struct RigZone { float sun = 1.0f, sky = 0.4f, land = 1.0f; bool landSeen = false; };
+    std::unordered_map<uint32_t, RigZone> m_rigZones;   // each zone's day light, measured by day
+    bool m_rigAdaptSet = false, m_rigGainSet = false;
+    double m_rigSteadySince = -1.0;              // since when the zone and the game's ambient have been seen steadily
+    void UpdateLightRig();
+    // A game light as the rig has it (lit draws, the light override): false - not a light the rig changes. The game's
+    // directional light from under the ground (its night light) gone, its sun faded out over its last degrees.
+    bool RigGameLight(const d3d::Light& game, d3d::Light* out) const;
+    float m_sunRising = 1.0f;                   // 1 rising .. 0 setting, eased (the trend over minutes)
     bool m_nightSet = false;
     void UpdateSunClock();
     float SunUp() const;                         // the eased sun's height (the sine of its elevation)
@@ -1774,6 +1832,7 @@ private:
     uint32_t m_shadowMemory = 1;                 // RVK_ShadowMem: remembered casters drawn into the sun's shadows
     uint32_t m_memoryTraceFrames = 0;            // (frames left of the counts' trace)
     bool m_hillShade = true;                     // RVK_HillShade: the terrain's shade from a low sun (terrain_sun.cpp)
+    bool m_lightRig = true;                      // RVK_LightRig: one light for day and night (light_rig.cpp)
     TerrainSettings m_terrainSettings;           // RVK_Terrain*: the ground's own texturing (terrain.cpp)
     bool m_shadowViewDebug = false;              // RVK_ShadowView: the sun shadow map's say painted on the scene
     // The next draws only cast (native mesh.cpp: static meshes the game culled, within the shadows' reach): recorded as

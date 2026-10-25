@@ -61,6 +61,13 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   too. Needs the matching AOReloaded.
 
 ### Changed
+- Day and night share one light (`RVK_LightRig`, on; off brings back the old night lighting). At sunset buildings and
+  rocks no longer light up and then drop to a third of their light as the moon rises; ground in a hill's shade no
+  longer brightens in the last minutes of daylight, the difference between sun and shade fading out as the sun goes
+  down; in a storm at night the ground and what stands on it darken alike; and by night buildings, rocks and
+  characters are lit by the same night sky as the ground around them, no longer at about half its brightness. How
+  dark the land gets now follows the light of the hour, as eyes adapt: a moonlit night is lighter than a moonless
+  one, and the darkness floor's slow brightening is gone (`RVK_Darkness` still sets how dark).
 - Faster on the GPU wherever buildings, characters and plants fill the view: they no longer share the ground's heavy
   shader build, and those no lamp reaches skip the lamps' code as well, so the graphics card works on more of their
   pixels at once (a city's scene by day about half the GPU time).
@@ -81,6 +88,14 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- By night, grass growing right behind a tree trunk (or anything else solid) showed in front of it. The grass was drawn
+  with the camera the game had set last for its night effects, not the world's.
+- With depth of field on (`RVK_Dof`), the glow a lamp makes in the air (a character's own light at night, in rain or
+  mist) was dimmed by the haze of whatever lay behind it: trees behind your character stood out as dark, sharp-edged
+  shapes in its glow, and the sky lost most of it.
+- In a thunderstorm at night, buildings, rocks, pillars and characters went near black against the ground around
+  them: the storm took three quarters of their light where it takes half of the ground's. By night they now dim as
+  the ground does.
 - Standing in grass with the camera zoomed out, the grass could stand up through your character instead of bending
   away from it, when other characters were walking nearer the camera (their footsteps took every place the grass
   keeps for what pushes it). Characters where they stand now always come first.

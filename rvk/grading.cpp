@@ -110,7 +110,8 @@ void Device::GradingParams(float out[8]) const
     out[4] = night;
     out[5] = m_nightTint;
     out[6] = m_vignette;
-    out[7] = m_dark.tone;                        // RVK_Darkness's night darkening (tonemap.frag main)
+    // RVK_Darkness's night darkening (tonemap.frag main) - with the light rig, its land exposure instead (negative).
+    out[7] = m_rig.on ? -m_rig.landGain : m_dark.tone;
 }
 
 }  // namespace rvk
