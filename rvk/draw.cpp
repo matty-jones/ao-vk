@@ -1559,6 +1559,27 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
         if (brute != hits) ++m_lightMaskDiff;
         hits = brute;
     }
+    // A dungeon room (a shop, a mission's rooms): only the lights the game lit it with. Its lamps are baked into its
+    // lightmap (stage 1), so the game leaves them out and lights it with moving ones (a character's own light); with
+    // every lamp in reach its walls and floor had them twice - a shop's room washed out once lamps indoors were at the
+    // game's strength (LampScale).
+    if (hits && VisualKind(m_drawVisualKind) == VisualKind::Room) {
+        uint64_t kept = 0;
+        for (uint64_t rest = hits; rest; rest &= rest - 1) {
+            const uint32_t k = uint32_t(std::countr_zero(rest));
+            const d3d::Light& l = m_lightsPrev[m_frameLightIndices[k]].light;
+            for (const LightSlot& slot : m_lights) {
+                if (!slot.enabled || slot.light.type == d3d::LIGHT_DIRECTIONAL || slot.light.range != l.range) continue;
+                const float dx = slot.light.position.x - l.position.x, dy = slot.light.position.y - l.position.y,
+                            dz = slot.light.position.z - l.position.z;
+                if (dx * dx + dy * dy + dz * dz < 1.0f) {
+                    kept |= uint64_t(1) << k;
+                    break;
+                }
+            }
+        }
+        hits = kept;
+    }
     out[0] = uint32_t(hits);
     out[1] = uint32_t(hits >> 32);
 }
