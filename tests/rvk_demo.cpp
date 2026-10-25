@@ -7,6 +7,7 @@
 #include "rvk.h"
 #include "threaded.h"
 #include "material_maps.h"
+#include "portal_file.h"
 
 #include <chrono>
 #include <memory>
@@ -4321,6 +4322,158 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
 }
 
 
+// A captured interior on its own (--portal-view FILE; shop portals, docs/shop-portal-plan.md): its pieces replayed as
+// the game drew them - their textures, material, render and stage states and lights - from just inside its entrance
+// looking in, or from --portal-cam R U I YAW: R units to the right, U up and I into the room from the entrance's bottom
+// centre, turned YAW degrees (positive: to the right). Checks a capture without the game.
+std::string g_portalView;
+float g_portalCam[4] = {0.0f, 1.8f, 0.5f, 0.0f};
+
+template <typename D>
+void RunPortalView(D& dev, int frames, const std::string& shot)
+{
+    portal::Capture capture;
+    if (!portal::Load(g_portalView.c_str(), capture)) {
+        std::printf("portal view: %s isn't a capture\n", g_portalView.c_str());
+        return;
+    }
+    std::vector<Texture*> textures;
+    for (const portal::CapturedTexture& t : capture.textures) {
+        Texture* tex = dev.CreateTexture(t.width, t.height, t.format, 1);
+        if (tex) dev.UpdateTexture(tex, 0, 0, 0, t.width, t.height, t.level0.data(), FormatRowBytes(t.format, t.width));
+        textures.push_back(tex);
+    }
+    // The view: from the entrance (or the pieces' middle), along its way in.
+    float base[3] = {}, in[3] = {0.0f, 0.0f, 1.0f};
+    if (capture.entranceKnown) {
+        std::memcpy(base, capture.entrance, sizeof(base));
+        std::memcpy(in, capture.inward, sizeof(in));
+    } else if (!capture.pieces.empty()) {
+        for (const auto& p : capture.pieces)
+            for (int j = 0; j < 3; ++j) base[j] += p.world.m[3][j] / float(capture.pieces.size());
+    }
+    const float right[3] = {in[2], 0.0f, -in[0]};
+    const float yaw = g_portalCam[3] * kPi / 180.0f;
+    const float look[3] = {in[0] * std::cos(yaw) + right[0] * std::sin(yaw), 0.0f,
+                           in[2] * std::cos(yaw) + right[2] * std::sin(yaw)};
+    const Vector eye{base[0] + right[0] * g_portalCam[0] + in[0] * g_portalCam[2], base[1] + g_portalCam[1],
+                     base[2] + right[2] * g_portalCam[0] + in[2] * g_portalCam[2]};
+    const Vector at{eye.x + look[0], eye.y - 0.15f, eye.z + look[2]};
+    std::printf("portal view: playfield %u, %zu pieces, %zu textures, entrance %s (%.2f %.2f %.2f) in (%.2f %.2f)\n",
+                capture.playfield, capture.pieces.size(), capture.textures.size(), capture.entranceKnown ? "known" : "not known",
+                base[0], base[1], base[2], in[0], in[2]);
+    // The states the replay sets (the rest stay the device's): what the pieces' look depends on.
+    static const uint32_t kStates[] = {RS_LIGHTING, RS_AMBIENT, RS_ALPHABLENDENABLE, RS_SRCBLEND, RS_DESTBLEND,
+                                       RS_ALPHATESTENABLE, RS_ALPHAREF, RS_ALPHAFUNC, RS_CULLMODE, RS_ZENABLE,
+                                       RS_ZWRITEENABLE, RS_ZFUNC, RS_COLORVERTEX, RS_DIFFUSEMATERIALSOURCE,
+                                       RS_AMBIENTMATERIALSOURCE, RS_SPECULARMATERIALSOURCE, RS_EMISSIVEMATERIALSOURCE,
+                                       RS_SPECULARENABLE, RS_NORMALIZENORMALS, RS_TEXTUREFACTOR, RS_ZBIAS};
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1)
+            dev.RequestScreenshot(shot);
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF000000, 1.0f);
+        dev.SetTransform(View, LookAtLH(eye, at, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
+        uint32_t lit = 0;
+        for (const portal::CapturedPiece& p : capture.pieces) {
+            dev.SetTransform(World, p.world);
+            dev.SetMaterial(p.material);
+            for (uint32_t st : kStates)
+                dev.SetRenderState(st, p.rs[st]);
+            for (uint32_t stage = 0; stage < 2; ++stage) {
+                for (uint32_t t = 1; t < TSS_COUNT; ++t)
+                    dev.SetTextureStageState(stage, t, p.tss[stage][t]);
+                dev.SetTexture(stage, p.texture[stage] >= 0 ? textures[size_t(p.texture[stage])] : nullptr);
+            }
+            for (uint32_t i = 0; i < p.lights.size(); ++i) {
+                dev.SetLight(i, p.lights[i]);
+                dev.LightEnable(i, true);
+            }
+            for (uint32_t i = uint32_t(p.lights.size()); i < lit; ++i)
+                dev.LightEnable(i, false);
+            lit = uint32_t(p.lights.size());
+            dev.SetDrawVisual(p.kind, p.kind == uint32_t(VisualKind::Room) ? "VisualRoom_t" : "RTriMesh_t");
+            if (p.indices.empty())
+                dev.DrawPrimitive(p.primitive, p.fvf, p.vertices.data(), p.vertexCount);
+            else
+                dev.DrawIndexedPrimitive(p.primitive, p.fvf, p.vertices.data(), p.vertexCount, p.indices.data(),
+                                         uint32_t(p.indices.size()));
+        }
+        dev.SetDrawVisual(0, nullptr);
+        dev.EndFrame();
+    }
+    for (Texture* t : textures) dev.DestroyTexture(t);
+}
+
+// The capture's side (--portal-capture-test DIR): a small room as the game draws a shop's - its walls and floor tagged
+// as rooms, boxes as props - in a playfield of its own (4242), drawn for 5 s; the capture saves it to DIR\4242.rvkp once
+// quiet, which --portal-view then draws.
+std::string g_portalCaptureDir;
+
+template <typename D>
+void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
+{
+    rvk::SetPortalDir(g_portalCaptureDir.c_str());
+    dev.SetSkyPlayfield(4242);
+    auto wallPixels = Checker(64, 4, 0xFFB09070, 0xFF806050);
+    auto boxPixels = Checker(64, 8, 0xFF60A0D0, 0xFF305070);
+    Texture* wall = dev.CreateTexture(64, 64, wallPixels.data());
+    Texture* box = dev.CreateTexture(64, 64, boxPixels.data());
+    std::vector<VtxMesh> room, props;
+    std::vector<uint16_t> roomIdx, propIdx;
+    AddCube(room, roomIdx, 0.0f, 3.0f, 8.0f, 8.0f);   // (the room: seen from inside)
+    for (int i = 0; i < 4; ++i)
+        AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
+    frames = std::max(frames, 330);
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1)
+            dev.RequestScreenshot(shot);
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF000000, 1.0f);
+        dev.SetTransform(View, LookAtLH({0.0f, 1.8f, 0.5f}, {0.0f, 1.65f, 1.5f}, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_LIGHTING, 1);
+        dev.SetRenderState(RS_AMBIENT, 0xFF909090);
+        dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_MATERIAL);
+        Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+        dev.SetMaterial(mat);
+        Light lamp{};
+        lamp.type = LIGHT_POINT;
+        lamp.diffuse = {1.0f, 0.9f, 0.7f, 1};
+        lamp.position = {0.0f, 5.0f, 9.0f};
+        lamp.range = 20.0f;
+        lamp.attenuation0 = 1.0f;
+        dev.SetLight(0, lamp);
+        dev.LightEnable(0, true);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        dev.SetDrawVisual(uint32_t(VisualKind::Room), "VisualRoom_t");
+        dev.SetTexture(0, wall);
+        dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, room.data(), uint32_t(room.size()), roomIdx.data(),
+                                 uint32_t(roomIdx.size()));
+        dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t");
+        dev.SetTexture(0, box);
+        dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, props.data(), uint32_t(props.size()), propIdx.data(),
+                                 uint32_t(propIdx.size()));
+        dev.SetDrawVisual(0, nullptr);
+        dev.LightEnable(0, false);
+        dev.EndFrame();
+        Sleep(16);
+    }
+    dev.DestroyTexture(wall);
+    dev.DestroyTexture(box);
+}
+
 // The zone hand-over (--handover-test; handover.cpp, RVK_ZoneFade): a zone change as the game makes one at 60 frames a
 // second. 18 frames of a warm scene, 2 of the world already stopped (black, the cubes only - n3EngineClient_t::
 // StartTeleport's; its signal comes after the first of them), 40 frames without 3D (a window of the interface only),
@@ -5128,6 +5281,9 @@ int main(int argc, char** argv)
         else if (a == "--lighting-debug") lightingDebug = true;
         else if (a == "--hide-ui") g_hideUi = true;
         else if (a == "--handover-test") { g_handoverTest = true; hdr = true; }
+        else if (a == "--portal-view" && i + 1 < argc) { g_portalView = argv[++i]; hdr = true; }
+        else if (a == "--portal-capture-test" && i + 1 < argc) { g_portalCaptureDir = argv[++i]; hdr = true; }
+        else if (a == "--portal-cam" && i + 4 < argc) { for (float& x : g_portalCam) x = float(std::atof(argv[++i])); }
         else if (a == "--light-override") lightOverride = true;
         else if (a == "--shadows") shadows = true;
         else if (a == "--shadow-test") shadowTest = shadows = true;
@@ -5757,6 +5913,10 @@ int main(int argc, char** argv)
         RunStatelTest(dev, frames, shot, dump);
     } else if (g_handoverTest) {
         RunHandoverTest(dev, frames, shot);
+    } else if (!g_portalView.empty()) {
+        RunPortalView(dev, frames, shot);
+    } else if (!g_portalCaptureDir.empty()) {
+        RunPortalCaptureTest(dev, frames, shot);
     } else if (!g_leafTrees.empty()) {
         RunLeafScene(dev, frames, shot, dump);
     } else if (g_grassBench) {

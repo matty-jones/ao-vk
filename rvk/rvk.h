@@ -29,6 +29,7 @@ struct VmaAllocator_T;
 struct VmaAllocation_T;
 struct VmaVirtualBlock_T;
 
+namespace rvk::portal { struct Capture; }
 namespace rvk::detail { struct FrameLights; struct FvfLayout; struct DrawConstants; struct DrawTransform; struct ShadowRecord; struct Cone; }
 
 namespace rvk {
@@ -108,6 +109,8 @@ void SetLogSink(void (*sink)(const char* line));
 // Where the pipeline cache is kept between runs (compiled pipelines load from it instead of being built again at every
 // start). Empty or never set: RANDYVK_PIPELINE_CACHE, else no cache file ("off" also disables it).
 void SetPipelineCachePath(const char* path);
+// Where captured interiors go (shop portals, portal_capture.cpp): <client>\randy-vk\portals. Unset: none captured.
+void SetPortalDir(const char* dir);
 
 // Texture formats (the D3DX 7 / DirectDraw pixel formats the client can create).
 enum class Format : uint32_t {
@@ -3307,6 +3310,26 @@ private:
     void PortalDiagPlayfield(uint32_t playfield);
     void PortalDiagDraw(uint32_t fvf, uint32_t vertexCount, uint32_t indexCount);
     void PortalDiagFrame();
+    // Shop portals' capture (portal_capture.cpp): a room's playfield's static draws, saved when quiet.
+    void PortalCapturePlayfield(uint32_t playfield);
+    void PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
+                           const uint16_t* indices, uint32_t indexCount);
+    void PortalCaptureFrame();                   // (BeginFrame, before anything is recorded)
+    void PortalCaptureSave();
+    void PortalForgetTexture(Texture* texture);  // (DestroyTexture)
+    bool ReadTexturesLevel0(const std::vector<Texture*>& textures, std::vector<std::vector<uint8_t>*>& out);   // (outside a frame)
+    struct PortalDoor { float base[3], axis[3]; char name[48]; };
+    struct PortalCaptureState {
+        bool on = false, terrainSeen = false, roomsSeen = false, arrivalSet = false;
+        std::shared_ptr<portal::Capture> capture;
+        std::unordered_set<uint64_t> keys;
+        std::unordered_map<Texture*, int32_t> textureIndex;
+        std::vector<std::pair<Texture*, int32_t>> pending;   // textures to read back
+        std::vector<PortalDoor> doors;
+        float arrival[3] = {}, roomCentre[3] = {};
+        uint32_t roomPieces = 0, unsaved = 0;
+        double lastNew = 0.0;
+    } m_pc;
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;

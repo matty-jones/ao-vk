@@ -118,6 +118,9 @@ bool RvkState::EnsureDevice(uint32_t width, uint32_t height)
         size_t slash = cache.find_last_of("\\/");
         cache = (slash == std::string::npos ? std::string() : cache.substr(0, slash + 1)) + "randy-vk.cache";
         rvk::SetPipelineCachePath(cache.c_str());
+        // Captured shop interiors (shop portals): randy-vk\portals beside it - the game's meshes and textures, local.
+        rvk::SetPortalDir(((slash == std::string::npos ? std::string() : cache.substr(0, slash + 1)) +
+                           "randy-vk\\portals").c_str());
     }
     device = new rvk::ThreadedDevice;
     ++deviceSerial;

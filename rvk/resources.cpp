@@ -139,9 +139,10 @@ bool Device::RealizeTexture(Texture* t)
     ci.arrayLayers = 1;
     ci.samples = VK_SAMPLE_COUNT_1_BIT;
     ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    // (Copied from too: a shop's textures are read back for its capture - portal_capture.cpp.)
+    ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if (t->m_renderTarget)
-        ci.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (t->m_storage)
         ci.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     VmaAllocationCreateInfo ac{};
@@ -660,6 +661,7 @@ void Device::DestroyTexture(Texture* texture)
 {
     if (!texture || texture == m_main)
         return;
+    PortalForgetTexture(texture);                // (shop portals: not read back once gone)
     for (auto& t : m_textures)
         if (t == texture) t = nullptr;
     for (auto& l : m_heldLabels)                 // (a label held back for after the post passes)

@@ -1759,6 +1759,7 @@ void Device::SetRenderTarget(Texture* target)
 
 void Device::BeginFrame()
 {
+    PortalCaptureFrame();                        // (shop portals: textures read back, a room's capture saved; outside a frame)
     HeapCheck("the frame's start", 1);
     if (!m_heapBroken && HeapCheckLevel() > 0) m_heapLastOk = "the frame's start";
     // Indoors (a room's playfield: rooms drawn, no terrain) for 10 frames running, or out again: no weather in there
