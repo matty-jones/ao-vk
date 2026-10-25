@@ -72,6 +72,8 @@ public:
     void AddGameSection(const char* name, double ms);
     // The renderer drops blob shadow draws (sun shadows on and valid), as of a frame or two ago.
     bool BlobShadowsReplaced() const { return m_device.m_blobShadowsReplaced.load(std::memory_order_relaxed); }
+    // Frames in a row without 3D, as the worker last ended one (a frame behind the game's).
+    uint32_t FramesWithout3D() const { return m_device.m_framesWithout3DShared.load(std::memory_order_relaxed); }
     void SetTransform(uint32_t type, const d3d::Matrix& m);
     void SetMaterial(const d3d::Material& m);
     void SetLight(uint32_t index, const d3d::Light& light);

@@ -5,6 +5,7 @@
 #include "native/ground.h"
 #include "native/rings.h"
 #include "native/scene.h"
+#include "native/zone.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -280,8 +281,10 @@ void RvkState::Present()
                                    // floating text goes just before it) and RVK_UiRate's layer
     rnative::rings::Install();     // N3.dll's statel rings, once it is loaded (RVK_DetailRange)
     rnative::ground::Install();    // DisplaySystem.dll's ground, once it is loaded (RVK_GroundRange)
+    rnative::zone::Install();      // the teleport and loading screen, logged (docs/zone-handover-plan.md)
     Frame();                  // a present without any rendering still shows a frame
     device->EndFrame();
+    rnative::zone::Frame(device->FramesWithout3D());
     PollMaterialMaps();       // material maps decoded in the background, uploaded between frames
     ParticleFrame();
     WeatherFrame();

@@ -3271,6 +3271,7 @@ private:
     // the interface and 2D pictures, which the upscaling would only soften. Scaled again at the first 3D frame.
     uint32_t RenderScaleNow() const { return TaaActive() && m_framesWithout3D < 60 ? m_renderScaleWanted : 100u; }
     uint32_t m_framesWithout3D = 0;              // frames in a row whose scene drew no 3D (EndFrame)
+    std::atomic<uint32_t> m_framesWithout3DShared{0};   // the same, for the game thread (FramesWithout3D)
     void ApplyRenderScale();
     // The scene is smaller than the output: the TAA upscales it, and the depth is brought up to the output size
     // after it (UpsampleDepth).
