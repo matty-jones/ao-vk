@@ -1477,7 +1477,7 @@ bool Device::LightReachesBox(const LightSphere& l, const float mn[3], const floa
 void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount, uint32_t out[4])
 {
     out[0] = out[1] = out[2] = out[3] = 0;
-    if (!m_lightOverride || !m_pixelLighting || !m_rs[d3d::RS_LIGHTING] ||
+    if (m_drawingPortal || !m_lightOverride || !m_pixelLighting || !m_rs[d3d::RS_LIGHTING] ||
         (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW || m_frameLightIndices.empty())
         return;
     uint32_t count = std::min<uint32_t>(uint32_t(m_frameLightIndices.size()), 64);
@@ -2026,6 +2026,20 @@ void Device::DrawIndexedPrimitiveVB(uint32_t primitive, VertexBuffer* vb, uint32
 // The D3D viewport as Vulkan's: negative height flips Y so D3D's clip space maps the same way; +0.5 matches D3D pixel
 // centres. The scissor is the viewport within the target.
 void Device::ViewportState(VkViewport* vp, VkRect2D* scissor) const
+{
+    ViewportStateOf(vp, scissor);
+    if (m_drawingPortal) {                       // (a shop's room: kept to its doorway's box - portal.cpp)
+        const int32_t x0 = std::max(scissor->offset.x, m_portalScissor.offset.x);
+        const int32_t y0 = std::max(scissor->offset.y, m_portalScissor.offset.y);
+        const int32_t x1 = std::min(scissor->offset.x + int32_t(scissor->extent.width),
+                                    m_portalScissor.offset.x + int32_t(m_portalScissor.extent.width));
+        const int32_t y1 = std::min(scissor->offset.y + int32_t(scissor->extent.height),
+                                    m_portalScissor.offset.y + int32_t(m_portalScissor.extent.height));
+        *scissor = {{x0, y0}, {uint32_t(std::max(x1 - x0, 0)), uint32_t(std::max(y1 - y0, 0))}};
+    }
+}
+
+void Device::ViewportStateOf(VkViewport* vp, VkRect2D* scissor) const
 {
     // RVK_RenderScale: the game's viewport is in back-buffer pixels; the scene is smaller (the half-pixel shift of
     // D3D's pixel centres stays half a scene pixel, as in the passes that draw into the scene themselves).
@@ -2907,23 +2921,26 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount, true);
     }
     DrawMeshInfo(fvf, layout.stride, vertices, vertexCount, indices, indexCount);
-    PortalDiagDraw(fvf, vertexCount, indexCount);   // (shop portals' phase 0: portal_diag.cpp)
-    PortalCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_capture.cpp)
-    PortalNoteBlack(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);     // (portal_links.cpp)
+    if (!m_drawingPortal) {                      // (a shop's room drawn into its doorway: none of the scene's notes)
+        PortalDiagDraw(fvf, vertexCount, indexCount);   // (shop portals' phase 0: portal_diag.cpp)
+        PortalCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_capture.cpp)
+        PortalNoteBlack(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);     // (portal_links.cpp)
+    }
     ProfileDrawSection("draw: setup (mesh info)", since);
-    NoteMeshPiece();                             // (mesh ids: which mesh the object drawing is)
+    if (!m_drawingPortal)
+        NoteMeshPiece();                         // (mesh ids: which mesh the object drawing is)
     // The object's entry in the per-object cache (objects.cpp): a static mesh at its world matrix.
     if (m_objectCache && m_drawMesh && m_drawMeshStatic && !m_external && !m_drawSkin && !m_drawGpu)
         m_drawObject = FindObject();
     ProfileDrawSection("draw: setup (mesh ids)", since);
     // (A GPU-skinned character has no vertices here: DrawSkinned hands the pick its CPU-skinned ones.)
-    if (m_pickActive && !m_external && (vertices || m_pickSkinned) && (m_textures[0] || m_drawVisual) &&
+    if (m_pickActive && !m_external && !m_drawingPortal && (vertices || m_pickSkinned) && (m_textures[0] || m_drawVisual) &&
         (m_target == m_scene || m_target == m_main) && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ &&
         m_rs[d3d::RS_ZENABLE])
         PickDraw(primitive, layout, vertices ? vertices : m_pickSkinned, vertexCount, indices, indexCount, IsTerrain(fvf));
     // ... and solid objects lying on the ground keep it off where they are (not characters, effects, the sky, plants
     // or anything see-through; grass.cpp CaptureCover).
-    if (m_grassOn && !m_external && vertices && !IsTerrain(fvf) && m_target == m_scene &&
+    if (m_grassOn && !m_external && !m_drawingPortal && vertices && !IsTerrain(fvf) && m_target == m_scene &&
         (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ && m_rs[d3d::RS_ZENABLE] && m_rs[d3d::RS_ZWRITEENABLE] &&
         m_rs[d3d::RS_ZFUNC] != d3d::CMP_ALWAYS && !IsMultiplyPass() && !m_drawSkin && !m_drawIsLabel &&
         (!m_textures[0] || m_textures[0]->m_opaque) && !m_rs[d3d::RS_ALPHATESTENABLE]) {
@@ -2932,12 +2949,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             !CharacterDraw(fvf, vertexCount))
             CaptureCover(primitive, layout, vertices, vertexCount, indices, indexCount);
     }
-    PushCandidateDraw(fvf);
+    if (!m_drawingPortal)
+        PushCandidateDraw(fvf);
     ProfileDrawSection("draw: setup (pick, grass cover)", since);
     // A canopy (leaves.cpp): its leaves, baked the first time it is seen, drawn just before it (DrawLeaves). A solid
     // draw may be a tree's trunk (where its fallen leaves lie).
     CanopyParams(primitive, fvf, layout, vertices, vertexCount, indices, indexCount);
-    if (!m_drawLeaves && !m_external)
+    if (!m_drawLeaves && !m_external && !m_drawingPortal)
         NoteSolidDraw(fvf);
     // A swaying plant: its big quads split into small ones (cached), so they bend rather than tilt as a whole.
     float sway[4] = {};
@@ -2979,7 +2997,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // (RVK_GiMode 1, brixelizer.cpp), the ray tracing's structures (raytrace.cpp): the native ground's patches, solid
     // statics and rooms; not plants, glass, characters or effects.
     m_drawRtPlace = 0;
-    if ((m_brix || m_rt) && staticIb && m_target == m_scene && !m_external && !m_drawGpu && !m_drawLeaves && !m_drawSkin &&
+    if ((m_brix || m_rt) && staticIb && m_target == m_scene && !m_external && !m_drawingPortal && !m_drawGpu && !m_drawLeaves && !m_drawSkin &&
         !m_drawIsLabel && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ && m_rs[d3d::RS_ZENABLE] &&
         m_rs[d3d::RS_ZWRITEENABLE]) {
         const auto kind = VisualKind(m_drawVisualKind);
@@ -3075,6 +3093,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // Per-draw world matrix: written into this draw's record.
     void* cpu;
     DrawTransform dt{};
+    if (m_drawingPortal)
+        std::memcpy(dt.clip, m_portalClip, sizeof(dt.clip));   // (portal.cpp)
     if (m_drawLeaves) {                          // a canopy with leaves: its branches sway (ffp.vert BranchSway)
         dt.leaf[0] = m_drawLeaves->centre[0];
         dt.leaf[1] = m_drawLeaves->centre[1];
@@ -3473,7 +3493,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_rs[d3d::RS_LIGHTING] && (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW) flags |= F_LIGHTING;
     if ((flags & F_LIGHTING) && m_pixelLighting) flags |= F_PERPIXEL;
     if (m_lightingDebug) flags |= F_DEBUGLIGHT;
-    bool override = (flags & F_PERPIXEL) && m_lightOverride && !SurfaceSheen(fvf);
+    bool override = (flags & F_PERPIXEL) && m_lightOverride && !SurfaceSheen(fvf) && !m_drawingPortal;
     if (override) flags |= F_LIGHTOVERRIDE;
     m_constLightOverride = override;             // (the block's: kept while later draws reuse it)
     bool hdrTarget = m_target->m_format == Format::RGBA16F;

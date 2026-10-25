@@ -290,7 +290,9 @@ struct DeviceInfo {
     X(RtShadow, m_rtShadow, 0)                        /* the sun's shadows ray traced (raytrace.cpp; 0 off) */ \
     X(RtReflect, m_rtReflect, 0)                      /* reflections the screen lacks ray traced (raytrace.cpp) */ \
     X(VolLamps, m_volLamps, 0)                        /* the lamps' light in the air (volume.frag; 0 none) */ \
-    X(ZoneHoldMax, m_zoneHoldMax, 0)                  /* the longest a zone change hides the new zone once it draws (s) */
+    X(ZoneHoldMax, m_zoneHoldMax, 0)                  /* the longest a zone change hides the new zone once it draws (s) */ \
+    X(PortalDist, m_portalDist, 0)                    /* shops' rooms drawn through their doors within this (units) */ \
+    X(PortalDim, m_portalDim, 0)                      /* ... their brightness by day (0..1 of their own) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
@@ -308,7 +310,8 @@ struct DeviceInfo {
     X(LightRig, m_lightRig, C)                        /* one light for day and night (light_rig.cpp) */ \
     X(GroundOne, m_groundOnePass, C)                  /* the native ground drawn in one pass, not two */ \
     X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */ \
-    X(ZoneFade, m_zoneFade, 0)                        /* a zone change holds the old zone's picture, fades into the new */
+    X(ZoneFade, m_zoneFade, 0)                        /* a zone change holds the old zone's picture, fades into the new */ \
+    X(Portals, m_portalsOn, 0)                        /* shops' rooms seen through their doors (portal.cpp) */
 enum class Knob : uint32_t {
 #define RVK_KNOB_NAME(name, member, refresh) name,
     RVK_FLOAT_KNOBS(RVK_KNOB_NAME) RVK_BOOL_KNOBS(RVK_KNOB_NAME)
@@ -2204,6 +2207,7 @@ private:
     void FrameCommandsSubmitted(Frame& f);       // back to one main command buffer
     // Shared with ApplyDynamicState: the D3D viewport as Vulkan's (and its scissor), the FVF's vertex input.
     void ViewportState(VkViewport* vp, VkRect2D* scissor) const;
+    void ViewportStateOf(VkViewport* vp, VkRect2D* scissor) const;   // (without a portal's box)
     Rect SceneRect(const Rect& r) const;         // back-buffer pixels -> the scene's (RVK_RenderScale)
     static void SetVertexInput(VkCommandBuffer cmd, uint32_t fvf, uint32_t stride);
     Texture* m_contactTex[2] = {};               // half resolution: contact shadow (1 = lit), view depth (ping-pong)
@@ -3329,7 +3333,8 @@ private:
         std::unordered_map<Texture*, int32_t> textureIndex;
         std::vector<std::pair<Texture*, int32_t>> pending;   // textures to read back
         std::vector<PortalDoor> doors;
-        float arrival[3] = {}, roomCentre[3] = {};
+        float arrival[3] = {}, arrivalForward[3] = {}, roomCentre[3] = {};
+        float roomFloor = 1e30f;                 // the rooms' lowest point (an entrance without a door: its floor)
         uint32_t roomPieces = 0, unsaved = 0;
         size_t bytes = 0;                        // its vertices, indices and textures so far
         double lastNew = 0.0, lastSave = 0.0;
@@ -3364,6 +3369,32 @@ private:
     void PortalLinkFrame();                      // (PortalCaptureFrame)
     void PortalLoadLinks();
     bool PortalSaveLinks();
+    // Shop portals (portal.cpp): the rooms behind the linked doorways in view, drawn at the scene's end.
+    struct LoadedPortal {
+        std::shared_ptr<portal::Capture> capture;
+        std::vector<Texture*> textures;          // the capture's, made on the GPU
+        bool ok = false;
+        double lastUsed = 0.0;
+    };
+    std::unordered_map<uint32_t, LoadedPortal> m_portals;   // by the room's playfield (failed loads too: not retried)
+    LoadedPortal* PortalLoad(uint32_t playfield);
+    void PortalForgetUnused(bool all);
+    void DestroyPortals();
+    bool PortalCopyDepth(VkCommandBuffer cmd);
+    void DrawPortals();                          // (EndScene)
+    bool m_drawingPortal = false;                // a room's piece being drawn into a doorway: no side effects
+    VkRect2D m_portalScissor{};                  // ... kept to the doorway's box on the scene
+    float m_portalClip[4] = {};                  // ... and behind its plane (DrawTransform clip)
+    uint32_t m_portalLogged = 0;                 // (the last room logged as drawn + 1)
+    VkPipeline m_portalOpenPipeline = VK_NULL_HANDLE;
+    VkImage m_portalDepthCopy = VK_NULL_HANDLE;
+    VkImageView m_portalDepthCopyView = VK_NULL_HANDLE;
+    VmaAllocation_T* m_portalDepthCopyAllocation = nullptr;
+    VkImageLayout m_portalDepthCopyLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    uint32_t m_portalDepthW = 0, m_portalDepthH = 0;
+    bool m_portalsOn = true;                     // RVK_Portals
+    float m_portalDist = 60.0f;                  // RVK_PortalDist: drawn within this of the camera (units)
+    float m_portalDim = 0.7f;                    // RVK_PortalDim: the room's brightness by day, of its own (0..1)
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;

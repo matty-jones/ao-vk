@@ -253,6 +253,7 @@ Device::~Device()
     DestroyStaticGeometry();
     DestroyStatels();
     DestroyHandover();
+    DestroyPortals();
     CollectGarbage();                            // (what those let go of: DestroyTexture defers - the device is idle)
     SavePipelineCache("at exit");
     if (m_pipelineCache) vkDestroyPipelineCache(m_device, m_pipelineCache, nullptr);

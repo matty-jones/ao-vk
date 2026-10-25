@@ -173,6 +173,13 @@ come from ao-vk's own record of it.
   - frame generation;
   - the zone hand-over (walking through, the held picture is the portal's view: no jump).
 
+**Built (2026-10-25):** `rvk/portal.cpp` and `rvk/shaders/portal_open.frag`.
+- The interior is clipped behind the doorway's plane: a per-draw plane in DrawTransform, discarded in ffp_main. The
+  entrance's own wall stood in the opening.
+- A room without a named door takes its entrance from the arrival camera.
+- A door that led outdoors links to nothing, so an inherited room that was wrong goes away once the door is used.
+- `rvk_demo --portal-capture-test`: the room shows in the street's doorway.
+
 ### Phase 4: polish
 
 - Interior lamps' glow in the air, and the shop's own fog colour.

@@ -196,12 +196,17 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
         p.texture[s] = it->second;
     }
     // (The rooms' box: which side of the entrance the room is.)
-    if (kind == VisualKind::Room && m_drawMesh)
+    if (kind == VisualKind::Room && m_drawMesh) {
+        float lowest = w[3][1];
         for (int j = 0; j < 3; ++j) {
             float c = w[3][j];
             for (int i = 0; i < 3; ++i) c += 0.5f * (m_drawMesh->boundsMin[i] + m_drawMesh->boundsMax[i]) * w[i][j];
             m_pc.roomCentre[j] += c;
         }
+        for (int i = 0; i < 3; ++i)
+            lowest += std::min(m_drawMesh->boundsMin[i] * w[i][1], m_drawMesh->boundsMax[i] * w[i][1]);
+        m_pc.roomFloor = std::min(m_pc.roomFloor, lowest);
+    }
     if (kind == VisualKind::Room) ++m_pc.roomPieces;
     m_pc.bytes += p.vertices.size() + p.indices.size() * 2;
     m_pc.capture->pieces.push_back(std::move(p));
@@ -291,8 +296,10 @@ void Device::PortalCaptureFrame()
         return;
     if (!m_pc.arrivalSet && m_sceneSaw3D && m_aoProjValid) {   // (the last frame's: the first with 3D)
         const auto& v = m_aoView.m;
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < 3; ++i) {
             m_pc.arrival[i] = -(v[3][0] * v[i][0] + v[3][1] * v[i][1] + v[3][2] * v[i][2]);
+            m_pc.arrivalForward[i] = v[i][2];
+        }
         m_pc.arrivalSet = true;
     }
     if (m_pc.terrainSeen) {                      // outdoors: let it go
@@ -350,6 +357,23 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
             "room (%.3f 0 %.3f)",
             c.playfield, best->name, double(std::sqrt(bestD)), double(c.entrance[0]), double(c.entrance[1]),
             double(c.entrance[2]), double(in[0]), double(in[2]));
+    } else if (!c.entranceKnown && s.arrivalSet && s.doors.empty() && s.roomPieces && s.roomFloor < 1e29f) {
+        // No door named: where the camera arrived, on the rooms' floor, the way it looked.
+        float in[3] = {s.arrivalForward[0], 0.0f, s.arrivalForward[2]};
+        const float len = std::sqrt(in[0] * in[0] + in[2] * in[2]);
+        if (len > 1e-3f) {
+            c.entrance[0] = s.arrival[0];
+            c.entrance[1] = s.roomFloor;
+            c.entrance[2] = s.arrival[2];
+            c.inward[0] = in[0] / len;
+            c.inward[1] = 0.0f;
+            c.inward[2] = in[2] / len;
+            c.entranceKnown = true;
+            Log("portal capture: playfield %u's entrance: no door seen - where the camera arrived, (%.2f %.2f %.2f), into "
+                "the room (%.3f 0 %.3f)",
+                c.playfield, double(c.entrance[0]), double(c.entrance[1]), double(c.entrance[2]), double(c.inward[0]),
+                double(c.inward[2]));
+        }
     }
     // Merged with what earlier visits saved: their pieces and textures kept, this visit's new ones added.
     const std::string path = g_portalDir + std::to_string(c.playfield) + ".rvkp";

@@ -733,6 +733,10 @@ void main()
     // Cut-out pixels (alpha test, F_CUTOUT) dropped before the lighting and shadows, not after: most of a plant's quad
     // is see-through. The alpha doesn't depend on the lighting (the lit diffuse keeps the vertex alpha). A dropped
     // pixel is demoted (a helper: its neighbours' derivatives still need it); a 2x2 block all dropped stops here.
+    // A shop's room drawn into its doorway: nothing of it on the street's side of the doorway's plane (its entrance's
+    // own wall and frame stand there - they hid the opening).
+    if (dot(D.clip.xyz, D.clip.xyz) > 0.0 && dot(vPosW, D.clip.xyz) + D.clip.w < 0.0)
+        discard;
 #ifndef RVK_NO_CUTOUT
     bool drop = false;
     if ((C.flags.x & (F_ALPHATEST | F_CUTOUT)) != 0u) {

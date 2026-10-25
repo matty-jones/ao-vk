@@ -59,6 +59,22 @@
   pattern back into the soft edge. The pre-pass uses the same noise, so the crown is lit about once per pixel, not
   once per layer of edges. Demo forest, 1440p: frame 3.59 ms with every plant two-pass, 3.38 past 30, 3.18 past 15,
   2.96 with all of them dithered (3.21 with `RVK_FolEdges` off).
+- **Shop portals** (settings `RVK_Portals`, General, on; `RVK_PortalDist` 60, ini only; `RVK_PortalDim` 0.7;
+  docs/shop-portal-plan.md): a shop's room drawn in 3D behind its black doorway.
+  - **Capture** (portal_capture.cpp): a room's playfield entered through a doorway is recorded as the game draws it
+    (rooms and props: geometry, textures read back between frames, states, lights; its entrance from the door nearest
+    the arrival) into `randy-vk\portals\<playfield>.rvkp`.
+  - **Links** (portal_links.cpp): the black texture's draws (1010004:6014) are split into quads; at a teleport the
+    doorway-sized one nearest the player is linked to the room arrived in (`links.tsv`). The same doorway of the same
+    building elsewhere inherits it, and a door that led outdoors links to nothing.
+  - **Drawing** (portal.cpp, at EndScene, for the nearest two doorways drawn this frame):
+    1. The depth is copied, and where the doorway's rectangle is the surface seen, the depth goes to the far plane
+       (portal_open.frag).
+    2. The room is replayed through the draw path, moved onto the doorway's sill. It uses its own lights (no frame
+       lights, sun shadows, ray tracing, picking or grass cover), is scissored to the doorway's box and clipped
+       behind its plane (DrawTransform clip).
+    3. A shade over the opening dims it by day.
+  - **Check:** `rvk_demo --portal-capture-test DIR` walks street, shop, street; `--portal-view` draws a capture.
 - **Zone hand-over** (settings `RVK_ZoneFade`, General, on; `RVK_ZoneHoldMax`, ini only, 1.5 s;
   docs/zone-handover-plan.md): at a zone change the game presents 0.5 to 1.5 s of frames without 3D, then the new zone
   fills in. Each 3D frame's finished scene (EndScene, after the post passes, before name labels and the interface) is

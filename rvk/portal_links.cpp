@@ -156,7 +156,7 @@ void Device::PortalReportLinks(BlackDraw& draw)
         return;
     draw.reportedIn = m_portalArrivals;
     for (const BlackQuad& q : draw.quads)
-        if (const PortalLink* link = PortalLinkFor(q, m_skyPlayfield))
+        if (const PortalLink* link = PortalLinkFor(q, m_skyPlayfield); link && link->interior)
             Log("portal link: the doorway of %s at (%.2f %.2f %.2f) in playfield %u leads to %u (%s)",
                 q.mesh[0] ? q.mesh : "an unnamed mesh", double(q.centre[0]), double(q.centre[1]), double(q.centre[2]),
                 m_skyPlayfield, link->interior,
@@ -166,7 +166,8 @@ void Device::PortalReportLinks(BlackDraw& draw)
                     : "the same building's elsewhere");
 }
 
-// The link for a doorway: its own (this playfield, this place), else the same doorway of the same building.
+// The link for a doorway: its own (this playfield, this place), else the same doorway of the same building (a link to a
+// room, not one that led outdoors). Its own link may lead nowhere (interior 0): no portal.
 const Device::PortalLink* Device::PortalLinkFor(const BlackQuad& q, uint32_t playfield)
 {
     PortalLoadLinks();
@@ -175,7 +176,7 @@ const Device::PortalLink* Device::PortalLinkFor(const BlackQuad& q, uint32_t pla
         if (l.outdoor == playfield && std::fabs(l.centre[0] - q.centre[0]) < 1.0f &&
             std::fabs(l.centre[1] - q.centre[1]) < 1.0f && std::fabs(l.centre[2] - q.centre[2]) < 1.0f)
             return &l;
-        if (!same && q.mesh[0] && std::strcmp(l.mesh, q.mesh) == 0 && l.piece == q.piece &&
+        if (!same && l.interior && q.mesh[0] && std::strcmp(l.mesh, q.mesh) == 0 && l.piece == q.piece &&
             std::fabs(l.modelCentre[0] - q.modelCentre[0]) < 0.05f &&
             std::fabs(l.modelCentre[1] - q.modelCentre[1]) < 0.05f &&
             std::fabs(l.modelCentre[2] - q.modelCentre[2]) < 0.05f)
@@ -249,16 +250,14 @@ void Device::PortalLinkFrame()
     }
     if (!m_pc.on || !m_pc.capture || m_pc.capture->playfield == p.from)
         return;
-    if (m_pc.terrainSeen) {
-        Log("portal link: the doorway led to playfield %u, outdoors - no link", m_pc.capture->playfield);
-        p.active = false;
-        return;
-    }
-    if (!m_pc.roomsSeen)
+    // Outdoors (or nowhere a room's): kept as a link to nothing, so this doorway no longer takes another building's
+    // room (an inherited link that was wrong).
+    const bool outdoors = m_pc.terrainSeen;
+    if (!outdoors && !m_pc.roomsSeen)
         return;
     PortalLink link{};
     link.outdoor = p.from;
-    link.interior = m_pc.capture->playfield;
+    link.interior = outdoors ? 0u : m_pc.capture->playfield;
     std::memcpy(link.mesh, p.quad.mesh, sizeof(link.mesh));
     link.piece = p.quad.piece;
     std::memcpy(link.modelCentre, p.quad.modelCentre, sizeof(link.modelCentre));
@@ -275,9 +274,10 @@ void Device::PortalLinkFrame()
     });
     m_portalLinks.push_back(link);
     const bool saved = PortalSaveLinks();
-    Log("portal link: the doorway of %s at (%.2f %.2f %.2f) in playfield %u leads to %u (learned; %zu links)%s",
+    Log("portal link: the doorway of %s at (%.2f %.2f %.2f) in playfield %u leads to %u%s (learned; %zu links)%s",
         link.mesh[0] ? link.mesh : "an unnamed mesh", double(link.centre[0]), double(link.centre[1]),
-        double(link.centre[2]), link.outdoor, link.interior, m_portalLinks.size(), saved ? "" : " - NOT SAVED");
+        double(link.centre[2]), link.outdoor, m_pc.capture->playfield, outdoors ? ", outdoors: no portal" : "",
+        m_portalLinks.size(), saved ? "" : " - NOT SAVED");
 }
 
 void Device::PortalLoadLinks()

@@ -4442,8 +4442,11 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
         AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
     frames = std::max(frames, 200);
     for (int frame = 0; frame < frames; ++frame) {
-        if (frame == 70)
-            dev.RequestScreenshot(shot);
+        if (frame == 20 || frame == 70 || frame == frames - 1) {
+            std::string name = shot;
+            name.insert(name.size() - 4, frame == 20 ? "-street" : frame == 70 ? "-room" : "-portal");
+            dev.RequestScreenshot(frame == frames - 1 ? shot : name);
+        }
         if (frame == 25)
             dev.ZoneSignal(rvk::kZoneTeleport);  // (at the doorway: StartTeleport)
         if (frame == 30 || frame == 80)

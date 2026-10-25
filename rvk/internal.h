@@ -63,6 +63,8 @@ struct DrawTransform {
                                    // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); its
                                    // rocks: y 2, its pebbles: y 3 and z kPebbleRange; w: kTerrainBase / kTerrainLight
                                    // (0 = not mapped)
+    float clip[4];                 // a shop's room drawn into its doorway (portal.cpp): kept where dot(world, xyz) + w
+                                   // >= 0 - behind the doorway's plane; all 0: everywhere
 };
 constexpr float kNativeTessDistance = 60.0f;   // world units: the native ground's tessellation gone from here on
 // The native ground's pebbles (ground_pebbles.cpp): drawn within this of the eye at most (each size its own range,

@@ -110,6 +110,9 @@ const uint32_t kFxaaSpirv[] = {
 const uint32_t kUiCompositeSpirv[] = {
 #include "ui_composite.frag.inc"
 };
+const uint32_t kPortalOpenSpirv[] = {
+#include "portal_open.frag.inc"
+};
 const uint32_t kHandoverSpirv[] = {
 #include "handover.frag.inc"
 };
@@ -356,6 +359,7 @@ bool Device::CreateHdrResources(std::string* error)
               fullscreen(kUiCompositeSpirv, sizeof(kUiCompositeSpirv), kColorFormat, 4, m_bloomLayout,
                          &m_uiOverlayPipeline) &&
               fullscreen(kHandoverSpirv, sizeof(kHandoverSpirv), kColorFormat, 2, m_bloomLayout, &m_handoverPipeline) &&
+              fullscreen(kPortalOpenSpirv, sizeof(kPortalOpenSpirv), kColorFormat, 3, m_bloomLayout, &m_portalOpenPipeline) &&
               fullscreen(kMotionBlurSpirv, sizeof(kMotionBlurSpirv), kColorFormat, false, m_bloomLayout, &m_motionPipeline) &&
               fullscreen(kTileMaxSpirv, sizeof(kTileMaxSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_tileMaxPipeline) &&
@@ -438,7 +442,7 @@ void Device::DestroyHdrResources()
                           &m_atmosViewPipeline, &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
                           &m_gbufferPipeline, &m_sssrResolvePipeline, &m_cacaoPackPipeline, &m_sssrEnvPipeline, &m_brixPackPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
-                          &m_uiOverlayPipeline, &m_handoverPipeline,
+                          &m_uiOverlayPipeline, &m_handoverPipeline, &m_portalOpenPipeline,
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,
@@ -522,6 +526,7 @@ void Device::EndScene()
         DrawPendingGroundBase();                 // (RVK_GroundOne: no lighting pass came after the ground's base pass)
     if (!m_scenePhase)
         return;
+    DrawPortals();                               // RVK_Portals: shops' rooms through their doors (portal.cpp)
     m_scenePhase = false;
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     bool wasMain = m_target == m_scene;

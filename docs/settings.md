@@ -17,11 +17,11 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-348 settings, 175 of them in the settings window.
+351 settings, 177 of them in the settings window.
 
 ## Sections
 
-- [General](#general) (10)
+- [General](#general) (13)
 - [Lighting](#lighting) (21)
 - [Materials](#materials) (15)
 - [Debug](#debug) (7)
@@ -49,6 +49,9 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 (every frame) / 30 / 60 / 90 / 120 | 60 | saves GPU and CPU: 30 or 60 cheaper than every frame | window |
 | `RVK_ZoneFade` | Zone changes: the last view stays up and fades into the new zone once it has loaded (off: the blank wait) | on / off | on | no cost | window; game value off; knob |
 | `RVK_ZoneHoldMax` | Zone changes: the longest the new zone stays hidden once it draws (seconds) | 0.5 .. 5 | 1.5 | no cost | ini only; switch `RVK_ZoneFade`; knob |
+| `RVK_Portals` | Shops' insides seen through their doors (once you have been in one of the kind) | on / off | on | GPU: low, with a shop's door in view | window; game value off; knob |
+| `RVK_PortalDist` | Shops' insides through their doors: drawn within this distance | 10 .. 200 | 60 | no cost | ini only; switch `RVK_Portals`; knob |
+| `RVK_PortalDim` | Shops' insides through their doors: their brightness by day (1 = as inside) | 0 .. 1 | 0.7 | no cost | window; switch `RVK_Portals`; knob |
 | `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's | on / off | off | no cost | window |
 | `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | no cost | window; knob |
 | `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | CPU and GPU: more with the value | window |

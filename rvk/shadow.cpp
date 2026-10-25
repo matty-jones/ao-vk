@@ -481,6 +481,8 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
                                 uint32_t vertexCount, VkDeviceSize vbOffset, const uint16_t* indices, uint32_t indexCount,
                                 VkDeviceSize ibOffset, VkBuffer vb, VkBuffer ib)
 {
+    if (m_drawingPortal)
+        return;                                  // (a shop's room in its doorway: not in this playfield's light)
     if (!IsShadowCaster(primitive, fvf))
         return;
     // (Profiling: its share of "draw: geometry + casters", sampled as the per-draw sections are.)
@@ -979,7 +981,7 @@ bool Device::WorldCamera() const
 
 bool Device::ShadowReceiver(uint32_t fvf) const
 {
-    if (m_drawIsLabel || !WorldCamera() || !m_shadows || !ShadingOn() || m_target != m_main || (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZ ||
+    if (m_drawIsLabel || m_drawingPortal || !WorldCamera() || !m_shadows || !ShadingOn() || m_target != m_main || (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZ ||
         !m_rs[d3d::RS_ZENABLE] || VisualKind(m_drawVisualKind) == VisualKind::Sky)   // the sky: no shadows on it
         return false;
     if (!m_rs[d3d::RS_ALPHABLENDENABLE])
