@@ -252,7 +252,8 @@ void main()
             } else {
                 glow = (atan((b - t0) / hh) - atan((a - t0) / hh)) / hh;
             }
-            lamps += l.diffuse.rgb * (glow * shape);
+            float air = l.ambient.w > 0.5 ? 1.0 : FL.volume2.y;   // (a carried light as it is; lamps at RVK_PtLight)
+            lamps += l.diffuse.rgb * (glow * shape * air);
         }
         light += lamps * (0.03 * FL.volume2.x * (1.0 + 3.0 * FL.fogBanks.w));
     }

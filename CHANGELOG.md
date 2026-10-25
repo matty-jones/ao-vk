@@ -102,7 +102,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Inside shops and other rooms, the props and characters were much darker than the walls and floor around them.
   Lamp brightness (`RVK_PtLight`) now only applies outdoors: in a room the lamps are its light, at the game's strength.
   A room's walls and floor take only the lights the game gives them (their lamps are already in their baked light), so
-  the room isn't washed out.
+  the room isn't washed out, and the lamps' glow in the air (`RVK_VolLamps`) stays at `RVK_PtLight` indoors too, so a
+  shop no longer fills with haze.
 - A ceiling lamp over a shop terminal or other prop could be taken for a light a character carries, dimmed to
   `RVK_CharLight`, and with `RVK_OwnShadow` off the prop under it cast no shadow.
 - At night in open zones, a lit strip ran round the whole horizon just under the sky, with a hard top edge and the
