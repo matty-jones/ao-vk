@@ -124,6 +124,14 @@ come from ao-vk's own record of it.
 - **`rvk_demo --portal-view <file>`** draws a capture alone with a free camera. This checks the capture without the
   game, and gives the portal's look-check scene.
 
+**Done (2026-10-25):** the Fair Trade shop (1187) captured in game.
+- 322 pieces, 45 textures, 4.5 MB.
+- The entrance: `door_village_standard2` at (205.01, 4.97, 119.98), into the room +z.
+- `rvk_demo --portal-view 1187.rvkp` draws it like the shop as seen in game: the floor, the panels, the screens, the
+  clinic and the terminals.
+- Saving: after 1.5 s without a new piece, every 5 s while pieces keep coming, and at the frame after leaving. Props
+  come into view as the player looks round, so a quiet spell alone saved nothing on a short visit.
+
 ### Phase 2: links
 
 - At `StartTeleport` outdoors, the doorway is the nearest black-texture quad drawn in the last frames within ~3 units
