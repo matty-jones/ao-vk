@@ -40,7 +40,8 @@ come from ao-vk's own record of it.
    props, but not characters, effects or the interface. Each record holds its geometry, textures, material, render
    states and the lights the game gave it.
    - The record grows as you look around, and is saved to disk keyed by the interior's playfield.
-   - It also stores an **anchor**: where you stood and faced on arrival, just inside the entrance.
+   - It also stores an **anchor**: the interior's entrance door (`door_village_standard2` in a Fair Trade shop), whose
+  bottom centre and inward facing go on the outdoor doorway's sill.
 2. **Link, once, at the door.** When a teleport starts outdoors, the doorway quad you are standing in is matched with
    the playfield you arrive in. The link (outdoor playfield, doorway corners, interior playfield) is saved.
 3. **Draw, every frame, outside.** When a linked doorway is on screen and near, ao-vk draws the interior behind it at
@@ -70,6 +71,43 @@ come from ao-vk's own record of it.
 - **Lighting flags.** Check how a draw could be lit as indoors while the frame is outdoors: the sun, sky ambient, fog,
   wetness, cloud and sun shadows are per-frame (FL) today. Find the smallest per-draw switch.
 - **Write-up:** the findings here. Decide the anchor and the capture's completion rule.
+
+### Phase 0 results (2026-10-25, Fair Trade in Newland Desert, 565 -> 1187 -> 565)
+
+- **The doorway pick** (Ctrl+Shift+J):
+  - 4 triangles of the building's black draw: an arched opening 2.55 wide and 2.86 tall, sill at y 21.30, peak at
+    24.16;
+  - centre (2211.98, 22.73, 1566.47), normal (-0.891, 0.001, 0.454);
+  - this is exactly the statel-matrix numbers. The doorway is the black draw's triangles joined to the hit one, so the
+    windows don't come with it.
+- **The rooms come whole, at once:**
+  - 6 `VisualRoom_t` draws of one 657-vertex buffer, all 125 ms after arrival;
+  - their box x 194..216, y 5..13, z 120..146.
+- **The props come mostly at once:**
+  - 234 of 270 static pieces in the first second, from the arrival view;
+  - the other 36 when turning round: mostly round the entrance (z ~120, behind the arrival camera), a few at the
+    sides.
+
+  So what a doorway shows is in the capture from arrival. Capturing over the whole visit, and merging visits, fills
+  the rest.
+- **The arrival is fixed:**
+  - both visits put the camera at (205.02, 7.02, 120.35) looking (0, -0.09, 0.996), with the player's head at
+    (204.99, 5.08, 124.00);
+  - leaving puts the player about 4.8 units out from the doorway.
+- **The interior has its own entrance:**
+  - `door_village_standard2.abiff` at (205.08, 6.58, 119.95), about 2.4 wide by 3.2 tall, from the floor at y 5.0;
+  - over it `door_blocker_flat.abiff`, a 6.1 x 3.8 panel of the same black texture.
+
+  **Anchor: the interior door's bottom centre (205.04, 5.0, 119.95), facing +z.** It goes on the outdoor doorway's
+  sill centre (2211.98, 21.30, 1566.47), facing in (0.891, 0, -0.454): a turn about the vertical and a move.
+- **Lighting a draw as indoors:**
+  - every bit of the draw flag word is taken, but the interior's draws set their own game state: no directional
+    light (so no sun), the room's ambient (FF1E1E1E), its fog;
+  - what is per frame (sun shadows F_SHADOW, sky light, wetness, cloud shadows, the env probe, GI, the light rig's
+    gains) needs a per-draw switch in a spare word of the draw constants.
+- **Brightness by day:** to be decided in phase 3. The light rig exposes for daylight, so the shop's lamps at that
+  exposure would leave the doorway nearly black by day: true to life, but no portal. The interior gets a gain so it
+  looks as it does from inside, times a setting (dimmer than the street by day).
 
 ### Phase 1: capture and a viewer
 
