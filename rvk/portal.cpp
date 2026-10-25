@@ -27,6 +27,7 @@ namespace {
 
 constexpr uint32_t kMostPortals = 2;       // drawn a frame (the nearest)
 constexpr double kKeepFor = 30.0;          // a capture unused this long is let go
+constexpr float kEntranceCut = 0.15f;      // the room drawn from this far behind the doorway's plane
 
 double Seconds()
 {
@@ -320,11 +321,13 @@ void Device::DrawPortals()
         const uint32_t kind = m_drawVisualKind;
         m_drawingPortal = true;
         m_portalScissor = box;
-        // Behind the doorway's plane (a little in front of it kept: the entrance's frame stands in it).
+        // Behind the doorway's plane, from 0.15 in: the room's own entrance wall stands just behind its door's plane
+        // (a Fair Trade's 0.03 - 0.13), and seen from the street through a wider doorway its door hole's sides showed
+        // as thin lines (its back faces aren't drawn).
         m_portalClip[0] = -out[0];
         m_portalClip[1] = 0.0f;
         m_portalClip[2] = -out[2];
-        m_portalClip[3] = out[0] * q.centre[0] + out[2] * q.centre[2] + 0.05f;
+        m_portalClip[3] = out[0] * q.centre[0] + out[2] * q.centre[2] - kEntranceCut;
         uint32_t drawn = 0;
         for (const portal::CapturedPiece& p : cap.pieces) {
             if (p.vertices.empty()) continue;
@@ -387,6 +390,7 @@ void Device::DrawPortals()
             ++m_lightsGen;
             m_drawVisualKind = uint32_t(VisualKind::Effect);
             m_constantsDirty = true;
+            std::fill(std::begin(m_portalClip), std::end(m_portalClip), 0.0f);   // (it stands in front of the plane)
             Draw(d3d::TriangleStrip, d3d::FVF_XYZ | d3d::FVF_DIFFUSE, quad, 4, nullptr, 0);
         }
         m_drawingPortal = false;
@@ -399,8 +403,9 @@ void Device::DrawPortals()
         m_material = material;
         m_drawVisualKind = kind;
         m_constantsDirty = true;
-        if (m_portalLogged != c.interior + 1) {
-            m_portalLogged = c.interior + 1;
+        const uint64_t logKey = uint64_t(c.interior) << 32 ^
+                                uint32_t(std::lround(q.centre[0] * 10.0f) * 73856093 ^ std::lround(q.centre[2] * 10.0f));
+        if (m_portalLogged.insert(logKey).second) {   // (once a doorway, each arrival in the playfield)
             Log("portal: the room of playfield %u drawn through the doorway of %s at (%.2f %.2f %.2f), %.1f away (%u "
                 "pieces, the screen box %d,%d %ux%u)",
                 c.interior, q.mesh[0] ? q.mesh : "an unnamed mesh", double(q.centre[0]), double(q.centre[1]),

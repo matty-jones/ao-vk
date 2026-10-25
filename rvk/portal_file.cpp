@@ -4,13 +4,14 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 
 namespace rvk::portal {
 
 namespace {
 
 constexpr uint32_t kMagic = 0x504B5652;           // "RVKP"
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2;                  // (1: a character's attachments could be among the pieces)
 
 struct Writer {
     FILE* f;
@@ -48,6 +49,11 @@ uint64_t Hash(const void* data, size_t size, uint64_t seed)
     for (size_t i = 0; i < size; ++i)
         h = (h ^ p[i]) * 0x100000001B3ull;
     return h;
+}
+
+uint64_t GeometryHash(const CapturedPiece& p)
+{
+    return Hash(p.indices.data(), p.indices.size() * 2, Hash(p.vertices.data(), p.vertices.size()));
 }
 
 bool Save(const char* path, const Capture& c)

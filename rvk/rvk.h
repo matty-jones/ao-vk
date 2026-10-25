@@ -3337,6 +3337,8 @@ private:
         float roomFloor = 1e30f;                 // the rooms' lowest point (an entrance without a door: its floor)
         uint32_t roomPieces = 0, unsaved = 0;
         size_t bytes = 0;                        // its vertices, indices and textures so far
+        std::unordered_map<uint64_t, std::vector<std::array<float, 3>>> placesOf;   // a prop's places, by its geometry
+        std::vector<std::array<float, 3>> characters;   // where characters stood (their attachments are dropped)
         double lastNew = 0.0, lastSave = 0.0;
     };
     PortalCaptureState m_pc, m_pcLeaving;        // (leaving: saved at the next frame's start)
@@ -3385,7 +3387,7 @@ private:
     bool m_drawingPortal = false;                // a room's piece being drawn into a doorway: no side effects
     VkRect2D m_portalScissor{};                  // ... kept to the doorway's box on the scene
     float m_portalClip[4] = {};                  // ... and behind its plane (DrawTransform clip)
-    uint32_t m_portalLogged = 0;                 // (the last room logged as drawn + 1)
+    std::unordered_set<uint64_t> m_portalLogged; // (the doorways logged as drawn since arriving)
     VkPipeline m_portalOpenPipeline = VK_NULL_HANDLE;
     VkImage m_portalDepthCopy = VK_NULL_HANDLE;
     VkImageView m_portalDepthCopyView = VK_NULL_HANDLE;

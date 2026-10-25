@@ -63,6 +63,7 @@ void SetPortalDir(const char* dir)
 void Device::PortalCapturePlayfield(uint32_t playfield)
 {
     ++m_portalArrivals;
+    m_portalLogged.clear();
     // Leaving a room's playfield with pieces not yet saved: saved at the next frame's start (outside a frame, its last
     // textures read back first).
     if (m_pc.on && m_pc.roomsSeen && !m_pc.terrainSeen && (m_pc.unsaved || !m_pc.pending.empty()))
@@ -106,6 +107,7 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
     if (kind == VisualKind::Room)
         m_pc.roomsSeen = true;
     if (m_pc.terrainSeen || !vertices || !vertexCount || !stride || m_drawSkin || m_drawIsLabel || m_drawLeaves ||
+        m_drawOwner ||                           // (a dynel's - a character's attachment, a door: not the room's)
         (kind != VisualKind::Room && kind != VisualKind::Static && kind != VisualKind::Unknown) ||
         CharacterDraw(fvf, vertexCount) || m_pc.capture->pieces.size() >= kMostPieces || m_pc.bytes >= kMostBytes)
         return;
@@ -158,6 +160,19 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
     key = portal::Hash(&rdb, sizeof(rdb), key);
     if (!m_pc.keys.insert(key).second)
         return;
+    // The same prop again within 0.3 of where it was recorded: one (a shop's display items bob - a Fair Trade's were
+    // recorded up to 23 times).
+    {
+        const uint64_t g = portal::Hash(indices, indices ? size_t(indexCount) * 2 : 0,
+                                        portal::Hash(vertices, size_t(vertexCount) * stride));
+        auto& places = m_pc.placesOf[g];
+        for (const auto& at3 : places) {
+            const float dx = at3[0] - w[3][0], dy = at3[1] - w[3][1], dz = at3[2] - w[3][2];
+            if (dx * dx + dy * dy + dz * dz < 0.3f * 0.3f)
+                return;
+        }
+        places.push_back({w[3][0], w[3][1], w[3][2]});
+    }
     portal::CapturedPiece p;
     p.key = key;
     p.kind = uint32_t(kind);
@@ -307,6 +322,17 @@ void Device::PortalCaptureFrame()
         m_pc = PortalCaptureState{};
         return;
     }
+    // Where characters stand (the frame's pushers: their heads' ground points), for their attachments (PortalCaptureSave).
+    for (const FramePusher& p : m_framePushers) {
+        bool known = false;
+        for (const auto& c : m_pc.characters)
+            if (std::fabs(c[0] - p.p[0]) < 0.25f && std::fabs(c[1] - p.p[1]) < 0.25f && std::fabs(c[2] - p.p[2]) < 0.25f) {
+                known = true;
+                break;
+            }
+        if (!known && m_pc.characters.size() < 4096)
+            m_pc.characters.push_back({p.p[0], p.p[1], p.p[2]});
+    }
     PortalCaptureReadBack(m_pc);
     const double now = Seconds();
     if (m_pc.roomsSeen && m_pc.unsaved && (now - m_pc.lastNew >= kQuiet || now - m_pc.lastSave >= kSaveEvery))
@@ -413,6 +439,36 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
             t = t >= 0 ? remap[size_t(t)] : -1;
         merged.pieces.push_back(std::move(q));
         ++added;
+    }
+    // Characters' attachments: small pieces where a character stood (its head, a light bar), drawn as props in its
+    // first frames in the room before the game names their owner - this visit's, and an earlier save's of it.
+    {
+        size_t dropped = 0;
+        std::erase_if(merged.pieces, [&](const portal::CapturedPiece& p) {
+            float mn[3] = {1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f, -1e30f, -1e30f};
+            const auto& w = p.world.m;
+            for (uint32_t v = 0; v < p.vertexCount; ++v) {
+                float m[3];
+                std::memcpy(m, p.vertices.data() + size_t(v) * p.stride, 12);
+                for (int j = 0; j < 3; ++j) {
+                    const float x = m[0] * w[0][j] + m[1] * w[1][j] + m[2] * w[2][j] + w[3][j];
+                    mn[j] = std::min(mn[j], x);
+                    mx[j] = std::max(mx[j], x);
+                }
+            }
+            if (p.kind == uint32_t(VisualKind::Room) || mx[0] - mn[0] > 1.0f || mx[1] - mn[1] > 1.0f || mx[2] - mn[2] > 1.0f)
+                return false;
+            const float cx = 0.5f * (mn[0] + mx[0]), cy = 0.5f * (mn[1] + mx[1]), cz = 0.5f * (mn[2] + mx[2]);
+            for (const auto& ch : s.characters)
+                if ((cx - ch[0]) * (cx - ch[0]) + (cz - ch[2]) * (cz - ch[2]) < 0.8f * 0.8f && cy > ch[1] - 0.5f &&
+                    cy < ch[1] + 2.5f) {
+                    ++dropped;
+                    return true;
+                }
+            return false;
+        });
+        if (dropped)
+            Log("portal capture: playfield %u: %zu pieces dropped - a character's (where one stood)", c.playfield, dropped);
     }
     std::error_code made;
     std::filesystem::create_directories(g_portalDir, made);
