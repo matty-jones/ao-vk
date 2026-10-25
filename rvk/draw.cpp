@@ -2909,6 +2909,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     DrawMeshInfo(fvf, layout.stride, vertices, vertexCount, indices, indexCount);
     PortalDiagDraw(fvf, vertexCount, indexCount);   // (shop portals' phase 0: portal_diag.cpp)
     PortalCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_capture.cpp)
+    PortalNoteBlack(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);     // (portal_links.cpp)
     ProfileDrawSection("draw: setup (mesh info)", since);
     NoteMeshPiece();                             // (mesh ids: which mesh the object drawing is)
     // The object's entry in the per-object cache (objects.cpp): a static mesh at its world matrix.

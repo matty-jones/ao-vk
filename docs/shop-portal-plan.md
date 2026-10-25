@@ -143,6 +143,15 @@ come from ao-vk's own record of it.
   confirms or corrects it.
 - Log lines for each link learned and each portal found in a frame.
 
+**Built (2026-10-25):** `rvk/portal_links.cpp`.
+- Each black-texture draw is split once into its connected quads (centre, outward facing, sill, width, height, and
+  where it sits on its mesh).
+- At a teleport, the doorway-sized quad (1.5..6 tall, 0.7..6 wide) nearest the player, drawn in the last 60 frames
+  and within 4.5 units, is the one walked through.
+- It is linked once the playfield arrived in shows rooms, and dropped if that playfield has terrain.
+- Each arrival in a playfield logs the doorways links know.
+- Checked by `rvk_demo --portal-capture-test` (street -> shop -> street).
+
 ### Phase 3: the portal
 
 - **`rvk/portal.cpp`, at EndScene, before the post passes:**

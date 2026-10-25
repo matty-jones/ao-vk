@@ -42,6 +42,8 @@ constexpr double kSettledAfter = 0.15;     // ... and at least this long
 
 void Device::ZoneSignal(uint32_t signal)
 {
+    if (signal & kZoneTeleport)
+        PortalLinkTeleport();                    // (shop portals: the doorway walked through - portal_links.cpp)
     if (signal & kZoneTeleportFailed) {
         if (m_ho.state == Handover::Armed) {
             Log("zone hand-over: the teleport failed - disarmed");

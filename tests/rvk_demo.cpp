@@ -4407,16 +4407,30 @@ void RunPortalView(D& dev, int frames, const std::string& shot)
     for (Texture* t : textures) dev.DestroyTexture(t);
 }
 
-// The capture's side (--portal-capture-test DIR): a small room as the game draws a shop's - its walls and floor tagged
-// as rooms, boxes as props - in a playfield of its own (4242), left after 0.8 s (before the capture's quiet spell: it
-// saves on leaving) for an empty one; the capture writes DIR\4242.rvkp, which --portal-view then draws.
+// The capture's and the links' side (--portal-capture-test DIR): a walk into a shop and out. A street (playfield 4100)
+// with a wall and a black doorway quad (the black texture, 1010004:6014), the camera in front of it; a teleport after
+// 0.4 s; then a small room as the game draws a shop's - walls and floor tagged as rooms, boxes as props - in a playfield
+// of its own (4242), left after 0.8 s (before the capture's quiet spell: it saves on leaving); then the street again.
+// The capture writes DIR\4242.rvkp (which --portal-view draws) and the link DIR\links.tsv; back in the street the
+// doorway is known.
 std::string g_portalCaptureDir;
 
 template <typename D>
 void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
 {
     rvk::SetPortalDir(g_portalCaptureDir.c_str());
-    dev.SetSkyPlayfield(4242);
+    dev.SetSkyPlayfield(4100);
+    const uint32_t blackPixel[16] = {0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000,
+                                     0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000,
+                                     0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000};
+    Texture* black = dev.CreateTexture(4, 4, blackPixel);
+    dev.SetTextureRdbId(black, 6014);
+    // The street's wall (z = 3) and its doorway (2.5 wide, 2.9 tall, from the ground), facing the camera (-z).
+    const VtxMesh wallQuad[4] = {{-6, 0, 3, 0, 0, -1, 0xFFFFFFFF, 0, 0}, {6, 0, 3, 0, 0, -1, 0xFFFFFFFF, 4, 0},
+                                 {6, 5, 3, 0, 0, -1, 0xFFFFFFFF, 4, 2}, {-6, 5, 3, 0, 0, -1, 0xFFFFFFFF, 0, 2}};
+    const VtxMesh door[4] = {{-1.25f, 0, 2.99f, 0, 0, -1, 0xFFFFFFFF, 0, 0}, {1.25f, 0, 2.99f, 0, 0, -1, 0xFFFFFFFF, 1, 0},
+                             {1.25f, 2.9f, 2.99f, 0, 0, -1, 0xFFFFFFFF, 1, 1}, {-1.25f, 2.9f, 2.99f, 0, 0, -1, 0xFFFFFFFF, 0, 1}};
+    const uint16_t quadIdx[6] = {0, 1, 2, 0, 2, 3};
     auto wallPixels = Checker(64, 4, 0xFFB09070, 0xFF806050);
     auto boxPixels = Checker(64, 8, 0xFF60A0D0, 0xFF305070);
     Texture* wall = dev.CreateTexture(64, 64, wallPixels.data());
@@ -4426,16 +4440,44 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
     AddCube(room, roomIdx, 0.0f, 3.0f, 8.0f, 8.0f);   // (the room: seen from inside)
     for (int i = 0; i < 4; ++i)
         AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
-    frames = std::max(frames, 120);
+    frames = std::max(frames, 200);
     for (int frame = 0; frame < frames; ++frame) {
-        if (frame == 40)
+        if (frame == 70)
             dev.RequestScreenshot(shot);
-        if (frame == 50)
-            dev.SetSkyPlayfield(0);              // (left: a zone change's blank frames)
+        if (frame == 25)
+            dev.ZoneSignal(rvk::kZoneTeleport);  // (at the doorway: StartTeleport)
+        if (frame == 30 || frame == 80)
+            dev.SetSkyPlayfield(0);              // (a zone change's blank frames)
+        if (frame == 35)
+            dev.SetSkyPlayfield(4242);           // (the shop)
+        if (frame == 100)
+            dev.SetSkyPlayfield(4100);           // (the street again)
+        const bool street = frame < 30 || frame >= 100;
+        const bool blank = (frame >= 30 && frame < 35) || (frame >= 80 && frame < 100);
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
         dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF000000, 1.0f);
-        if (frame >= 50) {
+        if (blank) {
+            dev.EndFrame();
+            Sleep(16);
+            continue;
+        }
+        if (street) {
+            dev.SetTransform(View, LookAtLH({0.0f, 1.8f, 0.0f}, {0.0f, 1.6f, 3.0f}, {0, 1, 0}));
+            dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
+            dev.SetTransform(World, Identity());
+            dev.SetRenderState(RS_ZENABLE, 1);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+            dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t");
+            dev.SetTexture(0, wall);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, wallQuad, 4, quadIdx, 6);
+            dev.SetTexture(0, black);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, door, 4, quadIdx, 6);
+            dev.SetDrawVisual(0, nullptr);
             dev.EndFrame();
             Sleep(16);
             continue;
@@ -4479,6 +4521,7 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
     }
     dev.DestroyTexture(wall);
     dev.DestroyTexture(box);
+    dev.DestroyTexture(black);
 }
 
 // The zone hand-over (--handover-test; handover.cpp, RVK_ZoneFade): a zone change as the game makes one at 60 frames a

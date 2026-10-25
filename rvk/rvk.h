@@ -111,6 +111,7 @@ void SetLogSink(void (*sink)(const char* line));
 void SetPipelineCachePath(const char* path);
 // Where captured interiors go (shop portals, portal_capture.cpp): <client>\randy-vk\portals. Unset: none captured.
 void SetPortalDir(const char* dir);
+const std::string& PortalDir();                  // (with a trailing backslash; empty: none)
 
 // Texture formats (the D3DX 7 / DirectDraw pixel formats the client can create).
 enum class Format : uint32_t {
@@ -3333,6 +3334,35 @@ private:
         double lastNew = 0.0, lastSave = 0.0;
     };
     PortalCaptureState m_pc, m_pcLeaving;        // (leaving: saved at the next frame's start)
+    // Shop portals' links (portal_links.cpp): the black texture's quads drawn (doorways and windows), and which
+    // doorway leads to which room's playfield.
+    struct BlackQuad {
+        float centre[3] = {}, normal[3] = {}, modelCentre[3] = {};
+        float sill = 0, width = 0, height = 0;
+        char mesh[48] = {};
+        uint16_t piece = 0;
+    };
+    struct BlackDraw { uint64_t lastFrame = 0; uint32_t reportedIn = 0; std::vector<BlackQuad> quads; };
+    uint32_t m_portalArrivals = 1;               // playfield changes (PortalCapturePlayfield): BlackDraw::reportedIn
+    void PortalReportLinks(BlackDraw& draw);
+    std::unordered_map<uint64_t, BlackDraw> m_blackDraws;   // by geometry and place
+    struct PortalLink {
+        uint32_t outdoor = 0, interior = 0;
+        char mesh[48] = {};
+        uint16_t piece = 0;
+        float modelCentre[3] = {}, centre[3] = {}, normal[3] = {};   // (normal: outward)
+        float sill = 0, width = 0, height = 0;
+    };
+    std::vector<PortalLink> m_portalLinks;
+    bool m_portalLinksLoaded = false;
+    struct PortalPending { bool active = false; double time = 0; uint32_t from = 0; BlackQuad quad; } m_portalPending;
+    void PortalNoteBlack(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
+                         const uint16_t* indices, uint32_t indexCount);
+    const PortalLink* PortalLinkFor(const BlackQuad& quad, uint32_t playfield);
+    void PortalLinkTeleport();                   // (ZoneSignal)
+    void PortalLinkFrame();                      // (PortalCaptureFrame)
+    void PortalLoadLinks();
+    bool PortalSaveLinks();
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;

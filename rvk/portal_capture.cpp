@@ -47,6 +47,11 @@ bool CaptureOn()
 
 }  // namespace
 
+const std::string& PortalDir()
+{
+    return g_portalDir;
+}
+
 void SetPortalDir(const char* dir)
 {
     g_portalDir = dir ? dir : "";
@@ -56,6 +61,7 @@ void SetPortalDir(const char* dir)
 
 void Device::PortalCapturePlayfield(uint32_t playfield)
 {
+    ++m_portalArrivals;
     // Leaving a room's playfield with pieces not yet saved: saved at the next frame's start (outside a frame, its last
     // textures read back first).
     if (m_pc.on && m_pc.roomsSeen && !m_pc.terrainSeen && (m_pc.unsaved || !m_pc.pending.empty()))
@@ -272,6 +278,7 @@ void Device::PortalCaptureFrame()
         PortalCaptureSave(m_pcLeaving);
         m_pcLeaving = PortalCaptureState{};
     }
+    PortalLinkFrame();                           // (a teleport's link, once its room is known: portal_links.cpp)
     if (!m_pc.on)
         return;
     if (!m_pc.arrivalSet && m_sceneSaw3D && m_aoProjValid) {   // (the last frame's: the first with 3D)
