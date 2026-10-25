@@ -473,6 +473,8 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
     std::error_code made;
     std::filesystem::create_directories(g_portalDir, made);
     const bool saved = portal::Save(path.c_str(), merged);
+    if (saved)
+        PortalForget(c.playfield);               // (the doorways draw the new capture: portal.cpp)
     size_t bytes = 0;
     for (const auto& t : merged.textures) bytes += t.level0.size();
     for (const auto& p : merged.pieces) bytes += p.vertices.size() + p.indices.size() * 2;

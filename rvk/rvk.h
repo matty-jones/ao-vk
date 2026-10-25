@@ -3376,8 +3376,10 @@ private:
         std::shared_ptr<portal::Capture> capture;
         std::vector<Texture*> textures;          // the capture's, made on the GPU
         bool ok = false;
-        double lastUsed = 0.0;
+        double lastUsed = 0.0, tried = 0.0;
     };
+    std::unordered_set<uint32_t> m_portalMissingLogged;   // (rooms logged as not captured yet)
+    void PortalForget(uint32_t playfield);
     std::unordered_map<uint32_t, LoadedPortal> m_portals;   // by the room's playfield (failed loads too: not retried)
     LoadedPortal* PortalLoad(uint32_t playfield);
     void PortalForgetUnused(bool all);

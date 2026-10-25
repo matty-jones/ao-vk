@@ -27,6 +27,7 @@ namespace {
 
 constexpr uint32_t kMostPortals = 2;       // drawn a frame (the nearest)
 constexpr double kKeepFor = 30.0;          // a capture unused this long is let go
+constexpr double kRetryAfter = 5.0;        // a capture that couldn't be loaded: tried again after this long
 constexpr float kEntranceCut = 0.15f;      // the room drawn from this far behind the doorway's plane
 
 double Seconds()
@@ -70,15 +71,19 @@ Device::LoadedPortal* Device::PortalLoad(uint32_t playfield)
 {
     auto it = m_portals.find(playfield);
     if (it != m_portals.end()) {
-        it->second.lastUsed = Seconds();
-        return it->second.ok ? &it->second : nullptr;
+        if (it->second.ok || Seconds() - it->second.tried < kRetryAfter) {
+            it->second.lastUsed = Seconds();
+            return it->second.ok ? &it->second : nullptr;
+        }
+        m_portals.erase(it);                     // (not loaded a while ago: it may have been captured since)
     }
     LoadedPortal& lp = m_portals[playfield];
-    lp.lastUsed = Seconds();
+    lp.lastUsed = lp.tried = Seconds();
     lp.capture = std::make_shared<portal::Capture>();
     const std::string path = PortalDir() + std::to_string(playfield) + ".rvkp";
     if (!portal::Load(path.c_str(), *lp.capture) || !lp.capture->entranceKnown) {
-        Log("portal: no capture of playfield %u to draw (%s)", playfield, path.c_str());
+        if (m_portalMissingLogged.insert(playfield).second)
+            Log("portal: no capture of playfield %u to draw yet (%s) - going in once records it", playfield, path.c_str());
         lp.capture.reset();
         return nullptr;
     }
@@ -94,6 +99,18 @@ Device::LoadedPortal* Device::PortalLoad(uint32_t playfield)
     Log("portal: playfield %u's room loaded to draw through its doors (%zu pieces, %zu textures)", playfield,
         lp.capture->pieces.size(), lp.capture->textures.size());
     return &lp;
+}
+
+// A room just captured again (PortalCaptureSave): what was loaded of it goes, the new one is loaded when next drawn.
+void Device::PortalForget(uint32_t playfield)
+{
+    auto it = m_portals.find(playfield);
+    if (it == m_portals.end())
+        return;
+    for (Texture* t : it->second.textures)
+        if (t) DestroyTexture(t);
+    m_portals.erase(it);
+    m_portalMissingLogged.erase(playfield);
 }
 
 void Device::PortalForgetUnused(bool all)
