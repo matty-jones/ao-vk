@@ -34,7 +34,7 @@ void WeatherFrame();                              // each presented frame (rvk_w
 void SmokeFrame();                                // each presented frame (rvk_smoke.cpp)
 // The game's effects watched (rvk_fx.cpp: RVK_FxLog); FxPlay plays a template on the player at the next FxFrame.
 void FxFrame();                                   // each presented frame
-void FxPlay(int templateId);
+void FxPlay(int templateId, bool cast = false);   // cast: from the player at the player (a Spell1)
 void FxReload();
 // After the game's update of a _GfxControlStars_t (rvk_particles.cpp's hook of it): ours in its place, if one stands for
 // its template. worldMatrix: RRefFrame_t::GetWorldMatrix (its sprites' frame).

@@ -12,6 +12,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   gathering at your hand, a bright bolt with a trail of motes and sparks, and a burst with a shock ring on the target.
   `rage_bolt.rvkfx` does the same in fire for Lesser Controlled Rage's cast (and four other nanos').
   `nano_recharge.rvkfx` replaces a nano recharger's burst: violet and cyan energy swirling in round you.
+  ao-assets' workbench has an effect editor for them (Effects): every change shows in the running game within a
+  second, and *Play in game* plays the effect on your character without casting. The console's `fx <template> cast`
+  plays a cast at yourself.
   Edited files show at once; the console's `fx reload` reads them again. `RVK_Fx` (Particles) switches them off.
 - Shops' insides can be seen through their open doors from the street, in 3D, instead of a black doorway. A shop
   shows once you have been in one of its kind: going in records the room, and walking through a door remembers where

@@ -45,12 +45,23 @@ using HandleFn = void(__fastcall*)(void* self, void* edx, uint32_t handle);
 using InstanceFn = void*(__cdecl*)();
 using DynelFn = const void*(__fastcall*)(const void* engine, void* edx);
 using CreateOnDynelFn = uint32_t(__fastcall*)(void* self, void* edx, int templateId, const void* dynel, int location);
+using CreateCastFn = uint32_t(__fastcall*)(void* self, void* edx, int templateId, const void* from, const void* to,
+                                           int location);
 
 MakeHandleFn g_makeHandle;
 HandleFn g_terminate, g_delete;
 InstanceFn g_handlerInstance, g_engineInstance;
 DynelFn g_clientDynel;
 CreateOnDynelFn g_createOnDynel;
+CreateCastFn g_createCast;
+std::atomic<bool> g_playCast{false};
+
+// The effect editor's link (ao-assets fx): _play.txt asks for an effect to be played ("<serial> <template> cast|on"),
+// _recent.txt lists the effects the game made lately (what was just seen, to pick it in the editor).
+struct Recent { DWORD at; uint32_t templateId; std::string kind, anchor; };
+std::vector<Recent> g_recent;                   // the last 48
+bool g_recentDirty = false;
+std::string g_playSerial;
 
 bool g_installed, g_gaveUp;
 std::atomic<int> g_playRequest{0};
@@ -376,8 +387,13 @@ std::string Callers(void* const* frame, int count)
 uint32_t __fastcall MakeHandleHook(void* self, void* edx, void* control, uint32_t templateId)
 {
     const uint32_t handle = g_makeHandle(self, edx, control, templateId);
-    if (handle)
+    if (handle) {
         NoteCast(control, templateId);
+        const char* anchor = OverloadAt(uintptr_t(__builtin_return_address(0)));
+        if (g_recent.size() >= 48) g_recent.erase(g_recent.begin());
+        g_recent.push_back({GetTickCount(), templateId, ClassOf(control), anchor ? anchor : "?"});
+        g_recentDirty = true;
+    }
     if (!handle || !LogOn())
         return handle;
     // This hook stands in MakeHandle's place: its return address is in CreateEffect2, and CreateEffect2's frame
@@ -437,6 +453,7 @@ void Install()
     uint8_t* del = exported(gc, "?DeleteEffect@_EffectHandler_t@@QAEXI@Z");
     g_handlerInstance = reinterpret_cast<InstanceFn>(exported(gc, "?GetInstance@_EffectHandler_t@@SAPAV1@XZ"));
     g_createOnDynel = reinterpret_cast<CreateOnDynelFn>(exported(gc, "?CreateEffect2@_EffectHandler_t@@QAEIHABVn3Dynel_t@@H@Z"));
+    g_createCast = reinterpret_cast<CreateCastFn>(exported(gc, "?CreateEffect2@_EffectHandler_t@@QAEIHABVn3Dynel_t@@0H@Z"));
     g_engineInstance = reinterpret_cast<InstanceFn>(exported(n3, "?GetInstance@n3EngineClient_t@@SAPAV1@XZ"));
     g_clientDynel = reinterpret_cast<DynelFn>(exported(n3, "?GetClientControlDynel@n3EngineClient_t@@QBEPAVn3VisualDynel_t@@XZ"));
     // MakeHandle: push ebp; mov ebp, esp; push ecx; push ecx; push esi; mov esi, ecx.
@@ -476,17 +493,54 @@ void Install()
     }
 }
 
-void Play(int templateId)
+// cast: from the player to the player (a cast's bolt, Spell1: caster and target dynels), else on the player.
+void Play(int templateId, bool cast)
 {
     void* handler = g_handlerInstance ? g_handlerInstance() : nullptr;
     void* engine = g_engineInstance ? g_engineInstance() : nullptr;
     const void* dynel = engine && g_clientDynel ? g_clientDynel(engine, nullptr) : nullptr;
-    if (!handler || !dynel || !g_createOnDynel) {
+    if (!handler || !dynel || !g_createOnDynel || (cast && !g_createCast)) {
         RvkLog("fx: play %d: no effect handler or character yet", templateId);
         return;
     }
-    const uint32_t handle = g_createOnDynel(handler, nullptr, templateId, dynel, 0);
-    RvkLog("fx: play %d on the player -> handle %u", templateId, handle);
+    const uint32_t handle = cast ? g_createCast(handler, nullptr, templateId, dynel, dynel, 0)
+                                 : g_createOnDynel(handler, nullptr, templateId, dynel, 0);
+    RvkLog("fx: play %d %s the player -> handle %u", templateId, cast ? "cast at" : "on", handle);
+}
+
+// The editor's request: a new serial plays its template.
+void PollPlayRequest()
+{
+    FILE* f = std::fopen((FxDir() + "_play.txt").c_str(), "rb");
+    if (!f)
+        return;
+    char line[128] = "";
+    std::fgets(line, sizeof(line), f);
+    std::fclose(f);
+    char serial[48] = "", how[16] = "";
+    unsigned templateId = 0;
+    if (std::sscanf(line, "%47s %u %15s", serial, &templateId, how) < 2 || g_playSerial == serial)
+        return;
+    const bool first = g_playSerial.empty();
+    g_playSerial = serial;
+    if (!first && templateId)                    // (a request left from before the game started: not played)
+        Play(int(templateId), std::strcmp(how, "cast") == 0);
+}
+
+void WriteRecent()
+{
+    std::string text = "# ao-vk: the effects the game made lately (ms since start, template, class, anchor)\n";
+    for (const Recent& r : g_recent)
+        text += std::to_string(r.at) + " " + std::to_string(r.templateId) + " " + r.kind + " " + r.anchor + "\n";
+    const std::string dir = FxDir();
+    CreateDirectoryA(dir.substr(0, dir.size() - 1).c_str(), nullptr);
+    const std::string path = dir + "_recent.txt", temp = path + ".tmp";
+    if (FILE* f = std::fopen(temp.c_str(), "wb")) {
+        std::fwrite(text.data(), 1, text.size(), f);
+        std::fclose(f);
+        MoveFileExA(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+    g_recentDirty = false;
 }
 
 }  // namespace
@@ -550,8 +604,9 @@ void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const voi
     g_rvk.device->FxInstance(uint64_t(reinterpret_cast<uintptr_t>(stars)) ^ (uint64_t(templateId) << 32), f.id, a);
 }
 
-void FxPlay(int templateId)
+void FxPlay(int templateId, bool cast)
 {
+    g_playCast.store(cast, std::memory_order_relaxed);
     g_playRequest.store(templateId, std::memory_order_relaxed);
 }
 
@@ -566,7 +621,11 @@ void FxFrame()
         ScanEffects(false);
     if (g_frame % 120 == 0)                      // (casts the game has deleted: no update for a while)
         std::erase_if(g_casts, [](const auto& c) { return c.second.lastFrame + 30 < g_frame; });
-    if (int id = g_playRequest.exchange(0, std::memory_order_relaxed)) Play(id);
+    if (int id = g_playRequest.exchange(0, std::memory_order_relaxed)) Play(id, g_playCast.load(std::memory_order_relaxed));
+    if (g_frame % 15 == 7)
+        PollPlayRequest();
+    if (g_recentDirty && g_frame % 30 == 0)
+        WriteRecent();
 }
 
 void FxReload()
