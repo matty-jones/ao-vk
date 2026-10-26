@@ -64,6 +64,8 @@ void Device::PortalCapturePlayfield(uint32_t playfield)
 {
     ++m_portalArrivals;
     m_streetRoom = StreetRoom{};                 // (the street portal reads its room's entrance again: portal.cpp)
+    m_streetWhy.clear();                         // (... and says again why it isn't drawn)
+    m_streetWhyLines = 0;
     m_portalLogged.clear();
     // Leaving a room's playfield with pieces not yet saved: saved at the next frame's start (outside a frame, its last
     // textures read back first).

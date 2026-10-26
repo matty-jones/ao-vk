@@ -3471,6 +3471,7 @@ private:
     float m_portalDim = 0.7f;                    // RVK_PortalDim: the room's brightness by day, of its own (0..1)
     // The reverse (portal.cpp DrawStreetPortal, docs/street-portal-plan.md): the street from inside a shop.
     void DrawStreetPortal();                     // (EndScene)
+    bool StreetDeclined(const char* why);        // why not, logged as it changes; true: declined
     // The street's ground (portal_street.cpp, phase 2): its capture's cut-out of the native ground, made a native
     // ground of its own - swapped into m_native to be made and drawn through the native ground's path.
     NativeState m_streetNative;
@@ -3489,6 +3490,8 @@ private:
     struct StreetRoom { uint32_t playfield = ~0u; bool known = false; float entrance[3] = {}, inward[3] = {}; } m_streetRoom;
     struct StreetLoaded { std::string path; LoadedPortal lp; bool logged = false; float inset = 0.0f; } m_street;
     uint64_t m_streetShownFrame = 0;             // the last frame the street was drawn through the entrance
+    std::string m_streetWhy;                     // why it isn't drawn, as last logged (StreetDeclined)
+    uint32_t m_streetWhyLines = 0;               // ... lines this visit
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;

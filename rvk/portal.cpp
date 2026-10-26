@@ -551,11 +551,36 @@ constexpr float kStreetEntranceMargin = 1.05f;   // the opening a little wider a
 constexpr float kStreetOpeningOut = 0.25f;
 }  // namespace
 
+// Indoors with the street view on, but the street not drawn: why, once each time the reason changes (at most 40 lines a
+// visit). A black doorway in the game left nothing in the log to say which of the conditions held it back.
+bool Device::StreetDeclined(const char* why)
+{
+    const std::string now = why ? why : "";
+    if (now == m_streetWhy)
+        return why != nullptr;
+    m_streetWhy = now;
+    if (why && m_streetWhyLines < 40) {
+        ++m_streetWhyLines;
+        Log("street: not drawn in playfield %u: %s (walked in from %u, to %u; target %s, scene %d, camera %d)", m_skyPlayfield,
+            why, m_enteredValid ? m_enteredFrom.outdoor : 0u, m_enteredValid ? m_enteredFrom.interior : 0u,
+            m_target == m_scene ? "scene" : "other", int(m_scenePhase), int(m_aoProjValid));
+    }
+    return why != nullptr;
+}
+
 void Device::DrawStreetPortal()
 {
-    if (!m_streetViewOn || !m_portalsOn || !m_indoors || !m_enteredValid || m_enteredFrom.interior != m_skyPlayfield ||
-        !m_scenePhase || m_target != m_scene || !m_aoProjValid || !m_portalOpenPipeline || PortalDir().empty())
+    if (!m_streetViewOn || !m_portalsOn || !m_indoors)
         return;
+    // (Only a drawn street clears the reason: a check that passes on the way says nothing.)
+    if (const char* why = !m_enteredValid                          ? "no doorway known to have been walked in through"
+                          : m_enteredFrom.interior != m_skyPlayfield ? "the doorway walked in through leads elsewhere"
+                          : !m_scenePhase || m_target != m_scene     ? "not drawing the scene"
+                          : !m_aoProjValid                           ? "no world camera this frame"
+                          : !m_portalOpenPipeline                    ? "no opening pipeline"
+                          : PortalDir().empty()                      ? "no portals folder"
+                                                                     : nullptr)
+        return void(StreetDeclined(why));
     // The room's entrance (its capture's header: read again each arrival and when the room's capture is saved - on the
     // first visit it is only written on leaving).
     if (m_streetRoom.playfield != m_skyPlayfield) {
@@ -568,7 +593,7 @@ void Device::DrawStreetPortal()
         std::memcpy(m_streetRoom.inward, header.inward, sizeof(m_streetRoom.inward));
     }
     if (!m_streetRoom.known)
-        return;
+        return void(StreetDeclined("the room's capture has no entrance"));
     // The street (loaded once a doorway; tried again a while after a failure).
     char name[96];
     std::snprintf(name, sizeof(name), "street-%u-%ld-%ld.rvkp", m_enteredFrom.outdoor, std::lround(m_enteredFrom.centre[0]),
@@ -655,7 +680,7 @@ void Device::DrawStreetPortal()
     const float toEye[3] = {eye[0] - e[0], eye[1] - e[1], eye[2] - e[2]};
     if (toEye[0] * in[0] + toEye[2] * in[2] <= 0.0f ||
         toEye[0] * toEye[0] + toEye[1] * toEye[1] + toEye[2] * toEye[2] > m_portalDist * m_portalDist)
-        return;                                  // (the camera outside the room's side of it, or too far)
+        return void(StreetDeclined("the camera on the street's side of the entrance, or farther than RVK_PortalDist"));
     const float across[3] = {-out[2], 0.0f, out[0]};
     const d3d::Vector origin{e[0] - across[0] * 0.5f * width + out[0] * kStreetOpeningOut, e[1],
                              e[2] - across[2] * 0.5f * width + out[2] * kStreetOpeningOut};
@@ -696,13 +721,13 @@ void Device::DrawStreetPortal()
         }
     }
     if (!kept)
-        return;
+        return void(StreetDeclined("the opening off screen"));
     x0 = std::clamp(std::floor(x0) - 2.0f, 0.0f, sw);
     y0 = std::clamp(std::floor(y0) - 2.0f, 0.0f, sh);
     x1 = std::clamp(std::ceil(x1) + 2.0f, 0.0f, sw);
     y1 = std::clamp(std::ceil(y1) + 2.0f, 0.0f, sh);
     if (x1 - x0 < 1.0f || y1 - y0 < 1.0f)
-        return;
+        return void(StreetDeclined("the opening off screen"));
     const VkRect2D box{{int32_t(x0), int32_t(y0)}, {uint32_t(x1 - x0), uint32_t(y1 - y0)}};
     d3d::Matrix inverse;
     if (!InvertMatrix(viewProj, &inverse))
@@ -716,7 +741,8 @@ void Device::DrawStreetPortal()
     // 1. The opening; 2. the sky into it, at the far plane.
     bool copied = false;
     if (!PortalOpenPass(cmd, push, box, copied))
-        return;
+        return void(StreetDeclined("the opening pass failed"));
+    StreetDeclined(nullptr);
     DrawSkyGlow(&box);
     m_streetShownFrame = m_frameNumber;
     // 3. The street: its doorway (the capture's entrance, facing its "inward" - out into the street) on the room's
