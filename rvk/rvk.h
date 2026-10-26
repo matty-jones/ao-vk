@@ -3414,6 +3414,10 @@ private:
     void StreetCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
                            const uint16_t* indices, uint32_t indexCount);
     void StreetCaptureFrame();
+    void StreetCaptureGround(const BlackQuad& quad, const float outward[3]);   // (the native ground in front of it)
+    void StreetCaptureGroundPass(bool light);    // (NativeGroundReplaces: the game's ground passes' states)
+    void StreetCaptureLight();                   // (the hour's lightmap over the cut-out, once there is one)
+    int32_t PortalTextureOf(PortalCaptureState& state, Texture* texture);   // (into its capture; read back later)
     // Shop portals (portal.cpp): the rooms behind the linked doorways in view, drawn at the scene's end.
     struct LoadedPortal {
         std::shared_ptr<portal::Capture> capture;
@@ -3431,6 +3435,7 @@ private:
     void DrawPortals();                          // (EndScene)
     bool PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied);
     uint32_t PortalReplay(const portal::Capture& capture, const std::vector<Texture*>& textures, const d3d::Matrix& place);
+    void PortalSetLights(const std::vector<d3d::Light>& lights, const d3d::Matrix& place);
     void PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box);
     bool m_drawingPortal = false;                // a room's piece being drawn into a doorway: no side effects
     VkRect2D m_portalScissor{};                  // ... kept to the doorway's box on the scene
@@ -3447,6 +3452,13 @@ private:
     float m_portalDim = 0.7f;                    // RVK_PortalDim: the room's brightness by day, of its own (0..1)
     // The reverse (portal.cpp DrawStreetPortal, docs/street-portal-plan.md): the street from inside a shop.
     void DrawStreetPortal();                     // (EndScene)
+    // The street's ground (portal_street.cpp, phase 2): its capture's cut-out of the native ground, made a native
+    // ground of its own - swapped into m_native to be made and drawn through the native ground's path.
+    NativeState m_streetNative;
+    bool m_streetGround = false;                 // it is drawing (its patches are the ground: IsTerrain)
+    bool BuildStreetGround(const portal::Capture& capture, const std::vector<Texture*>& textures);
+    void DrawStreetGround(const portal::Capture& capture, const d3d::Matrix& place);
+    void DestroyStreetGround();
     bool m_streetViewOn = true;                  // RVK_StreetView
     bool m_enteredValid = false;                 // the doorway walked in through (PortalLinkFrame)
     PortalLink m_enteredFrom;

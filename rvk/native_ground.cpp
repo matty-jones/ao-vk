@@ -464,6 +464,8 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
         return false;
     const bool base = !m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE];
     const bool light = m_rs[d3d::RS_LIGHTING] && IsMultiplyPass();
+    if (base || light)
+        StreetCaptureGroundPass(light);          // (a street being recorded: its ground's passes - portal_street.cpp)
     if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber)
         EnsurePebbleTable();                     // (which cells are sand: the means' texture, made again once it is)
     if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber &&
@@ -566,8 +568,9 @@ void Device::DrawNativeGround(bool lightPass)
     m_textures[0] = lightPass ? (m_native.lightmap ? m_native.lightmap : m_native.lightmapGrey) : m_blackTexture;
     m_native.drawing = true;
     UpdateFrameEye();
-    // In view: a patch's box against the camera's clip planes (all eight corners outside one: left out).
-    const d3d::Matrix vp = MulMatrix(m_view, m_proj);
+    // In view: a patch's box against the camera's clip planes (all eight corners outside one: left out). (Its world
+    // matrix: the playfield's ground has none, a street's seen from a shop is moved to its door - portal_street.cpp.)
+    const d3d::Matrix vp = MulMatrix(m_world, MulMatrix(m_view, m_proj));
     uint32_t drawn = 0;
     for (const NativePatch& p : m_native.patches) {
         bool outside[6] = {true, true, true, true, true, true};
@@ -595,7 +598,7 @@ void Device::DrawNativeGround(bool lightPass)
             const float d = std::max({p.lo[k] - m_frameEye[k], m_frameEye[k] - p.hi[k], 0.0f});
             d2 += d * d;
         }
-        m_native.tessPatch = d2 < kNativeTessDistance * kNativeTessDistance;
+        m_native.tessPatch = d2 < kNativeTessDistance * kNativeTessDistance && !m_streetGround;
         DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, p.indices, m_native.indexCount);
         ++drawn;
     }

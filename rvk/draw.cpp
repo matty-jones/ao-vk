@@ -2892,17 +2892,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         if (!m_gameSun)
             return;                              // (RVK_GameSun off: our disc alone)
     }
-    if (IsTerrain(fvf) && IsMultiplyPass())
+    if (IsTerrain(fvf) && IsMultiplyPass() && !m_drawingPortal)
         m_terrainLitPassCur = true;
     // (The terrain's base pass: its light pass multiplies, its fog white - not the scene's fog colour.)
     // (Not the native ground's rocks: the ground's heights are the ground's.)
     const bool groundHeights = IsTerrain(fvf) && !m_native.clutter && (!IsMultiplyPass() || m_groundOne) && m_scenePhase &&
-                               m_target == m_scene && !m_external && !m_drawGpu;
+                               m_target == m_scene && !m_external && !m_drawGpu && !m_drawingPortal;
     if (groundHeights)
         NoteTerrainHeights(fvf, vertices, vertexCount);   // (the valley mist's low ground: mist.cpp)
     if (groundHeights)
         NoteTerrainSun(fvf, vertices, vertexCount);   // (the terrain's shade from a low sun: terrain_sun.cpp)
-    if (IsTerrain(fvf) && !IsMultiplyPass() && m_scenePhase && m_target == m_scene && !m_external)
+    if (IsTerrain(fvf) && !IsMultiplyPass() && m_scenePhase && m_target == m_scene && !m_external && !m_drawingPortal)
         NoteSceneFog();
     Frame& f = m_frames[m_frameIndex];
     VkCommandBuffer cmd = f.main;
@@ -2921,7 +2921,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // RVK_GrassOn: the terrain's ground heights feed the procedural grass (grass.cpp CaptureTerrain / RenderGrassField).
     // The native ground in one pass (RVK_GroundOne) is its base pass too: the grass takes its heights and colours from
     // it as well - with no base pass drawn, no tile was ever given its ground, and no grass grew (user, 2026-10-20).
-    if (m_grassOn && !m_external && vertices && IsTerrain(fvf) && !m_native.clutter) {   // (not the rocks on it)
+    if (m_grassOn && !m_external && !m_drawingPortal && vertices && IsTerrain(fvf) && !m_native.clutter) {   // (not the rocks on it)
         CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount);
         if (m_groundOne && m_native.drawing)
             CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount, true);

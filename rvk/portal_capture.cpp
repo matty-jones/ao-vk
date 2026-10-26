@@ -171,6 +171,25 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
     PortalRecordPiece(m_pc, kind, primitive, fvf, stride, vertices, vertexCount, indices, indexCount);
 }
 
+// A texture into a capture: its place in the capture's textures, its level 0 read back between frames.
+int32_t Device::PortalTextureOf(PortalCaptureState& st, Texture* t)
+{
+    auto it = st.textureIndex.find(t);
+    if (it == st.textureIndex.end()) {
+        portal::CapturedTexture ct;
+        ct.rdbId = t->m_rdbId;
+        ct.width = t->m_width;
+        ct.height = t->m_height;
+        ct.format = t->m_format;
+        const int32_t index = int32_t(st.capture->textures.size());
+        st.capture->textures.push_back(std::move(ct));
+        it = st.textureIndex.emplace(t, index).first;
+        st.pending.emplace_back(t, index);
+        st.bytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
+    }
+    return it->second;
+}
+
 // A piece into a capture (a room's, or a street's: portal_street.cpp) - once each, its geometry, place, textures (read
 // back between frames), material, states and lights.
 void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t primitive, uint32_t fvf, uint32_t stride,
@@ -187,22 +206,7 @@ void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t
     uint64_t key = m_drawMesh ? m_drawMesh->indexHash : portal::Hash(indices, size_t(indexCount) * 2);
     key = portal::Hash(at, sizeof(at), key ^ (uint64_t(vertexCount) << 32 | indexCount));
     key = portal::Hash(blending, sizeof(blending), key);
-    auto textureOf = [&](Texture* t) {
-        auto it = st.textureIndex.find(t);
-        if (it == st.textureIndex.end()) {
-            portal::CapturedTexture ct;
-            ct.rdbId = t->m_rdbId;
-            ct.width = t->m_width;
-            ct.height = t->m_height;
-            ct.format = t->m_format;
-            const int32_t index = int32_t(st.capture->textures.size());
-            st.capture->textures.push_back(std::move(ct));
-            it = st.textureIndex.emplace(t, index).first;
-            st.pending.emplace_back(t, index);
-            st.bytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
-        }
-        return it->second;
-    };
+    auto textureOf = [&](Texture* t) { return PortalTextureOf(st, t); };
     if (auto known = st.pieceAt.find(key); known != st.pieceAt.end()) {
         portal::CapturedPiece& was = st.capture->pieces[known->second];
         bool changed = false;
@@ -476,6 +480,12 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
             merged.textures.push_back(t);
         }
         remap[i] = it->second;
+    }
+    // A street's ground: this visit's, once both its passes were seen (else an earlier save's, kept).
+    if (c.ground.cellsX && c.ground.baseKnown && c.ground.lightKnown) {
+        merged.ground = c.ground;
+        for (int32_t& t : merged.ground.tiles)
+            t = t >= 0 ? remap[size_t(t)] : -1;
     }
     std::unordered_map<uint64_t, size_t> keys;
     for (size_t i = 0; i < merged.pieces.size(); ++i)

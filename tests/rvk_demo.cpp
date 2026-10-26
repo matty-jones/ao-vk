@@ -4408,11 +4408,11 @@ void RunPortalView(D& dev, int frames, const std::string& shot)
 }
 
 // The capture's and the links' side (--portal-capture-test DIR): a walk into a shop and out. A street (playfield 4100)
-// with a wall and a black doorway quad (the black texture, 1010004:6014), the camera in front of it; a teleport after
+// with a wall and a black doorway quad (the black texture, 1010004:6014) and a native ground, the camera in front of it; a teleport after
 // 0.4 s; then a small room as the game draws a shop's - walls and floor tagged as rooms, boxes as props - in a playfield
 // of its own (4242), left after 0.8 s (before the capture's quiet spell: it saves on leaving); then the street again.
 // The capture writes DIR\4242.rvkp (which --portal-view draws) and the link DIR\links.tsv; back in the street the
-// doorway is known, shows the room, and its street is recorded (DIR\street-4100-0-3.rvkp); then into the shop again,
+// doorway is known, shows the room, and its street is recorded (DIR\street-4100-200-203.rvkp); then into the shop again,
 // looking back at its entrance: the street through it (the street portal). Shots: -street, -room, -portal, -inside.
 std::string g_portalCaptureDir;
 std::string g_portalDump;          // (--dump with --portal-capture-test: the last frame's dump, the portal in view)
@@ -4446,6 +4446,51 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
     std::vector<uint16_t> streetBoxIdx;
     for (int i = 0; i < 3; ++i)
         AddCube(streetBoxes, streetBoxIdx, -4.0f + 4.0f * float(i), 1.0f, -6.0f - 3.0f * float(i % 2), 1.0f);
+    // The street's native ground (the street stands at x, z 200, the ground's cells from 0): 128 x 128 cells of 4,
+    // four tiles, flat at the doorway and rolling further out, a lightmap of bands - its cut-out recorded with the
+    // street and drawn through the shop's entrance.
+    constexpr float kOx = 200.0f, kOz = 200.0f;
+    constexpr uint32_t kCells = 128;
+    std::shared_ptr<NativeGround> ground;
+    std::shared_ptr<std::vector<uint8_t>> packed;
+    {
+        const uint32_t colours[4] = {0xFF6E8C3Cu, 0xFF8C9A5Au, 0xFF9C8C7Cu, 0xFFB09060u};
+        std::vector<Texture*> tiles;
+        for (uint32_t t = 0; t < 4; ++t) {
+            std::vector<uint32_t> px(64 * 64);
+            for (uint32_t y = 0; y < 64; ++y)
+                for (uint32_t x = 0; x < 64; ++x)
+                    px[size_t(y) * 64 + x] = (x < 20 && y < 12) ? 0xFF303030u : ((x ^ y) & 8u) ? colours[t] : colours[t] - 0x00101010u;
+            tiles.push_back(dev.CreateTexture(64, 64, px.data()));
+        }
+        auto height = [&](float x, float z) {
+            const float d = std::sqrt((x - kOx) * (x - kOx) + (z - kOz) * (z - kOz));
+            const float t = std::clamp((d - 12.0f) / 30.0f, 0.0f, 1.0f);
+            return -0.02f + t * t * (3.0f * std::sin(x * 0.06f) * std::cos(z * 0.045f) + 2.0f);
+        };
+        ground = std::make_shared<NativeGround>();
+        ground->id = 4100;
+        ground->cellsX = ground->cellsZ = kCells;
+        ground->patch = 64;
+        ground->heights.resize(size_t(kCells + 1) * (kCells + 1));
+        for (uint32_t r = 0; r <= kCells; ++r)
+            for (uint32_t c = 0; c <= kCells; ++c) ground->heights[size_t(r) * (kCells + 1) + c] = height(c * 4.0f, r * 4.0f);
+        ground->codes.resize(size_t(kCells) * kCells);
+        for (uint32_t r = 0; r < kCells; ++r)
+            for (uint32_t c = 0; c < kCells; ++c)
+                ground->codes[size_t(r) * kCells + c] = uint16_t(((c / 3 + r / 5) % 4) | ((c * 7 + r) % 4) << 14);
+        ground->tiles = tiles;
+        packed = std::make_shared<std::vector<uint8_t>>(size_t(kCells / 2) * kCells);
+        for (uint32_t r = 0; r < kCells; ++r)
+            for (uint32_t c = 0; c < kCells; c += 2) {
+                const uint8_t v = uint8_t(8 + (r / 4 % 2) * 6);
+                (*packed)[size_t(r) * (kCells / 2) + c / 2] = uint8_t(v << 4 | v);
+            }
+    }
+    bool groundSet = false;
+    Matrix streetWorld = Identity();
+    streetWorld.m[3][0] = kOx;
+    streetWorld.m[3][2] = kOz;
     frames = std::max(frames, 330);
     for (int frame = 0; frame < frames; ++frame) {
         if (frame == frames - 1 && !g_portalDump.empty())
@@ -4474,13 +4519,54 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             Sleep(16);
             continue;
         }
+        if (street != groundSet) {               // (the street's ground: the game hands it over on arriving)
+            groundSet = street;
+            dev.SetNativeGround(street ? ground : nullptr);
+            if (street) dev.SetNativeGroundLightmap(packed, kCells, kCells, 0.45f);
+        }
         if (street) {
-            dev.SetTransform(View, LookAtLH({0.0f, 1.8f, 0.0f}, {0.0f, 1.6f, 3.0f}, {0, 1, 0}));
+            dev.SetTransform(View, LookAtLH({kOx, 1.8f, kOz}, {kOx, 1.6f, kOz + 3.0f}, {0, 1, 0}));
             dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
             dev.SetTransform(World, Identity());
             dev.SetRenderState(RS_ZENABLE, 1);
             dev.SetRenderState(RS_ZWRITEENABLE, 1);
             dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+            {
+                // The game's ground passes (one chunk each: the native ground draws its own in their place).
+                struct VtxT { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
+                const VtxT chunk[4] = {{kOx - 4, 0, kOz - 4, 0, 1, 0, 0, 0, 0, 0}, {kOx + 4, 0, kOz - 4, 0, 1, 0, 1, 0, 0, 0},
+                                       {kOx + 4, 0, kOz + 4, 0, 1, 0, 1, 1, 0, 0}, {kOx - 4, 0, kOz + 4, 0, 1, 0, 0, 1, 0, 0}};
+                const uint32_t kFvfT = FVF_XYZ | FVF_NORMAL | (2 << 8);
+                Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+                dev.SetMaterial(mat);
+                Light sun{};
+                sun.type = LIGHT_DIRECTIONAL;
+                sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
+                sun.direction = {0.55f, -0.7f, 0.45f};
+                dev.SetLight(0, sun);
+                dev.LightEnable(0, true);
+                dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
+                dev.SetTexture(0, ground->tiles[0]);
+                dev.SetRenderState(RS_LIGHTING, 0);
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+                dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+                dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfT, chunk, 4, quadIdx, 6);
+                dev.SetRenderState(RS_LIGHTING, 1);
+                dev.SetRenderState(RS_AMBIENT, 0xFF515151);
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+                dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
+                dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
+                dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
+                dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
+                dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfT, chunk, 4, quadIdx, 6);
+                dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+                dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+                dev.LightEnable(0, false);
+            }
+            dev.SetTransform(World, streetWorld);
             dev.SetRenderState(RS_LIGHTING, 0);
             dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
             dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);

@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 
 namespace rvk {
 
@@ -73,6 +74,201 @@ void Device::StreetCaptureNear(const PortalLink& link, const BlackQuad& q, const
     Log("street capture: the doorway of %s at (%.2f %.2f %.2f) into %u - its street recorded to %s",
         q.mesh[0] ? q.mesh : "an unnamed mesh", double(q.centre[0]), double(q.centre[1]), double(q.centre[2]),
         link.interior, path.c_str());
+    StreetCaptureGround(q, out);
+}
+
+// The native ground in front of the doorway (phase 2): its cells under the cone's box, a few round it - heights, tile
+// codes (their tiles renumbered among those used), the tiles' textures (read back with the pieces'), their surface
+// types, and the hour's lightmap over them. The ground's passes' states come as the game draws it
+// (StreetCaptureGroundPass).
+void Device::StreetCaptureGround(const BlackQuad& q, const float out[3])
+{
+    if (!m_native.on || !m_native.ground)
+        return;
+    const NativeGround& g = *m_native.ground;
+    float lo[2] = {q.centre[0], q.centre[2]}, hi[2] = {q.centre[0], q.centre[2]};
+    for (int k = -4; k <= 4; ++k) {                  // (the cone's arc, every 15 degrees)
+        const float a = float(k) * 0.2617994f, c = std::cos(a), s = std::sin(a);
+        const float d[2] = {out[0] * c - out[2] * s, out[0] * s + out[2] * c};
+        for (int j = 0; j < 2; ++j) {
+            lo[j] = std::min(lo[j], (j ? q.centre[2] : q.centre[0]) + d[j] * kRange);
+            hi[j] = std::max(hi[j], (j ? q.centre[2] : q.centre[0]) + d[j] * kRange);
+        }
+    }
+    constexpr float kMargin = 8.0f;
+    const int x0 = std::clamp(int(std::floor((lo[0] - kMargin) / g.cellX)), 0, int(g.cellsX));
+    const int x1 = std::clamp(int(std::ceil((hi[0] + kMargin) / g.cellX)), 0, int(g.cellsX));
+    const int z0 = std::clamp(int(std::floor((lo[1] - kMargin) / g.cellZ)), 0, int(g.cellsZ));
+    const int z1 = std::clamp(int(std::ceil((hi[1] + kMargin) / g.cellZ)), 0, int(g.cellsZ));
+    if (x1 - x0 < 2 || z1 - z0 < 2)
+        return;
+    portal::CapturedGround& cg = m_sc.capture->ground;
+    cg = portal::CapturedGround{};
+    cg.cellsX = uint32_t(x1 - x0);
+    cg.cellsZ = uint32_t(z1 - z0);
+    cg.cellX0 = uint32_t(x0);
+    cg.cellZ0 = uint32_t(z0);
+    cg.cellX = g.cellX;
+    cg.cellZ = g.cellZ;
+    const uint32_t W = g.cellsX + 1;
+    for (int r = z0; r <= z1; ++r)
+        for (int c = x0; c <= x1; ++c)
+            cg.heights.push_back(g.heights[size_t(r) * W + c]);
+    std::unordered_map<uint32_t, uint16_t> local;    // the playfield's tile -> the cut-out's
+    for (int r = z0; r < z1; ++r)
+        for (int c = x0; c < x1; ++c) {
+            const uint16_t code = g.codes[size_t(r) * g.cellsX + c];
+            const uint32_t tile = code & 0x3FFFu;
+            auto [it, fresh] = local.emplace(tile, uint16_t(cg.tiles.size()));
+            if (fresh) {
+                Texture* t = tile < g.tiles.size() ? g.tiles[tile] : nullptr;
+                cg.tiles.push_back(t && t->m_image && !t->m_renderTarget ? PortalTextureOf(m_sc, t) : -1);
+                if (!g.types.empty())
+                    cg.types.push_back(tile < g.types.size() ? g.types[tile] : 0);
+            }
+            cg.codes.push_back(uint16_t(it->second | (code & 0xC000u)));
+        }
+    StreetCaptureLight();
+    m_sc.bytes += cg.heights.size() * 4 + cg.codes.size() * 2 + cg.lightW * cg.lightH * 4;
+    Log("street capture: its ground - %u x %u cells from (%u, %u) of playfield %u, %zu tiles, the lightmap %s",
+        cg.cellsX, cg.cellsZ, cg.cellX0, cg.cellZ0, g.id, cg.tiles.size(), cg.light.empty() ? "not yet" : "kept");
+}
+
+// The hour's lightmap's texels over the cut-out's cells (it lies over the playfield a texel a cell, or scaled to it) -
+// when the street's ground is cut, or later (StreetCaptureGroundPass), should the hour's lightmap come after it.
+void Device::StreetCaptureLight()
+{
+    portal::CapturedGround& cg = m_sc.capture->ground;
+    if (!cg.light.empty() || !m_native.ground || m_native.lightPixels.empty() || !m_native.lightW || !m_native.lightH)
+        return;
+    const NativeGround& g = *m_native.ground;
+    cg.lightW = cg.cellsX;
+    cg.lightH = cg.cellsZ;
+    cg.light.reserve(size_t(cg.lightW) * cg.lightH);
+    for (uint32_t r = 0; r < cg.lightH; ++r)
+        for (uint32_t c = 0; c < cg.lightW; ++c) {
+            const uint32_t tx = std::min((cg.cellX0 + c) * m_native.lightW / g.cellsX, m_native.lightW - 1);
+            const uint32_t ty = std::min((cg.cellZ0 + r) * m_native.lightH / g.cellsZ, m_native.lightH - 1);
+            cg.light.push_back(m_native.lightPixels[size_t(ty) * m_native.lightW + tx]);
+        }
+}
+
+// NativeGroundReplaces: the game's ground pass about to be replaced - its states, for the street's ground drawn
+// again (the base pass's and the lighting pass's, once each).
+void Device::StreetCaptureGroundPass(bool light)
+{
+    if (!m_sc.on || !m_sc.capture || m_indoors || m_external)
+        return;
+    portal::CapturedGround& cg = m_sc.capture->ground;
+    if (cg.cellsX && light && cg.light.empty()) {
+        StreetCaptureLight();
+        if (!cg.light.empty() && cg.baseKnown && cg.lightKnown && !m_sc.unsaved++)
+            m_sc.lastSave = std::max(m_sc.lastSave, m_sc.lastNew = Seconds());   // (saved again with it)
+    }
+    if (!cg.cellsX || (light ? cg.lightKnown : cg.baseKnown))
+        return;
+    if (light) {
+        cg.lightRs = m_rs;
+        cg.lightTss = m_tss;
+        cg.material = m_material;
+        cg.lights.clear();
+        for (const LightSlot& slot : m_lights)
+            if (slot.enabled && cg.lights.size() < 8)
+                cg.lights.push_back(slot.light);
+        cg.lightKnown = true;
+    } else {
+        cg.baseRs = m_rs;
+        cg.baseTss = m_tss;
+        cg.baseKnown = true;
+    }
+    if (cg.baseKnown && cg.lightKnown) {
+        m_sc.lastNew = Seconds();
+        if (!m_sc.unsaved++)
+            m_sc.lastSave = std::max(m_sc.lastSave, m_sc.lastNew);
+    }
+}
+
+// The street's ground from its capture (DrawStreetPortal, at its loading): a native ground of its own, made in
+// m_streetNative - its patches, tile codes from the capture's textures, its lightmap - without rocks, pebbles or the
+// sky's visibility.
+bool Device::BuildStreetGround(const portal::Capture& cap, const std::vector<Texture*>& textures)
+{
+    DestroyStreetGround();
+    const portal::CapturedGround& cg = cap.ground;
+    if (!cg.cellsX || !cg.cellsZ || !cg.baseKnown || !cg.lightKnown)
+        return false;
+    auto g = std::make_shared<NativeGround>();
+    g->id = cap.playfield;
+    g->cellsX = cg.cellsX;
+    g->cellsZ = cg.cellsZ;
+    g->patch = 32;
+    g->cellX = cg.cellX;
+    g->cellZ = cg.cellZ;
+    g->heights = cg.heights;
+    g->codes = cg.codes;
+    for (int32_t t : cg.tiles)
+        g->tiles.push_back(t >= 0 && size_t(t) < textures.size() ? textures[size_t(t)] : nullptr);
+    g->types = cg.types;
+    std::swap(m_native, m_streetNative);
+    m_native.on = true;
+    m_native.rocks = 0.0f;
+    m_native.pebbles = 0.0f;
+    m_native.ao = 0.0f;
+    m_native.sun = m_streetNative.sun;
+    SetNativeGround(g);
+    if (m_native.ground && !cg.light.empty()) {
+        m_native.lightmap = CreateTexture(cg.lightW, cg.lightH, cg.light.data());
+        m_native.lightPixels = cg.light;
+        m_native.lightW = cg.lightW;
+        m_native.lightH = cg.lightH;
+        FitNativeLight();
+    }
+    const bool ok = m_native.ground != nullptr;
+    std::swap(m_native, m_streetNative);
+    return ok;
+}
+
+void Device::DestroyStreetGround()
+{
+    if (!m_streetNative.ground && !m_streetNative.lightmap && !m_streetNative.lightmapGrey)
+        return;
+    std::swap(m_native, m_streetNative);
+    DestroyNativeGround();
+    for (Texture** t : {&m_native.lightmap, &m_native.lightmapGrey})
+        if (*t) { DestroyTexture(*t); *t = nullptr; }
+    m_native.lightPixels.clear();
+    m_native.lightW = m_native.lightH = 0;
+    std::swap(m_native, m_streetNative);
+}
+
+// The street's ground into the opening (DrawStreetPortal, m_drawingPortal and its clip set): its two passes as the
+// game drew them outside, its cells where they lay in the street, moved by `place` with the street's pieces.
+void Device::DrawStreetGround(const portal::Capture& cap, const d3d::Matrix& place)
+{
+    if (!m_streetNative.ground)
+        return;
+    const portal::CapturedGround& cg = cap.ground;
+    std::swap(m_native, m_streetNative);
+    if (NativeMapsSignature() != m_native.mapsSignature)
+        MakeNativeCodes();                       // (the settings or the tiles' maps changed)
+    d3d::Matrix offset{};                        // (its cells from where the cut-out began)
+    offset.m[0][0] = offset.m[1][1] = offset.m[2][2] = offset.m[3][3] = 1.0f;
+    offset.m[3][0] = float(cg.cellX0) * cg.cellX;
+    offset.m[3][2] = float(cg.cellZ0) * cg.cellZ;
+    m_world = MulMatrix(offset, place);
+    m_drawVisualKind = uint32_t(VisualKind::Terrain);
+    m_material = cg.material;
+    m_streetGround = true;
+    for (const bool light : {false, true}) {
+        m_rs = light ? cg.lightRs : cg.baseRs;
+        m_tss = light ? cg.lightTss : cg.baseTss;
+        std::fill(m_textures.begin(), m_textures.end(), nullptr);
+        PortalSetLights(light ? cg.lights : std::vector<d3d::Light>{}, place);
+        m_constantsDirty = true;
+        DrawNativeGround(light);
+    }
+    m_streetGround = false;
+    std::swap(m_native, m_streetNative);
 }
 
 // The draw path (not the portals' own draws): a static draw in front of the doorway being recorded from.

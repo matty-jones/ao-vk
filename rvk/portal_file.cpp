@@ -98,6 +98,29 @@ bool Save(const char* path, const Capture& c)
         w.Vector(p.vertices);
         w.Vector(p.indices);
     }
+    const CapturedGround& g = c.ground;
+    w.Value(uint32_t(g.cellsX && g.baseKnown && g.lightKnown));
+    if (g.cellsX && g.baseKnown && g.lightKnown) {
+        w.Value(g.cellsX);
+        w.Value(g.cellsZ);
+        w.Value(g.cellX0);
+        w.Value(g.cellZ0);
+        w.Value(g.cellX);
+        w.Value(g.cellZ);
+        w.Vector(g.heights);
+        w.Vector(g.codes);
+        w.Vector(g.tiles);
+        w.Vector(g.types);
+        w.Value(g.lightW);
+        w.Value(g.lightH);
+        w.Vector(g.light);
+        w.Value(g.baseRs);
+        w.Value(g.lightRs);
+        w.Value(g.baseTss);
+        w.Value(g.lightTss);
+        w.Value(g.material);
+        w.Vector(g.lights);
+    }
     const bool ok = w.ok && std::fclose(f) == 0;
     if (!ok) {
         std::remove(temp.c_str());
@@ -186,6 +209,43 @@ bool Load(const char* path, Capture& c)
         for (int32_t t : p.texture)
             if (t >= int32_t(c.textures.size())) r.ok = false;
         if (!r.ok) break;
+    }
+    // The ground (a street's): a file that ends here has none.
+    uint32_t hasGround = 0;
+    if (r.ok && std::fread(&hasGround, sizeof(hasGround), 1, f) == 1 && hasGround) {
+        CapturedGround& g = c.ground;
+        r.Value(g.cellsX);
+        r.Value(g.cellsZ);
+        r.Value(g.cellX0);
+        r.Value(g.cellZ0);
+        r.Value(g.cellX);
+        r.Value(g.cellZ);
+        if (g.cellsX > 1024 || g.cellsZ > 1024) r.ok = false;
+        r.Vector(g.heights, 1u << 21);
+        r.Vector(g.codes, 1u << 20);
+        r.Vector(g.tiles, 1u << 14);
+        r.Vector(g.types, 1u << 14);
+        r.Value(g.lightW);
+        r.Value(g.lightH);
+        r.Vector(g.light, 1u << 20);
+        r.Value(g.baseRs);
+        r.Value(g.lightRs);
+        r.Value(g.baseTss);
+        r.Value(g.lightTss);
+        r.Value(g.material);
+        r.Vector(g.lights, 8);
+        g.baseKnown = g.lightKnown = true;
+        // (Sound: the sizes agree, the tiles' textures exist, the codes name tiles there are.)
+        if (r.ok && (g.heights.size() != size_t(g.cellsX + 1) * (g.cellsZ + 1) ||
+                     g.codes.size() != size_t(g.cellsX) * g.cellsZ || g.light.size() != size_t(g.lightW) * g.lightH ||
+                     (!g.types.empty() && g.types.size() != g.tiles.size())))
+            r.ok = false;
+        for (int32_t t : g.tiles)
+            if (t >= int32_t(c.textures.size())) r.ok = false;
+        for (uint16_t code : g.codes)
+            if ((code & 0x3FFFu) >= g.tiles.size()) { r.ok = false; break; }
+        if (!r.ok) c.ground = CapturedGround{};
+        r.ok = true;                             // (a broken ground: the street without it)
     }
     std::fclose(f);
     if (!r.ok) {

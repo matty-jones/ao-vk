@@ -439,6 +439,8 @@ bool Device::IsTerrain(uint32_t fvf) const
 {
     if (fvf != (d3d::FVF_XYZ | d3d::FVF_NORMAL | (2u << 8)))
         return false;
+    if (m_streetGround)                          // (a street's ground seen from a shop: moved to its door)
+        return true;
     const auto& w = m_world.m;
     return w[3][0] == 0.0f && w[3][1] == 0.0f && w[3][2] == 0.0f && w[0][0] == 1.0f && w[1][1] == 1.0f && w[2][2] == 1.0f;
 }

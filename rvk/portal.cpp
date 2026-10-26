@@ -137,6 +137,7 @@ void Device::PortalForgetUnused(bool all)
 void Device::DestroyPortals()
 {
     PortalForgetUnused(true);
+    DestroyStreetGround();
     for (Texture* t : m_street.lp.textures)
         if (t) DestroyTexture(t);
     m_street = StreetLoaded{};
@@ -267,17 +268,7 @@ uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Text
             m_textures[s] = p.texture[s] >= 0 ? textures[size_t(p.texture[s])] : nullptr;
         m_world = MulMatrix(p.world, place);
         m_material = p.material;
-        m_lights.assign(p.lights.size(), LightSlot{});
-        for (size_t i = 0; i < p.lights.size(); ++i) {
-            LightSlot& slot = m_lights[i];
-            slot.light = p.lights[i];
-            slot.light.position = Apply(place, p.lights[i].position, 1.0f);
-            slot.light.direction = Apply(place, p.lights[i].direction, 0.0f);
-            slot.enabled = true;
-            slot.cosHalfTheta = std::cos(slot.light.theta * 0.5f);
-            slot.cosHalfPhi = std::cos(slot.light.phi * 0.5f);
-        }
-        ++m_lightsGen;
+        PortalSetLights(p.lights, place);
         m_drawVisualKind = p.kind;
         m_constantsDirty = true;
         Draw(p.primitive, p.fvf, p.vertices.data(), p.vertexCount, p.indices.empty() ? nullptr : p.indices.data(),
@@ -285,6 +276,22 @@ uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Text
         ++drawn;
     }
     return drawn;
+}
+
+// A captured draw's lights as the device's, moved by `place`.
+void Device::PortalSetLights(const std::vector<d3d::Light>& lights, const d3d::Matrix& place)
+{
+    m_lights.assign(lights.size(), LightSlot{});
+    for (size_t i = 0; i < lights.size(); ++i) {
+        LightSlot& slot = m_lights[i];
+        slot.light = lights[i];
+        slot.light.position = Apply(place, lights[i].position, 1.0f);
+        slot.light.direction = Apply(place, lights[i].direction, 0.0f);
+        slot.enabled = true;
+        slot.cosHalfTheta = std::cos(slot.light.theta * 0.5f);
+        slot.cosHalfPhi = std::cos(slot.light.phi * 0.5f);
+    }
+    ++m_lightsGen;
 }
 
 // The opening's pixels (as PortalOpenPass found them) marked in the local-light target as lit by their own lamps
@@ -528,8 +535,9 @@ void Device::DrawPortals()
 // street recorded (portal_street.cpp) and its entrance known (the room's capture): the door's opening at the entrance -
 // its size the door's (the room capture's doors this visit), else 2.4 x 3.2 - is opened as a doorway is from the street
 // (a closed door stands in front of it and keeps it shut); ao-vk's sky is drawn into it at the far plane; the street's
-// pieces are replayed, moved so its doorway stands on the entrance facing out, kept on the street's side of the
-// entrance's plane. Lit as recorded (the hour it was recorded at, for now), no ground or clouds yet (phases 2 and 4).
+// ground (its cut-out of the native ground: portal_street.cpp) and pieces are replayed, moved so its doorway stands on
+// the entrance facing out, kept on the street's side of the entrance's plane. Lit as recorded (the hour it was recorded
+// at, for now), no clouds yet (phase 4).
 namespace rvk {
 
 namespace {
@@ -560,6 +568,7 @@ void Device::DrawStreetPortal()
                   std::lround(m_enteredFrom.centre[2]));
     const std::string path = PortalDir() + name;
     if (m_street.path != path || (!m_street.lp.ok && Seconds() - m_street.lp.tried > kRetryAfter)) {
+        DestroyStreetGround();                   // (its tiles are the street's textures)
         for (Texture* t : m_street.lp.textures)
             if (t) DestroyTexture(t);
         m_street = StreetLoaded{};
@@ -606,9 +615,11 @@ void Device::DrawStreetPortal()
             m_street.inset = std::clamp(depth, 0.0f, 4.0f);
             m_street.lp.capture = cap;
             m_street.lp.ok = true;
+            const bool ground = BuildStreetGround(*cap, m_street.lp.textures);
             Log("street: %s loaded to draw through playfield %u's entrance (%zu pieces, %zu textures; its doorway's %zu "
-                "left out, set in %.2f)", name, m_skyPlayfield, cap->pieces.size(), cap->textures.size(),
-                before - cap->pieces.size(), double(m_street.inset));
+                "left out, set in %.2f; %s)", name, m_skyPlayfield, cap->pieces.size(), cap->textures.size(),
+                before - cap->pieces.size(), double(m_street.inset),
+                ground ? "its ground" : cap->ground.cellsX ? "its ground not made" : "no ground recorded");
         } else {
             Log("street: no %s yet - standing at that doorway outside records it", name);
         }
@@ -708,6 +719,8 @@ void Device::DrawStreetPortal()
     m_portalClip[1] = 0.0f;
     m_portalClip[2] = out[2];
     m_portalClip[3] = -(out[0] * e[0] + out[2] * e[2]) - 0.05f;
+    // (The ground first, then the pieces: the street's pieces' feet on it.)
+    DrawStreetGround(street, place);
     const uint32_t drawn = PortalReplay(street, m_street.lp.textures, place);
     m_drawingPortal = false;
     m_rs = rs;

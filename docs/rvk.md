@@ -74,7 +74,15 @@
        lights, sun shadows, ray tracing, picking or grass cover), is scissored to the doorway's box and clipped
        behind its plane (DrawTransform clip).
     3. A shade over the opening dims it by day.
-  - **Check:** `rvk_demo --portal-capture-test DIR` walks street, shop, street; `--portal-view` draws a capture.
+  - **Street view** (`RVK_StreetView`, docs/street-portal-plan.md): the reverse, the street through the shop's
+    entrance from inside. A walked-through doorway's street is recorded when the camera is within 30 of it
+    (portal_street.cpp: the static pieces in a cone 100 deep, and a cut-out of the native ground under it, with its
+    tiles read back, the hour's lightmap over it and the game's two ground passes' states) into
+    `street-<playfield>-<x>-<z>.rvkp`. Inside, DrawStreetPortal opens the entrance, draws the sky into its box, then
+    the ground (made a native ground of its own, `m_streetNative`, swapped into `m_native` to be built and drawn) and
+    the pieces, all moved onto the entrance and clipped at its plane.
+  - **Check:** `rvk_demo --portal-capture-test DIR` walks street, shop, street, shop (the street has a native ground);
+    `--portal-view` draws a capture.
 - **Zone hand-over** (settings `RVK_ZoneFade`, General, on; `RVK_ZoneHoldMax`, ini only, 1.5 s;
   docs/zone-handover-plan.md): at a zone change the game presents 0.5 to 1.5 s of frames without 3D, then the new zone
   fills in. Each 3D frame's finished scene (EndScene, after the post passes, before name labels and the interface) is

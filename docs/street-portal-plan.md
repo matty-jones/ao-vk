@@ -84,23 +84,32 @@ A recorder of its own (portal_street.cpp), keyed by link, with the cone test. Th
 - It reuses the room capture's piece recording (`PortalRecordPiece`) and saving (`PortalCaptureSave`, with a path of
   its own and no entrance search).
 - The black doorway quads and doors are left out.
-- `rvk_demo --portal-capture-test` records its street (`street-4100-0-3.rvkp`), and `--portal-view` draws it from
+- `rvk_demo --portal-capture-test` records its street (`street-4100-200-203.rvkp`), and `--portal-view` draws it from
   the doorway looking out.
 - Not yet seen in game.
 
 ### Phase 2: ground cut-out
 
-Not started.
-- **Why not yet:** `m_native` is used ~200 times over nine files, and `DrawNativeGround` runs on the game's own
-  terrain draws, with the game's states.
-- **Likely route:** a second `NativeState` for the street, swapped into `m_native` around a ground draw inside
-  `DrawStreetPortal`, with the base and lighting passes' states set by hand. This avoids reworking every use.
-- **Data:** the cut-out (heights, codes, the tiles read back, the street playfield's lightmap) recorded into the
-  street's file as a section of its own.
-- **First:** see phases 1 and 3 in game.
-
-`NativeGround` cut to the cone's cells. The draw path takes a ground to draw (`DrawNativeGround(const NativeState&)`),
-and the tile textures are kept by the cut-out, as copies read back, not the game's.
+**Built (2026-10-25):** the ground in front of the doorway, recorded and drawn through the native ground's own path.
+- **Capture** (portal_street.cpp `StreetCaptureGround`): when a street's capture starts, the native ground's cells
+  under the cone's box (8 units round it) are cut out: heights, tile codes (tiles renumbered among those used, the
+  turn kept), the tiles' textures (read back with the pieces'), their surface types and the hour's lightmap over the
+  cells (filled in later if it comes after). The game's two ground passes' states (the base pass, and the lighting
+  pass with its lights and material) are kept from `NativeGroundReplaces` (`StreetCaptureGroundPass`).
+- **File:** an optional section after the pieces (`portal::CapturedGround`): a file that ends without it has no
+  ground, so no version change. A save keeps this visit's ground, else an earlier one's.
+- **Drawing** (`BuildStreetGround`, `DrawStreetGround`): the cut-out becomes a `NativeGround` of its own in a second
+  `NativeState`, `m_streetNative`. It is swapped into `m_native` for `SetNativeGround` at loading, and for the two
+  passes each frame (`DrawNativeGround(false)`, then `(true)`), between the sky and the pieces.
+  - Its world matrix is the cut-out's first cell moved by the pieces' place. `IsTerrain` takes it as the ground while
+    `m_streetGround` is set, and the patch culling now includes the world matrix (identity for the playfield's own).
+  - Left out: rocks, pebbles, the sky's visibility (its lookup is by world position), tessellation, grass. The
+    ground's notes (heights, sun, fog, grass capture) skip portal draws.
+  - The terrain shader's world-position detail (cliff lays, noise) follows the room's coordinates, not the street's:
+    the same ground, its fine detail laid differently.
+- **Check:** `rvk_demo --portal-capture-test` gives its street a native ground (the street at x, z 200). The -inside
+  shot shows the tiles, the lightmap's bands and the hills behind the street's boxes through the entrance.
+- **Not yet seen in game.** A street recorded before this has no ground until its doorway is stood at again.
 
 ### Phase 3: drawing inside
 
@@ -116,7 +125,7 @@ ground, the pieces lit by the current sun, clip and mark. Settings: `RVK_StreetV
 - **Passes:**
   1. the open pass, shared with the shop portals (`PortalOpenPass`);
   2. ao-vk's sky into the box at the far plane (`DrawSkyGlow(&box)`: `fullscreen_far.vert`, a depth-tested pipeline);
-  3. the street's pieces (`PortalReplay`), kept from 5 cm out of the entrance's plane.
+  3. the street's ground (phase 2), then its pieces (`PortalReplay`), kept from 5 cm out of the entrance's plane.
 - **Lit as recorded:** the hour of the capture, the rig off indoors.
 - **Check:** `rvk_demo --portal-capture-test` walks street, shop, street, shop: the last shot (-inside) shows the sky
   and the street's box through the entrance.
