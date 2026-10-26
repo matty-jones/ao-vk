@@ -5046,6 +5046,10 @@ float g_leafCamOrbit = 0.0f;       // --leaf-cam-orbit R: ... going round the ro
 int g_leafFilm = 0;                // --leaf-film N: ~60 frames a second, a screenshot every N frames (film_NNN.bmp)
 int g_frameGenToggle = 0;          // --frame-gen-toggle N: frame generation off at frame N, on again at 2N (the leaf
                                    // scenes; the swapchain made again each time)
+int g_fgBlankFrom = 0, g_fgHudAt = 0, g_fgHudEnd = 0;   // --fg-loading A H E: from frame A no 3D (a loading screen),
+                                        // frames H to E the perf readout's image, redrawn every 15 frames (the leaf
+                                        // scenes, with --window --frame-gen: the readout switched on at a loading screen
+                                        // hung FSR 3's swapchain)
 bool g_leafPond = false;           // --leaf-pond: a pond in front of the trees, drawn before them (as the game draws a
                                    // pond's water before most of a forest: the depth pre-pass's second segment)
 int g_leafForest = 0;              // --leaf-forest N: an N x N grid of the trees (12 units apart), seen from eye height
@@ -5195,6 +5199,17 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
         dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8AB0D8, 1.0f);
+        if (g_fgHudEnd > 0 && frame == g_fgHudEnd)
+            dev.SetConsoleImage(0, 0, nullptr);
+        else if (g_fgHudAt > 0 && frame >= g_fgHudAt && (frame < g_fgHudEnd || !g_fgHudEnd) && (frame - g_fgHudAt) % 15 == 0) {
+            std::vector<uint32_t> hud(size_t(g_width) * 120, (frame / 15) % 2 ? 0xB0101820u : 0xB0201008u);
+            dev.SetConsoleImage(g_width, 120, hud.data());
+        }
+        if (g_fgBlankFrom > 0 && frame >= g_fgBlankFrom) {
+            dev.EndFrame();
+            if (frame % 30 == 0) std::printf("fg-loading: frame %d\n", frame);
+            continue;
+        }
         const float yaw = g_leafCamYaw + g_leafCamOrbit * std::sin(float(frame) * kPi / 60.0f);
         const float ex = mid + dist * std::sin(yaw), ez = -dist * std::cos(yaw);
         const float lookY = g_leafForest > 0 ? camY + 3.0f : tallest * 0.45f;
@@ -5894,6 +5909,11 @@ int main(int argc, char** argv)
         else if (a == "--ui-window") g_uiWindow = true;
         else if (a == "--shine-pass" && i + 1 < argc) g_shinePass = std::atoi(argv[++i]);
         else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
+        else if (a == "--fg-loading" && i + 3 < argc) {
+            g_fgBlankFrom = std::atoi(argv[++i]);
+            g_fgHudAt = std::atoi(argv[++i]);
+            g_fgHudEnd = std::atoi(argv[++i]);
+        }
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
             saturation = float(std::atof(argv[++i])); contrast = float(std::atof(argv[++i]));
             warmth = float(std::atof(argv[++i])); nightTint = float(std::atof(argv[++i])); vignette = float(std::atof(argv[++i]));

@@ -117,6 +117,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- With frame generation on (`RVK_FrameGen`), the game could freeze for good on a loading screen when anything drawn
+  over the picture appeared or went away there: switching on the performance readout during a zone change or at
+  character select did it every time, and the interface coming or going during a load could too.
 - Forests next to water no longer cost far more than other forests: the trees drawn after a pond or river were
   shaded once for every layer of leaves (about 46 fps under a Newland tree, where a forest without water stays fast).
   `RVK_PrepassMore` (ini only) switches the fix off for comparison.
