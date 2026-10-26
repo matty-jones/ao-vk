@@ -1383,14 +1383,14 @@ void HudFrame(rvk::ThreadedDevice* device)
         std::snprintf(lines[4], sizeof(lines[4]), "CPU      -");
     // Client memory: how much of the game's address space is taken (a 32-bit program: 4 GB at most, and a zone's load
     // needs a large free block - long sessions that ran it out ended the game). Video memory: against the driver's budget.
-    MEMORYSTATUSEX mem{};
-    mem.dwLength = sizeof(mem);
-    const bool memKnown = GlobalMemoryStatusEx(&mem) && mem.ullTotalVirtual > 0;
-    const uint64_t memFree = memKnown ? mem.ullAvailVirtual : 0;
+    // (From the regions, rvk LatestAddressSpace: under Wine GlobalMemoryStatusEx said 93% with a gigabyte still free.)
+    const rvk::AddressSpace space = rvk::LatestAddressSpace();
+    const bool memKnown = space.total > 0 && space.free <= space.total;
+    const uint64_t memFree = memKnown ? space.free : 0;
     const bool memLow = memKnown && memFree < (512ull << 20);
     if (memKnown)
         std::snprintf(lines[5], sizeof(lines[5]), "client mem %3.0f%%  %4u MB free",
-                      100.0 * double(mem.ullTotalVirtual - memFree) / double(mem.ullTotalVirtual), unsigned(memFree >> 20));
+                      100.0 * double(space.total - memFree) / double(space.total), unsigned(memFree >> 20));
     else
         std::snprintf(lines[5], sizeof(lines[5]), "client mem   -");
     uint64_t vramUsed, vramBudget;

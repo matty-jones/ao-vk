@@ -99,6 +99,59 @@ int main(int argc, char** argv)
         Print("check: abort()");
         std::abort();
     }
+    if (!std::strcmp(mode, "--addr")) {
+        // The address space three ways: Windows' figure (GlobalMemoryStatusEx), the free regions summed
+        // (VirtualQuery), and what can really be reserved, 64 MB at a time then 1 MB - under Wine the first two
+        // differ by a gigabyte.
+        // What the game has that an empty process doesn't, 256 MB each: committed memory, reserved only, a mapped
+        // file view, heap blocks.
+        if (argc > 2) {
+            VirtualAlloc(nullptr, SIZE_T(256) << 20, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+            VirtualAlloc(nullptr, SIZE_T(256) << 20, MEM_RESERVE, PAGE_NOACCESS);
+            HANDLE m = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 256u << 20, nullptr);
+            if (m) MapViewOfFile(m, FILE_MAP_WRITE, 0, 0, 0);
+            for (int i = 0; i < 256; ++i) HeapAlloc(GetProcessHeap(), 0, 1 << 20);
+            Print("check: 1 GB taken (256 MB each: committed, reserved, mapped, heap)");
+        }
+        if (argc > 3) {                          // a game's many regions: is the walk cheap enough four times a second?
+            for (int i = 0; i < 20000; ++i)
+                VirtualAlloc(nullptr, 65536, MEM_RESERVE | MEM_COMMIT, (i & 1) ? PAGE_READWRITE : PAGE_READONLY);
+            LARGE_INTEGER f, a, b;
+            QueryPerformanceFrequency(&f);
+            QueryPerformanceCounter(&a);
+            int regions = 0;
+            MEMORY_BASIC_INFORMATION m;
+            for (uintptr_t p = 0x10000; VirtualQuery(reinterpret_cast<const void*>(p), &m, sizeof(m)) == sizeof(m); ++regions) {
+                const uintptr_t next = reinterpret_cast<uintptr_t>(m.BaseAddress) + m.RegionSize;
+                if (next <= p) break;
+                p = next;
+            }
+            QueryPerformanceCounter(&b);
+            Print("check: walk of %d regions: %.2f ms", regions, double(b.QuadPart - a.QuadPart) * 1000.0 / double(f.QuadPart));
+        }
+        MEMORYSTATUSEX mem{};
+        mem.dwLength = sizeof(mem);
+        GlobalMemoryStatusEx(&mem);
+        uint64_t free = 0, largest = 0;
+        MEMORY_BASIC_INFORMATION mbi;
+        for (uintptr_t p = 0x10000; VirtualQuery(reinterpret_cast<const void*>(p), &mbi, sizeof(mbi)) == sizeof(mbi);) {
+            if (mbi.State == MEM_FREE) {
+                free += mbi.RegionSize;
+                if (mbi.RegionSize > largest) largest = mbi.RegionSize;
+            }
+            const uintptr_t next = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if (next <= p) break;
+            p = next;
+        }
+        uint64_t reserved = 0;
+        for (SIZE_T chunk : {SIZE_T(64) << 20, SIZE_T(1) << 20})
+            while (VirtualAlloc(nullptr, chunk, MEM_RESERVE, PAGE_NOACCESS)) reserved += chunk;
+        Print("check: address space: total %llu MB; GlobalMemoryStatusEx free %llu MB; free regions %llu MB (largest "
+              "%llu MB); reservable %llu MB", (unsigned long long)(mem.ullTotalVirtual >> 20),
+              (unsigned long long)(mem.ullAvailVirtual >> 20), (unsigned long long)(free >> 20),
+              (unsigned long long)(largest >> 20), (unsigned long long)(reserved >> 20));
+        return 0;
+    }
     if (!std::strcmp(mode, "--hung-window")) {
         // Frames keep coming, but the window's thread takes no messages: Windows' "not responding" (an unseen window).
         HWND window = CreateWindowExA(0, "STATIC", "crash_check", WS_POPUP, 0, 0, 16, 16, nullptr, nullptr, nullptr, nullptr);
