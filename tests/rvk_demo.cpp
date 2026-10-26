@@ -774,6 +774,14 @@ void RunDemo(D& dev, bool windowed, bool stress, int frames, const std::string& 
             VtxRhwDiffuseTex q[3] = {{0, 0, 0, 1, 0x01FFFFFF, 0, 0}, {1, 0, 0, 1, 0x01FFFFFF, 1, 0}, {0, 1, 0, 1, 0x01FFFFFF, 0, 1}};
             dev.DrawPrimitive(TriangleList, kFvfRhwDiffuseTex, q, 3);
             dev.SetTexture(0, nullptr);
+            // 12000 draws, each its own material: more distinct constants a frame than the arenas start with (a busy
+            // zone's), so they grow - and must stay inside the ring (a player's 71 MB of them in 64 MB wrote past it).
+            VtxRhwDiffuse dot[3] = {{0, 0, 0, 1, 0x00FFFFFF}, {1, 0, 0, 1, 0x00FFFFFF}, {0, 1, 0, 1, 0x00FFFFFF}};
+            for (int i = 0; i < 12000; ++i) {
+                Material m{{float(i % 97) / 97.0f, float(i % 89) / 89.0f, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1};
+                dev.SetMaterial(m);
+                dev.DrawPrimitive(TriangleList, kFvfRhwDiffuse, dot, 3);
+            }
         }
         dev.EndFrame();
         if (shortLived)

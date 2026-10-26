@@ -153,6 +153,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   leaves now keep the holes in their shadows every frame.
 - Rivers missing in Borealis: the canyons under the bridges showed dry sand where the game has water. The playfield
   keeps a second sheet of water hidden under the land, and the river was put at its height, under the ground.
+- A crash in busy zones with many different objects in view: once the renderer's per-frame buffer was outgrown, every
+  frame wrote past its end until the game went down (randy-vk.log filled with "bytes do not fit in the ring buffer").
+  The buffer now grows for the next frames, and nothing is ever written beyond it.
 
 ### Diagnostics
 - Inside a shop, when its open door shows black instead of the street, randy-vk.log now says why (no street
@@ -161,6 +164,11 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`-surface.bmp`: normals, characters' marked twice as bright); `-gi.bmp` stays ours.
 - `RVK_RtDebug 1` (randy-vk.ini) shows what ray tracing sees on GPUs that have it: each building, rock and patch of
   ground in its own colour (red: a surface seen from behind). The ray-traced effects are built on it.
+- Crashes that used to leave randy-vk.log simply ending now leave a report: errors thrown in code (out of memory
+  during a zone load), crashes nothing caught, and the renderer's own fatal errors. A normal quit ends the log with
+  "the game exits", so a log without it was ended from outside the game.
+- randy-vk.log notes the free memory at each zone change and in every crash report, with the largest free block: the
+  game is a 32-bit program, and a load needs one large block.
 
 ## 0.7.0 - 2026-10-20
 
