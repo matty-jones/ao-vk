@@ -224,6 +224,12 @@ void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t
             st.lastNew = Seconds();
             if (!st.unsaved++)
                 st.lastSave = std::max(st.lastSave, st.lastNew);
+            if (st.saves && st.againLines < 8) {   // (what keeps a room saving every few seconds)
+                ++st.againLines;
+                Log("%s capture: playfield %u: unsaved again - a piece's texture changed (%u vertices at %.2f %.2f %.2f, "
+                    "now %d %d)", st.street ? "street" : "portal", st.capture->playfield, vertexCount,
+                    double(w[3][0]), double(w[3][1]), double(w[3][2]), was.texture[0], was.texture[1]);
+            }
         }
         return;
     }
@@ -282,6 +288,12 @@ void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t
     st.lastNew = Seconds();
     if (!st.unsaved++)
         st.lastSave = std::max(st.lastSave, st.lastNew);   // (the 5 s count from the first unsaved piece)
+    if (st.saves && st.againLines < 8) {
+        ++st.againLines;
+        Log("%s capture: playfield %u: unsaved again - a new piece (kind %u, %u vertices at %.2f %.2f %.2f)",
+            st.street ? "street" : "portal", st.capture->playfield, uint32_t(kind), vertexCount, double(w[3][0]),
+            double(w[3][1]), double(w[3][2]));
+    }
 }
 
 // Textures' level 0 as stored (FormatRowBytes x FormatRows), read back now - outside a frame - in one submission
@@ -544,8 +556,10 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
     const bool saved = portal::Save(path.c_str(), merged);
     if (saved && !s.street) {
         PortalForget(c.playfield);               // (the doorways draw the new capture: portal.cpp)
+        // (... and its entrance is read again for the street portal, at its next draw - kept till then: emptied, the
+        // black panel in the doorway was drawn for that frame, a dark flash at every save - the user, 2026-10-26.)
         if (m_streetRoom.playfield == c.playfield)
-            m_streetRoom = StreetRoom{};         // (... and its entrance is read again for the street portal)
+            m_streetRoom.playfield = ~0u;
     }
     size_t bytes = 0;
     for (const auto& t : merged.textures) bytes += t.level0.size();
@@ -555,6 +569,7 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
         merged.pieces.size(), merged.textures.size(), double(bytes) / 1048576.0, had ? " added to" : " written to",
         path.c_str(), saved ? "" : "- FAILED");
     s.unsaved = 0;
+    ++s.saves;
     s.lastSave = Seconds();
 }
 
