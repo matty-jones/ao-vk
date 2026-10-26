@@ -575,8 +575,19 @@ bool Device::StreetDeclined(const char* why)
 void Device::NoteStreetDoorDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
                                 const uint16_t* indices, uint32_t indexCount)
 {
-    if (m_streetDoorDraws.size() >= 16 || vertexCount > 4096)
+    // (16 was too few: a door's pieces, drawn in more than one pass, and the room's other doors near it came to more,
+    // and which were left over went by the draw order - the lock dropped out standing on one side of the door, the
+    // whole door for a frame now and then - the user, 2026-10-26.)
+    if (vertexCount > 4096)
         return;
+    if (m_streetDoorDraws.size() >= 64) {
+        if (m_streetDoorLines < 40 && m_streetDoorLast < 64) {
+            ++m_streetDoorLines;
+            m_streetDoorLast = 64;
+            Log("street: more than 64 of the door's pieces in a frame - the rest not drawn again over the street");
+        }
+        return;
+    }
     // (Its mesh's name - or its visual's, for rvk_demo's leaf: the game's are class names.)
     const char* name = "";
     if (m_drawMesh) {
@@ -587,9 +598,10 @@ void Device::NoteStreetDoorDraw(uint32_t primitive, uint32_t fvf, const void* ve
         name = m_drawVisualName;
     if (!std::strstr(name, "door") || std::strstr(name, "blocker"))
         return;
+    // (The entrance's door: its pieces' places within a door's width or so - the room's other doors stay inside it.)
     const auto& w = m_world.m;
     const float dx = w[3][0] - m_streetRoom.entrance[0], dz = w[3][2] - m_streetRoom.entrance[2];
-    if (dx * dx + dz * dz > 4.0f * 4.0f)
+    if (dx * dx + dz * dz > 2.5f * 2.5f)
         return;
     const uint32_t stride = FvfStride(fvf);
     StreetDoorDraw d;
