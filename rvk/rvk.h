@@ -3350,7 +3350,7 @@ private:
     struct PortalCaptureState {
         bool on = false, terrainSeen = false, roomsSeen = false, arrivalSet = false;
         std::shared_ptr<portal::Capture> capture;
-        std::unordered_set<uint64_t> keys;
+        std::unordered_map<uint64_t, size_t> pieceAt;   // a piece's key -> its place in capture->pieces
         std::unordered_map<Texture*, int32_t> textureIndex;
         std::vector<std::pair<Texture*, int32_t>> pending;   // textures to read back
         std::vector<PortalDoor> doors;
@@ -3451,7 +3451,7 @@ private:
     bool m_enteredValid = false;                 // the doorway walked in through (PortalLinkFrame)
     PortalLink m_enteredFrom;
     struct StreetRoom { uint32_t playfield = ~0u; bool known = false; float entrance[3] = {}, inward[3] = {}; } m_streetRoom;
-    struct StreetLoaded { std::string path; LoadedPortal lp; bool logged = false; } m_street;
+    struct StreetLoaded { std::string path; LoadedPortal lp; bool logged = false; float inset = 0.0f; } m_street;
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;

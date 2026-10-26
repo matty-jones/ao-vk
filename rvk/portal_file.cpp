@@ -1,6 +1,7 @@
 // Captured interiors on disk (portal_file.h): a small binary file, its fields in order, little-endian as written.
 #include "portal_file.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -11,6 +12,7 @@ namespace rvk::portal {
 namespace {
 
 constexpr uint32_t kMagic = 0x504B5652;           // "RVKP"
+constexpr uint32_t kStandInTexture = 9279;        // 1010004:9279, what a room's walls are drawn with until theirs load
 constexpr uint32_t kVersion = 2;                  // (1: a character's attachments could be among the pieces)
 
 struct Writer {
@@ -186,9 +188,38 @@ bool Load(const char* path, Capture& c)
         if (!r.ok) break;
     }
     std::fclose(f);
-    if (!r.ok)
+    if (!r.ok) {
         c = Capture{};
-    return r.ok;
+        return false;
+    }
+    // One piece a place: the same geometry, place and blending recorded twice (captures from before the texture left
+    // the key: the stand-in a room's first frames draw with, and the walls' own) - the later recorded kept.
+    std::unordered_map<uint64_t, size_t> last;
+    for (size_t i = 0; i < c.pieces.size(); ++i) {
+        const CapturedPiece& p = c.pieces[i];
+        const uint32_t blending[4] = {p.rs[d3d::RS_ALPHABLENDENABLE], p.rs[d3d::RS_SRCBLEND], p.rs[d3d::RS_DESTBLEND],
+                                      p.rs[d3d::RS_ALPHATESTENABLE]};
+        int32_t place[12];
+        for (int k = 0; k < 12; ++k)
+            place[k] = int32_t(std::lround((&p.world.m[0][0])[k < 9 ? k + k / 3 : 12 + (k - 9)] * 100.0f));
+        uint64_t key = Hash(blending, sizeof(blending), GeometryHash(p));
+        key = Hash(place, sizeof(place), key);
+        auto standIn = [&](const CapturedPiece& q) {
+            return q.texture[0] >= 0 && c.textures[size_t(q.texture[0])].rdbId == kStandInTexture;
+        };
+        auto [it, fresh] = last.emplace(key, i);
+        if (!fresh && !(standIn(p) && !standIn(c.pieces[it->second])))
+            it->second = i;                      // (the later - but never the stand-in over a real texture)
+    }
+    if (last.size() < c.pieces.size()) {
+        std::vector<bool> keep(c.pieces.size(), false);
+        for (const auto& [key, i] : last) keep[i] = true;
+        std::vector<CapturedPiece> kept;
+        for (size_t i = 0; i < c.pieces.size(); ++i)
+            if (keep[i]) kept.push_back(std::move(c.pieces[i]));
+        c.pieces = std::move(kept);
+    }
+    return true;
 }
 
 }  // namespace rvk::portal

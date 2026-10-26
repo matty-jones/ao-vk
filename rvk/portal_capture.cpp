@@ -179,12 +179,48 @@ void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t
     const auto& w = m_world.m;
     const int32_t at[3] = {int32_t(std::lround(w[3][0] * 100.0f)), int32_t(std::lround(w[3][1] * 100.0f)),
                            int32_t(std::lround(w[3][2] * 100.0f))};
-    const uint32_t rdb = m_textures[0] ? m_textures[0]->m_rdbId : 0;
+    // The piece: its geometry, place and blending - not its texture. The same piece drawn again with another texture
+    // takes the new one: a room's first frames draw its walls with the game's stand-in (a rock texture, 1010004:9279)
+    // until their own textures have loaded, and both were kept, the stand-in drawn over the walls.
+    const uint32_t blending[4] = {m_rs[d3d::RS_ALPHABLENDENABLE], m_rs[d3d::RS_SRCBLEND], m_rs[d3d::RS_DESTBLEND],
+                                  m_rs[d3d::RS_ALPHATESTENABLE]};
     uint64_t key = m_drawMesh ? m_drawMesh->indexHash : portal::Hash(indices, size_t(indexCount) * 2);
     key = portal::Hash(at, sizeof(at), key ^ (uint64_t(vertexCount) << 32 | indexCount));
-    key = portal::Hash(&rdb, sizeof(rdb), key);
-    if (!st.keys.insert(key).second)
+    key = portal::Hash(blending, sizeof(blending), key);
+    auto textureOf = [&](Texture* t) {
+        auto it = st.textureIndex.find(t);
+        if (it == st.textureIndex.end()) {
+            portal::CapturedTexture ct;
+            ct.rdbId = t->m_rdbId;
+            ct.width = t->m_width;
+            ct.height = t->m_height;
+            ct.format = t->m_format;
+            const int32_t index = int32_t(st.capture->textures.size());
+            st.capture->textures.push_back(std::move(ct));
+            it = st.textureIndex.emplace(t, index).first;
+            st.pending.emplace_back(t, index);
+            st.bytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
+        }
+        return it->second;
+    };
+    if (auto known = st.pieceAt.find(key); known != st.pieceAt.end()) {
+        portal::CapturedPiece& was = st.capture->pieces[known->second];
+        bool changed = false;
+        for (int s = 0; s < 2; ++s) {
+            Texture* t = m_textures[s];
+            const int32_t now = t && !t->m_renderTarget ? textureOf(t) : -1;
+            if (now != was.texture[s]) {
+                was.texture[s] = now;
+                changed = true;
+            }
+        }
+        if (changed) {
+            st.lastNew = Seconds();
+            if (!st.unsaved++)
+                st.lastSave = std::max(st.lastSave, st.lastNew);
+        }
         return;
+    }
     // The same prop again within 0.3 of where it was recorded: one (a shop's display items bob - a Fair Trade's were
     // recorded up to 23 times).
     {
@@ -218,22 +254,8 @@ void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t
         p.indices.assign(indices, indices + indexCount);
     for (int s = 0; s < 2; ++s) {
         Texture* t = m_textures[s];
-        if (!t || t->m_renderTarget)
-            continue;
-        auto it = st.textureIndex.find(t);
-        if (it == st.textureIndex.end()) {
-            portal::CapturedTexture ct;
-            ct.rdbId = t->m_rdbId;
-            ct.width = t->m_width;
-            ct.height = t->m_height;
-            ct.format = t->m_format;
-            const int32_t index = int32_t(st.capture->textures.size());
-            st.capture->textures.push_back(std::move(ct));
-            it = st.textureIndex.emplace(t, index).first;
-            st.pending.emplace_back(t, index);
-            st.bytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
-        }
-        p.texture[s] = it->second;
+        if (t && !t->m_renderTarget)
+            p.texture[s] = textureOf(t);
     }
     // (The rooms' box: which side of the entrance the room is.)
     if (kind == VisualKind::Room && m_drawMesh) {
@@ -249,6 +271,7 @@ void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t
     }
     if (kind == VisualKind::Room) ++st.roomPieces;
     st.bytes += p.vertices.size() + p.indices.size() * 2;
+    st.pieceAt.emplace(key, st.capture->pieces.size());
     st.capture->pieces.push_back(std::move(p));
     st.lastNew = Seconds();
     if (!st.unsaved++)
@@ -454,16 +477,23 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
         }
         remap[i] = it->second;
     }
-    std::unordered_set<uint64_t> keys;
-    for (const portal::CapturedPiece& p : merged.pieces)
-        keys.insert(p.key);
+    std::unordered_map<uint64_t, size_t> keys;
+    for (size_t i = 0; i < merged.pieces.size(); ++i)
+        keys.emplace(merged.pieces[i].key, i);
     uint32_t added = 0;
     for (const portal::CapturedPiece& p : c.pieces) {
-        if (keys.count(p.key))
+        int32_t texture[2];
+        for (int t = 0; t < 2; ++t)
+            texture[t] = p.texture[t] >= 0 ? remap[size_t(p.texture[t])] : -1;
+        if (auto known = keys.find(p.key); known != keys.end()) {
+            // (Kept from an earlier save; this visit's textures are the newer - unless its own weren't read back.)
+            for (int t = 0; t < 2; ++t)
+                if (texture[t] >= 0 || p.texture[t] < 0)
+                    merged.pieces[known->second].texture[t] = texture[t];
             continue;
+        }
         portal::CapturedPiece q = p;
-        for (int32_t& t : q.texture)
-            t = t >= 0 ? remap[size_t(t)] : -1;
+        std::memcpy(q.texture, texture, sizeof(texture));
         merged.pieces.push_back(std::move(q));
         ++added;
     }

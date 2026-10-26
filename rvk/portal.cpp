@@ -575,10 +575,40 @@ void Device::DrawStreetPortal()
                 }
                 m_street.lp.textures.push_back(tex);
             }
+            // Its own doorway left out - the recess and the frame round it, all of them within 4 out of the doorway and
+            // a unit round its size (its link's) - and the street set in by their depth: seen from the room's door,
+            // they stood in it as a second, dark doorway with the frame's bars across it.
+            const float hw = 0.5f * m_enteredFrom.width + 1.0f, top = m_enteredFrom.height + 1.0f;
+            const float* se = cap->entrance;
+            const float so[2] = {cap->inward[0], cap->inward[2]}, sa[2] = {-cap->inward[2], cap->inward[0]};
+            float depth = 0.0f;
+            size_t before = cap->pieces.size();
+            std::erase_if(cap->pieces, [&](const portal::CapturedPiece& p) {
+                float o0 = 1e30f, o1 = -1e30f, a0 = 1e30f, a1 = -1e30f, u0 = 1e30f, u1 = -1e30f;
+                const auto& w = p.world.m;
+                for (uint32_t v = 0; v < p.vertexCount; ++v) {
+                    float m[3];
+                    std::memcpy(m, p.vertices.data() + size_t(v) * p.stride, 12);
+                    float wp[3];
+                    for (int j = 0; j < 3; ++j) wp[j] = m[0] * w[0][j] + m[1] * w[1][j] + m[2] * w[2][j] + w[3][j];
+                    const float o = (wp[0] - se[0]) * so[0] + (wp[2] - se[2]) * so[1];
+                    const float a = (wp[0] - se[0]) * sa[0] + (wp[2] - se[2]) * sa[1];
+                    o0 = std::min(o0, o); o1 = std::max(o1, o);
+                    a0 = std::min(a0, a); a1 = std::max(a1, a);
+                    u0 = std::min(u0, wp[1] - se[1]); u1 = std::max(u1, wp[1] - se[1]);
+                }
+                if (o0 < -0.3f || o1 > 4.0f || a0 < -hw || a1 > hw || u0 < -0.5f || u1 > top)
+                    return false;
+                if (o0 < 0.5f)
+                    depth = std::max(depth, o1);   // (the recess's depth: pieces from the doorway out - not a step)
+                return true;
+            });
+            m_street.inset = std::clamp(depth, 0.0f, 4.0f);
             m_street.lp.capture = cap;
             m_street.lp.ok = true;
-            Log("street: %s loaded to draw through playfield %u's entrance (%zu pieces, %zu textures)", name,
-                m_skyPlayfield, cap->pieces.size(), cap->textures.size());
+            Log("street: %s loaded to draw through playfield %u's entrance (%zu pieces, %zu textures; its doorway's %zu "
+                "left out, set in %.2f)", name, m_skyPlayfield, cap->pieces.size(), cap->textures.size(),
+                before - cap->pieces.size(), double(m_street.inset));
         } else {
             Log("street: no %s yet - standing at that doorway outside records it", name);
         }
@@ -654,8 +684,11 @@ void Device::DrawStreetPortal()
     // 3. The street: its doorway (the capture's entrance, facing its "inward" - out into the street) on the room's
     // entrance, facing out of the room.
     const float turn = std::atan2(out[0], out[2]) - std::atan2(street.inward[0], street.inward[2]);
-    const d3d::Matrix place = MulMatrix(MulMatrix(Translation(-street.entrance[0], -street.entrance[1],
-                                                              -street.entrance[2]),
+    // (The street's facade - its doorway's depth out, m_street.inset - on the room's door.)
+    const float inset = m_street.inset;
+    const d3d::Matrix place = MulMatrix(MulMatrix(Translation(-(street.entrance[0] + street.inward[0] * inset),
+                                                              -street.entrance[1],
+                                                              -(street.entrance[2] + street.inward[2] * inset)),
                                                   TurnY(turn)),
                                         Translation(e[0], e[1], e[2]));
     const auto rs = m_rs;
