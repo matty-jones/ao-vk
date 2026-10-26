@@ -320,7 +320,8 @@ enum class Knob : uint32_t {
 };
 int KnobByName(const char* setting);
 // Device::ZoneSignal's bits (the zone hand-over, handover.cpp; from proxy/native/zone.cpp's teleport hooks).
-enum : uint32_t { kZoneTeleport = 1, kZoneTeleportFailed = 2 };             // "RVK_Mist" -> Knob::Mist; -1: not a knob
+enum : uint32_t { kZoneTeleport = 1, kZoneTeleportFailed = 2, kZoneTeleportTry = 4 };   // (Try: an attempt, the world
+                                                                                       // still there; Teleport: it stops)             // "RVK_Mist" -> Knob::Mist; -1: not a knob
 
 class Device {
 public:
@@ -3291,6 +3292,8 @@ private:
     // The zone hand-over (handover.cpp, docs/zone-handover-plan.md, RVK_ZoneFade): the old zone's last picture held over
     // the blank frames of a zone change and the new zone's first ones, then faded out.
     void HandoverScene(VkCommandBuffer cmd);     // (EndScene, after the post passes)
+    bool HandoverPick(bool before);
+    void HandoverBegin(double now);
     bool HandoverShown() const;                  // the held picture is over the frame's scene (whole or fading)
     bool HandoverOpaque() const;                 // ... whole
     void DestroyHandover();
@@ -3303,6 +3306,7 @@ private:
         int latest = -1;                         // ... the newer one (-1: none)
         Texture* image = nullptr;                // the held picture: one of them
         bool cameraSet = false;
+        bool picked = false;                     // the held picture chosen (Armed: the old playfield stopped)
         double armed = 0, holdStart = 0, first3D = 0, fadeStart = 0, fadeLength = 0.5, lastFrame = 0;   // (s)
         uint32_t frames3D = 0, frameCount = 0;
         float frameMs[kHandoverFrames] = {};
@@ -3349,8 +3353,19 @@ private:
         float sill = 0, width = 0, height = 0;
         char mesh[48] = {};
         uint16_t piece = 0;
+        mutable uint64_t drawnFrame = ~0ull;     // its room drawn behind it (portal.cpp: once a frame)
     };
-    struct BlackDraw { uint64_t lastFrame = 0; uint32_t reportedIn = 0; std::vector<BlackQuad> quads; };
+    struct BlackDraw {
+        uint64_t lastFrame = 0;
+        uint32_t reportedIn = 0;
+        uint32_t linksGen = ~0u;                 // (hasPortal as of m_portalLinksGen)
+        bool hasPortal = false;                  // a doorway of it leads to a room
+        std::vector<BlackQuad> quads;
+    };
+    uint32_t m_portalLinksGen = 0;               // links loaded or learned
+    bool m_portalArmed = false;                  // a doorway with a room drawn since its room was: DrawPortals next
+    uint64_t m_portalsFrame = ~0ull;             // (the frame m_portalsDrawn counts)
+    uint32_t m_portalsDrawn = 0;
     uint32_t m_portalArrivals = 1;               // playfield changes (PortalCapturePlayfield): BlackDraw::reportedIn
     void PortalReportLinks(BlackDraw& draw);
     std::unordered_map<uint64_t, BlackDraw> m_blackDraws;   // by geometry and place

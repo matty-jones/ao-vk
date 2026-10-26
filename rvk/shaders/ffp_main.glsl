@@ -1359,6 +1359,10 @@ void main()
         outGlow = vec4(0.0, 0.0, 0.0, (C.flags.x & F_BLENDED) != 0u ? clamp(current.a, 0.0, 1.0) : 1.0);
     // Blended with this fragment's alpha like the colour (attachment 2's blend state follows the colour's).
     outLocal = vec4(gLocalFraction, clamp(reflectivity, 0.0, 1.0), gSunShare, current.a);
+    // A shop's room drawn into its doorway (D.clip): lit by its own lamps, none of it by the street's sun - the passes
+    // after the scene (traced sun shadows, ambient occlusion) leave it as it is; the doorway's shadow fell on its floor.
+    if (dot(D.clip.xyz, D.clip.xyz) > 0.0)
+        outLocal.xz = vec2(1.0, 0.0);
     // Motion vectors (written by depth-writing draws only, see the blend state): where this point was last frame.
     vec2 now = vClip.xy / vClip.w, before = vPrevClip.xy / max(vPrevClip.w, 1e-6);
     outMotion = vec4(vPrevClip.w > 1e-6 ? (now - before) * 0.5 * C.viewport.zw * FL.screen.xy * vec2(1.0, -1.0) : vec2(0.0),

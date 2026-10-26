@@ -151,7 +151,7 @@ bool __fastcall TeleportTryHook(void* self, void* edx)
     static int last = -1;
     const bool ok = g_teleportTry(self, edx);
     if (ok)
-        g_signals.fetch_or(kTeleport, std::memory_order_relaxed);
+        g_signals.fetch_or(kTeleportTry, std::memory_order_relaxed);
     if (int(ok) != last) {
         last = ok;
         Event("StartTeleportTry -> %s", ok ? "true" : "false");

@@ -2592,6 +2592,10 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
 {
     if (!m_inFrame || !vertexCount)
         return;
+    // A shop's room behind a doorway drawn just now (portal.cpp): before this draw - particles and effects later in
+    // the frame go over it (drawn at the scene's end, it covered them).
+    if (m_portalArmed && !m_drawingPortal && m_scenePhase && m_target == m_scene)
+        DrawPortals();
     // The game's ground, drawn by rvk from the playfield's data instead (native_ground.cpp): its own draws skipped.
     // (Its base pass deferred to the lighting pass - RVK_GroundOne - but something else came first: drawn now.)
     if (m_native.basePending && !m_native.drawing &&

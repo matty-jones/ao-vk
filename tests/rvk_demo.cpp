@@ -4480,6 +4480,23 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, wallQuad, 4, quadIdx, 6);
             dev.SetTexture(0, black);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, door, 4, quadIdx, 6);
+            // An effect after it, in front of the doorway (as the game's sparks): over the room drawn behind it.
+            struct VtxC { float x, y, z; uint32_t argb; };
+            const VtxC spark[4] = {{-0.4f, 0.8f, 2.5f, 0x80FF4020}, {0.4f, 0.8f, 2.5f, 0x80FF4020},
+                                   {-0.4f, 1.6f, 2.5f, 0x80FF4020}, {0.4f, 1.6f, 2.5f, 0x80FF4020}};
+            dev.SetDrawVisual(uint32_t(VisualKind::Effect), "effect");
+            dev.SetTexture(0, nullptr);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+            dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+            dev.SetRenderState(RS_ZWRITEENABLE, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+            dev.DrawPrimitive(TriangleStrip, FVF_XYZ | FVF_DIFFUSE, spark, 4);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
             dev.SetDrawVisual(0, nullptr);
             dev.EndFrame();
             Sleep(16);

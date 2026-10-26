@@ -1,14 +1,16 @@
 // Shop portals (docs/shop-portal-plan.md phase 3, RVK_Portals): the inside of a shop seen through its door.
 //
-// At the end of the scene (EndScene, before the post passes), each doorway a link knows (portal_links.cpp) that was
-// drawn this frame, near enough - the nearest two - gets its room drawn behind it:
+// Right after a doorway a link knows (portal_links.cpp) is drawn - at the next draw, so particles and effects drawn
+// later go over the room; at the scene's end (EndScene) for one drawn last - each such doorway near enough (the
+// nearest two a frame) gets its room drawn behind it:
 //   1. the scene's depth is copied, and where the doorway's rectangle is the surface seen (nothing in front of its
 //      plane: not the door, the recess's walls or a character) the depth is pushed to the far plane (portal_open.frag);
 //   2. the room's capture (portal_capture.cpp) is replayed through the draw path - each piece as the game drew it, moved
 //      so the room's entrance stands on the doorway's sill facing in, lit by its own lights only (no sun, frame lights
 //      or shadows), kept to the doorway's box on the screen; the scene's depth does the rest;
 //   3. a shade over the opening dims it by day (RVK_PortalDim), as a room looks from a sunny street.
-// The post passes then treat it as part of the scene. Captures are loaded when first needed and let go when unused.
+// Its pixels are marked lit by their own lamps, not the sun (ffp_main: D.clip), so the post passes' traced sun shadows
+// and ambient occlusion leave them be; otherwise the post passes treat it as part of the scene. Captures are loaded when first needed and let go when unused.
 #include "internal.h"
 #include "portal_file.h"
 
@@ -199,9 +201,15 @@ bool Device::PortalCopyDepth(VkCommandBuffer cmd)
     return true;
 }
 
-// EndScene, while the scene is still being drawn: the rooms behind the linked doorways in view.
+// While the scene is being drawn (Draw, after a linked doorway; EndScene): the rooms behind the linked doorways drawn
+// so far this frame, not yet drawn behind.
 void Device::DrawPortals()
 {
+    m_portalArmed = false;
+    if (m_portalsFrame != m_frameNumber) {
+        m_portalsFrame = m_frameNumber;
+        m_portalsDrawn = 0;
+    }
     if (!m_portalsOn || PortalDir().empty() || !m_scenePhase || m_target != m_scene || !m_aoProjValid ||
         !m_portalOpenPipeline || m_indoors) {
         if (!m_portals.empty()) PortalForgetUnused(false);
@@ -217,6 +225,7 @@ void Device::DrawPortals()
         if (draw.lastFrame != m_frameNumber) continue;
         for (const BlackQuad& q : draw.quads) {
             if (q.height < 1.5f || q.width < 0.7f || q.height > 6.0f || q.width > 6.0f) continue;
+            if (q.drawnFrame == m_frameNumber) continue;   // (its room drawn already this frame)
             const PortalLink* link = PortalLinkFor(q, m_skyPlayfield);
             if (!link || !link->interior) continue;
             const float dx = q.centre[0] - eye[0], dy = q.centre[1] - eye[1], dz = q.centre[2] - eye[2];
@@ -228,8 +237,9 @@ void Device::DrawPortals()
     if (candidates.empty())
         return;
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
-    if (candidates.size() > kMostPortals)
-        candidates.resize(kMostPortals);
+    // (The nearest first: those drawn earlier in the frame count against kMostPortals.)
+    if (candidates.size() > kMostPortals - std::min(m_portalsDrawn, kMostPortals))
+        candidates.resize(kMostPortals - std::min(m_portalsDrawn, kMostPortals));
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     const d3d::Matrix viewProj = MulMatrix(m_aoView, m_aoProj);
     d3d::Matrix inverse;
@@ -240,6 +250,8 @@ void Device::DrawPortals()
         LoadedPortal* lp = PortalLoad(c.interior);
         if (!lp)
             continue;
+        c.quad->drawnFrame = m_frameNumber;
+        ++m_portalsDrawn;
         const portal::Capture& cap = *lp->capture;
         const BlackQuad& q = *c.quad;
         // The doorway's outward facing (horizontal): towards the camera's side of it.

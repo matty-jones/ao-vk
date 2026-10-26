@@ -290,6 +290,7 @@ void RvkState::Present()
     rnative::zone::Frame(device->FramesWithout3D());
     if (const uint32_t zone = rnative::zone::TakeSignals())
         device->ZoneSignal((zone & rnative::zone::kTeleport ? rvk::kZoneTeleport : 0u) |
+                           (zone & rnative::zone::kTeleportTry ? rvk::kZoneTeleportTry : 0u) |
                            (zone & rnative::zone::kTeleportFailed ? rvk::kZoneTeleportFailed : 0u));   // RVK_ZoneFade
     PollMaterialMaps();       // material maps decoded in the background, uploaded between frames
     ParticleFrame();

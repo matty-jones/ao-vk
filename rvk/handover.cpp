@@ -51,32 +51,44 @@ void Device::ZoneSignal(uint32_t signal)
         }
         return;
     }
-    if (!(signal & kZoneTeleport) || !m_zoneFade)
+    if (!(signal & (kZoneTeleport | kZoneTeleportTry)) || !m_zoneFade)
         return;
     if (m_ho.state == Handover::Idle) {
-        // The picture: the 3D frame before the latest, if it is recent (not from before a stretch without 3D).
-        const int latest = m_ho.latest;
-        const int older = latest ^ 1;
-        int pick = -1;
-        if (latest >= 0 && m_ho.shots[older] && m_ho.shotFrame[latest] - m_ho.shotFrame[older] <= 4 &&
-            m_ho.shots[older]->m_width == m_ho.shots[latest]->m_width &&
-            m_ho.shots[older]->m_height == m_ho.shots[latest]->m_height)
-            pick = older;
-        else if (latest >= 0)
-            pick = latest;
-        if (pick < 0) {
-            Log("zone hand-over: a teleport, but no 3D frame to hold");
-            return;
-        }
-        m_ho.image = m_ho.shots[pick];
         m_ho.state = Handover::Armed;
+        m_ho.picked = false;
         m_ho.groundAtArm = m_native.ground.get();
-        Log("zone hand-over: armed (a teleport), holding the picture from %llu frames back",
-            static_cast<unsigned long long>(m_frameNumber - m_ho.shotFrame[pick]));
     }
-    if (m_ho.state == Handover::Armed)
-        m_ho.armed = Seconds();
-    // (Holding or fading: a second teleport keeps the picture already held.)
+    if (m_ho.state != Handover::Armed)
+        return;                                  // (holding or fading: a second teleport keeps the picture held)
+    m_ho.armed = Seconds();
+    // The old playfield stops (StartTeleport): the picture is chosen now - the 3D frame before the latest (the frame
+    // the signal came in can already be drawn without the world: held, the picture was black). An attempt alone
+    // (StartTeleportTry, repeated while standing on a door's trigger) keeps the pictures coming: one chosen then was
+    // seconds old by the time the teleport came.
+    if ((signal & kZoneTeleport) && !m_ho.picked)
+        HandoverPick(true);
+}
+
+// The held picture: of the latest two 3D frames, the older (`before`) or the latest, if recent.
+bool Device::HandoverPick(bool before)
+{
+    const int latest = m_ho.latest;
+    if (latest < 0) {
+        Log("zone hand-over: a teleport, but no 3D frame to hold");
+        m_ho.state = Handover::Idle;
+        return false;
+    }
+    const int older = latest ^ 1;
+    int pick = latest;
+    if (before && m_ho.shots[older] && m_ho.shotFrame[latest] - m_ho.shotFrame[older] <= 4 &&
+        m_ho.shots[older]->m_width == m_ho.shots[latest]->m_width &&
+        m_ho.shots[older]->m_height == m_ho.shots[latest]->m_height)
+        pick = older;
+    m_ho.image = m_ho.shots[pick];
+    m_ho.picked = true;
+    Log("zone hand-over: armed (a teleport), holding the picture from %llu frames back",
+        static_cast<unsigned long long>(m_frameNumber - m_ho.shotFrame[pick]));
+    return true;
 }
 
 bool Device::HandoverShown() const
@@ -92,6 +104,15 @@ bool Device::HandoverFading() const
 bool Device::HandoverOpaque() const
 {
     return m_ho.state == Handover::Holding;
+}
+
+void Device::HandoverBegin(double now)
+{
+    m_ho.state = Handover::Holding;
+    m_ho.holdStart = now;
+    m_ho.frames3D = 0;
+    m_ho.frameCount = 0;
+    Log("zone hand-over: holding the last picture");
 }
 
 void Device::DestroyHandover()
@@ -122,31 +143,38 @@ void Device::HandoverScene(VkCommandBuffer cmd)
     const double dt = m_ho.lastFrame > 0.0 ? now - m_ho.lastFrame : 0.0;
     m_ho.lastFrame = now;
 
-    if (m_ho.state == Handover::Idle) {
-        if (!m_sceneSaw3D)
-            return;
-        // Each 3D frame copied, the two images by turns: the latest two, for the next teleport.
-        const int slot = m_ho.latest < 0 ? 0 : m_ho.latest ^ 1;
-        Texture*& shot = m_ho.shots[slot];
-        if (!shot || shot->m_width != main->m_width || shot->m_height != main->m_height) {
-            if (shot) DestroyTexture(shot);
-            shot = CreateImage(main->m_width, main->m_height, Format::A8R8G8B8, 1, true);
-            if (!shot) {
-                m_ho.latest = -1;
-                return;
+    if (m_ho.state == Handover::Idle || (m_ho.state == Handover::Armed && !m_ho.picked)) {
+        if (m_sceneSaw3D) {
+            if (m_ho.state == Handover::Armed && now - m_ho.armed > kArmedFor)
+                m_ho.state = Handover::Idle;     // (an attempt with nothing after it: standing on a door's trigger)
+            // Each 3D frame copied, the two images by turns: the latest two, for the next teleport.
+            const int slot = m_ho.latest < 0 ? 0 : m_ho.latest ^ 1;
+            Texture*& shot = m_ho.shots[slot];
+            if (!shot || shot->m_width != main->m_width || shot->m_height != main->m_height) {
+                if (shot) DestroyTexture(shot);
+                shot = CreateImage(main->m_width, main->m_height, Format::A8R8G8B8, 1, true);
+                if (!shot) {
+                    m_ho.latest = -1;
+                    return;
+                }
             }
+            Transition(cmd, main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            Transition(cmd, shot, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            VkImageCopy c{};
+            c.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            c.dstSubresource = c.srcSubresource;
+            c.extent = {main->m_width, main->m_height, 1};
+            vkCmdCopyImage(cmd, main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shot->m_image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+            m_ho.shotFrame[slot] = m_frameNumber;
+            m_ho.latest = slot;
+            return;
         }
-        Transition(cmd, main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        Transition(cmd, shot, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkImageCopy c{};
-        c.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        c.dstSubresource = c.srcSubresource;
-        c.extent = {main->m_width, main->m_height, 1};
-        vkCmdCopyImage(cmd, main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shot->m_image,
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
-        m_ho.shotFrame[slot] = m_frameNumber;
-        m_ho.latest = slot;
-        return;
+        // Blank frames before the old playfield stopped (a border's attempt comes first): the latest is good, and held
+        // from this frame on.
+        if (m_ho.state != Handover::Armed || !HandoverPick(false))
+            return;
+        HandoverBegin(now);
     }
 
     if (m_ho.state == Handover::Armed) {
@@ -157,12 +185,7 @@ void Device::HandoverScene(VkCommandBuffer cmd)
             }
             return;
         }
-        // The first frame without 3D: the hold begins.
-        m_ho.state = Handover::Holding;
-        m_ho.holdStart = now;
-        m_ho.frames3D = 0;
-        m_ho.frameCount = 0;
-        Log("zone hand-over: holding the last picture");
+        HandoverBegin(now);                      // (the first frame without 3D)
     }
 
     if (m_ho.image->m_width != main->m_width || m_ho.image->m_height != main->m_height) {

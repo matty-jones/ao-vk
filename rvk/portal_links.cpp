@@ -152,6 +152,16 @@ void Device::PortalNoteBlack(uint32_t primitive, uint32_t fvf, uint32_t stride, 
 // building elsewhere), logged.
 void Device::PortalReportLinks(BlackDraw& draw)
 {
+    // (A doorway leading to a room: the room is drawn behind it before the next draw - portal.cpp.)
+    if (draw.linksGen != m_portalLinksGen) {
+        draw.linksGen = m_portalLinksGen;
+        draw.hasPortal = false;
+        for (const BlackQuad& q : draw.quads)
+            if (const PortalLink* link = PortalLinkFor(q, m_skyPlayfield); link && link->interior)
+                draw.hasPortal = true;
+    }
+    if (draw.hasPortal && m_portalsOn)
+        m_portalArmed = true;
     if (draw.reportedIn == m_portalArrivals)
         return;
     draw.reportedIn = m_portalArrivals;
@@ -273,6 +283,7 @@ void Device::PortalLinkFrame()
                std::fabs(l.centre[2] - link.centre[2]) < 1.0f;
     });
     m_portalLinks.push_back(link);
+    ++m_portalLinksGen;
     const bool saved = PortalSaveLinks();
     Log("portal link: the doorway of %s at (%.2f %.2f %.2f) in playfield %u leads to %u%s (learned; %zu links)%s",
         link.mesh[0] ? link.mesh : "an unnamed mesh", double(link.centre[0]), double(link.centre[1]),
@@ -304,6 +315,7 @@ void Device::PortalLoadLinks()
         }
     }
     std::fclose(f);
+    ++m_portalLinksGen;
     Log("portal link: %zu links from %s", m_portalLinks.size(), path.c_str());
 }
 
