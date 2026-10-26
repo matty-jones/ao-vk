@@ -31,7 +31,11 @@ namespace {
 constexpr uint32_t kMostPortals = 2;       // drawn a frame (the nearest)
 constexpr double kKeepFor = 30.0;          // a capture unused this long is let go
 constexpr double kRetryAfter = 5.0;        // a capture that couldn't be loaded: tried again after this long
-constexpr float kEntranceCut = 0.15f;      // the room drawn from this far behind the doorway's plane
+// The room is set this far nearer the street than its entrance's door: its entrance's wall and door frame stand just
+// behind that door (a Fair Trade's 0.03 - 0.13; through a wider doorway its door hole's sides showed as lines, cut at
+// 0.15 its frame still did), so they come out in front of the doorway's plane and are cut away there, while the floor
+// still reaches the plane (cut deeper instead, a strip of black opened at the sill).
+constexpr float kEntranceShift = 0.5f;
 
 double Seconds()
 {
@@ -269,7 +273,8 @@ void Device::DrawPortals()
         const float turn = std::atan2(-out[0], -out[2]) - std::atan2(cap.inward[0], cap.inward[2]);
         const d3d::Matrix place = MulMatrix(MulMatrix(Translation(-cap.entrance[0], -cap.entrance[1], -cap.entrance[2]),
                                                       TurnY(turn)),
-                                            Translation(q.centre[0], q.sill, q.centre[2]));
+                                            Translation(q.centre[0] + out[0] * kEntranceShift, q.sill,
+                                                        q.centre[2] + out[2] * kEntranceShift));
         // The doorway's rectangle: its corners, and its box on the scene.
         const float across[3] = {-out[2], 0.0f, out[0]};
         const float half = 0.5f * q.width;
@@ -353,13 +358,11 @@ void Device::DrawPortals()
         m_drawOwner = 0;
         m_drawingPortal = true;
         m_portalScissor = box;
-        // Behind the doorway's plane, from 0.15 in: the room's own entrance wall stands just behind its door's plane
-        // (a Fair Trade's 0.03 - 0.13), and seen from the street through a wider doorway its door hole's sides showed
-        // as thin lines (its back faces aren't drawn).
+        // Behind the doorway's plane only (the room's entrance, moved out in front of it, cut away: kEntranceShift).
         m_portalClip[0] = -out[0];
         m_portalClip[1] = 0.0f;
         m_portalClip[2] = -out[2];
-        m_portalClip[3] = out[0] * q.centre[0] + out[2] * q.centre[2] - kEntranceCut;
+        m_portalClip[3] = out[0] * q.centre[0] + out[2] * q.centre[2] - 0.01f;
         uint32_t drawn = 0;
         for (const portal::CapturedPiece& p : cap.pieces) {
             if (p.vertices.empty()) continue;
