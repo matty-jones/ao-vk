@@ -110,6 +110,11 @@ The format is versioned and the editor writes it; randy-vk reads it with default
 1. **ao-assets gfxtweak reader.** Module, `fx` CLI (`fx find`, `fx tree`), selftest, type names, nano names.
 2. **Effect log in game.** Hook `CreateGfxControl` (all overloads) and the terminate / delete calls, log with
    `RVK_FxLog`, `fx <id>` command. Play through a session, collect which templates the common actions use.
+   *Done (60f17da):* hooked at `MakeHandle` instead (one function; the overload from its return address). A session
+   (394 effects): nano casts start a `Spell1` from caster to target (stat 428; anchor dynel+dynel, Gamecode+0x07b18e)
+   and the nano's own effect on the target (stat 361; e.g. Meta 47173, dynel, +0x07adf1). Running buffs show as Stars
+   (43640/43641) and BuffPlaceHolder pairs (+0x0d3bd8 / +0x0d3c42); the world's lamps and fires as Sprite_t / Fire_t /
+   Smoke_t on connectors; every character has WaterRipples 33000 and Shadow 37000.
 3. **Runtime.** `RvkFxControl`, `.rvkfx` loader with hot reload, the emitter system, `rvk_demo --fx`. One hand-written
    effect replacing Lesser Controlled Rage, seen in game.
 4. **Editor.** Effects panel, emitter forms, JS preview, play in game.
