@@ -90,6 +90,15 @@ A recorder of its own (portal_street.cpp), keyed by link, with the cone test. Th
 
 ### Phase 2: ground cut-out
 
+Not started.
+- **Why not yet:** `m_native` is used ~200 times over nine files, and `DrawNativeGround` runs on the game's own
+  terrain draws, with the game's states.
+- **Likely route:** a second `NativeState` for the street, swapped into `m_native` around a ground draw inside
+  `DrawStreetPortal`, with the base and lighting passes' states set by hand. This avoids reworking every use.
+- **Data:** the cut-out (heights, codes, the tiles read back, the street playfield's lightmap) recorded into the
+  street's file as a section of its own.
+- **First:** see phases 1 and 3 in game.
+
 `NativeGround` cut to the cone's cells. The draw path takes a ground to draw (`DrawNativeGround(const NativeState&)`),
 and the tile textures are kept by the cut-out, as copies read back, not the game's.
 
