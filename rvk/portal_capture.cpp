@@ -68,6 +68,11 @@ void Device::PortalCapturePlayfield(uint32_t playfield)
     // textures read back first).
     if (m_pc.on && m_pc.roomsSeen && !m_pc.terrainSeen && (m_pc.unsaved || !m_pc.pending.empty()))
         m_pcLeaving = std::move(m_pc);
+    if (m_sc.on) {                               // (a street's: saved at the next frame's start, as a room's)
+        if (m_sc.unsaved || !m_sc.pending.empty())
+            m_scLeaving = std::move(m_sc);
+        m_sc = PortalCaptureState{};
+    }
     m_pc = PortalCaptureState{};
     if (!CaptureOn() || !playfield)
         return;
@@ -84,7 +89,7 @@ void Device::PortalCapturePlayfield(uint32_t playfield)
 void Device::PortalForgetTexture(Texture* texture)
 {
     // Gone before it was read back: its pieces go without it (PortalCaptureSave drops a texture with no pixels).
-    for (PortalCaptureState* s : {&m_pc, &m_pcLeaving}) {
+    for (PortalCaptureState* s : {&m_pc, &m_pcLeaving, &m_sc, &m_scLeaving}) {
         auto it = s->textureIndex.find(texture);
         if (it == s->textureIndex.end())
             continue;
@@ -162,20 +167,29 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
             m_pc.doors.push_back(door);
         return;
     }
+    PortalRecordPiece(m_pc, kind, primitive, fvf, stride, vertices, vertexCount, indices, indexCount);
+}
+
+// A piece into a capture (a room's, or a street's: portal_street.cpp) - once each, its geometry, place, textures (read
+// back between frames), material, states and lights.
+void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t primitive, uint32_t fvf, uint32_t stride,
+                               const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount)
+{
+    const auto& w = m_world.m;
     const int32_t at[3] = {int32_t(std::lround(w[3][0] * 100.0f)), int32_t(std::lround(w[3][1] * 100.0f)),
                            int32_t(std::lround(w[3][2] * 100.0f))};
     const uint32_t rdb = m_textures[0] ? m_textures[0]->m_rdbId : 0;
     uint64_t key = m_drawMesh ? m_drawMesh->indexHash : portal::Hash(indices, size_t(indexCount) * 2);
     key = portal::Hash(at, sizeof(at), key ^ (uint64_t(vertexCount) << 32 | indexCount));
     key = portal::Hash(&rdb, sizeof(rdb), key);
-    if (!m_pc.keys.insert(key).second)
+    if (!st.keys.insert(key).second)
         return;
     // The same prop again within 0.3 of where it was recorded: one (a shop's display items bob - a Fair Trade's were
     // recorded up to 23 times).
     {
         const uint64_t g = portal::Hash(indices, indices ? size_t(indexCount) * 2 : 0,
                                         portal::Hash(vertices, size_t(vertexCount) * stride));
-        auto& places = m_pc.placesOf[g];
+        auto& places = st.placesOf[g];
         for (const auto& at3 : places) {
             const float dx = at3[0] - w[3][0], dy = at3[1] - w[3][1], dz = at3[2] - w[3][2];
             if (dx * dx + dy * dy + dz * dz < 0.3f * 0.3f)
@@ -205,18 +219,18 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
         Texture* t = m_textures[s];
         if (!t || t->m_renderTarget)
             continue;
-        auto it = m_pc.textureIndex.find(t);
-        if (it == m_pc.textureIndex.end()) {
+        auto it = st.textureIndex.find(t);
+        if (it == st.textureIndex.end()) {
             portal::CapturedTexture ct;
             ct.rdbId = t->m_rdbId;
             ct.width = t->m_width;
             ct.height = t->m_height;
             ct.format = t->m_format;
-            const int32_t index = int32_t(m_pc.capture->textures.size());
-            m_pc.capture->textures.push_back(std::move(ct));
-            it = m_pc.textureIndex.emplace(t, index).first;
-            m_pc.pending.emplace_back(t, index);
-            m_pc.bytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
+            const int32_t index = int32_t(st.capture->textures.size());
+            st.capture->textures.push_back(std::move(ct));
+            it = st.textureIndex.emplace(t, index).first;
+            st.pending.emplace_back(t, index);
+            st.bytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
         }
         p.texture[s] = it->second;
     }
@@ -226,18 +240,18 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
         for (int j = 0; j < 3; ++j) {
             float c = w[3][j];
             for (int i = 0; i < 3; ++i) c += 0.5f * (m_drawMesh->boundsMin[i] + m_drawMesh->boundsMax[i]) * w[i][j];
-            m_pc.roomCentre[j] += c;
+            st.roomCentre[j] += c;
         }
         for (int i = 0; i < 3; ++i)
             lowest += std::min(m_drawMesh->boundsMin[i] * w[i][1], m_drawMesh->boundsMax[i] * w[i][1]);
-        m_pc.roomFloor = std::min(m_pc.roomFloor, lowest);
+        st.roomFloor = std::min(st.roomFloor, lowest);
     }
-    if (kind == VisualKind::Room) ++m_pc.roomPieces;
-    m_pc.bytes += p.vertices.size() + p.indices.size() * 2;
-    m_pc.capture->pieces.push_back(std::move(p));
-    m_pc.lastNew = Seconds();
-    if (!m_pc.unsaved++)
-        m_pc.lastSave = std::max(m_pc.lastSave, m_pc.lastNew);   // (the 5 s count from the first unsaved piece)
+    if (kind == VisualKind::Room) ++st.roomPieces;
+    st.bytes += p.vertices.size() + p.indices.size() * 2;
+    st.capture->pieces.push_back(std::move(p));
+    st.lastNew = Seconds();
+    if (!st.unsaved++)
+        st.lastSave = std::max(st.lastSave, st.lastNew);   // (the 5 s count from the first unsaved piece)
 }
 
 // Textures' level 0 as stored (FormatRowBytes x FormatRows), read back now - outside a frame - in one submission
@@ -317,6 +331,7 @@ void Device::PortalCaptureFrame()
         m_pcLeaving = PortalCaptureState{};
     }
     PortalLinkFrame();                           // (a teleport's link, once its room is known: portal_links.cpp)
+    StreetCaptureFrame();                        // (a street's capture: portal_street.cpp)
     if (!m_pc.on)
         return;
     if (!m_pc.arrivalSet && m_sceneSaw3D && m_aoProjValid) {   // (the last frame's: the first with 3D)
@@ -371,8 +386,9 @@ void Device::PortalCaptureReadBack(PortalCaptureState& s)
 void Device::PortalCaptureSave(PortalCaptureState& s)
 {
     portal::Capture& c = *s.capture;
-    // The entrance: the door nearest the camera on arrival; into the room is towards the rooms' centre.
-    if (!c.entranceKnown && s.arrivalSet && !s.doors.empty() && s.roomPieces) {
+    // The entrance: the door nearest the camera on arrival; into the room is towards the rooms' centre. (A street's
+    // capture has its doorway's from the start: portal_street.cpp.)
+    if (!s.street && !c.entranceKnown && s.arrivalSet && !s.doors.empty() && s.roomPieces) {
         const PortalDoor* best = nullptr;
         float bestD = 1e30f;
         for (const PortalDoor& d : s.doors) {
@@ -393,7 +409,7 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
             "room (%.3f 0 %.3f), %.2f wide and %.2f tall",
             c.playfield, best->name, double(std::sqrt(bestD)), double(c.entrance[0]), double(c.entrance[1]),
             double(c.entrance[2]), double(in[0]), double(in[2]), double(best->width), double(best->height));
-    } else if (!c.entranceKnown && s.arrivalSet && s.doors.empty() && s.roomPieces && s.roomFloor < 1e29f) {
+    } else if (!s.street && !c.entranceKnown && s.arrivalSet && s.doors.empty() && s.roomPieces && s.roomFloor < 1e29f) {
         // No door named: where the camera arrived, on the rooms' floor, the way it looked.
         float in[3] = {s.arrivalForward[0], 0.0f, s.arrivalForward[2]};
         const float len = std::sqrt(in[0] * in[0] + in[2] * in[2]);
@@ -412,7 +428,7 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
         }
     }
     // Merged with what earlier visits saved: their pieces and textures kept, this visit's new ones added.
-    const std::string path = g_portalDir + std::to_string(c.playfield) + ".rvkp";
+    const std::string path = !s.path.empty() ? s.path : g_portalDir + std::to_string(c.playfield) + ".rvkp";
     portal::Capture merged;
     const bool had = portal::Load(path.c_str(), merged) && merged.playfield == c.playfield;
     if (!had)
@@ -483,12 +499,13 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
     std::error_code made;
     std::filesystem::create_directories(g_portalDir, made);
     const bool saved = portal::Save(path.c_str(), merged);
-    if (saved)
+    if (saved && !s.street)
         PortalForget(c.playfield);               // (the doorways draw the new capture: portal.cpp)
     size_t bytes = 0;
     for (const auto& t : merged.textures) bytes += t.level0.size();
     for (const auto& p : merged.pieces) bytes += p.vertices.size() + p.indices.size() * 2;
-    Log("portal capture: playfield %u: %u new pieces (%zu in all, %zu textures, %.1f MB)%s %s %s", c.playfield, added,
+    Log("%s capture: playfield %u: %u new pieces (%zu in all, %zu textures, %.1f MB)%s %s %s",
+        s.street ? "street" : "portal", c.playfield, added,
         merged.pieces.size(), merged.textures.size(), double(bytes) / 1048576.0, had ? " added to" : " written to",
         path.c_str(), saved ? "" : "- FAILED");
     s.unsaved = 0;

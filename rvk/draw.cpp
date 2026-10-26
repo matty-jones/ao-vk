@@ -2930,6 +2930,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (!m_drawingPortal) {                      // (a shop's room drawn into its doorway: none of the scene's notes)
         PortalDiagDraw(fvf, vertexCount, indexCount);   // (shop portals' phase 0: portal_diag.cpp)
         PortalStreetDiagDraw(fvf, vertexCount, indexCount, layout.stride);   // (the reverse's phase 0: portal_diag.cpp)
+        StreetCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_street.cpp)
         PortalCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_capture.cpp)
         PortalNoteBlack(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);     // (portal_links.cpp)
     }

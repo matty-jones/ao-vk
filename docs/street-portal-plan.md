@@ -80,6 +80,14 @@ To do in game:
 A recorder of its own (portal_street.cpp), keyed by link, with the cone test. The room capture's file format holds it
 (pieces, textures), with a new section for the ground cut-out. Then `rvk_demo --portal-view` for a street file.
 
+**Built (2026-10-26):** `rvk/portal_street.cpp`.
+- It reuses the room capture's piece recording (`PortalRecordPiece`) and saving (`PortalCaptureSave`, with a path of
+  its own and no entrance search).
+- The black doorway quads and doors are left out.
+- `rvk_demo --portal-capture-test` records its street (`street-4100-0-3.rvkp`), and `--portal-view` draws it from
+  the doorway looking out.
+- Not yet seen in game.
+
 ### Phase 2: ground cut-out
 
 `NativeGround` cut to the cone's cells. The draw path takes a ground to draw (`DrawNativeGround(const NativeState&)`),

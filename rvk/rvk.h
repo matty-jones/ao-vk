@@ -3341,6 +3341,8 @@ private:
     struct PortalCaptureState;
     void PortalCaptureSave(PortalCaptureState& state);
     void PortalCaptureReadBack(PortalCaptureState& state);
+    void PortalRecordPiece(PortalCaptureState& state, VisualKind kind, uint32_t primitive, uint32_t fvf, uint32_t stride,
+                           const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount);
     void PortalForgetTexture(Texture* texture);  // (DestroyTexture)
     bool ReadTexturesLevel0(const std::vector<Texture*>& textures, std::vector<std::vector<uint8_t>*>& out);   // (outside a frame)
     struct PortalDoor { float base[3], axis[3]; char name[48]; float width, height; };   // (size: its pieces' largest)
@@ -3355,11 +3357,17 @@ private:
         float roomFloor = 1e30f;                 // the rooms' lowest point (an entrance without a door: its floor)
         uint32_t roomPieces = 0, unsaved = 0;
         size_t bytes = 0;                        // its vertices, indices and textures so far
+        // A street's (portal_street.cpp): its file, and the doorway it is seen from - in front of it, the cone kept.
+        bool street = false;
+        std::string path;
+        float apex[3] = {}, dir[3] = {};
+        double lastNear = 0.0;
         std::unordered_map<uint64_t, std::vector<std::array<float, 3>>> placesOf;   // a prop's places, by its geometry
         std::vector<std::array<float, 3>> characters;   // where characters stood (their attachments are dropped)
         double lastNew = 0.0, lastSave = 0.0;
     };
     PortalCaptureState m_pc, m_pcLeaving;        // (leaving: saved at the next frame's start)
+    PortalCaptureState m_sc, m_scLeaving;        // a street's (portal_street.cpp), the same way
     // Shop portals' links (portal_links.cpp): the black texture's quads drawn (doorways and windows), and which
     // doorway leads to which room's playfield.
     struct BlackQuad {
@@ -3400,6 +3408,11 @@ private:
     void PortalLinkFrame();                      // (PortalCaptureFrame)
     void PortalLoadLinks();
     bool PortalSaveLinks();
+    // Street portals' capture (portal_street.cpp): what a walked-through doorway sees of the street.
+    void StreetCaptureNear(const PortalLink& link, const BlackQuad& quad, const float outward[3], float distance);
+    void StreetCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
+                           const uint16_t* indices, uint32_t indexCount);
+    void StreetCaptureFrame();
     // Shop portals (portal.cpp): the rooms behind the linked doorways in view, drawn at the scene's end.
     struct LoadedPortal {
         std::shared_ptr<portal::Capture> capture;

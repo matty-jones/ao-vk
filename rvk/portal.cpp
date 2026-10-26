@@ -294,8 +294,10 @@ void Device::DrawPortals()
                 candidates.push_back(c);
                 // (The reverse's phase 0: what this doorway sees of the street, if walked through - portal_diag.cpp.)
                 if (d < 30.0f && link->outdoor == m_skyPlayfield && std::fabs(link->centre[0] - q.centre[0]) < 1.0f &&
-                    std::fabs(link->centre[2] - q.centre[2]) < 1.0f)
+                    std::fabs(link->centre[2] - q.centre[2]) < 1.0f) {
                     PortalStreetDiagStart(q, c.out, link->interior);
+                    StreetCaptureNear(*link, q, c.out, d);   // (and recorded: portal_street.cpp)
+                }
             }
         }
     }

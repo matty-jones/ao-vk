@@ -4441,6 +4441,10 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
     AddCube(room, roomIdx, 0.0f, 3.0f, 8.0f, 8.0f);   // (the room: seen from inside)
     for (int i = 0; i < 4; ++i)
         AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
+    std::vector<VtxMesh> streetBoxes;
+    std::vector<uint16_t> streetBoxIdx;
+    for (int i = 0; i < 3; ++i)
+        AddCube(streetBoxes, streetBoxIdx, -4.0f + 4.0f * float(i), 1.0f, -6.0f - 3.0f * float(i % 2), 1.0f);
     frames = std::max(frames, 200);
     for (int frame = 0; frame < frames; ++frame) {
         if (frame == frames - 1 && !g_portalDump.empty())
@@ -4483,6 +4487,10 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, wallQuad, 4, quadIdx, 6);
             dev.SetTexture(0, black);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, door, 4, quadIdx, 6);
+            // The street in front of the doorway (behind the camera): boxes the street's capture records.
+            dev.SetTexture(0, box);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, streetBoxes.data(), uint32_t(streetBoxes.size()), streetBoxIdx.data(),
+                                     uint32_t(streetBoxIdx.size()));
             // A solid wall behind the doorway's plane drawn after it (as the building's own insides): hidden by the room.
             const VtxMesh inside[4] = {{-3, 0, 5, 0, 0, -1, 0xFF808080, 0, 0}, {3, 0, 5, 0, 0, -1, 0xFF808080, 1, 0},
                                        {3, 4, 5, 0, 0, -1, 0xFF808080, 1, 1}, {-3, 4, 5, 0, 0, -1, 0xFF808080, 0, 1}};
