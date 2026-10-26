@@ -546,6 +546,9 @@ namespace rvk {
 
 namespace {
 constexpr float kStreetEntranceMargin = 1.05f;   // the opening a little wider and taller than the door's leaf
+// The opening's rectangle stands this far out of the room from the door's base: behind the door's leaf, so a shut door
+// (its panel at the base's plane, within the open pass's 5 cm) is in front of it and keeps it shut.
+constexpr float kStreetOpeningOut = 0.25f;
 }  // namespace
 
 void Device::DrawStreetPortal()
@@ -654,7 +657,8 @@ void Device::DrawStreetPortal()
         toEye[0] * toEye[0] + toEye[1] * toEye[1] + toEye[2] * toEye[2] > m_portalDist * m_portalDist)
         return;                                  // (the camera outside the room's side of it, or too far)
     const float across[3] = {-out[2], 0.0f, out[0]};
-    const d3d::Vector origin{e[0] - across[0] * 0.5f * width, e[1], e[2] - across[2] * 0.5f * width};
+    const d3d::Vector origin{e[0] - across[0] * 0.5f * width + out[0] * kStreetOpeningOut, e[1],
+                             e[2] - across[2] * 0.5f * width + out[2] * kStreetOpeningOut};
     const d3d::Vector edgeU{across[0] * width, 0.0f, across[2] * width};
     const d3d::Vector edgeV{0.0f, height, 0.0f};
     const d3d::Matrix viewProj = MulMatrix(m_aoView, m_aoProj);

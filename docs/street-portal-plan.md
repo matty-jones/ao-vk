@@ -135,6 +135,9 @@ ground, the pieces lit by the current sun, clip and mark. Settings: `RVK_StreetV
   screen), the whole room. Now it is drawn only where the depth is still the far plane, and the box is the rectangle
   cut at the camera's near limit (nothing when it is all behind the camera). Two walked-through doorways in reach
   were recorded by turns, each capture restarted every frame: the one recorded is kept unless the other is 3 nearer.
+  The opening's rectangle stood on the door's base plane, so a shut door's panel (within the open pass's 5 cm) was
+  taken for the opening and the street showed through it between the door's bars: it now stands 25 cm out, behind the
+  leaf.
 
 ### Phase 4: polish
 
