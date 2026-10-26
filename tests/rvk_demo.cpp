@@ -4663,8 +4663,9 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, pillar.data(), uint32_t(pillar.size()), pillarIdx.data(),
                                      uint32_t(pillarIdx.size()));
             // The black texture's panel in the entrance's plane (as a shop's, in game): left out while the street shows.
-            const VtxMesh panel[4] = {{-1.4f, -5.0f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 0, 0}, {1.4f, -5.0f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 1, 0},
-                                      {1.4f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 1, 1}, {-1.4f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 0, 1}};
+            // As wide as last_ditch_building_medium3's, much more than the door: its corners far from the entrance.
+            const VtxMesh panel[4] = {{-6.0f, -5.0f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 0, 0}, {6.0f, -5.0f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 1, 0},
+                                      {6.0f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 1, 1}, {-6.0f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 0, 1}};
             dev.SetTexture(0, black);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, panel, 4, quadIdx, 6);
         }

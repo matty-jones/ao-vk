@@ -2610,15 +2610,25 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // door's leaf to keep a shut door shut, would find it in front and stay black.
     if (m_streetShownFrame + 1 >= m_frameNumber && m_indoors && !m_drawingPortal && m_textures[0] &&
         m_textures[0]->m_rdbId == 6014 && (fvf & 0x00E) != 0x004) {   // (not a 2D draw)
-        // (Where its first corner is in the world: a door's width or so round the entrance's base.)
+        // (All of it in the entrance's plane, across the entrance's middle, from its base to a door's height. Not its
+        // first corner near the entrance: in a last_ditch_building_medium3 the panel spans much of the wall, the door's
+        // opening only a part of it - the user's dump, 2026-10-26.)
         const auto& w = m_world.m;
-        float p[3] = {0.0f, 0.0f, 0.0f}, at[3];
-        if (vertices)
-            std::memcpy(p, vertices, 12);
-        for (int j = 0; j < 3; ++j) at[j] = p[0] * w[0][j] + p[1] * w[1][j] + p[2] * w[2][j] + w[3][j];
-        const float dx = at[0] - m_streetRoom.entrance[0], dz = at[2] - m_streetRoom.entrance[2];
-        const float dy = at[1] - m_streetRoom.entrance[1];
-        if (dx * dx + dz * dz < 2.5f * 2.5f && dy > -1.0f && dy < 5.0f)
+        const float* e = m_streetRoom.entrance;
+        const float in[2] = {m_streetRoom.inward[0], m_streetRoom.inward[2]}, across[2] = {-in[1], in[0]};
+        const uint32_t stride = FvfStride(fvf);
+        float o0 = 1e30f, o1 = -1e30f, a0 = 1e30f, a1 = -1e30f, u0 = 1e30f, u1 = -1e30f;
+        for (uint32_t v = 0; vertices && v < std::min(vertexCount, 64u); ++v) {
+            float p[3], at[3];
+            std::memcpy(p, static_cast<const uint8_t*>(vertices) + size_t(v) * stride, 12);
+            for (int j = 0; j < 3; ++j) at[j] = p[0] * w[0][j] + p[1] * w[1][j] + p[2] * w[2][j] + w[3][j];
+            const float dx = at[0] - e[0], dz = at[2] - e[2];
+            const float o = dx * in[0] + dz * in[1], a = dx * across[0] + dz * across[1], u = at[1] - e[1];
+            o0 = std::min(o0, o); o1 = std::max(o1, o);
+            a0 = std::min(a0, a); a1 = std::max(a1, a);
+            u0 = std::min(u0, u); u1 = std::max(u1, u);
+        }
+        if (o0 > -0.5f && o1 < 0.5f && a0 < 0.0f && a1 > 0.0f && a1 - a0 < 16.0f && u0 < 2.5f && u1 > 0.2f)
             return;
     }
     // RVK_FrameGen: a 2D draw on the frame after the interface (the mouse pointer) goes on top of the overlay.
