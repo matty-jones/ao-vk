@@ -510,17 +510,18 @@ void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const voi
         return;
     if (f.def->replace && g_disableRendering)
         g_disableRendering(visual, nullptr, 1);
-    // Where it is: its locator's position (+0x30; the position at +0xC, unless the flag at +0x8 says it has none) - the
-    // sprites are written in the world from it, their batch's frame left at the world's origin (FUN_100f7f3c, re/fx/
-    // stars.c). Without a locator, the frame's.
-    float at[3] = {0.0f, 0.0f, 0.0f};
-    if (const void* locator = At<const void*>(stars, 0x30); locator && !At<uint8_t>(locator, 0x8)) {
-        std::memcpy(at, static_cast<const uint8_t*>(locator) + 0xC, 12);
-    } else if (const float* m = worldMatrix(visual)) {
-        std::memcpy(at, m + 12, 12);
-    } else {
+    // Where it is: its locator's position (+0x30; the position at +0xC, unless the flag at +0x8 says it has none), in its
+    // sprites' space - the sprite batch's frame takes it into the world (as rvk_particles.cpp does each sprite): the
+    // locator alone put it at x = z = 0, the frame alone at the ground's height 0 (the user, 2026-10-26; FUN_100f7f3c,
+    // re/fx/stars.c).
+    const float* m = worldMatrix(visual);
+    if (!m)
         return;
-    }
+    float local[3] = {0.0f, 0.0f, 0.0f};
+    if (const void* locator = At<const void*>(stars, 0x30); locator && !At<uint8_t>(locator, 0x8))
+        std::memcpy(local, static_cast<const uint8_t*>(locator) + 0xC, 12);
+    float at[3];
+    for (int c = 0; c < 3; ++c) at[c] = local[0] * m[c] + local[1] * m[4 + c] + local[2] * m[8 + c] + m[12 + c];
     rvk::Device::FxAnchors a;
     std::memcpy(a.head, at, 12);
     std::memcpy(a.source, at, 12);
