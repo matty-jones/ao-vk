@@ -606,10 +606,22 @@ void Device::NoteStreetDoorDraw(uint32_t primitive, uint32_t fvf, const void* ve
     d.world = m_world;
     d.material = m_material;
     d.mesh = m_drawMesh;
+    d.visualName = m_drawVisualName;
     d.kind = m_drawVisualKind;
     d.visual = m_drawVisual;
     d.owner = m_drawOwner;
     m_streetDoorDraws.push_back(std::move(d));
+    const std::pair<uint64_t, uint32_t> piece{m_drawMesh ? m_drawMesh->geo : 0, vertexCount};
+    if (std::find(m_streetDoorSeen.begin(), m_streetDoorSeen.end(), piece) == m_streetDoorSeen.end() &&
+        m_streetDoorSeen.size() < 64) {
+        m_streetDoorSeen.push_back(piece);
+        if (m_streetDoorLines < 40) {
+            ++m_streetDoorLines;
+            Log("street: a door piece drawn again over the street: %s, %u vertices, texture %u, at (%.2f %.2f %.2f)", name,
+                vertexCount, m_textures[0] ? m_textures[0]->m_rdbId : 0u, double(w[3][0]), double(w[3][1]),
+                double(w[3][2]));
+        }
+    }
 }
 
 // The door's draws again, after the street: through the draw path as the game drew them, depth tested - in front of
@@ -625,6 +637,7 @@ void Device::RedrawStreetDoor(std::vector<StreetDoorDraw>& draws)
     const d3d::Matrix world = m_world;
     const d3d::Material material = m_material;
     const MeshInfo* mesh = m_drawMesh;
+    const char* visualName = m_drawVisualName;
     const uint32_t kind = m_drawVisualKind, visual = m_drawVisual, owner = m_drawOwner;
     m_redrawingDoor = true;
     for (const StreetDoorDraw& d : draws) {
@@ -636,6 +649,7 @@ void Device::RedrawStreetDoor(std::vector<StreetDoorDraw>& draws)
         m_world = d.world;
         m_material = d.material;
         m_drawMesh = d.mesh;
+        m_drawVisualName = d.visualName;
         m_drawVisualKind = d.kind;
         m_drawVisual = d.visual;
         m_drawOwner = d.owner;
@@ -652,6 +666,7 @@ void Device::RedrawStreetDoor(std::vector<StreetDoorDraw>& draws)
     m_world = world;
     m_material = material;
     m_drawMesh = mesh;
+    m_drawVisualName = visualName;
     m_drawVisualKind = kind;
     m_drawVisual = visual;
     m_drawOwner = owner;
@@ -884,10 +899,13 @@ void Device::DrawStreetPortal()
     m_drawVisual = visual;
     m_drawOwner = owner;
     m_constantsDirty = true;
-    if (!m_street.doorLogged && (!doorDraws.empty() || m_street.logged)) {
-        m_street.doorLogged = true;
-        Log("street: the room's door drawn again over the street: %zu draws noted this frame", doorDraws.size());
+    // (A frame that took fewer of the door's pieces than the one before: one of them gone for a frame.)
+    if (doorDraws.size() < m_streetDoorLast && m_streetDoorLines < 40) {
+        ++m_streetDoorLines;
+        Log("street: %zu of the door's pieces drawn again this frame, %u the frame before", doorDraws.size(),
+            m_streetDoorLast);
     }
+    m_streetDoorLast = uint32_t(doorDraws.size());
     RedrawStreetDoor(doorDraws);
     if (!m_street.logged) {
         m_street.logged = true;

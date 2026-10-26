@@ -66,6 +66,8 @@ void Device::PortalCapturePlayfield(uint32_t playfield)
     m_streetRoom = StreetRoom{};                 // (the street portal reads its room's entrance again: portal.cpp)
     m_streetWhy.clear();                         // (... and says again why it isn't drawn)
     m_streetWhyLines = 0;
+    m_streetDoorSeen.clear();                    // (... and what of the door it draws again)
+    m_streetDoorLast = m_streetDoorLines = 0;
     m_portalLogged.clear();
     // Leaving a room's playfield with pieces not yet saved: saved at the next frame's start (outside a frame, its last
     // textures read back first).
@@ -389,17 +391,7 @@ void Device::PortalCaptureFrame()
         m_pc = PortalCaptureState{};
         return;
     }
-    // Where characters stand (the frame's pushers: their heads' ground points), for their attachments (PortalCaptureSave).
-    for (const FramePusher& p : m_framePushers) {
-        bool known = false;
-        for (const auto& c : m_pc.characters)
-            if (std::fabs(c[0] - p.p[0]) < 0.25f && std::fabs(c[1] - p.p[1]) < 0.25f && std::fabs(c[2] - p.p[2]) < 0.25f) {
-                known = true;
-                break;
-            }
-        if (!known && m_pc.characters.size() < 4096)
-            m_pc.characters.push_back({p.p[0], p.p[1], p.p[2]});
-    }
+    PortalNoteCharacters(m_pc);
     PortalCaptureReadBack(m_pc);
     const double now = Seconds();
     if (m_pc.roomsSeen && m_pc.unsaved && (now - m_pc.lastNew >= kQuiet || now - m_pc.lastSave >= kSaveEvery))
@@ -423,6 +415,23 @@ void Device::PortalCaptureReadBack(PortalCaptureState& s)
             ct.hash = portal::Hash(ct.level0.data(), ct.level0.size(), uint64_t(ct.width) << 32 | ct.height);
         }
     s.pending.clear();
+}
+
+// Where characters stand (the frame's pushers: their heads' ground points), for their attachments, dropped at the save
+// (PortalCaptureSave) - a room's capture and a street's (whose recorded the player's head and light bar standing in its
+// doorway, then seen through a shop's door: the user, 2026-10-26).
+void Device::PortalNoteCharacters(PortalCaptureState& s)
+{
+    for (const FramePusher& p : m_framePushers) {
+        bool known = false;
+        for (const auto& c : s.characters)
+            if (std::fabs(c[0] - p.p[0]) < 0.25f && std::fabs(c[1] - p.p[1]) < 0.25f && std::fabs(c[2] - p.p[2]) < 0.25f) {
+                known = true;
+                break;
+            }
+        if (!known && s.characters.size() < 4096)
+            s.characters.push_back({p.p[0], p.p[1], p.p[2]});
+    }
 }
 
 void Device::PortalCaptureSave(PortalCaptureState& s)

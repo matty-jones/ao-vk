@@ -426,6 +426,7 @@ void Device::StreetCaptureFrame()
     }
     if (!m_sc.on)
         return;
+    PortalNoteCharacters(m_sc);
     PortalCaptureReadBack(m_sc);
     const double now = Seconds();
     const bool gone = now - m_sc.lastNear > kGone;
