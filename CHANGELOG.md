@@ -169,6 +169,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   "the game exits", so a log without it was ended from outside the game.
 - randy-vk.log notes the free memory at each zone change and in every crash report, with the largest free block: the
   game is a 32-bit program, and a load needs one large block.
+- When the game stops responding (Windows greys its window and offers to close it), randy-vk.log now gets a hang report
+  after about ten seconds, even if the picture still updates. Before, only a picture frozen for 20 s got one, and a game
+  closed from that Windows prompt left nothing in the log.
 
 ## 0.7.0 - 2026-10-20
 

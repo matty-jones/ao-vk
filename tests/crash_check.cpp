@@ -99,6 +99,22 @@ int main(int argc, char** argv)
         Print("check: abort()");
         std::abort();
     }
+    if (!std::strcmp(mode, "--hung-window")) {
+        // Frames keep coming, but the window's thread takes no messages: Windows' "not responding" (an unseen window).
+        HWND window = CreateWindowExA(0, "STATIC", "crash_check", WS_POPUP, 0, 0, 16, 16, nullptr, nullptr, nullptr, nullptr);
+        rnative::SetHangWindow(window);
+        PostMessageA(window, WM_USER, 0, 0);     // (a message waiting, never taken)
+        Print("check: window %p not answering, frames still coming", static_cast<void*>(window));
+        char s[8] = "20";
+        GetEnvironmentVariableA("RANDYVK_HANG_SECONDS", s, sizeof(s));
+        const DWORD until = GetTickCount() + DWORD(std::atoi(s) / 4 + 12) * 1000;
+        while (GetTickCount() < until) {
+            rnative::HangBeat();
+            Sleep(16);
+        }
+        Print("check: done");
+        return 0;
+    }
     if (!std::strcmp(mode, "--exit")) {
         Print("check: exit(3)");
         rnative::CrashLogExit();                 // (what the DLL's process detach calls)

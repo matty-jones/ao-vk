@@ -3,6 +3,7 @@
 #include "rvk_settings.h"
 #include "native/gui.h"
 #include "native/ground.h"
+#include "native/native.h"
 #include "native/rings.h"
 #include "native/scene.h"
 #include "native/zone.h"
@@ -149,6 +150,7 @@ void RvkState::SetWindow(HWND hwnd)
     if (!hwnd)
         return;
     window = hwnd;
+    rnative::SetHangWindow(hwnd);
     if (device && device->Window() != hwnd) {
         if (device->InFrame())
             device->EndFrame();
