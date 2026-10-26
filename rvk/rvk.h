@@ -3011,6 +3011,7 @@ private:
     VkDeviceSize m_textureBytes[2] = {};         // live textures' images: the game's, render targets
     uint32_t m_textureCount[2] = {};
     std::string GpuMemoryReport() const;
+    void VramUse(uint64_t* used, uint64_t* budget) const;   // the GPU's own heaps, summed (the perf readout)
     void DestroyLeafResources();
     float m_pointLightScale = 1.0f, m_charLightScale = 1.0f;   // SetPointLightIntensity
     float LightScale(const d3d::Light& l) const;
