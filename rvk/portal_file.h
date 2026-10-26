@@ -47,6 +47,8 @@ struct Capture {
 uint64_t GeometryHash(const CapturedPiece& piece);
 bool Save(const char* path, const Capture& capture);
 bool Load(const char* path, Capture& capture);
+// Its playfield and entrance only (no pieces or textures read).
+bool LoadHeader(const char* path, Capture& capture);
 uint64_t Hash(const void* data, size_t size, uint64_t seed = 0xCBF29CE484222325ull);
 
 }  // namespace rvk::portal

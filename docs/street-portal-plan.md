@@ -99,6 +99,19 @@ The opening at the room's entrance, the sky into its box (`DrawSkyGlow` for a bo
 ground, the pieces lit by the current sun, clip and mark. Settings: `RVK_StreetView` (on/off),
 `RVK_StreetDist` (hidden).
 
+**Built ahead of phase 2 (2026-10-26):** `DrawStreetPortal` (portal.cpp), at the scene's end, indoors.
+- **Which street:** the doorway walked in through (`m_enteredFrom`, set when a teleport's link is made).
+- **Opening and place:** the room's entrance comes from its capture's header (`portal::LoadHeader`, read again each
+  arrival and when the capture is saved). The door's size comes from the room capture's doors this visit (else 2.4 x
+  3.2, 5% larger).
+- **Passes:**
+  1. the open pass, shared with the shop portals (`PortalOpenPass`);
+  2. ao-vk's sky into the box at the far plane (`DrawSkyGlow(&box)`: `fullscreen_far.vert`, a depth-tested pipeline);
+  3. the street's pieces (`PortalReplay`), kept from 5 cm out of the entrance's plane.
+- **Lit as recorded:** the hour of the capture, the rig off indoors.
+- **Check:** `rvk_demo --portal-capture-test` walks street, shop, street, shop: the last shot (-inside) shows the sky
+  and the street's box through the entrance.
+
 ### Phase 4: polish
 
 Clouds (the layer, at least), the suns, fog and the hour's haze in the opening, rain seen through the door.

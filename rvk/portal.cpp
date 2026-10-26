@@ -137,6 +137,9 @@ void Device::PortalForgetUnused(bool all)
 void Device::DestroyPortals()
 {
     PortalForgetUnused(true);
+    for (Texture* t : m_street.lp.textures)
+        if (t) DestroyTexture(t);
+    m_street = StreetLoaded{};
     if (m_portalDepthCopy) {
         vkDestroyImageView(m_device, m_portalDepthCopyView, nullptr);
         vmaDestroyImage(m_allocator, m_portalDepthCopy, m_portalDepthCopyAllocation);
@@ -204,6 +207,102 @@ bool Device::PortalCopyDepth(VkCommandBuffer cmd)
                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT);
     m_depthLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     return true;
+}
+
+// The opening (portal_open.frag): the scene's depth copied (once a frame), then pushed to the far plane where the
+// rectangle in `push` is the surface seen, inside `box`. The scene's rendering is ended and begun again.
+bool Device::PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied)
+{
+    const float sw = float(m_scene->m_width), sh = float(m_scene->m_height);
+    m_renderEndCause = kEndCopy;
+    EndRendering();
+    if (!copied && !PortalCopyDepth(cmd)) {
+        BeginRenderingOn(m_scene);
+        return false;
+    }
+    copied = true;
+    VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    depth.imageView = m_depthView;
+    depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, {m_scene->m_width, m_scene->m_height}};
+    ri.layerCount = 1;
+    ri.pDepthAttachment = &depth;
+    vkCmdBeginRendering(cmd, &ri);
+    VkViewport viewport{0.0f, 0.0f, sw, sh, 0.0f, 1.0f};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &box);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_portalOpenPipeline);
+    VkDescriptorImageInfo image{m_pointSampler, m_portalDepthCopyView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    wr.dstBinding = 0;
+    wr.descriptorCount = 1;
+    wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wr.pImageInfo = &image;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_bloomLayout, 0, 1, &wr);
+    vkCmdPushConstants(cmd, m_bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 * sizeof(float), push);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    m_cache = StateCache{};                      // (the pass bound its own pipeline and set 0)
+    m_arenaBound = false;
+    m_bindlessBound = false;
+    m_constantsDirty = true;
+    BeginRenderingOn(m_scene);
+    return true;
+}
+
+// A capture's pieces replayed through the draw path, each as the game drew it, moved by `place` (m_drawingPortal,
+// m_portalScissor and m_portalClip set by the caller, the device's state kept by it too). Returns how many were drawn.
+uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Texture*>& textures, const d3d::Matrix& place)
+{
+    uint32_t drawn = 0;
+    for (const portal::CapturedPiece& p : cap.pieces) {
+        if (p.vertices.empty()) continue;
+        m_rs = p.rs;
+        m_tss = p.tss;
+        std::fill(m_textures.begin(), m_textures.end(), nullptr);
+        for (int s = 0; s < 2; ++s)
+            m_textures[s] = p.texture[s] >= 0 ? textures[size_t(p.texture[s])] : nullptr;
+        m_world = MulMatrix(p.world, place);
+        m_material = p.material;
+        m_lights.assign(p.lights.size(), LightSlot{});
+        for (size_t i = 0; i < p.lights.size(); ++i) {
+            LightSlot& slot = m_lights[i];
+            slot.light = p.lights[i];
+            slot.light.position = Apply(place, p.lights[i].position, 1.0f);
+            slot.light.direction = Apply(place, p.lights[i].direction, 0.0f);
+            slot.enabled = true;
+            slot.cosHalfTheta = std::cos(slot.light.theta * 0.5f);
+            slot.cosHalfPhi = std::cos(slot.light.phi * 0.5f);
+        }
+        ++m_lightsGen;
+        m_drawVisualKind = p.kind;
+        m_constantsDirty = true;
+        Draw(p.primitive, p.fvf, p.vertices.data(), p.vertexCount, p.indices.empty() ? nullptr : p.indices.data(),
+             uint32_t(p.indices.size()));
+        ++drawn;
+    }
+    return drawn;
+}
+
+// The opening's pixels (as PortalOpenPass found them) marked in the local-light target as lit by their own lamps
+// (portal_mark.frag): the passes after the scene - the street's sun shadows, ambient occlusion, reflections - leave
+// them be (the traced occlusion darkened a patch of a room's floor: its own draws' mark didn't hold there).
+void Device::PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box)
+{
+    if (!m_portalMarkPipeline || !m_localFraction)
+        return;
+    m_renderEndCause = kEndCopy;
+    EndRendering();
+    FullscreenPass(cmd, m_localFraction, m_portalMarkPipeline, m_portalDepthCopyView, m_portalDepthCopyView,
+                   m_pointSampler, push, 32 * sizeof(float), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &box);
+    m_cache = StateCache{};
+    m_arenaBound = false;
+    m_bindlessBound = false;
+    m_constantsDirty = true;
+    BeginRenderingOn(m_scene);
 }
 
 // While the scene is being drawn (Draw: the first draw writing no depth after a linked doorway; EndScene): the rooms
@@ -339,42 +438,8 @@ void Device::DrawPortals()
                                 edgeV.x, edgeV.y, edgeV.z, 0.0f, sw, sh, m_aoProj.m[2][2], m_aoProj.m[3][2]};
         std::memcpy(push + 16, rest, sizeof(rest));
         // 1. The opening.
-        m_renderEndCause = kEndCopy;
-        EndRendering();
-        if (!copied && !PortalCopyDepth(cmd))
+        if (!PortalOpenPass(cmd, push, box, copied))
             return;
-        copied = true;
-        {
-            VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-            depth.imageView = m_depthView;
-            depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-            depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-            depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
-            ri.renderArea = {{0, 0}, {m_scene->m_width, m_scene->m_height}};
-            ri.layerCount = 1;
-            ri.pDepthAttachment = &depth;
-            vkCmdBeginRendering(cmd, &ri);
-            VkViewport viewport{0.0f, 0.0f, sw, sh, 0.0f, 1.0f};
-            vkCmdSetViewport(cmd, 0, 1, &viewport);
-            vkCmdSetScissor(cmd, 0, 1, &box);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_portalOpenPipeline);
-            VkDescriptorImageInfo image{m_pointSampler, m_portalDepthCopyView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-            VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-            wr.dstBinding = 0;
-            wr.descriptorCount = 1;
-            wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            wr.pImageInfo = &image;
-            vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_bloomLayout, 0, 1, &wr);
-            vkCmdPushConstants(cmd, m_bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
-            vkCmdDraw(cmd, 3, 1, 0, 0);
-            vkCmdEndRendering(cmd);
-        }
-        m_cache = StateCache{};                  // (the pass bound its own pipeline and set 0)
-        m_arenaBound = false;
-        m_bindlessBound = false;
-        m_constantsDirty = true;
-        BeginRenderingOn(m_scene);
         // 2. The room, as the game drew it, moved into the doorway.
         const auto rs = m_rs;
         const auto tss = m_tss;
@@ -392,33 +457,7 @@ void Device::DrawPortals()
         m_portalClip[1] = 0.0f;
         m_portalClip[2] = -out[2];
         m_portalClip[3] = out[0] * q.centre[0] + out[2] * q.centre[2] - 0.01f;
-        uint32_t drawn = 0;
-        for (const portal::CapturedPiece& p : cap.pieces) {
-            if (p.vertices.empty()) continue;
-            m_rs = p.rs;
-            m_tss = p.tss;
-            std::fill(m_textures.begin(), m_textures.end(), nullptr);
-            for (int s = 0; s < 2; ++s)
-                m_textures[s] = p.texture[s] >= 0 ? lp->textures[size_t(p.texture[s])] : nullptr;
-            m_world = MulMatrix(p.world, place);
-            m_material = p.material;
-            m_lights.assign(p.lights.size(), LightSlot{});
-            for (size_t i = 0; i < p.lights.size(); ++i) {
-                LightSlot& slot = m_lights[i];
-                slot.light = p.lights[i];
-                slot.light.position = Apply(place, p.lights[i].position, 1.0f);
-                slot.light.direction = Apply(place, p.lights[i].direction, 0.0f);
-                slot.enabled = true;
-                slot.cosHalfTheta = std::cos(slot.light.theta * 0.5f);
-                slot.cosHalfPhi = std::cos(slot.light.phi * 0.5f);
-            }
-            ++m_lightsGen;
-            m_drawVisualKind = p.kind;
-            m_constantsDirty = true;
-            Draw(p.primitive, p.fvf, p.vertices.data(), p.vertexCount, p.indices.empty() ? nullptr : p.indices.data(),
-                 uint32_t(p.indices.size()));
-            ++drawn;
-        }
+        const uint32_t drawn = PortalReplay(cap, lp->textures, place);
         // 3. The shade over the opening: by day the room is dimmer than the street.
         const float day = std::clamp((m_cond.sunUp + 0.05f) / 0.2f, 0.0f, 1.0f);
         const float shade = (1.0f - std::clamp(m_portalDim, 0.0f, 1.0f)) * day;
@@ -458,17 +497,7 @@ void Device::DrawPortals()
         // 4. The opening's pixels marked lit by the room's own lamps in the local-light target (portal_mark.frag): the
         // passes after the scene leave them be - not the street's sun shadows, ambient occlusion or reflections (the
         // traced occlusion darkened a patch of the floor: the room's own draws' mark didn't hold there).
-        if (m_portalMarkPipeline && m_localFraction) {
-            m_renderEndCause = kEndCopy;
-            EndRendering();
-            FullscreenPass(cmd, m_localFraction, m_portalMarkPipeline, m_portalDepthCopyView, m_portalDepthCopyView,
-                           m_pointSampler, push, sizeof(push), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &box);
-            m_cache = StateCache{};
-            m_arenaBound = false;
-            m_bindlessBound = false;
-            m_constantsDirty = true;
-            BeginRenderingOn(m_scene);
-        }
+        PortalMarkPass(cmd, push, box);
         m_rs = rs;
         m_tss = tss;
         m_textures = textures;
@@ -489,6 +518,181 @@ void Device::DrawPortals()
                 double(q.centre[2]), double(c.distance), drawn, box.offset.x, box.offset.y, box.extent.width,
                 box.extent.height);
         }
+    }
+}
+
+}  // namespace rvk
+
+// The reverse: the street seen from inside a shop through its entrance door (docs/street-portal-plan.md phase 3,
+// RVK_StreetView). At the scene's end indoors, in the room of a doorway walked in through (m_enteredFrom), with its
+// street recorded (portal_street.cpp) and its entrance known (the room's capture): the door's opening at the entrance -
+// its size the door's (the room capture's doors this visit), else 2.4 x 3.2 - is opened as a doorway is from the street
+// (a closed door stands in front of it and keeps it shut); ao-vk's sky is drawn into it at the far plane; the street's
+// pieces are replayed, moved so its doorway stands on the entrance facing out, kept on the street's side of the
+// entrance's plane. Lit as recorded (the hour it was recorded at, for now), no ground or clouds yet (phases 2 and 4).
+namespace rvk {
+
+namespace {
+constexpr float kStreetEntranceMargin = 1.05f;   // the opening a little wider and taller than the door's leaf
+}  // namespace
+
+void Device::DrawStreetPortal()
+{
+    if (!m_streetViewOn || !m_portalsOn || !m_indoors || !m_enteredValid || m_enteredFrom.interior != m_skyPlayfield ||
+        !m_scenePhase || m_target != m_scene || !m_aoProjValid || !m_portalOpenPipeline || PortalDir().empty())
+        return;
+    // The room's entrance (its capture's header: read again each arrival and when the room's capture is saved - on the
+    // first visit it is only written on leaving).
+    if (m_streetRoom.playfield != m_skyPlayfield) {
+        m_streetRoom = StreetRoom{};
+        m_streetRoom.playfield = m_skyPlayfield;
+        portal::Capture header;
+        const std::string path = PortalDir() + std::to_string(m_skyPlayfield) + ".rvkp";
+        m_streetRoom.known = portal::LoadHeader(path.c_str(), header) && header.entranceKnown;
+        std::memcpy(m_streetRoom.entrance, header.entrance, sizeof(m_streetRoom.entrance));
+        std::memcpy(m_streetRoom.inward, header.inward, sizeof(m_streetRoom.inward));
+    }
+    if (!m_streetRoom.known)
+        return;
+    // The street (loaded once a doorway; tried again a while after a failure).
+    char name[96];
+    std::snprintf(name, sizeof(name), "street-%u-%ld-%ld.rvkp", m_enteredFrom.outdoor, std::lround(m_enteredFrom.centre[0]),
+                  std::lround(m_enteredFrom.centre[2]));
+    const std::string path = PortalDir() + name;
+    if (m_street.path != path || (!m_street.lp.ok && Seconds() - m_street.lp.tried > kRetryAfter)) {
+        for (Texture* t : m_street.lp.textures)
+            if (t) DestroyTexture(t);
+        m_street = StreetLoaded{};
+        m_street.path = path;
+        m_street.lp.tried = Seconds();
+        auto cap = std::make_shared<portal::Capture>();
+        if (portal::Load(path.c_str(), *cap) && cap->entranceKnown) {
+            for (const portal::CapturedTexture& t : cap->textures) {
+                Texture* tex = t.level0.empty() ? nullptr : CreateTexture(t.width, t.height, t.format, 1);
+                if (tex) {
+                    UpdateTexture(tex, 0, 0, 0, t.width, t.height, t.level0.data(), FormatRowBytes(t.format, t.width));
+                    tex->m_rdbId = t.rdbId;
+                }
+                m_street.lp.textures.push_back(tex);
+            }
+            m_street.lp.capture = cap;
+            m_street.lp.ok = true;
+            Log("street: %s loaded to draw through playfield %u's entrance (%zu pieces, %zu textures)", name,
+                m_skyPlayfield, cap->pieces.size(), cap->textures.size());
+        } else {
+            Log("street: no %s yet - standing at that doorway outside records it", name);
+        }
+    }
+    if (!m_street.lp.ok)
+        return;
+    const portal::Capture& street = *m_street.lp.capture;
+    // The opening: the door's (the one at the entrance this visit), out of the room.
+    const float* e = m_streetRoom.entrance;
+    float in[3] = {m_streetRoom.inward[0], 0.0f, m_streetRoom.inward[2]};
+    float width = 2.4f, height = 3.2f;
+    for (const PortalDoor& d : m_pc.doors) {
+        const float dx = d.base[0] - e[0], dz = d.base[2] - e[2];
+        if (dx * dx + dz * dz < 1.5f * 1.5f && d.width > 0.5f && d.height > 1.0f) {
+            width = d.width;
+            height = d.height;
+        }
+    }
+    width *= kStreetEntranceMargin;
+    height *= kStreetEntranceMargin;
+    const float out[3] = {-in[0], 0.0f, -in[2]};
+    const auto& vm = m_aoView.m;
+    float eye[3];
+    for (int i = 0; i < 3; ++i) eye[i] = -(vm[3][0] * vm[i][0] + vm[3][1] * vm[i][1] + vm[3][2] * vm[i][2]);
+    const float toEye[3] = {eye[0] - e[0], eye[1] - e[1], eye[2] - e[2]};
+    if (toEye[0] * in[0] + toEye[2] * in[2] <= 0.0f ||
+        toEye[0] * toEye[0] + toEye[1] * toEye[1] + toEye[2] * toEye[2] > m_portalDist * m_portalDist)
+        return;                                  // (the camera outside the room's side of it, or too far)
+    const float across[3] = {-out[2], 0.0f, out[0]};
+    const d3d::Vector origin{e[0] - across[0] * 0.5f * width, e[1], e[2] - across[2] * 0.5f * width};
+    const d3d::Vector edgeU{across[0] * width, 0.0f, across[2] * width};
+    const d3d::Vector edgeV{0.0f, height, 0.0f};
+    const d3d::Matrix viewProj = MulMatrix(m_aoView, m_aoProj);
+    const float sw = float(m_scene->m_width), sh = float(m_scene->m_height);
+    float x0 = sw, y0 = sh, x1 = 0.0f, y1 = 0.0f;
+    int behind = 0;
+    for (int k = 0; k < 4; ++k) {
+        const d3d::Vector p{origin.x + (k & 1 ? edgeU.x : 0.0f), origin.y + (k & 2 ? edgeV.y : 0.0f),
+                            origin.z + (k & 1 ? edgeU.z : 0.0f)};
+        const float* m = &viewProj.m[0][0];
+        const float cx = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
+        const float cy = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
+        const float cw = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
+        if (cw <= 0.05f) { ++behind; continue; }
+        const float px = (cx / cw * 0.5f + 0.5f) * sw, py = (0.5f - cy / cw * 0.5f) * sh;
+        x0 = std::min(x0, px); x1 = std::max(x1, px);
+        y0 = std::min(y0, py); y1 = std::max(y1, py);
+    }
+    if (behind == 4)
+        return;
+    if (behind) { x0 = 0.0f; y0 = 0.0f; x1 = sw; y1 = sh; }
+    x0 = std::clamp(std::floor(x0) - 2.0f, 0.0f, sw);
+    y0 = std::clamp(std::floor(y0) - 2.0f, 0.0f, sh);
+    x1 = std::clamp(std::ceil(x1) + 2.0f, 0.0f, sw);
+    y1 = std::clamp(std::ceil(y1) + 2.0f, 0.0f, sh);
+    if (x1 - x0 < 1.0f || y1 - y0 < 1.0f)
+        return;
+    const VkRect2D box{{int32_t(x0), int32_t(y0)}, {uint32_t(x1 - x0), uint32_t(y1 - y0)}};
+    d3d::Matrix inverse;
+    if (!InvertMatrix(viewProj, &inverse))
+        return;
+    float push[32];
+    std::memcpy(push, &inverse.m[0][0], 64);
+    const float rest[16] = {origin.x, origin.y, origin.z, 0.0f, edgeU.x, edgeU.y, edgeU.z, 0.0f,
+                            edgeV.x, edgeV.y, edgeV.z, 0.0f, sw, sh, m_aoProj.m[2][2], m_aoProj.m[3][2]};
+    std::memcpy(push + 16, rest, sizeof(rest));
+    VkCommandBuffer cmd = m_frames[m_frameIndex].main;
+    // 1. The opening; 2. the sky into it, at the far plane.
+    bool copied = false;
+    if (!PortalOpenPass(cmd, push, box, copied))
+        return;
+    DrawSkyGlow(&box);
+    // 3. The street: its doorway (the capture's entrance, facing its "inward" - out into the street) on the room's
+    // entrance, facing out of the room.
+    const float turn = std::atan2(out[0], out[2]) - std::atan2(street.inward[0], street.inward[2]);
+    const d3d::Matrix place = MulMatrix(MulMatrix(Translation(-street.entrance[0], -street.entrance[1],
+                                                              -street.entrance[2]),
+                                                  TurnY(turn)),
+                                        Translation(e[0], e[1], e[2]));
+    const auto rs = m_rs;
+    const auto tss = m_tss;
+    const auto textures = m_textures;
+    const auto lights = m_lights;
+    const d3d::Matrix world = m_world;
+    const d3d::Material material = m_material;
+    const uint32_t kind = m_drawVisualKind, visual = m_drawVisual, owner = m_drawOwner;
+    m_drawVisual = 0;
+    m_drawOwner = 0;
+    m_drawingPortal = true;
+    m_portalScissor = box;
+    // On the street's side of the entrance's plane only, from 5 cm out (the room behind it is the room's; the street's
+    // facade round its doorway stands at the doorway's plane or behind it).
+    m_portalClip[0] = out[0];
+    m_portalClip[1] = 0.0f;
+    m_portalClip[2] = out[2];
+    m_portalClip[3] = -(out[0] * e[0] + out[2] * e[2]) - 0.05f;
+    const uint32_t drawn = PortalReplay(street, m_street.lp.textures, place);
+    m_drawingPortal = false;
+    m_rs = rs;
+    m_tss = tss;
+    m_textures = textures;
+    m_lights = lights;
+    ++m_lightsGen;
+    m_world = world;
+    m_material = material;
+    m_drawVisualKind = kind;
+    m_drawVisual = visual;
+    m_drawOwner = owner;
+    m_constantsDirty = true;
+    if (!m_street.logged) {
+        m_street.logged = true;
+        Log("street: drawn through playfield %u's entrance (%u pieces, the opening %.2f x %.2f, the screen box %d,%d %ux%u)",
+            m_skyPlayfield, drawn, double(width), double(height), box.offset.x, box.offset.y, box.extent.width,
+            box.extent.height);
     }
 }
 

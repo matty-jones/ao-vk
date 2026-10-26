@@ -63,6 +63,7 @@ void SetPortalDir(const char* dir)
 void Device::PortalCapturePlayfield(uint32_t playfield)
 {
     ++m_portalArrivals;
+    m_streetRoom = StreetRoom{};                 // (the street portal reads its room's entrance again: portal.cpp)
     m_portalLogged.clear();
     // Leaving a room's playfield with pieces not yet saved: saved at the next frame's start (outside a frame, its last
     // textures read back first).
@@ -499,8 +500,11 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
     std::error_code made;
     std::filesystem::create_directories(g_portalDir, made);
     const bool saved = portal::Save(path.c_str(), merged);
-    if (saved && !s.street)
+    if (saved && !s.street) {
         PortalForget(c.playfield);               // (the doorways draw the new capture: portal.cpp)
+        if (m_streetRoom.playfield == c.playfield)
+            m_streetRoom = StreetRoom{};         // (... and its entrance is read again for the street portal)
+    }
     size_t bytes = 0;
     for (const auto& t : merged.textures) bytes += t.level0.size();
     for (const auto& p : merged.pieces) bytes += p.vertices.size() + p.indices.size() * 2;

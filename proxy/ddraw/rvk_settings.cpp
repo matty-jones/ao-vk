@@ -53,6 +53,7 @@ Setting g_settings[] = {
     {"RVK_Portals", "Shops' insides seen through their doors (once you have been in one of the kind)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PortalDist", "Shops' insides through their doors: drawn within this distance", "General", Float, 10, 200, 5, 60, nullptr, 0, "RVK_Portals"},
     {"RVK_PortalDim", "Shops' insides through their doors: their brightness by day (1 = as inside)", "General", Float, 0, 1, 0.05f, 0.7f, nullptr, 0, "RVK_Portals"},
+    {"RVK_StreetView", "The street seen from inside a shop through its open door (once you have stood at that door outside)", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Portals"},
     {"RVK_PerfHud", "Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's", "General", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_AlienMap", "AI missions' PF map: rooms shown black on green (the game's is black on black)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
@@ -446,7 +447,7 @@ const Vanilla kVanilla[] = {
     {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
     {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_Rainbow", 0}, {"RVK_ViewRange", 1},
-    {"RVK_LightRig", 0}, {"RVK_Metering", 0}, {"RVK_ZoneFade", 0}, {"RVK_Portals", 0},
+    {"RVK_LightRig", 0}, {"RVK_Metering", 0}, {"RVK_ZoneFade", 0}, {"RVK_Portals", 0}, {"RVK_StreetView", 0},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -526,6 +527,7 @@ const Cost kCosts[] = {
     {"RVK_Portals", "GPU: low, with a shop's door in view"},
     {"RVK_PortalDist", "no cost"},
     {"RVK_PortalDim", "no cost"},
+    {"RVK_StreetView", "GPU: low, with a shop's open door in view"},
     {"RVK_PerfHud", "no cost"},
     {"RVK_AlienMap", "no cost"},
     {"RVK_DetailRange", "CPU and GPU: more with the value"},

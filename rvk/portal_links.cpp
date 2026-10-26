@@ -316,6 +316,8 @@ void Device::PortalLinkFrame()
     });
     m_portalLinks.push_back(link);
     ++m_portalLinksGen;
+    m_enteredFrom = link;                        // (the street seen from inside: portal.cpp DrawStreetPortal)
+    m_enteredValid = !outdoors;
     const bool saved = PortalSaveLinks();
     Log("portal link: the doorway of %s at (%.2f %.2f %.2f) in playfield %u leads to %u%s (learned; %zu links)%s",
         link.mesh[0] ? link.mesh : "an unnamed mesh", double(link.centre[0]), double(link.centre[1]),

@@ -311,7 +311,8 @@ struct DeviceInfo {
     X(GroundOne, m_groundOnePass, C)                  /* the native ground drawn in one pass, not two */ \
     X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */ \
     X(ZoneFade, m_zoneFade, 0)                        /* a zone change holds the old zone's picture, fades into the new */ \
-    X(Portals, m_portalsOn, 0)                        /* shops' rooms seen through their doors (portal.cpp) */
+    X(Portals, m_portalsOn, 0)                        /* shops' rooms seen through their doors (portal.cpp) */ \
+    X(StreetView, m_streetViewOn, 0)                  /* ... and the street from inside them */
 enum class Knob : uint32_t {
 #define RVK_KNOB_NAME(name, member, refresh) name,
     RVK_FLOAT_KNOBS(RVK_KNOB_NAME) RVK_BOOL_KNOBS(RVK_KNOB_NAME)
@@ -1665,7 +1666,7 @@ private:
     double m_skyFogClock = -1.0;
     uint64_t m_skyDrawFrame = ~0ull, m_skyGlowFrame = ~0ull;
     uint32_t m_skyDraws = 0;                     // the sky's draws so far this frame (the glow before the second)
-    VkPipeline m_skyGlowPipeline = VK_NULL_HANDLE;
+    VkPipeline m_skyGlowPipeline = VK_NULL_HANDLE, m_skyGlowFarPipeline = VK_NULL_HANDLE;   // (far: into a street portal)
     VkPipelineLayout m_skyGlowLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_skyGlowSetLayout = VK_NULL_HANDLE;   // (the sky view table)
     // Our own sky (atmosphere.cpp; RVK_ProcSky): the atmosphere's tables, the sky view's frame; the dome's draw skipped.
@@ -1731,7 +1732,7 @@ private:
     void UpdateAtmosphere(VkCommandBuffer cmd);
     void DestroyAtmosphere();
     void UpdateSkyModel();
-    void DrawSkyGlow();
+    void DrawSkyGlow(const VkRect2D* box = nullptr);   // (box: a street portal's opening, at the far plane only)
     // The sun's clock (sky.cpp UpdateSunClock; docs/dusk-plan.md): the true sun's direction eased over real time (the
     // game's light, below the horizon too: m_trueSunDir), and from its height the dusk's phases - one smooth day to
     // night that the sky, the light handover and the grading all read, instead of each its own narrow ramp.
@@ -3428,6 +3429,9 @@ private:
     void DestroyPortals();
     bool PortalCopyDepth(VkCommandBuffer cmd);
     void DrawPortals();                          // (EndScene)
+    bool PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied);
+    uint32_t PortalReplay(const portal::Capture& capture, const std::vector<Texture*>& textures, const d3d::Matrix& place);
+    void PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box);
     bool m_drawingPortal = false;                // a room's piece being drawn into a doorway: no side effects
     VkRect2D m_portalScissor{};                  // ... kept to the doorway's box on the scene
     float m_portalClip[4] = {};                  // ... and behind its plane (DrawTransform clip)
@@ -3441,6 +3445,13 @@ private:
     bool m_portalsOn = true;                     // RVK_Portals
     float m_portalDist = 60.0f;                  // RVK_PortalDist: drawn within this of the camera (units)
     float m_portalDim = 0.7f;                    // RVK_PortalDim: the room's brightness by day, of its own (0..1)
+    // The reverse (portal.cpp DrawStreetPortal, docs/street-portal-plan.md): the street from inside a shop.
+    void DrawStreetPortal();                     // (EndScene)
+    bool m_streetViewOn = true;                  // RVK_StreetView
+    bool m_enteredValid = false;                 // the doorway walked in through (PortalLinkFrame)
+    PortalLink m_enteredFrom;
+    struct StreetRoom { uint32_t playfield = ~0u; bool known = false; float entrance[3] = {}, inward[3] = {}; } m_streetRoom;
+    struct StreetLoaded { std::string path; LoadedPortal lp; bool logged = false; } m_street;
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;

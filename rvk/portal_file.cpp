@@ -105,6 +105,25 @@ bool Save(const char* path, const Capture& c)
     return std::rename(temp.c_str(), path) == 0;
 }
 
+bool LoadHeader(const char* path, Capture& c)
+{
+    FILE* f = std::fopen(path, "rb");
+    if (!f)
+        return false;
+    Reader r{f};
+    uint32_t magic = 0, version = 0, entrance = 0;
+    r.Value(magic);
+    r.Value(version);
+    c = Capture{};
+    r.Value(c.playfield);
+    r.Value(entrance);
+    r.Value(c.entrance);
+    r.Value(c.inward);
+    c.entranceKnown = entrance != 0;
+    std::fclose(f);
+    return r.ok && magic == kMagic && version == kVersion;
+}
+
 bool Load(const char* path, Capture& c)
 {
     FILE* f = std::fopen(path, "rb");

@@ -532,6 +532,7 @@ void Device::EndScene()
     if (!m_scenePhase)
         return;
     DrawPortals();                               // RVK_Portals: shops' rooms through their doors (portal.cpp)
+    DrawStreetPortal();                          // RVK_StreetView: the street from inside a shop (portal.cpp)
     m_scenePhase = false;
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     bool wasMain = m_target == m_scene;

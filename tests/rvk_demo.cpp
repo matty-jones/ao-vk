@@ -4412,7 +4412,8 @@ void RunPortalView(D& dev, int frames, const std::string& shot)
 // 0.4 s; then a small room as the game draws a shop's - walls and floor tagged as rooms, boxes as props - in a playfield
 // of its own (4242), left after 0.8 s (before the capture's quiet spell: it saves on leaving); then the street again.
 // The capture writes DIR\4242.rvkp (which --portal-view draws) and the link DIR\links.tsv; back in the street the
-// doorway is known.
+// doorway is known, shows the room, and its street is recorded (DIR\street-4100-0-3.rvkp); then into the shop again,
+// looking back at its entrance: the street through it (the street portal). Shots: -street, -room, -portal, -inside.
 std::string g_portalCaptureDir;
 std::string g_portalDump;          // (--dump with --portal-capture-test: the last frame's dump, the portal in view)
 
@@ -4445,25 +4446,26 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
     std::vector<uint16_t> streetBoxIdx;
     for (int i = 0; i < 3; ++i)
         AddCube(streetBoxes, streetBoxIdx, -4.0f + 4.0f * float(i), 1.0f, -6.0f - 3.0f * float(i % 2), 1.0f);
-    frames = std::max(frames, 200);
+    frames = std::max(frames, 330);
     for (int frame = 0; frame < frames; ++frame) {
         if (frame == frames - 1 && !g_portalDump.empty())
             dev.RequestFrameDump(g_portalDump);
-        if (frame == 20 || frame == 70 || frame == frames - 1) {
+        if (frame == 20 || frame == 70 || frame == 199 || frame == frames - 1) {
             std::string name = shot;
-            name.insert(name.size() - 4, frame == 20 ? "-street" : frame == 70 ? "-room" : "-portal");
-            dev.RequestScreenshot(frame == frames - 1 ? shot : name);
+            name.insert(name.size() - 4, frame == 20 ? "-street" : frame == 70 ? "-room" : frame == 199 ? "-portal" : "-inside");
+            dev.RequestScreenshot(name);
         }
-        if (frame == 25)
+        if (frame == 25 || frame == 205)
             dev.ZoneSignal(rvk::kZoneTeleport);  // (at the doorway: StartTeleport)
-        if (frame == 30 || frame == 80)
+        if (frame == 30 || frame == 80 || frame == 210)
             dev.SetSkyPlayfield(0);              // (a zone change's blank frames)
-        if (frame == 35)
+        if (frame == 35 || frame == 215)
             dev.SetSkyPlayfield(4242);           // (the shop)
         if (frame == 100)
-            dev.SetSkyPlayfield(4100);           // (the street again)
-        const bool street = frame < 30 || frame >= 100;
-        const bool blank = (frame >= 30 && frame < 35) || (frame >= 80 && frame < 100);
+            dev.SetSkyPlayfield(4100);           // (the street again: its doorway's street recorded)
+        const bool street = frame < 30 || (frame >= 100 && frame < 210);
+        const bool blank = (frame >= 30 && frame < 35) || (frame >= 80 && frame < 100) || (frame >= 210 && frame < 215);
+        const bool lookingBack = frame >= 215;   // (in the shop again, looking at its entrance: the street through it)
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
         dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF000000, 1.0f);
@@ -4518,7 +4520,10 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             Sleep(16);
             continue;
         }
-        dev.SetTransform(View, LookAtLH({0.0f, 1.8f, 0.5f}, {0.0f, 1.65f, 1.5f}, {0, 1, 0}));
+        if (lookingBack)
+            dev.SetTransform(View, LookAtLH({0.0f, -3.0f, 8.0f}, {0.0f, -3.3f, 0.0f}, {0, 1, 0}));
+        else
+            dev.SetTransform(View, LookAtLH({0.0f, 1.8f, 0.5f}, {0.0f, 1.65f, 1.5f}, {0, 1, 0}));
         dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
         dev.SetTransform(World, Identity());
         dev.SetRenderState(RS_ZENABLE, 1);
