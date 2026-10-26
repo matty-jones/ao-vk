@@ -106,9 +106,15 @@ struct TerrainFit {
 // Diagnostics. Default: stderr, flushed per line. SetLogSink redirects (e.g. into the game's log file).
 void Log(const char* fmt, ...);
 void SetLogSink(void (*sink)(const char* line));
-// The largest free region of the process's address space (bytes). A 32-bit game runs out of one big enough for a
-// zone's load well before the total free (the address-space log lines) reaches nothing.
-uint64_t LargestFreeBlock();
+// The process's address space from its regions (VirtualQuery), bytes: free, the largest free block (a 32-bit game runs
+// out of one big enough for a zone's load before the free total reaches nothing), and the whole. Under Wine,
+// GlobalMemoryStatusEx's free figure is off by as much as a gigabyte either way; the regions are what can be reserved
+// (crash_check --addr).
+struct AddressSpace { uint64_t free = 0, largest = 0, total = 0; };
+AddressSpace QueryAddressSpace();
+// The same, walked once a second on a thread of its own (started at the first call; all zero until its first walk):
+// a game's thousands of regions take ~9 ms to walk, too long for its thread four times a second (the perf readout).
+AddressSpace LatestAddressSpace();
 // Where the pipeline cache is kept between runs (compiled pipelines load from it instead of being built again at every
 // start). Empty or never set: RANDYVK_PIPELINE_CACHE, else no cache file ("off" also disables it).
 void SetPipelineCachePath(const char* path);

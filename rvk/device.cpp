@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
 
 namespace rvk {
 
@@ -123,17 +124,42 @@ void LayoutUse(VkImageLayout layout, VkPipelineStageFlags2* stage, VkAccessFlags
 
 }  // namespace
 
-uint64_t LargestFreeBlock()
+AddressSpace QueryAddressSpace()
 {
-    uint64_t largest = 0;
+    AddressSpace a;
     MEMORY_BASIC_INFORMATION mbi;
     for (uintptr_t p = 0x10000; VirtualQuery(reinterpret_cast<const void*>(p), &mbi, sizeof(mbi)) == sizeof(mbi);) {
-        if (mbi.State == MEM_FREE) largest = std::max<uint64_t>(largest, mbi.RegionSize);
+        if (mbi.State == MEM_FREE) {
+            a.free += mbi.RegionSize;
+            a.largest = std::max<uint64_t>(a.largest, mbi.RegionSize);
+        }
         const uintptr_t next = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
         if (next <= p) break;                    // (the top of the address space)
         p = next;
     }
-    return largest;
+    MEMORYSTATUSEX mem{};
+    mem.dwLength = sizeof(mem);
+    if (GlobalMemoryStatusEx(&mem)) a.total = mem.ullTotalVirtual;   // (the whole is right everywhere)
+    return a;
+}
+
+AddressSpace LatestAddressSpace()
+{
+    static std::atomic<uint64_t> free{0}, largest{0}, total{0};
+    static std::once_flag started;
+    std::call_once(started, [] {
+        std::thread([] {
+            for (;;) {
+                const AddressSpace a = QueryAddressSpace();
+                free.store(a.free, std::memory_order_relaxed);
+                largest.store(a.largest, std::memory_order_relaxed);
+                total.store(a.total, std::memory_order_relaxed);
+                Sleep(1000);
+            }
+        }).detach();
+    });
+    return {free.load(std::memory_order_relaxed), largest.load(std::memory_order_relaxed),
+            total.load(std::memory_order_relaxed)};
 }
 
 namespace detail {
@@ -1907,12 +1933,9 @@ void Device::BeginFrame()
             m_ringWanted = std::max(kRingSize, m_ringWanted / 2);
             m_ringQuietWindows = 0;
         }
-        MEMORYSTATUSEX mem{};
-        mem.dwLength = sizeof(mem);
-        if (GlobalMemoryStatusEx(&mem))
-            Log("address space: %llu of %llu MB free (the game's process), largest free block %u MB",
-                (unsigned long long)(mem.ullAvailVirtual >> 20), (unsigned long long)(mem.ullTotalVirtual >> 20),
-                unsigned(LargestFreeBlock() >> 20));
+        const AddressSpace space = QueryAddressSpace();
+        Log("address space: %u of %u MB free (the game's process), largest free block %u MB", unsigned(space.free >> 20),
+            unsigned(space.total >> 20), unsigned(space.largest >> 20));
         Log("%s", GpuMemoryReport().c_str());
         Log("opaque static fast path: %llu draws; %llu alpha-1 blended draws drawn unblended (last 600 frames)",
             (unsigned long long)m_opaqueDraws, (unsigned long long)m_opaqueBlendDraws);
