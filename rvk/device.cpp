@@ -1583,8 +1583,8 @@ void Device::SetRenderTarget(Texture* target)
         target = m_main;
     if (m_uiLayerActive && target == m_main && m_uiLayer)
         target = m_uiLayer;                      // the interface is being drawn into its layer
-    else if (m_fgTopActive && target == m_main && m_fgTop)
-        target = m_fgTop;                        // (frame generation: the overlay's top, to the frame's end)
+    else if (m_overlayTopActive && target == m_main && m_overlayTop)
+        target = m_overlayTop;                        // (frame generation: the overlay's top, to the frame's end)
     if (!target->m_renderTarget || !target->m_image) {
         Log("SetRenderTarget: not a (usable) render target\n");
         return;
@@ -1620,7 +1620,6 @@ void Device::BeginFrame()
         }
         m_frameRoomVisuals = m_frameTerrainVisuals = 0;
     }
-    m_fgUiLayer = m_fg != nullptr;               // (RVK_FrameGen: the interface's layer to the swapchain, framegen.cpp)
     m_pickActive = m_pickArmed;                  // texture picking (RequestPick): this frame's draws
     m_pickArmed = false;
     m_pickBest = nullptr;
@@ -1858,14 +1857,15 @@ void Device::EndFrame()
         m_particleOrphanTrigger = "end of the frame";   // no interface draw after the 3D
         DrawOrphanParticles();
     }
+    if (m_overlayLabelsActive) OverlayLabelsEnd();
     EndScene();                                  // if the interface didn't end it (no interface drawn)
     m_framesWithout3D = m_sceneSaw3D ? 0u : std::min(m_framesWithout3D + 1u, 1000u);   // (RenderScaleNow)
     Frame& f = m_frames[m_frameIndex];
     m_renderEndCause = kEndScene;
     EndRendering();
-    if (m_fgTopActive) {                         // (frame generation's top layer: done, for the overlay)
-        m_fgTopActive = false;
-        m_fgTopFrame = m_frameNumber;
+    if (m_overlayTopActive) {                         // (frame generation's top layer: done, for the overlay)
+        m_overlayTopActive = false;
+        m_overlayTopFrame = m_frameNumber;
         m_target = m_main;
     }
     ProfileMark("interface");
@@ -1884,17 +1884,19 @@ void Device::EndFrame()
     Transition(f.main, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     bool screenshot = !m_screenshotPath.empty();
+    static const bool worldOnlyShots = std::getenv("RANDYVK_WORLD_SHOT") != nullptr;
     static const bool consoleInShots = std::getenv("RANDYVK_CONSOLE_SHOT") != nullptr;   // (tests: the console in it)
-    if (consoleInShots) DrawConsole(f.main);
+
     if (screenshot) {
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {m_width, m_height, 1};
-        Texture* shot = FgComposedFrame(f.main);   // (RVK_FrameGen: the labels and interface aren't in the frame)
+        Texture* shot = worldOnlyShots ? nullptr : ComposedFrame(f.main, consoleInShots);
         vkCmdCopyImageToBuffer(f.main, (shot ? shot : m_main)->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_readback, 1,
                                &region);
     }
-    if (!consoleInShots) DrawConsole(f.main);    // (after the screenshot's copy: not in it)
+    Texture* shown = m_fg ? m_main : ComposedFrame(f.main, true);
+    if (!shown) shown = m_main;
 
     uint32_t imageIndex = 0;
     bool present = false;
@@ -1920,7 +1922,7 @@ void Device::EndFrame()
         blit.srcSubresource = blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         blit.srcOffsets[1] = {int32_t(m_width), int32_t(m_height), 1};
         blit.dstOffsets[1] = {int32_t(m_swapExtent.width), int32_t(m_swapExtent.height), 1};
-        vkCmdBlitImage(f.main, m_main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
+        vkCmdBlitImage(f.main, shown->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
         // (The frame interpolation swapchain's images are read by its passes - optical flow, interpolation, the
         // interface laid over - and it expects them as shader-read textures, not to present.)
@@ -2033,8 +2035,8 @@ bool Device::ReadPixels(Texture* target, void* out)
         EndRendering();
         Texture* src = t;
         if (t == m_main) {
-            // (RVK_FrameGen: the labels and the interface laid over, as the player sees it - the game's screenshots.)
-            if (Texture* composed = FgComposedFrame(cmd)) {
+            // Read the displayed overlays too, as in the game's screenshots.
+            if (Texture* composed = ComposedFrame(cmd)) {
                 src = composed;
                 m_cache = StateCache{};          // (its passes changed the pipeline and pushed set 0: InterfaceEnd)
                 m_arenaBound = false;
@@ -2056,8 +2058,11 @@ bool Device::ReadPixels(Texture* target, void* out)
         VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &b);
-        Transition(cmd, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        vkCmdCopyImageToBuffer(cmd, t->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+        Texture* src = t;
+        if (t == m_main)
+            if (Texture* composed = ComposedFrame(cmd)) src = composed;
+        Transition(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        vkCmdCopyImageToBuffer(cmd, src->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
         vkEndCommandBuffer(cmd);
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount = 1;

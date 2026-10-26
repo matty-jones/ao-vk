@@ -5,7 +5,12 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+### Diagnostics
+- `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
+
 ### Fixed
+- Names, floating combat text and the mouse pointer stay separate from world effects and temporal processing,
+  whether frame generation is on or off. Screenshots use the same overlay order as the displayed frame.
 - The interface stays in its own layer with `RVK_UiRate` 0 (every frame) and Native Direct or Device off,
   including with frame generation enabled.
 

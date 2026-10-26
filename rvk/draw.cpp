@@ -1869,7 +1869,12 @@ void Device::CopyTexture(Texture* dst, const Rect* dstRect, Texture* src, const 
 {
     if (!m_inFrame)
         return;
-    if (!dst) dst = m_main;
+    if (!dst || dst == m_main) {
+        if (m_uiLayerActive) dst = m_uiLayer;
+        else if (m_overlayTopActive) dst = m_overlayTop;
+        else if (m_overlayLabelsActive) dst = m_overlayLabels;
+        else dst = m_main;
+    }
     if (!src) src = m_main;
     if (!dst->m_renderTarget || src == dst || FormatIsCompressed(src->m_format) || !dst->m_image || !src->m_image) {
         Log("CopyTexture: unsupported source/destination combination\n");
@@ -2511,9 +2516,9 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_native.ground && NativeGroundReplaces(fvf))
         return;
     // RVK_FrameGen: a 2D draw on the frame after the interface (the mouse pointer) goes on top of the overlay.
-    if (m_fgUiLayer && m_target == m_main && !m_fgTopActive && !m_uiLayerActive && !m_external &&
+    if (m_target == m_main && !m_overlayTopActive && !m_uiLayerActive && !m_external &&
         m_interfaceEndFrame == m_frameNumber && IsInterfaceDraw(fvf))
-        FgTopBegin();
+        OverlayTopBegin();
     m_drawObject = nullptr;                      // (found below for a static mesh)
     struct ObjectScope {                         // ... and none once the draw is done (DrawWorldBox, FrameLightMask
         Device* d;                               // read it: outside a draw they must work from the matrix)
@@ -2752,7 +2757,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // The interface hidden (screenshots): its draws - pre-transformed, onto the frame or into the interface layer,
     // not while the 3D scene is still being drawn - and the names over characters.
     if (m_hideInterface && !m_external &&
-        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer || m_target == m_fgTop) &&
+        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer || m_target == m_overlayTop) &&
                            !(m_scenePhase && m_target == m_scene))))
         return;
     // A name label in the scene: held back, drawn after the post passes (DrawHeldLabels).
@@ -2763,6 +2768,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
                                 m_tss, m_textures, m_world, m_view, m_proj, m_texMatrix, m_viewport});
         return;
     }
+    const bool labelLayer = m_drawIsLabel && m_target == m_main && !m_overlayLabelsActive &&
+                            m_main->m_format == Format::A8R8G8B8 && OverlayLabelsBegin();
+    struct LabelLayerScope {
+        Device* device;
+        bool active;
+        ~LabelLayerScope() { if (active) device->OverlayLabelsEnd(); }
+    } labelLayerScope{this, labelLayer};
     if (m_dumpFile && !m_external) {
         DumpDraw(primitive, fvf, m_drawGpu ? nullptr : vertices, vertexCount, indices, indexCount);
         // (Its vertex colours, averaged - what a draw-by-draw comparison of frames can't see otherwise: a colour

@@ -927,7 +927,7 @@ public:
     // The world's floating text (damage, XP, names over heads) next: the scene ends here - its effects (smoke, fog,
     // the tone mapping, bloom, grading) applied - and the text is drawn over the finished picture, still hidden by
     // what stands in front of it (the scene's depth). The interface follows.
-    void OverlayBegin() { if (m_inFrame && m_main) InterfaceSceneEnd(); }
+    void OverlayBegin();
     // The layer holds an interface drawn at the current size (else the next frame must redraw it). Any thread.
     bool InterfaceLayerReady() const { return m_uiLayerReady.load(std::memory_order_relaxed); }
     Texture* GetRenderTarget() const { return m_target == m_main ? nullptr : m_target; }
@@ -1876,8 +1876,8 @@ private:
     // as coverage (draw.cpp).
     bool InLayer() const
     {
-        return (m_uiLayerActive && m_target == m_uiLayer) || (m_fgLabelsActive && m_target == m_fgLabels) ||
-               (m_fgTopActive && m_target == m_fgTop);
+        return (m_uiLayerActive && m_target == m_uiLayer) || (m_overlayLabelsActive && m_target == m_overlayLabels) ||
+               (m_overlayTopActive && m_target == m_overlayTop);
     }
     bool m_sceneSaw3D = false;
     uint32_t m_sceneEndDraw = 0, m_sceneEndFvf = 0;   // frame dumps: where the scene phase ended
@@ -3105,26 +3105,25 @@ private:
     bool m_frameGenFailed = false;               // (it couldn't be made: not tried again until the setting changes)
     struct FrameGenState;
     FrameGenState* m_fg = nullptr;
-    bool m_fgUiLayer = false;                    // this frame's interface layer goes to the swapchain, not over the frame
     // What the swapchain lays over the real and the generated frames, so none of it is interpolated: the name labels
-    // (drawn into a layer of their own, FgLabelsBegin/End - EndScene), the interface layer and the console, put
+    // (drawn into a layer of their own, OverlayLabelsBegin/End - EndScene), the interface layer and the console, put
     // together each frame (FgBeforePresent).
-    Texture* m_fgLabels = nullptr;
-    bool m_fgLabelsActive = false;               // the held labels' draws go into m_fgLabels
-    uint64_t m_fgLabelsFrame = ~0ull;            // the frame they were drawn in
+    Texture* m_overlayLabels = nullptr;
+    bool m_overlayLabelsActive = false;               // the held labels' draws go into m_overlayLabels
+    uint64_t m_overlayLabelsFrame = ~0ull;            // the frame they were drawn in
     Texture* m_fgOverlay = nullptr;
-    bool FgLabelsBegin();
-    void FgLabelsEnd();
+    bool OverlayLabelsBegin();
+    void OverlayLabelsEnd();
     // What the game draws on the frame after its interface - the mouse pointer - into a layer of its own, the overlay's
-    // top (FgTopBegin from Draw; it lasts to the frame's end): drawn into the frame it came out under the interface.
-    Texture* m_fgTop = nullptr;
-    bool m_fgTopActive = false;
-    uint64_t m_fgTopFrame = ~0ull;               // the frame it was drawn in
+    // top (OverlayTopBegin from Draw; it lasts to the frame's end): drawn into the frame it came out under the interface.
+    Texture* m_overlayTop = nullptr;
+    bool m_overlayTopActive = false;
+    uint64_t m_overlayTopFrame = ~0ull;               // the frame it was drawn in
     uint64_t m_interfaceEndFrame = ~0ull;        // the frame the interface layer was last ended in (InterfaceEnd)
-    bool FgTopBegin();
+    bool OverlayTopBegin();
     void ClearImage(VkCommandBuffer cmd, Texture* t);
-    Texture* m_fgShot = nullptr;
-    Texture* FgComposedFrame(VkCommandBuffer cmd);   // the frame as seen, for reading back (null: m_main is)
+    Texture* m_composedFrame = nullptr;
+    Texture* ComposedFrame(VkCommandBuffer cmd, bool console = false);   // the frame as seen, for reading back (null: m_main is)
     bool FgCreateSwapchain(const VkSwapchainCreateInfoKHR& ci, std::string* error);
     void FgDestroySwapchain();
     void WaitIdle();                             // vkDeviceWaitIdle, frame generation's presents done first

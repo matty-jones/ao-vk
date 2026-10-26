@@ -4664,6 +4664,116 @@ LONG WINAPI Crashed(EXCEPTION_POINTERS* e)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// Synthetic overlay order and cache checks, including readback outside the frame.
+template <typename D>
+int RunInterfaceTest(D& dev, const std::string& shot)
+{
+    int failures = 0;
+    Texture* copied = dev.CreateRenderTarget(16, 16);
+    Texture* opaque = dev.CreateTexture(1, 1, Format::X8R8G8B8, 1);
+    const uint32_t cyan = 0x0000FFFF;
+    dev.UpdateTexture(opaque, 0, 0, 0, 1, 1, &cyan, 4);
+    auto quad = [&](float x, float y, float w, float h, uint32_t colour) {
+        const VtxRhwDiffuse v[] = {{x,y,0,1,colour}, {x+w,y,0,1,colour},
+                                  {x,y+h,0,1,colour}, {x+w,y+h,0,1,colour}};
+        dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, v, 4);
+    };
+    for (int frame = 0; frame < 5; ++frame) {
+        if (frame == 3) dev.Resize(g_width + 32, g_height + 32);
+        const uint32_t w = g_width + (frame >= 3 ? 32 : 0), h = g_height + (frame >= 3 ? 32 : 0);
+        std::vector<uint32_t> partial(size_t(w) * h);
+        auto readback = [&](uint32_t x, uint32_t y, uint32_t expected) {
+            if (!dev.ReadPixels(nullptr, partial.data()) || (partial[size_t(y) * w + x] & 0xFFFFFF) != expected) {
+                std::printf("interface frame %d: open-layer readback at %u,%u differs\n", frame, x, y);
+                ++failures;
+            }
+        };
+        dev.SetHideInterface(frame == 2);
+        dev.BeginFrame();
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF204060, 1.0f);
+        dev.SetRenderState(RS_ZENABLE, 0);
+        dev.SetRenderState(RS_ZWRITEENABLE, 0);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_LIGHTING, 0);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+        dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+        dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+        dev.SetTexture(0, nullptr);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
+        dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(1, TSS_COLOROP, TOP_DISABLE);
+        dev.SetTransform(World, Identity());
+        dev.SetTransform(View, Identity());
+        dev.SetTransform(Projection, Identity());
+        const VtxDiffuse world[] = {{-1,1,0.5f,0xFF204060}, {1,1,0.5f,0xFF204060},
+                                    {-1,-1,0.5f,0xFF204060}, {1,-1,0.5f,0xFF204060}};
+        if (frame != 0) dev.DrawPrimitive(TriangleStrip, kFvfDiffuse, world, 4);
+        dev.OverlayBegin();
+        quad(20, 20, 100, 100, 0xFF00FF00);
+        if (frame != 2) readback(30, 30, 0x00FF00);
+        const bool redraw = frame != 1 && frame != 2;
+        const d3d::Viewport normal = dev.GetViewport();
+        const d3d::Viewport entry{3, 4, w - 8, h - 10, 0.2f, 0.9f};
+        dev.SetViewport(entry);
+        dev.InterfaceBegin(redraw);
+        if (std::memcmp(&entry, &dev.GetViewport(), sizeof(entry)) != 0) ++failures;
+        dev.SetViewport(entry);                  // also exercises ThreadedDevice's repeated-state suppression
+        if (redraw) quad(0, 0, 2, 2, 0xFFFFFF00);
+        dev.SetViewport(normal);
+        if (redraw) {
+            quad(60, 20, 100, 100, 0xFF000000);
+            quad(160, 20, 80, 100, 0x80FFFFFF);
+            dev.SetRenderTarget(copied);
+            dev.Clear(CLEAR_TARGET, 0xFFFF00FF, 1.0f);
+            dev.SetRenderTarget(nullptr);
+            const Device::Rect destination{240, 20, 260, 40};
+            dev.CopyTexture(nullptr, &destination, copied, nullptr, false);
+            const Device::Rect opaqueDestination{260, 20, 280, 40};
+            dev.CopyTexture(nullptr, &opaqueDestination, opaque, nullptr, false);
+        }
+        if (frame != 2) readback(70, 30, 0x000000);
+        dev.InterfaceEnd();
+        if (std::memcmp(&normal, &dev.GetViewport(), sizeof(normal)) != 0) ++failures;
+        quad(90, 50, 20, 20, 0xFFFF0000);
+        if (frame != 2) readback(100, 60, 0xFF0000);
+        if (frame == 4) dev.RequestScreenshot(shot);
+        dev.EndFrame();
+        std::vector<uint32_t> pixels(size_t(w) * h);
+        if (!dev.ReadPixels(nullptr, pixels.data())) { ++failures; continue; }
+        if (((pixels[w + 1] >> 16) & 255) > 200) ++failures;   // the clipped probe must not appear
+        auto check = [&](uint32_t x, uint32_t y, uint32_t expected) {
+            const uint32_t got = pixels[size_t(y) * w + x] & 0xFFFFFF;
+            if (got != expected) {
+                std::printf("interface frame %d at %u,%u: %06x, expected %06x\n", frame, x, y, got, expected);
+                ++failures;
+            }
+        };
+        if (frame != 2) check(30, 30, 0x00FF00);
+        if (frame != 2) {
+            check(70, 30, 0x000000);
+            check(100, 60, 0xFF0000);
+            check(245, 30, 0xFF00FF);
+            check(265, 30, 0x00FFFF);
+            const uint32_t blended = pixels[size_t(30) * w + 180];
+            for (int shift : {0, 8, 16}) {
+                const int background = int((pixels[size_t(30) * w + 300] >> shift) & 255);
+                if (std::abs(int((blended >> shift) & 255) - (128 + background / 2)) > 5) ++failures;
+            }
+        } else {
+            for (uint32_t x : {70u, 100u})
+                for (int shift : {0, 8, 16})
+                    if (std::abs(int((pixels[size_t(30) * w + x] >> shift) & 255) -
+                                 int((pixels[size_t(30) * w + 300] >> shift) & 255)) > 12) ++failures;
+        }
+    }
+    dev.DestroyTexture(copied);
+    dev.DestroyTexture(opaque);
+    std::printf("interface: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv)
 {
     SetUnhandledExceptionFilter(&Crashed);
@@ -4686,7 +4796,7 @@ int main(int argc, char** argv)
     int renderScale = 100;                       // --render-scale N: RVK_RenderScale (needs --hdr --taa)
     int upscaler = 0;                            // --upscaler N: RVK_Upscaler (1: FSR 2, 2: FSR 3)
     bool frameGen = false;                       // --frame-gen: RVK_FrameGen (needs --window)
-    bool normalMapTest = false, pbrTest = false, glowOccludeTest = false;
+    bool normalMapTest = false, pbrTest = false, glowOccludeTest = false, interfaceTest = false;
     uint32_t anisotropy = 1;
     float motionBlur = 0.0f, dof = 0.0f, dofFocus = 0.0f;
     bool dofBokeh = true, dofFar = true;
@@ -5021,6 +5131,7 @@ int main(int argc, char** argv)
         else if (a == "--upscaler" && i + 1 < argc) upscaler = std::atoi(argv[++i]);
         else if (a == "--frame-gen") frameGen = true;
         else if (a == "--ui-window") g_uiWindow = true;
+        else if (a == "--interface-test") interfaceTest = true;
         else if (a == "--shine-pass" && i + 1 < argc) g_shinePass = std::atoi(argv[++i]);
         else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
@@ -5206,6 +5317,15 @@ int main(int argc, char** argv)
     dev.SetMotionBlurMode(motionMode);
     dev.SetDof(dof > 0.0f, dofBokeh, true, dof, 16.0f, dofFocus, 0.2f, dofFar, 3.0f);
     dev.SetPointShadowFadeIn(fadeIn);    // frames here are milliseconds apart: no fade-in unless asked
+    if (interfaceTest) {
+        if (!threaded) return RunInterfaceTest(dev, shot);
+        ThreadedDevice queued;
+        if (!queued.Init(nullptr, g_width, g_height, &error)) return 1;
+        queued.SetHdr(hdr);
+        queued.SetTaa(taa, sharpen);
+        queued.SetRenderScale(uint32_t(renderScale));
+        return RunInterfaceTest(queued, shot);
+    }
     if (glowOccludeTest) {
         RunGlowOccludeTest(dev, frames, shot);
         std::printf("rendered; screenshot %s\n", shot.c_str());

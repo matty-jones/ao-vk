@@ -22,11 +22,20 @@ void Device::InterfaceSceneEnd()
         m_particleOrphanTrigger = "the interface";
         DrawOrphanParticles();
     }
-    if (m_scenePhase && m_target == m_scene && m_sceneSaw3D) {
+    if (m_scenePhase && m_target == m_scene) {
         m_sceneEndDraw = m_dumpDraw;
         m_sceneEndFvf = 0;
         EndScene();
     }
+}
+
+void Device::OverlayBegin()
+{
+    if (!m_inFrame || !m_main)
+        return;
+    InterfaceSceneEnd();
+    if (m_target == m_main && !m_overlayLabelsActive && m_main->m_format == Format::A8R8G8B8)
+        OverlayLabelsBegin();
 }
 
 void Device::InterfaceBegin(bool redraw)
@@ -41,6 +50,8 @@ void Device::InterfaceBegin(bool redraw)
         m_uiLayerReady.store(false, std::memory_order_relaxed);
         return;
     }
+    if (m_overlayLabelsActive)
+        OverlayLabelsEnd();
     m_uiLayerOpen = true;
     if (!redraw)
         return;
@@ -52,8 +63,10 @@ void Device::InterfaceBegin(bool redraw)
             return;
     }
     m_uiLayerReturn = m_target;
+    const d3d::Viewport viewport = m_viewport;
     m_uiLayerActive = true;
-    SetRenderTarget(m_uiLayer);                  // (ends the rendering on the main target, begins one on the layer)
+    SetRenderTarget(m_uiLayer);
+    m_viewport = viewport;
     m_cache = StateCache{};                      // the layer's blend equations differ (ApplyDynamicState)
     VkClearAttachment clear{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
     clear.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
@@ -67,28 +80,16 @@ void Device::InterfaceEnd()
         return;
     m_uiLayerOpen = false;
     m_interfaceEndFrame = m_frameNumber;
-    VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     if (m_uiLayerActive) {
         m_uiLayerActive = false;
         m_renderEndCause = kEndTarget;
         EndRendering();
         Texture* back = m_uiLayerReturn && m_uiLayerReturn != m_uiLayer ? m_uiLayerReturn : m_main;
         m_target = back;
-        m_viewport = {0, 0, back->m_width, back->m_height, 0.0f, 1.0f};
         m_uiLayerReady.store(true, std::memory_order_relaxed);
     } else {
         m_renderEndCause = kEndTarget;
         EndRendering();
-    }
-    // The layer over the main target - this frame's interface, or the last one drawn.
-    // (RVK_FrameGen: the swapchain lays it over the real and the generated frame - framegen.cpp FgBeforePresent.)
-    if (m_uiLayer && m_uiCompositePipeline && m_uiLayerReady.load(std::memory_order_relaxed) && !m_hideInterface && !m_fgUiLayer &&
-        m_main->m_format == Format::A8R8G8B8 && m_uiLayer->m_width == m_main->m_width &&
-        m_uiLayer->m_height == m_main->m_height) {
-        Transition(cmd, m_uiLayer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        const float params[4] = {};
-        FullscreenPass(cmd, m_main, m_uiCompositePipeline, m_uiLayer->m_view, m_uiLayer->m_view, m_pointSampler, params,
-                       sizeof(params), true);
     }
     // The pass pushed set 0 with its own layout and changed the pipeline: the next draw binds again (as EndScene).
     m_cache = StateCache{};
@@ -115,8 +116,6 @@ void Device::SetConsoleImage(uint32_t width, uint32_t height, const void* pixels
 // before its draws. An image made for another size (the window just resized) waits for the console's next one.
 void Device::DrawConsole(VkCommandBuffer cmd, Texture* dst)
 {
-    if (!dst && m_fgUiLayer)
-        return;                                  // (RVK_FrameGen: in the overlay the swapchain lays over the frames)
     Texture* target = dst ? dst : m_main;
     if (!m_consoleH || !m_uiCompositePipeline || !target || m_main->m_format != Format::A8R8G8B8 ||
         m_consoleW != target->m_width || m_consoleH > target->m_height)
@@ -138,6 +137,131 @@ void Device::DrawConsole(VkCommandBuffer cmd, Texture* dst)
                    sizeof(params), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &area);
     if (!dst)
         Transition(cmd, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+}
+
+// Labels and floating text share a display-sized layer, with the world's depth for occlusion.
+bool Device::OverlayLabelsBegin()
+{
+    const uint32_t w = m_ldrMain->m_width, h = m_ldrMain->m_height;
+    if (!m_overlayLabels || m_overlayLabels->m_width != w || m_overlayLabels->m_height != h) {
+        if (m_overlayLabels) DestroyTexture(m_overlayLabels);
+        m_overlayLabels = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+        if (!m_overlayLabels)
+            return false;
+    }
+    m_renderEndCause = kEndTarget;
+    EndRendering();
+    m_target = m_overlayLabels;
+    m_overlayLabelsActive = true;
+    m_cache = StateCache{};                      // (the layer's blend equations differ)
+    BeginRenderingOn(m_overlayLabels);
+    if (m_overlayLabelsFrame == m_frameNumber)
+        return true;                            // append floating text to the held name labels
+    VkClearAttachment clear{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
+    clear.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkClearRect rect{{{0, 0}, {w, h}}, 0, 1};
+    vkCmdClearAttachments(m_frames[m_frameIndex].main, 1, &clear, 1, &rect);
+    return true;
+}
+
+void Device::OverlayLabelsEnd()
+{
+    m_renderEndCause = kEndTarget;
+    EndRendering();
+    m_overlayLabelsActive = false;
+    m_overlayLabelsFrame = m_frameNumber;
+    m_target = m_ldrMain;
+    m_cache = StateCache{};
+    BeginRenderingOn(m_ldrMain);
+}
+
+// Late draws, including the cursor, stay above the console and interface.
+bool Device::OverlayTopBegin()
+{
+    const uint32_t w = m_main->m_width, h = m_main->m_height;
+    if (m_main->m_format != Format::A8R8G8B8)
+        return false;
+    if (!m_overlayTop || m_overlayTop->m_width != w || m_overlayTop->m_height != h) {
+        if (m_overlayTop) DestroyTexture(m_overlayTop);
+        m_overlayTop = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+        if (!m_overlayTop)
+            return false;
+    }
+    m_renderEndCause = kEndTarget;
+    EndRendering();
+    m_target = m_overlayTop;
+    m_overlayTopActive = true;
+    m_cache = StateCache{};                      // (the layer's blend equations differ)
+    BeginRenderingOn(m_overlayTop);
+    VkClearAttachment clear{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
+    clear.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    VkClearRect rect{{{0, 0}, {w, h}}, 0, 1};
+    vkCmdClearAttachments(m_frames[m_frameIndex].main, 1, &clear, 1, &rect);
+    return true;
+}
+
+// An image cleared to transparent black (a render target, left as a colour attachment).
+void Device::ClearImage(VkCommandBuffer cmd, Texture* t)
+{
+    Transition(cmd, t, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    color.imageView = t->m_view;
+    color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, {t->m_width, t->m_height}};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &color;
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdEndRendering(cmd);
+}
+
+// The world with labels, interface, optional console and cursor, left in TRANSFER_SRC.
+// The world target stays untouched for temporal processing and frame generation. Null: no overlays.
+// (Outside a rendering; the passes change the pipeline, the caller binds again.)
+Texture* Device::ComposedFrame(VkCommandBuffer cmd, bool console)
+{
+    if (!m_main || m_main->m_format != Format::A8R8G8B8 || !m_uiCompositePipeline)
+        return nullptr;
+    const uint32_t w = m_main->m_width, h = m_main->m_height;
+    const bool interface = m_uiLayer && (m_uiLayerActive || m_uiLayerReady.load(std::memory_order_relaxed)) && !m_hideInterface &&
+                           m_uiLayer->m_width == w && m_uiLayer->m_height == h;
+    const bool labels = !m_hideInterface && m_overlayLabels && (m_overlayLabelsActive || m_overlayLabelsFrame == m_frameNumber) && m_overlayLabels->m_width == w &&
+                        m_overlayLabels->m_height == h;
+    const bool top = m_overlayTop && (m_overlayTopActive || m_overlayTopFrame == m_frameNumber) && m_overlayTop->m_width == w && m_overlayTop->m_height == h;
+    console = console && m_consoleH && m_consoleW == w && m_consoleH <= h;
+    if (!interface && !labels && !top && !console)
+        return nullptr;
+    if (!m_composedFrame || m_composedFrame->m_width != w || m_composedFrame->m_height != h) {
+        if (m_composedFrame) DestroyTexture(m_composedFrame);
+        m_composedFrame = CreateImage(w, h, Format::A8R8G8B8, 1, true);
+        if (!m_composedFrame)
+            return nullptr;
+    }
+    Transition(cmd, m_main, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    Transition(cmd, m_composedFrame, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkImageCopy region{};
+    region.srcSubresource = region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.extent = {w, h, 1};
+    vkCmdCopyImage(cmd, m_main->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_composedFrame->m_image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    const float none[4] = {};
+    for (Texture* layer : {labels ? m_overlayLabels : nullptr, interface ? m_uiLayer : nullptr}) {
+        if (!layer) continue;
+        Transition(cmd, layer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        FullscreenPass(cmd, m_composedFrame, m_uiCompositePipeline, layer->m_view, layer->m_view, m_pointSampler, none,
+                       sizeof(none), true);
+    }
+    if (console) DrawConsole(cmd, m_composedFrame);
+    if (top) {
+        Transition(cmd, m_overlayTop, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        FullscreenPass(cmd, m_composedFrame, m_uiCompositePipeline, m_overlayTop->m_view, m_overlayTop->m_view,
+                       m_pointSampler, none, sizeof(none), true);
+    }
+    Transition(cmd, m_composedFrame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    return m_composedFrame;
 }
 
 }  // namespace rvk

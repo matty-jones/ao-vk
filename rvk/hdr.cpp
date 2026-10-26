@@ -388,10 +388,10 @@ void Device::DestroyHdrResources()
     DestroyFsr2();
     DestroyFsr3();
     if (m_uiLayer) { DestroyTextureNow(m_uiLayer); m_uiLayer = nullptr; }
-    if (m_fgLabels) { DestroyTextureNow(m_fgLabels); m_fgLabels = nullptr; }
+    if (m_overlayLabels) { DestroyTextureNow(m_overlayLabels); m_overlayLabels = nullptr; }
     if (m_fgOverlay) { DestroyTextureNow(m_fgOverlay); m_fgOverlay = nullptr; }
-    if (m_fgShot) { DestroyTextureNow(m_fgShot); m_fgShot = nullptr; }
-    if (m_fgTop) { DestroyTextureNow(m_fgTop); m_fgTop = nullptr; }
+    if (m_composedFrame) { DestroyTextureNow(m_composedFrame); m_composedFrame = nullptr; }
+    if (m_overlayTop) { DestroyTextureNow(m_overlayTop); m_overlayTop = nullptr; }
     m_uiLayerReady.store(false, std::memory_order_relaxed);
     for (Texture*& t : m_motionTiles)
         if (t) { DestroyTextureNow(t); t = nullptr; }
@@ -621,9 +621,9 @@ void Device::EndScene()
         BeginRenderingOn(m_target);
     if (m_inFrame && m_target == m_ldrMain) {
         // (RVK_FrameGen: into a layer the swapchain lays over the frames - interpolated, they smeared.)
-        if (m_fgUiLayer && !m_heldLabels.empty() && FgLabelsBegin()) {
+        if (!m_heldLabels.empty() && OverlayLabelsBegin()) {
             DrawHeldLabels();
-            FgLabelsEnd();
+            OverlayLabelsEnd();
         } else {
             DrawHeldLabels();
         }
