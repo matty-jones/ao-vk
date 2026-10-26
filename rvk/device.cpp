@@ -2019,6 +2019,7 @@ void Device::EndFrame()
     m_framesWithout3D = m_sceneSaw3D ? 0u : std::min(m_framesWithout3D + 1u, 1000u);   // (RenderScaleNow)
     m_framesWithout3DShared.store(m_framesWithout3D, std::memory_order_relaxed);
     PortalDiagFrame();                           // (shop portals' phase 0: portal_diag.cpp)
+    PortalStreetDiagFrame();
     Frame& f = m_frames[m_frameIndex];
     m_renderEndCause = kEndScene;
     EndRendering();

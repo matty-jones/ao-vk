@@ -290,7 +290,13 @@ void Device::DrawPortals()
             const float dx = q.centre[0] - eye[0], dy = q.centre[1] - eye[1], dz = q.centre[2] - eye[2];
             const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
             Candidate c{&q, link->interior, d, {}, {}, {}, {}, {}};
-            if (d <= m_portalDist && onScreen(c)) candidates.push_back(c);
+            if (d <= m_portalDist && onScreen(c)) {
+                candidates.push_back(c);
+                // (The reverse's phase 0: what this doorway sees of the street, if walked through - portal_diag.cpp.)
+                if (d < 30.0f && link->outdoor == m_skyPlayfield && std::fabs(link->centre[0] - q.centre[0]) < 1.0f &&
+                    std::fabs(link->centre[2] - q.centre[2]) < 1.0f)
+                    PortalStreetDiagStart(q, c.out, link->interior);
+            }
         }
     }
     PortalForgetUnused(false);

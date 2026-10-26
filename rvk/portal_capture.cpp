@@ -132,7 +132,7 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
             return;
         axis[0] /= len;
         axis[2] /= len;
-        float centre[3], lowest = 1e30f;
+        float centre[3], lowest = 1e30f, highest = -1e30f;
         for (int j = 0; j < 3; ++j) {
             centre[j] = w[3][j];
             for (int i = 0; i < 3; ++i) centre[j] += 0.5f * (mn[i] + mx[i]) * w[i][j];
@@ -141,12 +141,22 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
             float y = w[3][1];
             for (int i = 0; i < 3; ++i) y += (corner >> i & 1 ? mx[i] : mn[i]) * w[i][1];
             lowest = std::min(lowest, y);
+            highest = std::max(highest, y);
         }
-        PortalDoor door{{centre[0], lowest, centre[2]}, {axis[0], 0.0f, axis[2]}, {}};
+        // Its size (the opening it closes, for the street seen through it: docs/street-portal-plan.md): across, its
+        // model's other horizontal axis turned and scaled by its world matrix; up, its world height.
+        const int wide = thin == 0 ? 2 : 0;
+        const float width = (mx[wide] - mn[wide]) * std::sqrt(w[wide][0] * w[wide][0] + w[wide][2] * w[wide][2]);
+        PortalDoor door{{centre[0], lowest, centre[2]}, {axis[0], 0.0f, axis[2]}, {}, width, highest - lowest};
         std::snprintf(door.name, sizeof(door.name), "%s", name);
-        for (const PortalDoor& d : m_pc.doors) {
+        for (PortalDoor& d : m_pc.doors) {
             const float dx = d.base[0] - door.base[0], dz = d.base[2] - door.base[2];
-            if (dx * dx + dz * dz < 1.0f) return;   // (its other pieces, or the same door opening)
+            if (dx * dx + dz * dz < 1.0f) {      // (its other pieces, or the same door opening: the largest)
+                d.width = std::max(d.width, door.width);
+                d.height = std::max(d.height, door.height);
+                d.base[1] = std::min(d.base[1], door.base[1]);
+                return;
+            }
         }
         if (m_pc.doors.size() < 32)
             m_pc.doors.push_back(door);
@@ -380,9 +390,9 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
         std::memcpy(c.inward, in, sizeof(c.inward));
         c.entranceKnown = true;
         Log("portal capture: playfield %u's entrance: %s, %.1f from the camera on arrival, at (%.2f %.2f %.2f), into the "
-            "room (%.3f 0 %.3f)",
+            "room (%.3f 0 %.3f), %.2f wide and %.2f tall",
             c.playfield, best->name, double(std::sqrt(bestD)), double(c.entrance[0]), double(c.entrance[1]),
-            double(c.entrance[2]), double(in[0]), double(in[2]));
+            double(c.entrance[2]), double(in[0]), double(in[2]), double(best->width), double(best->height));
     } else if (!c.entranceKnown && s.arrivalSet && s.doors.empty() && s.roomPieces && s.roomFloor < 1e29f) {
         // No door named: where the camera arrived, on the rooms' floor, the way it looked.
         float in[3] = {s.arrivalForward[0], 0.0f, s.arrivalForward[2]};

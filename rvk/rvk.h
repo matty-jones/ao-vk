@@ -3319,6 +3319,20 @@ private:
     void PortalDiagPlayfield(uint32_t playfield);
     void PortalDiagDraw(uint32_t fvf, uint32_t vertexCount, uint32_t indexCount);
     void PortalDiagFrame();
+    // The reverse (docs/street-portal-plan.md, phase 0): what a walked-through doorway sees of the street (portal_diag.cpp).
+    struct BlackQuad;
+    void PortalStreetDiagStart(const BlackQuad& quad, const float outward[3], uint32_t interior);
+    void PortalStreetDiagDraw(uint32_t fvf, uint32_t vertexCount, uint32_t indexCount, uint32_t stride);
+    void PortalStreetDiagFrame();
+    struct StreetDiag {
+        bool active = false;
+        uint32_t arrival = 0, interior = 0, framesLeft = 0, pieces = 0, terrain = 0;
+        size_t bytes = 0, textureBytes = 0;
+        float apex[3] = {}, dir[3] = {};
+        char mesh[48] = {};
+        std::unordered_set<uint64_t> seen;
+        std::unordered_set<Texture*> textures;
+    } m_sd;
     // Shop portals' capture (portal_capture.cpp): a room's playfield's static draws, saved when quiet.
     void PortalCapturePlayfield(uint32_t playfield);
     void PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
@@ -3329,7 +3343,7 @@ private:
     void PortalCaptureReadBack(PortalCaptureState& state);
     void PortalForgetTexture(Texture* texture);  // (DestroyTexture)
     bool ReadTexturesLevel0(const std::vector<Texture*>& textures, std::vector<std::vector<uint8_t>*>& out);   // (outside a frame)
-    struct PortalDoor { float base[3], axis[3]; char name[48]; };
+    struct PortalDoor { float base[3], axis[3]; char name[48]; float width, height; };   // (size: its pieces' largest)
     struct PortalCaptureState {
         bool on = false, terrainSeen = false, roomsSeen = false, arrivalSet = false;
         std::shared_ptr<portal::Capture> capture;

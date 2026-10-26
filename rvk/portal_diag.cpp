@@ -154,3 +154,92 @@ void Device::PortalDiagFrame()
 }
 
 }  // namespace rvk
+
+// The reverse of a shop portal, phase 0 (docs/street-portal-plan.md): what a doorway walked through sees of the street.
+// When one is near (within 30 of the camera), for the next 300 frames every static draw whose box lies in front of it -
+// within 100, inside 60 degrees of its outward facing - is counted once: pieces, their geometry's bytes, their
+// textures, and the ground's draws there (the game's, or the native ground drawing instead). One line a doorway each
+// arrival: how big a capture of its view would be.
+namespace rvk {
+
+namespace {
+constexpr float kStreetRange = 100.0f, kStreetCos = 0.5f;   // (60 degrees)
+}  // namespace
+
+void Device::PortalStreetDiagStart(const BlackQuad& q, const float outward[3], uint32_t interior)
+{
+    if (!DiagOn() || m_sd.active || m_sd.arrival == m_portalArrivals)
+        return;
+    m_sd = StreetDiag{};
+    m_sd.active = true;
+    m_sd.arrival = m_portalArrivals;
+    m_sd.interior = interior;
+    m_sd.framesLeft = 300;
+    std::memcpy(m_sd.apex, q.centre, sizeof(m_sd.apex));
+    const float l = std::sqrt(outward[0] * outward[0] + outward[2] * outward[2]);
+    m_sd.dir[0] = l > 0.0f ? outward[0] / l : 1.0f;
+    m_sd.dir[2] = l > 0.0f ? outward[2] / l : 0.0f;
+    std::snprintf(m_sd.mesh, sizeof(m_sd.mesh), "%s", q.mesh[0] ? q.mesh : "an unnamed mesh");
+}
+
+void Device::PortalStreetDiagDraw(uint32_t fvf, uint32_t vertexCount, uint32_t indexCount, uint32_t stride)
+{
+    if (!m_sd.active || m_external || m_target != m_scene || (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZ ||
+        !vertexCount)
+        return;
+    const auto& w = m_world.m;
+    float c[3] = {w[3][0], w[3][1], w[3][2]}, r = 0.0f;
+    if (m_drawMesh) {
+        float e2 = 0.0f;
+        for (int j = 0; j < 3; ++j) {
+            c[j] = w[3][j];
+            float e = 0.0f;
+            for (int i = 0; i < 3; ++i) {
+                c[j] += 0.5f * (m_drawMesh->boundsMin[i] + m_drawMesh->boundsMax[i]) * w[i][j];
+                e += 0.5f * (m_drawMesh->boundsMax[i] - m_drawMesh->boundsMin[i]) * std::fabs(w[i][j]);
+            }
+            e2 += e * e;
+        }
+        r = std::sqrt(e2);
+    }
+    const float v[3] = {c[0] - m_sd.apex[0], c[1] - m_sd.apex[1], c[2] - m_sd.apex[2]};
+    const float d = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    const float ahead = v[0] * m_sd.dir[0] + v[2] * m_sd.dir[2];
+    if (d - r > kStreetRange || ahead < kStreetCos * d - r)
+        return;                                  // (beyond the range, or outside the doorway's view)
+    const bool terrain = IsTerrain(fvf);
+    const int32_t at[3] = {int32_t(std::lround(w[3][0] * 10.0f)), int32_t(std::lround(w[3][1] * 10.0f)),
+                           int32_t(std::lround(w[3][2] * 10.0f))};
+    uint64_t key = m_drawMesh ? m_drawMesh->indexHash : (uint64_t(vertexCount) << 32 | indexCount);
+    for (int32_t a : at)
+        key = key * 0x100000001B3ull ^ uint32_t(a);
+    if (!m_sd.seen.insert(key).second)
+        return;
+    if (terrain) {
+        ++m_sd.terrain;
+        return;
+    }
+    if (m_drawSkin || CharacterDraw(fvf, vertexCount) || m_drawOwner)
+        return;
+    ++m_sd.pieces;
+    m_sd.bytes += size_t(vertexCount) * stride + size_t(indexCount) * 2;
+    for (int s = 0; s < 2; ++s)
+        if (Texture* t = m_textures[s]; t && !t->m_renderTarget && m_sd.textures.insert(t).second)
+            m_sd.textureBytes += size_t(FormatRowBytes(t->m_format, t->m_width)) * FormatRows(t->m_format, t->m_height);
+}
+
+void Device::PortalStreetDiagFrame()
+{
+    if (!m_sd.active || --m_sd.framesLeft > 0)
+        return;
+    Log("street diag: the doorway of %s at (%.2f %.2f %.2f) into %u looks out on %u pieces (%.1f MB of geometry), %zu "
+        "textures (%.1f MB), %u ground draws (the native ground %s) within %.0f",
+        m_sd.mesh, double(m_sd.apex[0]), double(m_sd.apex[1]), double(m_sd.apex[2]), m_sd.interior, m_sd.pieces,
+        double(m_sd.bytes) / 1048576.0, m_sd.textures.size(), double(m_sd.textureBytes) / 1048576.0, m_sd.terrain,
+        m_native.on && m_native.ground ? "drawing" : "off", double(kStreetRange));
+    m_sd.active = false;
+    m_sd.seen.clear();
+    m_sd.textures.clear();
+}
+
+}  // namespace rvk
