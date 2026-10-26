@@ -1,8 +1,9 @@
 // Shop portals (docs/shop-portal-plan.md phase 3, RVK_Portals): the inside of a shop seen through its door.
 //
-// Right after a doorway a link knows (portal_links.cpp) is drawn - at the next draw, so particles and effects drawn
-// later go over the room; at the scene's end (EndScene) for one drawn last - each such doorway near enough (the
-// nearest two a frame) gets its room drawn behind it:
+// Once a doorway a link knows (portal_links.cpp) has been drawn, before the first draw after it that writes no depth -
+// the game's effects and particles, which then go over the room; solid things come before those, and drawn after the
+// room, those behind the doorway's plane (the building's own insides) showed in it - or at the scene's end (EndScene),
+// each such doorway near enough (the nearest two a frame) gets its room drawn behind it:
 //   1. the scene's depth is copied, and where the doorway's rectangle is the surface seen (nothing in front of its
 //      plane: not the door, the recess's walls or a character) the depth is pushed to the far plane (portal_open.frag);
 //   2. the room's capture (portal_capture.cpp) is replayed through the draw path - each piece as the game drew it, moved
@@ -201,8 +202,8 @@ bool Device::PortalCopyDepth(VkCommandBuffer cmd)
     return true;
 }
 
-// While the scene is being drawn (Draw, after a linked doorway; EndScene): the rooms behind the linked doorways drawn
-// so far this frame, not yet drawn behind.
+// While the scene is being drawn (Draw: the first draw writing no depth after a linked doorway; EndScene): the rooms
+// behind the linked doorways drawn so far this frame, not yet drawn behind.
 void Device::DrawPortals()
 {
     m_portalArmed = false;

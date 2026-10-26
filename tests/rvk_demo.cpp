@@ -4480,6 +4480,11 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, wallQuad, 4, quadIdx, 6);
             dev.SetTexture(0, black);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, door, 4, quadIdx, 6);
+            // A solid wall behind the doorway's plane drawn after it (as the building's own insides): hidden by the room.
+            const VtxMesh inside[4] = {{-3, 0, 5, 0, 0, -1, 0xFF808080, 0, 0}, {3, 0, 5, 0, 0, -1, 0xFF808080, 1, 0},
+                                       {3, 4, 5, 0, 0, -1, 0xFF808080, 1, 1}, {-3, 4, 5, 0, 0, -1, 0xFF808080, 0, 1}};
+            dev.SetTexture(0, wall);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, inside, 4, quadIdx, 6);
             // An effect after it, in front of the doorway (as the game's sparks): over the room drawn behind it.
             struct VtxC { float x, y, z; uint32_t argb; };
             const VtxC spark[4] = {{-0.4f, 0.8f, 2.5f, 0x80FF4020}, {0.4f, 0.8f, 2.5f, 0x80FF4020},
