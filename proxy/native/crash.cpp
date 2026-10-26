@@ -430,14 +430,18 @@ NtGetNextThreadFn g_nextThread;
 volatile LONG g_beats;
 volatile DWORD g_lastBeat;
 DWORD g_gameThread;
+HWND volatile g_window;                           // the game's window (SetHangWindow)
 
-void DumpThreads(DWORD stalledMs)
+// False if another report holds the writer (the watchdog tries again a second later).
+bool DumpThreads(const char* what, DWORD seconds, DWORD sinceFrameMs)
 {
-    if (InterlockedCompareExchange(&g_busy, 1, 0) != 0) return;
+    if (InterlockedCompareExchange(&g_busy, 1, 0) != 0) return false;
     Line& line = g_line;
-    line.Put("randy-vk crash: hang - no frame for ").Dec(stalledMs / 1000).Put(" s (game thread ").Hex(g_gameThread, 4)
+    line.Put("randy-vk crash: hang - ").Put(what).Put(" for ").Dec(seconds).Put(" s (last frame ")
+        .Dec(sinceFrameMs / 1000).Put(" s ago, game thread ").Hex(g_gameThread, 4)
         .Put("); every thread's place follows (thread ids as in Wine's log)");
     line.Write();
+    PutAddressSpace(line);
     g_pages.count = 0;
     const DWORD self = GetCurrentThreadId();
     HANDLE thread = nullptr;
@@ -474,24 +478,47 @@ void DumpThreads(DWORD stalledMs)
     line.Put("randy-vk crash: hang report ends (").Dec(uint32_t(count)).Put(" threads)");
     line.Write();
     InterlockedExchange(&g_busy, 0);
+    return true;
 }
 
 DWORD g_stallMs = 20000;                          // RANDYVK_HANG_SECONDS (tests)
 
+// Two kinds of hang. Frames stop for 20 s. Or the window stops answering: its thread has taken no messages for 5 s
+// (IsHungAppWindow - when Windows greys the window and offers to close the game, and closing it leaves no trace in
+// the log), for another 5 s, even if frames still come. A player's game was closed so (Event Viewer: "Application
+// Hang") a minute after its log stopped, with no report: the watchdog then knew only frames.
 DWORD WINAPI Watchdog(void*)
 {
     const DWORD kStallMs = g_stallMs;
+    const DWORD kHungMs = kStallMs / 4;
     int reports = 0;
-    LONG reportedAt = -1;                         // the beat count of the last report: one report per stall
+    LONG reportedAt = -1;                         // the beat count of the last stall report: one report per stall
+    DWORD hungMs = 0;
+    bool hungReported = false;
     for (;;) {
         Sleep(1000);
         const LONG beats = g_beats;
-        if (!beats || beats == reportedAt) continue;
-        const DWORD stalled = GetTickCount() - g_lastBeat;
-        if (stalled < kStallMs) continue;
-        reportedAt = beats;
-        DumpThreads(stalled);
-        if (++reports == 3) return 0;
+        if (!beats) continue;
+        const DWORD sinceFrame = GetTickCount() - g_lastBeat;
+        const HWND window = g_window;
+        if (window && IsHungAppWindow(window)) {
+            hungMs += 1000;
+        } else {
+            hungMs = 0;
+            hungReported = false;
+        }
+        bool reported = false;
+        if (beats != reportedAt && sinceFrame >= kStallMs) {
+            if (!DumpThreads("no frame", sinceFrame / 1000, sinceFrame)) continue;
+            reportedAt = beats;
+            hungReported = hungMs > 0;            // (the same hang)
+            reported = true;
+        } else if (!hungReported && hungMs >= kHungMs) {
+            if (!DumpThreads("the window has not answered Windows", hungMs / 1000 + 5, sinceFrame)) continue;
+            hungReported = true;
+            reported = true;
+        }
+        if (reported && ++reports == 3) return 0;
     }
 }
 
@@ -508,7 +535,16 @@ void HangBeat()
         if (g_handler) RemoveVectoredExceptionHandler(g_handler);
         g_handler = AddVectoredExceptionHandler(1, &FaultReport);
         RegisterLastChance();                     // (the same for the unhandled-exception filter)
+        // Whether the watchdog sees the frames (a player's game hung with no report; did it ever?).
+        Log("crash reports: frames seen on thread %04x - the hang watchdog watches them", unsigned(g_gameThread));
     }
+}
+
+void SetHangWindow(HWND window)
+{
+    if (window && window != g_window)
+        Log("crash reports: the hang watchdog watches window %p as Windows does", static_cast<void*>(window));
+    g_window = window;
 }
 
 void CrashLogExit()
