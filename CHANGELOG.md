@@ -148,6 +148,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   keeps a second sheet of water hidden under the land, and the river was put at its height, under the ground.
 
 ### Diagnostics
+- Inside a shop, when its open door shows black instead of the street, randy-vk.log now says why (no street
+  recorded for that door, the room's entrance not known yet, ...).
 - Frame dumps also save AMD's indirect light (`-brixgi.bmp`, with `RVK_GiMode 1`) and the surfaces AMD's effects read
   (`-surface.bmp`: normals, characters' marked twice as bright); `-gi.bmp` stays ours.
 - `RVK_RtDebug 1` (randy-vk.ini) shows what ray tracing sees on GPUs that have it: each building, rock and patch of
