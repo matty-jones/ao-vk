@@ -97,6 +97,19 @@ void LayoutUse(VkImageLayout layout, VkPipelineStageFlags2* stage, VkAccessFlags
 
 }  // namespace
 
+uint64_t LargestFreeBlock()
+{
+    uint64_t largest = 0;
+    MEMORY_BASIC_INFORMATION mbi;
+    for (uintptr_t p = 0x10000; VirtualQuery(reinterpret_cast<const void*>(p), &mbi, sizeof(mbi)) == sizeof(mbi);) {
+        if (mbi.State == MEM_FREE) largest = std::max<uint64_t>(largest, mbi.RegionSize);
+        const uintptr_t next = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (next <= p) break;                    // (the top of the address space)
+        p = next;
+    }
+    return largest;
+}
+
 namespace detail {
 
 bool Check(VkResult r, const char* what, std::string* error)
@@ -1285,10 +1298,22 @@ VkDeviceSize Device::Allocate(VkDeviceSize size, VkDeviceSize alignment, void** 
     // Any alignment (vertex strides); 32-bit math, the ring is far below 4 GB (64-bit division is a libcall on x86).
     uint32_t a = uint32_t(alignment), o = uint32_t(f.ringOffset);
     VkDeviceSize offset = (o + a - 1) / a * a;
+    if (size > f.ringSize) {
+        // Bigger than the whole ring: written aside, so nothing past the ring's mapping is overwritten; the GPU reads
+        // stale data for it this frame, and the next frames get a ring that holds it.
+        if (m_ringTooSmallLogged++ < 20)
+            Log("per-frame ring buffer too small: %llu bytes wanted, ring %llu MB - left out this frame\n",
+                (unsigned long long)size, (unsigned long long)(f.ringSize >> 20));
+        WantRing(size + size / 4);
+        if (m_ringSpill.size() < size) m_ringSpill.resize(size_t(size));
+        *cpu = m_ringSpill.data();
+        return 0;
+    }
     if (offset + size > f.ringSize) {
         Log("per-frame ring buffer full (%llu bytes)\n", (unsigned long long)f.ringSize);
         offset = 0;     // overwrites this frame's data; visible corruption rather than a crash
         ++m_ringGeneration;
+        WantRing(f.ringSize * 2);
     }
     f.ringOffset = offset + size;
     *cpu = f.ringData + offset;
@@ -1346,8 +1371,12 @@ void Device::EnsureRingSpace(VkDeviceSize bytes)
     if (f.ringOffset + needed <= f.ringSize)
         return;
     if (needed > f.ringSize) {
-        Log("%llu bytes do not fit in the %llu-byte ring buffer\n",
-                     (unsigned long long)bytes, (unsigned long long)f.ringSize);
+        // Never fits this frame. It used to stay so: the ring grew only after a mid-frame flush, and a zone whose
+        // frames wanted 71 MB of a 64 MB ring overflowed it every frame, writing past its end, until the game ended.
+        if (m_ringTooSmallLogged++ < 20)
+            Log("%llu bytes do not fit in the %llu-byte ring buffer - a bigger one for the next frames\n",
+                (unsigned long long)bytes, (unsigned long long)f.ringSize);
+        WantRing(needed + needed / 4);
         return;
     }
     if (m_inFrame) {
@@ -1355,7 +1384,7 @@ void Device::EnsureRingSpace(VkDeviceSize bytes)
         // drop out of this frame's shadows: the next frames get a bigger ring (BeginFrame).
         ++m_midFrameFlushes;
         m_ringPeak = std::max(m_ringPeak, f.ringOffset);
-        m_ringWanted = std::min(std::max(m_ringWanted, f.ringSize * 2), kRingMaxSize);
+        WantRing(f.ringSize * 2);
         if (m_ringFlushesLogged++ < 20)
             Log("ring buffer full mid-frame (%llu bytes wanted, ring %llu MB): flushing\n", (unsigned long long)bytes,
                 (unsigned long long)(f.ringSize >> 20));
@@ -1384,8 +1413,46 @@ void Device::EnsureRingSpace(VkDeviceSize bytes)
     ++m_ringGeneration;
 }
 
+void Device::WantRing(VkDeviceSize bytes)
+{
+    VkDeviceSize size = std::max(m_ringWanted, kRingSize);
+    while (size < bytes && size < kRingMaxSize) size *= 2;
+    size = std::min(size, kRingMaxSize);
+    if (m_ringRefused && size >= m_ringRefused) size = std::max(m_ringWanted, m_ringRefused / 2);
+    m_ringWanted = std::max(m_ringWanted, size);
+    m_ringQuietWindows = 0;
+}
+
 // ---------------------------------------------------------------------------------------------------
 // GPU-driven M2: a frame's draw arenas, slices of its ring
+
+VkDeviceSize Device::ArenaBytes(uint32_t consts, uint32_t records) const
+{
+    VkDeviceSize shadowBytes = (m_shadows || m_pointShadows) ? VkDeviceSize(kShadowRecordCapacity) *
+                                               (sizeof(ShadowRecord) + sizeof(VkDrawIndexedIndirectCommand))
+                                         : 0;
+    return VkDeviceSize(consts) * sizeof(DrawConstants) + VkDeviceSize(records) * sizeof(DrawRecord) +
+           2 * VkDeviceSize(records) * sizeof(VkDrawIndexedIndirectCommand) + shadowBytes + 64;
+}
+
+void Device::FitArenas(uint32_t* consts, uint32_t* records)
+{
+    uint32_t c = m_constWanted, r = m_recordWanted;
+    const VkDeviceSize limit = m_frames[m_frameIndex].ringSize / 2;
+    if (ArenaBytes(c, r) > limit)
+        WantRing(2 * ArenaBytes(c, r));
+    // Until then the larger array gives way (each stays at least its starting size; a frame that fills it flushes).
+    while (ArenaBytes(c, r) > limit && (c > kDrawConstCapacity || r > kDrawRecordCapacity)) {
+        const bool recordsLarger = VkDeviceSize(r) * (sizeof(DrawRecord) + 2 * sizeof(VkDrawIndexedIndirectCommand)) >=
+                                   VkDeviceSize(c) * sizeof(DrawConstants);
+        if ((recordsLarger && r > kDrawRecordCapacity) || c <= kDrawConstCapacity)
+            r /= 2;
+        else
+            c /= 2;
+    }
+    *consts = c;
+    *records = r;
+}
 
 // Reserve this frame's deduplicated-constants and draw-record arrays in the ring (the space was ensured by the
 // caller). Called when the ring was (re)started.
@@ -1393,15 +1460,9 @@ void Device::PrepareDrawArenas()
 {
     if (m_arenaGeneration == m_ringGeneration)
         return;
-    m_constCapacity = m_constWanted;
-    m_recordCapacity = m_recordWanted;
+    FitArenas(&m_constCapacity, &m_recordCapacity);
     VkDeviceSize align = std::max<VkDeviceSize>(16, m_props.limits.minStorageBufferOffsetAlignment);
-    VkDeviceSize shadowBytes = (m_shadows || m_pointShadows) ? VkDeviceSize(kShadowRecordCapacity) *
-                                               (sizeof(ShadowRecord) + sizeof(VkDrawIndexedIndirectCommand))
-                                         : 0;
-    VkDeviceSize bytes = VkDeviceSize(m_constCapacity) * sizeof(DrawConstants) +
-                         VkDeviceSize(m_recordCapacity) * sizeof(DrawRecord) +
-                         2 * VkDeviceSize(m_recordCapacity) * sizeof(VkDrawIndexedIndirectCommand) + shadowBytes + 64;
+    VkDeviceSize bytes = ArenaBytes(m_constCapacity, m_recordCapacity);
     EnsureRingSpace(bytes);          // the caller reserved for it, but a flush may have restarted the ring since
     void* cpu;
     m_constsBase = Allocate(VkDeviceSize(m_constCapacity) * sizeof(DrawConstants), align, &cpu);
@@ -1665,8 +1726,12 @@ void Device::BeginFrame()
                     m_ringWanted > old ? "frames overflowed it" : "frames have used little of it for a while");
             else if (!CreateRing(f, old, &error))
                 Log("ring buffer: %s", error.c_str());
-            else
+            else {
+                Log("ring buffer: no memory for %llu MB, stays %llu MB", (unsigned long long)(m_ringWanted >> 20),
+                    (unsigned long long)(old >> 20));
+                if (m_ringWanted > old) m_ringRefused = m_ringWanted;   // not asked for again every frame
                 m_ringWanted = old;              // no memory for more: stay
+            }
         }
         m_ringPeak = std::max(m_ringPeak, f.ringOffset);
         f.ringOffset = 0;
@@ -1686,8 +1751,9 @@ void Device::BeginFrame()
         MEMORYSTATUSEX mem{};
         mem.dwLength = sizeof(mem);
         if (GlobalMemoryStatusEx(&mem))
-            Log("address space: %llu of %llu MB free (the game's process)", (unsigned long long)(mem.ullAvailVirtual >> 20),
-                (unsigned long long)(mem.ullTotalVirtual >> 20));
+            Log("address space: %llu of %llu MB free (the game's process), largest free block %u MB",
+                (unsigned long long)(mem.ullAvailVirtual >> 20), (unsigned long long)(mem.ullTotalVirtual >> 20),
+                unsigned(LargestFreeBlock() >> 20));
         Log("%s", GpuMemoryReport().c_str());
         Log("opaque static fast path: %llu draws; %llu alpha-1 blended draws drawn unblended (last 600 frames)",
             (unsigned long long)m_opaqueDraws, (unsigned long long)m_opaqueBlendDraws);

@@ -104,6 +104,9 @@ struct TerrainFit {
 // Diagnostics. Default: stderr, flushed per line. SetLogSink redirects (e.g. into the game's log file).
 void Log(const char* fmt, ...);
 void SetLogSink(void (*sink)(const char* line));
+// The largest free region of the process's address space (bytes). A 32-bit game runs out of one big enough for a
+// zone's load well before the total free (the address-space log lines) reaches nothing.
+uint64_t LargestFreeBlock();
 // Where the pipeline cache is kept between runs (compiled pipelines load from it instead of being built again at every
 // start). Empty or never set: RANDYVK_PIPELINE_CACHE, else no cache file ("off" also disables it).
 void SetPipelineCachePath(const char* path);
@@ -3638,10 +3641,18 @@ private:
     VkDeviceSize m_ringPeak = 0;                 // the most a frame used (logged with the flushes)
     uint32_t m_ringQuietWindows = 0;             // 600-frame windows in a row that used under a quarter of the ring
     uint32_t m_ringFlushesLogged = 0;
+    uint32_t m_ringTooSmallLogged = 0;           // requests bigger than the whole ring (logged, throttled)
+    VkDeviceSize m_ringRefused = 0;              // a ring size the driver had no memory for: not asked for again
+    std::vector<uint8_t> m_ringSpill;            // where a request bigger than the ring is written (never past its end)
+    void WantRing(VkDeviceSize bytes);           // the next frames' ring holds at least `bytes` (to kRingMaxSize)
     // The draw arenas' reserve targets (entries), grown between frames when one overflows.
     static constexpr uint32_t kDrawConstCapacity = 2048, kDrawRecordCapacity = 16384;
     static constexpr uint32_t kMaxDrawConstCapacity = 8192, kMaxDrawRecordCapacity = 131072;
     uint32_t m_constWanted = kDrawConstCapacity, m_recordWanted = kDrawRecordCapacity;
+    // The arenas' bytes in the ring (with the shadow arrays), and the sizes a frame reserves: the wanted ones, halved
+    // until they take at most half of the ring (the rest is the frame's geometry); the ring grows for the next frames.
+    VkDeviceSize ArenaBytes(uint32_t consts, uint32_t records) const;
+    void FitArenas(uint32_t* consts, uint32_t* records);
     uint32_t m_arenaFlushes = 0;                 // mid-frame arena overflows (logged, throttled)
     // M4: the sun/point shadow passes' caster records and indirect commands, also slices of the frame's ring.
     // Reserved with the draw arenas; `m_shadowRecordCount` is shared by both passes (they append, not reset).

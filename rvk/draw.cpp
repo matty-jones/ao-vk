@@ -2929,25 +2929,27 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     float tessLevel = TessellateDraw(primitive, fvf, vertexCount);
     // GPU-driven M2: reserve this frame's arrays (with the geometry) in the ring in one go; they are only
     // (re)reserved when the ring has been started. A frame that overflowed them grows the target below.
-    bool reserveArenas = m_arenaGeneration != m_ringGeneration;
-    VkDeviceSize arenaBytes = reserveArenas ? VkDeviceSize(m_constWanted) * sizeof(DrawConstants) +
-                                                  VkDeviceSize(m_recordWanted) * sizeof(DrawRecord) +
-                                                  2 * VkDeviceSize(m_recordWanted) * sizeof(VkDrawIndexedIndirectCommand) +
-                                                  ((m_shadows || m_pointShadows) ? VkDeviceSize(kShadowRecordCapacity) *
-                                                                   (sizeof(ShadowRecord) +
-                                                                    sizeof(VkDrawIndexedIndirectCommand))
-                                                             : 0) + 64
-                                            : 0;
+    VkDeviceSize arenaBytes = 0;
+    if (m_arenaGeneration != m_ringGeneration) {
+        uint32_t consts, records;
+        FitArenas(&consts, &records);
+        arenaBytes = ArenaBytes(consts, records);
+    }
     EnsureRingSpace(arenaBytes + sizeof(FrameLights) + geometryBytes + 3 * uboAlign +
                     layout.stride + 32 + (motion ? 12ull * vertexCount + 256 : 0) +
                     (tessLevel > 0.0f ? 12ull * vertexCount + 256 : 0));
     PrepareDrawArenas();
     // The arrays are full (a frame with more unique states or draws than reserved): submit what is recorded, wait,
-    // and start over. Rare; the targets double for the next frames.
-    if (m_constCount >= m_constCapacity || m_recordCount + 3 > m_recordCapacity) {   // (two-pass foliage: 2 records;
-                                                                                   // a tree's own canopy: 1 more)
-        m_constWanted = std::min(m_constWanted * 2u, kMaxDrawConstCapacity);
-        m_recordWanted = std::min(m_recordWanted * 2u, kMaxDrawRecordCapacity);
+    // and start over. Rare; the target of the one that filled doubles for the next frames (both doubling, a zone short
+    // of constants grew the records to 44 MB they never used, and the arenas outgrew the ring). A target already
+    // above its capacity waits for the bigger ring FitArenas asked for.
+    const bool constsFull = m_constCount >= m_constCapacity;
+    const bool recordsFull = m_recordCount + 3 > m_recordCapacity;   // (two-pass foliage: 2 records; a canopy: 1 more)
+    if (constsFull || recordsFull) {
+        if (constsFull && m_constWanted <= m_constCapacity)
+            m_constWanted = std::min(m_constWanted * 2u, kMaxDrawConstCapacity);
+        if (recordsFull && m_recordWanted <= m_recordCapacity)
+            m_recordWanted = std::min(m_recordWanted * 2u, kMaxDrawRecordCapacity);
         FlushDrawArenas();
     }
 

@@ -12,13 +12,21 @@
 // Faults: the first report of each distinct fault address, 16 at most, first chance (before any handler - the game's
 // or mss32's - gets it; it may still be handled). Hangs: the game thread's frames (Randy_t::Flip) stop for 20 s -> each
 // thread's registers and the return addresses on its stack, 3 reports at most, the next only after frames resumed.
+//
+// The ends that raise no fault (players' logs that simply stopped during a zone load, 2026-10-26): C++ exceptions
+// (bad_alloc when a load finds no address space), first chance, one report per thrown type; the unhandled-exception
+// filter, chained in front of the game's, which also sees the VS2010 runtime's invalid-parameter and abort paths (they
+// call it directly); our own runtime's abort (std::terminate), invalid-parameter and pure-call handlers, which end in a
+// fast fail nothing else sees; and a line at ExitProcess. Every report says how much address space is left.
 #include "native/native.h"
 
 #include <intrin.h>
 
 #include <algorithm>
 
+#include <csignal>
 #include <cstdint>
+#include <cstdlib>
 
 namespace rnative {
 
@@ -196,6 +204,26 @@ volatile LONG g_busy;
 Line g_line;
 uintptr_t g_stack[1024];
 
+// "    address space: N MB free, largest free block M MB" - what a report says about memory (a load that finds no block
+// big enough ends the game without a fault). Regions walked with VirtualQuery; nothing allocated.
+void PutAddressSpace(Line& line)
+{
+    uint64_t free = 0, largest = 0;
+    MEMORY_BASIC_INFORMATION mbi;
+    for (uintptr_t p = 0x10000; VirtualQuery(reinterpret_cast<const void*>(p), &mbi, sizeof(mbi)) == sizeof(mbi);) {
+        if (mbi.State == MEM_FREE) {
+            free += mbi.RegionSize;
+            largest = std::max<uint64_t>(largest, mbi.RegionSize);
+        }
+        const uintptr_t next = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (next <= p) break;
+        p = next;
+    }
+    line.Put("    address space: ").Dec(uint32_t(free >> 20)).Put(" MB free, largest free block ")
+        .Dec(uint32_t(largest >> 20)).Put(" MB");
+    line.Write();
+}
+
 // ---------------------------------------------------------------- faults
 volatile LONG g_faults;
 uintptr_t g_faultAt[16];
@@ -208,15 +236,94 @@ const char* FaultName(DWORD code)
     case EXCEPTION_PRIV_INSTRUCTION: return "privileged instruction";
     case EXCEPTION_STACK_OVERFLOW: return "stack overflow";
     case EXCEPTION_INT_DIVIDE_BY_ZERO: return "divide by zero";
+    case 0xC0000017: return "out of memory";
     case 0xC0000374: return "heap corruption";
     case 0xC0000409: return "stack buffer overrun";
+    case 0xC0000417: return "invalid C runtime parameter";
+    case 0xC0000420: return "assertion failure";
+    case 0x40000015: return "fatal application exit (abort)";
     default: return nullptr;
     }
+}
+
+// ---------------------------------------------------------------- C++ exceptions
+// MSVC's throw raises 0xE06D7363 with the object (ExceptionInformation[1]) and its ThrowInfo ([2]). x86 layouts:
+// ThrowInfo +0x0C the catchable types (+0 count, +4 the pointers, the most derived first); a CatchableType +4 its
+// TypeDescriptor, whose decorated name (".?AVbad_alloc@std@@") is at +8. An std::exception keeps what() at +4 (VS2010's
+// runtime and the UCRT alike).
+constexpr DWORD kCppException = 0xE06D7363;
+volatile LONG g_throws;
+uintptr_t g_throwInfo[8];
+
+// The NUL-terminated text at `p`, at most `most` characters, each read checked first.
+void PutText(Line& line, const char* p, unsigned most)
+{
+    for (unsigned i = 0; i < most; ++i) {
+        char c;
+        if (!Read(p + i, &c) || !c) return;
+        const char text[2] = {c >= 32 && c < 127 ? c : '?', 0};
+        line.Put(text);
+    }
+}
+
+bool TextIs(const char* p, const char* s)
+{
+    for (;; ++p, ++s) {
+        char c;
+        if (!Read(p, &c) || c != *s) return false;
+        if (!c) return true;
+    }
+}
+
+void ReportThrow(const EXCEPTION_RECORD& r, const CONTEXT& context)
+{
+    if (r.NumberParameters < 3 || g_throws >= 8) return;
+    const uintptr_t object = r.ExceptionInformation[1], throwInfo = r.ExceptionInformation[2];
+    for (LONG i = 0; i < g_throws; ++i)
+        if (g_throwInfo[i] == throwInfo) return;
+    g_pages.count = 0;
+    g_throwInfo[g_throws] = throwInfo;
+    InterlockedIncrement(&g_throws);
+    Line& line = g_line;
+    line.Put("randy-vk crash: C++ exception ");
+    uintptr_t types = 0, name = 0;
+    uint32_t count = 0;
+    bool standard = false;
+    if (Read(reinterpret_cast<const void*>(throwInfo + 0x0C), &types) && Read(reinterpret_cast<const void*>(types), &count))
+        for (uint32_t i = 0; i < count && i < 16; ++i) {
+            uintptr_t type = 0, descriptor = 0;
+            if (!Read(reinterpret_cast<const void*>(types + 4 + 4 * i), &type) ||
+                !Read(reinterpret_cast<const void*>(type + 4), &descriptor))
+                break;
+            if (i == 0) name = descriptor + 8;
+            standard |= TextIs(reinterpret_cast<const char*>(descriptor + 8), ".?AVexception@std@@");
+        }
+    if (name)
+        PutText(line, reinterpret_cast<const char*>(name), 96);
+    else
+        line.Put("(type unknown)");
+    uintptr_t what = 0;
+    if (standard && Read(reinterpret_cast<const void*>(object + 4), &what) && what) {
+        line.Put(" \"");
+        PutText(line, reinterpret_cast<const char*>(what), 160);
+        line.Put("\"");
+    }
+    line.Put(" thrown, thread ").Hex(GetCurrentThreadId(), 4).Put(" - first chance, may still be caught");
+    line.Write();
+    PutStack(line, g_stack, CopyStack(context.Esp, g_stack, 1024), 24);
+    PutAddressSpace(line);
 }
 
 LONG CALLBACK FaultReport(EXCEPTION_POINTERS* e)
 {
     const DWORD code = e->ExceptionRecord->ExceptionCode;
+    if (code == kCppException) {
+        if (g_throws < 8 && InterlockedCompareExchange(&g_busy, 1, 0) == 0) {
+            ReportThrow(*e->ExceptionRecord, *e->ContextRecord);
+            InterlockedExchange(&g_busy, 0);
+        }
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     const char* name = FaultName(code);
     if (!name || g_faults >= 16) return EXCEPTION_CONTINUE_SEARCH;
     const uintptr_t at = reinterpret_cast<uintptr_t>(e->ExceptionRecord->ExceptionAddress);
@@ -238,9 +345,82 @@ LONG CALLBACK FaultReport(EXCEPTION_POINTERS* e)
         line.Write();
         PutRegisters(line, *e->ContextRecord);
         PutStack(line, g_stack, CopyStack(e->ContextRecord->Esp, g_stack, 1024), 24);
+        PutAddressSpace(line);
     }
     InterlockedExchange(&g_busy, 0);
     return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// ---------------------------------------------------------------- the last chance
+// The unhandled-exception filter: what nothing caught, just before the game ends (the filter before ours - the game's,
+// Wine's - still runs after). Registered at install and again at the first frame, in front of any the game set while
+// starting. A filter that chains back to this one finds it already running and passes.
+LPTOP_LEVEL_EXCEPTION_FILTER g_previousFilter;
+volatile LONG g_inLastChance;
+volatile LONG g_lastChances;
+
+LONG WINAPI LastChance(EXCEPTION_POINTERS* e)
+{
+    if (InterlockedCompareExchange(&g_inLastChance, 1, 0) != 0) return EXCEPTION_CONTINUE_SEARCH;
+    if (g_lastChances < 4 && InterlockedCompareExchange(&g_busy, 1, 0) == 0) {
+        InterlockedIncrement(&g_lastChances);
+        g_pages.count = 0;
+        const DWORD code = e->ExceptionRecord->ExceptionCode;
+        const char* name = code == kCppException ? "C++ exception" : FaultName(code);
+        Line& line = g_line;
+        line.Put("randy-vk crash: unhandled ").Hex(code);
+        if (name) line.Put(" (").Put(name).Put(")");
+        line.Put(" at ");
+        PutWhere(line, reinterpret_cast<uintptr_t>(e->ExceptionRecord->ExceptionAddress));
+        line.Put(", thread ").Hex(GetCurrentThreadId(), 4).Put(" - nothing caught it, the game ends here");
+        line.Write();
+        PutRegisters(line, *e->ContextRecord);
+        PutStack(line, g_stack, CopyStack(e->ContextRecord->Esp, g_stack, 1024), 24);
+        PutAddressSpace(line);
+        InterlockedExchange(&g_busy, 0);
+    }
+    const LONG r = g_previousFilter ? g_previousFilter(e) : EXCEPTION_CONTINUE_SEARCH;
+    InterlockedExchange(&g_inLastChance, 0);
+    return r;
+}
+
+void RegisterLastChance()
+{
+    const LPTOP_LEVEL_EXCEPTION_FILTER previous = SetUnhandledExceptionFilter(&LastChance);
+    if (previous != &LastChance) g_previousFilter = previous;
+}
+
+// ---------------------------------------------------------------- our runtime's own ends
+// randy31.dll links its C runtime statically: its abort (std::terminate - an exception nothing caught -, a failed
+// check) and its invalid-parameter end are fast fails, which no exception handler or filter sees. A line first, from
+// where it was called; then the runtime's own end goes on as before.
+void ReportHere(const char* what)
+{
+    if (InterlockedCompareExchange(&g_busy, 1, 0) != 0) return;
+    g_pages.count = 0;
+    Line& line = g_line;
+    line.Put("randy-vk crash: ").Put(what).Put(", thread ").Hex(GetCurrentThreadId(), 4).Put(" - the game ends here");
+    line.Write();
+    PutStack(line, g_stack, CopyStack(reinterpret_cast<uintptr_t>(_AddressOfReturnAddress()), g_stack, 1024), 24);
+    PutAddressSpace(line);
+    InterlockedExchange(&g_busy, 0);
+}
+
+void __cdecl OnAbort(int)
+{
+    ReportHere("abort() in randy31.dll (std::terminate - an exception nothing caught - or a failed check)");
+}
+
+void __cdecl OnInvalidParameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned, uintptr_t)
+{
+    ReportHere("an invalid parameter to a C runtime call in randy31.dll");
+    __fastfail(FAST_FAIL_INVALID_ARG);           // what the runtime does without a handler
+}
+
+void __cdecl OnPureCall()
+{
+    ReportHere("a pure virtual call in randy31.dll");
+    std::abort();
 }
 
 // ---------------------------------------------------------------- hangs
@@ -327,7 +507,25 @@ void HangBeat()
         // First in line again: handlers the game (or mss32) added while starting would otherwise see a fault first.
         if (g_handler) RemoveVectoredExceptionHandler(g_handler);
         g_handler = AddVectoredExceptionHandler(1, &FaultReport);
+        RegisterLastChance();                     // (the same for the unhandled-exception filter)
     }
+}
+
+void CrashLogExit()
+{
+    if (g_file == INVALID_HANDLE_VALUE) return;
+    // At exit nothing else reports any more; another thread's report cut short by the exit is not waited for.
+    Line line;
+    DWORD code = STILL_ACTIVE;
+    GetExitCodeProcess(GetCurrentProcess(), &code);
+    line.Put("randy-vk: the game exits");
+    if (code == STILL_ACTIVE)
+        line.Put(" (exit code unknown)");
+    else if (code < 0x10000)
+        line.Put(" (exit code ").Dec(code).Put(")");
+    else
+        line.Put(" (exit code ").Hex(code).Put(")");
+    line.Write();
 }
 
 void InstallCrashLog()
@@ -337,12 +535,17 @@ void InstallCrashLog()
     done = true;
     // The log's first line of the session moves an old, large log aside (RvkLog): let that happen before the handle
     // opens, so the reports go into this session's file.
-    Log("crash reports: on (faults in any module; a hang report after 20 s without a frame)");
+    Log("crash reports: on (faults in any module, C++ exceptions, unhandled ends and aborts; a hang report after 20 s "
+        "without a frame; a line at exit)");
     char path[MAX_PATH] = "randy-vk.log";
     GetEnvironmentVariableA("RANDYVK_LOG", path, sizeof(path));
     g_file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                          OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     g_handler = AddVectoredExceptionHandler(1, &FaultReport);
+    RegisterLastChance();
+    std::signal(SIGABRT, &OnAbort);
+    _set_invalid_parameter_handler(&OnInvalidParameter);
+    _set_purecall_handler(&OnPureCall);
     char off[8] = "";
     if (GetEnvironmentVariableA("RANDYVK_NO_WATCHDOG", off, sizeof(off)) && off[0] == '1') return;
     char seconds[8] = "";

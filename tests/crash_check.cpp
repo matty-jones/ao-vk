@@ -2,6 +2,8 @@
 // 1. A fault in our own code. 2. A fault while this thread holds the process heap lock and the loader lock (a report
 // that allocates or asks the loader would hang here). 3. A hang: one thread holds the heap lock forever, the main thread
 // blocks on it - the watchdog must still write every thread's place. Exits by itself, never with a dialog.
+// The ends without a plain fault, each its own run: --throw (a C++ exception, caught), --unhandled (a fault nothing
+// catches: the last-chance filter, then the one before it), --abort (our runtime's abort), --exit (ExitProcess's line).
 #include "native/native.h"
 
 #include <intrin.h>
@@ -11,6 +13,8 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdlib>
+#include <new>
+#include <stdexcept>
 
 namespace {
 
@@ -53,11 +57,53 @@ DWORD WINAPI HoldHeap(void*)
 
 }  // namespace
 
+// The filter before ours (the game's, in the game): ends the process quietly, as no dialog may show.
+LONG WINAPI QuietEnd(EXCEPTION_POINTERS* e)
+{
+    Print("check: the earlier filter ran (code %08lx)", e->ExceptionRecord->ExceptionCode);
+    TerminateProcess(GetCurrentProcess(), 7);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+__declspec(noinline) void Throw(int kind)
+{
+    if (kind == 0) throw std::runtime_error("the check's own exception");
+    throw std::bad_alloc();
+}
+
 int main(int argc, char** argv)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    const char* mode = argc > 1 ? argv[1] : "";
+    SetUnhandledExceptionFilter(&QuietEnd);
     rnative::SetLog(&Print);
     rnative::InstallCrashLog();
+
+    if (!std::strcmp(mode, "--throw")) {
+        for (int kind = 0; kind < 2; ++kind)
+            for (int twice = 0; twice < 2; ++twice) {             // one report per type
+                try {
+                    Throw(kind);
+                } catch (const std::exception& e) {
+                    Print("check: caught %s", e.what());
+                }
+            }
+        return 0;
+    }
+    if (!std::strcmp(mode, "--unhandled")) {
+        Print("check: a fault nothing catches");
+        *reinterpret_cast<volatile int*>(0x18) = 3;
+        return 1;
+    }
+    if (!std::strcmp(mode, "--abort")) {
+        Print("check: abort()");
+        std::abort();
+    }
+    if (!std::strcmp(mode, "--exit")) {
+        Print("check: exit(3)");
+        rnative::CrashLogExit();                 // (what the DLL's process detach calls)
+        std::exit(3);
+    }
 
     Print("check: fault in our code");
     FaultAt(&Poke, 0);
