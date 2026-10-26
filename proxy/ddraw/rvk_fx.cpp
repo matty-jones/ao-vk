@@ -527,6 +527,25 @@ void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const voi
     std::memcpy(a.source, at, 12);
     std::memcpy(a.target, at, 12);
     a.phase = rvk::fx::kFlight;
+    if (std::find(g_playLogged.begin(), g_playLogged.end(), f.id) == g_playLogged.end()) {
+        // (Where else it could be, for the log: the locator, the frame's place, the middle of the game's live sprites -
+        // DiaBill_n: count +0x1A8, sprites +0x1AC, 32 bytes each, position first, alive at +28.)
+        float mean[3] = {0.0f, 0.0f, 0.0f};
+        uint32_t alive = 0;
+        const int32_t count = std::min(At<int32_t>(visual, 0x1A8), 128);
+        if (const uint8_t* sprites = At<const uint8_t*>(visual, 0x1AC))
+            for (int32_t i = 0; i < count; ++i)
+                if (sprites[size_t(i) * 32 + 28]) {
+                    float p[3];
+                    std::memcpy(p, sprites + size_t(i) * 32, 12);
+                    for (int c = 0; c < 3; ++c) mean[c] += p[0] * m[c] + p[1] * m[4 + c] + p[2] * m[8 + c] + m[12 + c];
+                    ++alive;
+                }
+        for (float& v : mean) v /= float(std::max(alive, 1u));
+        RvkLog("fx: Stars %u: locator (%.2f %.2f %.2f), frame at (%.2f %.2f %.2f), %u live sprites round (%.2f %.2f %.2f)",
+               templateId, double(local[0]), double(local[1]), double(local[2]), double(m[12]), double(m[13]),
+               double(m[14]), alive, double(mean[0]), double(mean[1]), double(mean[2]));
+    }
     LogFirstPlay(f.id, f.file.c_str(), templateId, "Stars", at);
     g_rvk.device->FxInstance(uint64_t(reinterpret_cast<uintptr_t>(stars)) ^ (uint64_t(templateId) << 32), f.id, a);
 }
