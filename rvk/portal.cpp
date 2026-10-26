@@ -884,6 +884,10 @@ void Device::DrawStreetPortal()
     m_drawVisual = visual;
     m_drawOwner = owner;
     m_constantsDirty = true;
+    if (!m_street.doorLogged && (!doorDraws.empty() || m_street.logged)) {
+        m_street.doorLogged = true;
+        Log("street: the room's door drawn again over the street: %zu draws noted this frame", doorDraws.size());
+    }
     RedrawStreetDoor(doorDraws);
     if (!m_street.logged) {
         m_street.logged = true;
