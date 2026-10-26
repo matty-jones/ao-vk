@@ -3,7 +3,7 @@
 // Once a doorway a link knows (portal_links.cpp) has been drawn, before the first draw after it that writes no depth -
 // the game's effects and particles, which then go over the room; solid things come before those, and drawn after the
 // room, those behind the doorway's plane (the building's own insides) showed in it - or at the scene's end (EndScene),
-// each such doorway near enough (the nearest two a frame) gets its room drawn behind it:
+// each such doorway near enough and on the screen (the nearest three a frame) gets its room drawn behind it:
 //   1. the scene's depth is copied, and where the doorway's rectangle is the surface seen (nothing in front of its
 //      plane: not the door, the recess's walls or a character) the depth is pushed to the far plane (portal_open.frag);
 //   2. the room's capture (portal_capture.cpp) is replayed through the draw path - each piece as the game drew it, moved
@@ -28,7 +28,7 @@ using namespace detail;
 
 namespace {
 
-constexpr uint32_t kMostPortals = 2;       // drawn a frame (the nearest)
+constexpr uint32_t kMostPortals = 3;       // drawn a frame (the nearest of those on the screen)
 constexpr double kKeepFor = 30.0;          // a capture unused this long is let go
 constexpr double kRetryAfter = 5.0;        // a capture that couldn't be loaded: tried again after this long
 // The room is set this far nearer the street than its entrance's door: its entrance's wall and door frame stand just
@@ -224,7 +224,61 @@ void Device::DrawPortals()
     float eye[3];
     for (int i = 0; i < 3; ++i) eye[i] = -(vm[3][0] * vm[i][0] + vm[3][1] * vm[i][1] + vm[3][2] * vm[i][2]);
     // The doorways drawn this frame that lead to a room, nearest first.
-    struct Candidate { const BlackQuad* quad; uint32_t interior; float distance; };
+    const d3d::Matrix viewProj = MulMatrix(m_aoView, m_aoProj);
+    const float sw = float(m_scene->m_width), sh = float(m_scene->m_height);
+    struct Candidate {
+        const BlackQuad* quad;
+        uint32_t interior;
+        float distance;
+        float out[3];                            // its outward facing (horizontal, towards the camera's side)
+        d3d::Vector origin, edgeU, edgeV;        // its rectangle: bottom-left corner, bottom and left edges
+        VkRect2D box;                            // ... on the scene
+    };
+    // The doorway's rectangle and its box on the scene; false when none of it is on the screen (behind the camera -
+    // zoomed out, the player's own doorway behind it took the frame's rooms - or outside the view).
+    auto onScreen = [&](Candidate& c) {
+        const BlackQuad& q = *c.quad;
+        float out[3] = {q.normal[0], 0.0f, q.normal[2]};
+        const float ol = std::sqrt(out[0] * out[0] + out[2] * out[2]);
+        if (ol < 1e-4f) return false;
+        out[0] /= ol;
+        out[2] /= ol;
+        if (out[0] * (eye[0] - q.centre[0]) + out[2] * (eye[2] - q.centre[2]) < 0.0f) {
+            out[0] = -out[0];
+            out[2] = -out[2];
+        }
+        std::memcpy(c.out, out, sizeof(out));
+        const float across[3] = {-out[2], 0.0f, out[0]};
+        const float half = 0.5f * q.width;
+        c.origin = {q.centre[0] - across[0] * half, q.sill, q.centre[2] - across[2] * half};
+        c.edgeU = {across[0] * q.width, 0.0f, across[2] * q.width};
+        c.edgeV = {0.0f, q.height, 0.0f};
+        float x0 = sw, y0 = sh, x1 = 0.0f, y1 = 0.0f;
+        int behind = 0;
+        for (int k = 0; k < 4; ++k) {
+            const d3d::Vector p{c.origin.x + (k & 1 ? c.edgeU.x : 0.0f), c.origin.y + (k & 2 ? c.edgeV.y : 0.0f),
+                                c.origin.z + (k & 1 ? c.edgeU.z : 0.0f)};
+            const float* m = &viewProj.m[0][0];
+            const float cx = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
+            const float cy = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
+            const float cw = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
+            if (cw <= 0.05f) { ++behind; continue; }
+            const float px = (cx / cw * 0.5f + 0.5f) * sw, py = (0.5f - cy / cw * 0.5f) * sh;
+            x0 = std::min(x0, px); x1 = std::max(x1, px);
+            y0 = std::min(y0, py); y1 = std::max(y1, py);
+        }
+        if (behind == 4)
+            return false;                        // (all of it behind the camera)
+        if (behind) { x0 = 0.0f; y0 = 0.0f; x1 = sw; y1 = sh; }   // (across the camera's plane: anywhere)
+        x0 = std::clamp(std::floor(x0) - 2.0f, 0.0f, sw);
+        y0 = std::clamp(std::floor(y0) - 2.0f, 0.0f, sh);
+        x1 = std::clamp(std::ceil(x1) + 2.0f, 0.0f, sw);
+        y1 = std::clamp(std::ceil(y1) + 2.0f, 0.0f, sh);
+        if (x1 - x0 < 1.0f || y1 - y0 < 1.0f)
+            return false;                        // (outside the view)
+        c.box = {{int32_t(x0), int32_t(y0)}, {uint32_t(x1 - x0), uint32_t(y1 - y0)}};
+        return true;
+    };
     std::vector<Candidate> candidates;
     for (const auto& [key, draw] : m_blackDraws) {
         if (draw.lastFrame != m_frameNumber) continue;
@@ -235,18 +289,18 @@ void Device::DrawPortals()
             if (!link || !link->interior) continue;
             const float dx = q.centre[0] - eye[0], dy = q.centre[1] - eye[1], dz = q.centre[2] - eye[2];
             const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
-            if (d <= m_portalDist) candidates.push_back({&q, link->interior, d});
+            Candidate c{&q, link->interior, d, {}, {}, {}, {}, {}};
+            if (d <= m_portalDist && onScreen(c)) candidates.push_back(c);
         }
     }
     PortalForgetUnused(false);
     if (candidates.empty())
         return;
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
-    // (The nearest first: those drawn earlier in the frame count against kMostPortals.)
+    // (The nearest on the screen first: those drawn earlier in the frame count against kMostPortals.)
     if (candidates.size() > kMostPortals - std::min(m_portalsDrawn, kMostPortals))
         candidates.resize(kMostPortals - std::min(m_portalsDrawn, kMostPortals));
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
-    const d3d::Matrix viewProj = MulMatrix(m_aoView, m_aoProj);
     d3d::Matrix inverse;
     if (!InvertMatrix(viewProj, &inverse))
         return;
@@ -259,51 +313,17 @@ void Device::DrawPortals()
         ++m_portalsDrawn;
         const portal::Capture& cap = *lp->capture;
         const BlackQuad& q = *c.quad;
-        // The doorway's outward facing (horizontal): towards the camera's side of it.
-        float out[3] = {q.normal[0], 0.0f, q.normal[2]};
-        const float ol = std::sqrt(out[0] * out[0] + out[2] * out[2]);
-        if (ol < 1e-4f) continue;
-        out[0] /= ol;
-        out[2] /= ol;
-        if (out[0] * (eye[0] - q.centre[0]) + out[2] * (eye[2] - q.centre[2]) < 0.0f) {
-            out[0] = -out[0];
-            out[2] = -out[2];
-        }
+        const float* out = c.out;
+        const d3d::Vector& origin = c.origin;
+        const d3d::Vector& edgeU = c.edgeU;
+        const d3d::Vector& edgeV = c.edgeV;
+        const VkRect2D box = c.box;
         // The room's entrance onto the doorway's sill, its way in along the doorway's.
         const float turn = std::atan2(-out[0], -out[2]) - std::atan2(cap.inward[0], cap.inward[2]);
         const d3d::Matrix place = MulMatrix(MulMatrix(Translation(-cap.entrance[0], -cap.entrance[1], -cap.entrance[2]),
                                                       TurnY(turn)),
                                             Translation(q.centre[0] + out[0] * kEntranceShift, q.sill,
                                                         q.centre[2] + out[2] * kEntranceShift));
-        // The doorway's rectangle: its corners, and its box on the scene.
-        const float across[3] = {-out[2], 0.0f, out[0]};
-        const float half = 0.5f * q.width;
-        const d3d::Vector origin{q.centre[0] - across[0] * half, q.sill, q.centre[2] - across[2] * half};
-        const d3d::Vector edgeU{across[0] * q.width, 0.0f, across[2] * q.width};
-        const d3d::Vector edgeV{0.0f, q.height, 0.0f};
-        const float sw = float(m_scene->m_width), sh = float(m_scene->m_height);
-        float x0 = sw, y0 = sh, x1 = 0.0f, y1 = 0.0f;
-        bool behind = false;
-        for (int k = 0; k < 4; ++k) {
-            const d3d::Vector p{origin.x + (k & 1 ? edgeU.x : 0.0f), origin.y + (k & 2 ? edgeV.y : 0.0f),
-                                origin.z + (k & 1 ? edgeU.z : 0.0f)};
-            const float* m = &viewProj.m[0][0];
-            const float cx = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
-            const float cy = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
-            const float cw = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
-            if (cw <= 0.05f) { behind = true; break; }
-            const float px = (cx / cw * 0.5f + 0.5f) * sw, py = (0.5f - cy / cw * 0.5f) * sh;
-            x0 = std::min(x0, px); x1 = std::max(x1, px);
-            y0 = std::min(y0, py); y1 = std::max(y1, py);
-        }
-        if (behind) { x0 = 0.0f; y0 = 0.0f; x1 = sw; y1 = sh; }
-        x0 = std::clamp(std::floor(x0) - 2.0f, 0.0f, sw);
-        y0 = std::clamp(std::floor(y0) - 2.0f, 0.0f, sh);
-        x1 = std::clamp(std::ceil(x1) + 2.0f, 0.0f, sw);
-        y1 = std::clamp(std::ceil(y1) + 2.0f, 0.0f, sh);
-        if (x1 - x0 < 1.0f || y1 - y0 < 1.0f)
-            continue;
-        const VkRect2D box{{int32_t(x0), int32_t(y0)}, {uint32_t(x1 - x0), uint32_t(y1 - y0)}};
         // The doorway's rectangle for the opening and the mark (portal_open.frag).
         float push[32];
         std::memcpy(push, &inverse.m[0][0], 64);
