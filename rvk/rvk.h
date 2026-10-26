@@ -3358,6 +3358,7 @@ private:
         float arrival[3] = {}, arrivalForward[3] = {}, roomCentre[3] = {};
         float roomFloor = 1e30f;                 // the rooms' lowest point (an entrance without a door: its floor)
         uint32_t roomPieces = 0, unsaved = 0;
+        uint32_t saves = 0, againLines = 0;   // saves this visit; lines on what made it unsaved after one
         size_t bytes = 0;                        // its vertices, indices and textures so far
         // A street's (portal_street.cpp): its file, and the doorway it is seen from - in front of it, the cone kept.
         bool street = false;
