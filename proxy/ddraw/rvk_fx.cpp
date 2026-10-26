@@ -85,6 +85,16 @@ std::vector<EffectFile> g_files;
 std::unordered_map<uint32_t, uint32_t> g_byTemplate;   // the game's template -> the file standing for it (index)
 uint32_t g_nextId = 1;
 uint64_t g_sentSerial = 0;                      // the device the effects were last given to
+std::vector<uint32_t> g_playLogged;              // effects whose first play was logged (where: for misplaced ones)
+
+void LogFirstPlay(uint32_t id, const char* file, uint32_t templateId, const char* kind, const float at[3])
+{
+    if (g_playLogged.size() >= 64 || std::find(g_playLogged.begin(), g_playLogged.end(), id) != g_playLogged.end())
+        return;
+    g_playLogged.push_back(id);
+    RvkLog("fx: %s plays in place of %s %u, at (%.2f %.2f %.2f)", file, kind, templateId, double(at[0]), double(at[1]),
+           double(at[2]));
+}
 uint32_t g_frame = 0;
 
 std::string FxDir()
@@ -240,6 +250,7 @@ void __fastcall SpellProcessHook(void* self, void* edx)
         a.phase = rvk::fx::kImpact;
         std::memcpy(a.head, a.target, 12);
     }
+    if (c.file < g_files.size()) LogFirstPlay(c.id, g_files[c.file].file.c_str(), c.templateId, "Spell1", a.source);
     g_rvk.device->FxInstance(uint64_t(reinterpret_cast<uintptr_t>(self)) ^ (uint64_t(c.templateId) << 32), c.id, a);
 }
 
@@ -482,8 +493,8 @@ void Play(int templateId)
 
 // A sparkle (_GfxControlStars_t), after the game's update: ours in its place if one of our effects stands for its
 // template (+0x4) - found by the template rather than at MakeHandle, so the Stars inside a Meta's tree (made by
-// CreateGfxControl, with no handle) are found too. Its points all at its sprites' frame (the batch at +0x40, which
-// follows what it is on); its one phase, "play", while it lives. Replacing it, its sprites switched off after the
+// CreateGfxControl, with no handle) are found too. Its points all at its locator's position (what it is on); its one
+// phase, "play", while it lives. Replacing it, its sprites switched off after the
 // update. (A nano recharger's burst: 13600.)
 void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const void* frame))
 {
@@ -499,14 +510,23 @@ void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const voi
         return;
     if (f.def->replace && g_disableRendering)
         g_disableRendering(visual, nullptr, 1);
-    const float* m = worldMatrix(visual);
-    if (!m)
+    // Where it is: its locator's position (+0x30; the position at +0xC, unless the flag at +0x8 says it has none) - the
+    // sprites are written in the world from it, their batch's frame left at the world's origin (FUN_100f7f3c, re/fx/
+    // stars.c). Without a locator, the frame's.
+    float at[3] = {0.0f, 0.0f, 0.0f};
+    if (const void* locator = At<const void*>(stars, 0x30); locator && !At<uint8_t>(locator, 0x8)) {
+        std::memcpy(at, static_cast<const uint8_t*>(locator) + 0xC, 12);
+    } else if (const float* m = worldMatrix(visual)) {
+        std::memcpy(at, m + 12, 12);
+    } else {
         return;
+    }
     rvk::Device::FxAnchors a;
-    std::memcpy(a.head, m + 12, 12);
-    std::memcpy(a.source, m + 12, 12);
-    std::memcpy(a.target, m + 12, 12);
+    std::memcpy(a.head, at, 12);
+    std::memcpy(a.source, at, 12);
+    std::memcpy(a.target, at, 12);
     a.phase = rvk::fx::kFlight;
+    LogFirstPlay(f.id, f.file.c_str(), templateId, "Stars", at);
     g_rvk.device->FxInstance(uint64_t(reinterpret_cast<uintptr_t>(stars)) ^ (uint64_t(templateId) << 32), f.id, a);
 }
 
