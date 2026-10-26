@@ -718,6 +718,7 @@ void Device::DrawStreetPortal()
     if (!PortalOpenPass(cmd, push, box, copied))
         return;
     DrawSkyGlow(&box);
+    m_streetShownFrame = m_frameNumber;
     // 3. The street: its doorway (the capture's entrance, facing its "inward" - out into the street) on the room's
     // entrance, facing out of the room.
     const float turn = std::atan2(out[0], out[2]) - std::atan2(street.inward[0], street.inward[2]);

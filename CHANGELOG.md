@@ -16,7 +16,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   `RVK_StreetView` (General) switches it off. The ground in front of the door shows too, as ao-vk's ground draws
   it; a street recorded before this needs another stand at its door to get its ground. The street is lit as it was
   when you walked in (the hour's sun, ambient light and fog), not as when it was recorded (`RVK_StreetNow`, ini only). A shut
-  door stays shut: the street no longer shows through its panel.
+  door stays shut: the street no longer shows through its panel, and the open door shows the street, not black.
   No clouds through the door yet.
 - Zone changes no longer freeze on a blank picture: the last view of the zone you leave stays up, slowly drifting
   and dimming, while the next one loads, then fades into the new zone once it has settled, its ground and lighting

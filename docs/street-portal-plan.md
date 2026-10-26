@@ -137,7 +137,8 @@ ground, the pieces lit by the current sun, clip and mark. Settings: `RVK_StreetV
   were recorded by turns, each capture restarted every frame: the one recorded is kept unless the other is 3 nearer.
   The opening's rectangle stood on the door's base plane, so a shut door's panel (within the open pass's 5 cm) was
   taken for the opening and the street showed through it between the door's bars: it now stands 25 cm out, behind the
-  leaf.
+  leaf. The game's black-texture panel (1010004:6014) stands in the same plane as the door, so that left the opening
+  black: while the street is drawn, the panel's draws by the entrance are skipped (draw.cpp, `m_streetShownFrame`).
 
 ### Phase 4: polish
 

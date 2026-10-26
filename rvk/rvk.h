@@ -3488,6 +3488,7 @@ private:
     PortalLink m_enteredFrom;
     struct StreetRoom { uint32_t playfield = ~0u; bool known = false; float entrance[3] = {}, inward[3] = {}; } m_streetRoom;
     struct StreetLoaded { std::string path; LoadedPortal lp; bool logged = false; float inset = 0.0f; } m_street;
+    uint64_t m_streetShownFrame = 0;             // the last frame the street was drawn through the entrance
     struct {
         bool active = false, cameraLogged = false;
         uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;

@@ -2605,6 +2605,22 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         DrawPendingGroundBase();
     if (m_native.ground && NativeGroundReplaces(fvf))
         return;
+    // The black texture's panel in a shop's entrance (1010004:6014), while the street is drawn through it
+    // (portal.cpp DrawStreetPortal, the frame before): it stands in the door's plane, so the opening, set behind the
+    // door's leaf to keep a shut door shut, would find it in front and stay black.
+    if (m_streetShownFrame + 1 >= m_frameNumber && m_indoors && !m_drawingPortal && m_textures[0] &&
+        m_textures[0]->m_rdbId == 6014 && (fvf & 0x00E) != 0x004) {   // (not a 2D draw)
+        // (Where its first corner is in the world: a door's width or so round the entrance's base.)
+        const auto& w = m_world.m;
+        float p[3] = {0.0f, 0.0f, 0.0f}, at[3];
+        if (vertices)
+            std::memcpy(p, vertices, 12);
+        for (int j = 0; j < 3; ++j) at[j] = p[0] * w[0][j] + p[1] * w[1][j] + p[2] * w[2][j] + w[3][j];
+        const float dx = at[0] - m_streetRoom.entrance[0], dz = at[2] - m_streetRoom.entrance[2];
+        const float dy = at[1] - m_streetRoom.entrance[1];
+        if (dx * dx + dz * dz < 2.5f * 2.5f && dy > -1.0f && dy < 5.0f)
+            return;
+    }
     // RVK_FrameGen: a 2D draw on the frame after the interface (the mouse pointer) goes on top of the overlay.
     if (m_fgUiLayer && m_target == m_main && !m_fgTopActive && !m_uiLayerActive && !m_external &&
         m_interfaceEndFrame == m_frameNumber && IsInterfaceDraw(fvf))
