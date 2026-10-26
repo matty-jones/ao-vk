@@ -338,8 +338,11 @@ void Device::SimulateFx(VkCommandBuffer cmd)
         const uint32_t count = std::min(e.count, kPerBlock);
         GpuBlock& g = gb[n];
         std::memset(&g, 0, sizeof(g));
-        const float* pt = PointOf(a, e.at);
-        const float* prevPt = PointOf(b, e.at);
+        float pt[3], prevPt[3];
+        for (int i = 0; i < 3; ++i) {
+            pt[i] = PointOf(a, e.at)[i] + e.offset[i];
+            prevPt[i] = PointOf(b, e.at)[i] + e.offset[i];
+        }
         std::memcpy(g.point, pt, 12);
         g.point[3] = float(spawn);
         std::memcpy(g.prevPoint, prevPt, 12);

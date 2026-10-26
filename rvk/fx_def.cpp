@@ -187,11 +187,13 @@ bool ReadEmitter(const Value& v, Emitter& e, std::string* error)
     if (const Value* d = v.Get("during"); d && d->type == Value::kArray) {
         e.during = 0;
         for (const Value& x : d->array)
-            e.during |= x.type == Value::kString ? (x.string == "charge" ? kCharge : x.string == "flight" ? kFlight
+            e.during |= x.type == Value::kString ? (x.string == "charge" ? kCharge
+                                                    : x.string == "flight" || x.string == "play" ? kFlight
                                                     : x.string == "impact" ? kImpact : 0u) : 0u;
     }
     e.shape = Choice(v.Get("shape"), {"point", "sphere", "shell", "ring", "disc"}, e.shape);
     e.radius = std::max(Num(v.Get("radius"), e.radius), 0.0f);
+    Vec3(v.Get("offset"), e.offset);
     e.rate = std::max(Num(v.Get("rate"), e.rate), 0.0f);
     e.burst = std::max(Num(v.Get("burst"), e.burst), 0.0f);
     e.count = uint32_t(std::clamp(Num(v.Get("count"), float(e.count)), 1.0f, float(kMaxParticles)));

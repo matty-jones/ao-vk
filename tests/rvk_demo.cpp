@@ -5272,7 +5272,10 @@ bool g_particleWater = false;            // --particle-water: water the game's w
 // Our own effects (--fx FILE.rvkfx; rvk fx.cpp): a cast played over and over - charged at the caster's hand for 0.5 s,
 // flying to the target in an arc for 0.8 s, its impact for 0.7 s, then 0.6 s of nothing (its particles living out) -
 // the effect announced every frame as the proxy does for the game's Spell1. Shots of the first cast: -charge (0.3 s),
-// -flight (0.9 s), -impact (1.5 s), and the last frame's as --shot.
+// -flight (0.9 s), -impact (1.5 s), and the last frame's as --shot. --fx-still: an effect on a character instead (a
+// sparkle: its one phase, "play", for 2 s at the middle post's top, then 0.6 s of nothing).
+bool g_fxStill = false;
+
 template <typename D>
 void RunFxTest(D& dev, int frames, const std::string& file, const std::string& shot)
 {
@@ -5322,7 +5325,8 @@ void RunFxTest(D& dev, int frames, const std::string& file, const std::string& s
         // The ground, and a post for each of the caster and the target.
         std::vector<VtxGround> v = {{-8, 0, -4, 0xFF2A2E38}, {8, 0, -4, 0xFF2A2E38}, {-8, 0, 6, 0xFF1C2028}, {8, 0, 6, 0xFF1C2028}};
         std::vector<uint16_t> idx = {0, 1, 2, 1, 2, 3};
-        for (float x : {hand[0], chest[0]}) {
+        for (float x : {hand[0], chest[0], 0.0f}) {
+            if (x == 0.0f && !g_fxStill) continue;
             const uint16_t b = uint16_t(v.size());
             v.push_back({x - 0.25f, 0.0f, 0.0f, 0xFF505868});
             v.push_back({x + 0.25f, 0.0f, 0.0f, 0xFF505868});
@@ -5335,7 +5339,15 @@ void RunFxTest(D& dev, int frames, const std::string& file, const std::string& s
         // The cast: where its head is, and which phase it is in.
         const float t = std::fmod(float(frame) * 0.016f, 2.6f);
         const uint64_t key = uint64_t(float(frame) * 0.016f / 2.6f) + 1;
-        if (t < 2.0f) {
+        if (t < 2.0f && g_fxStill) {
+            Device::FxAnchors a;
+            const float at[3] = {0.0f, 1.0f, 0.0f};
+            std::memcpy(a.head, at, sizeof(at));
+            std::memcpy(a.source, at, sizeof(at));
+            std::memcpy(a.target, at, sizeof(at));
+            a.phase = rvk::fx::kFlight;
+            dev.FxInstance(key, 1, a);
+        } else if (t < 2.0f) {
             Device::FxAnchors a;
             std::memcpy(a.source, hand, sizeof(hand));
             std::memcpy(a.target, chest, sizeof(chest));
@@ -5951,6 +5963,7 @@ int main(int argc, char** argv)
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--particle-test") particleTest = true;
         else if (a == "--fx" && i + 1 < argc) { fxFile = argv[++i]; hdr = true; }
+        else if (a == "--fx-still") g_fxStill = true;
         else if (a == "--particles-off") particlesOff = true;
         else if (a == "--particle-end" && i + 1 < argc) particleEnd = std::atoi(argv[++i]);
         else if (a == "--particle-effects" && i + 1 < argc) particleEffects = std::atoi(argv[++i]);

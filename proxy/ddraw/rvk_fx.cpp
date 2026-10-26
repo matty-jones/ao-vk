@@ -480,6 +480,36 @@ void Play(int templateId)
 
 }  // namespace
 
+// A sparkle (_GfxControlStars_t), after the game's update: ours in its place if one of our effects stands for its
+// template (+0x4) - found by the template rather than at MakeHandle, so the Stars inside a Meta's tree (made by
+// CreateGfxControl, with no handle) are found too. Its points all at its sprites' frame (the batch at +0x40, which
+// follows what it is on); its one phase, "play", while it lives. Replacing it, its sprites switched off after the
+// update. (A nano recharger's burst: 13600.)
+void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const void* frame))
+{
+    if (!stars || !worldMatrix || !g_rvk.device || g_byTemplate.empty() || !FxOn())
+        return;
+    const uint32_t templateId = At<uint32_t>(stars, 4);
+    auto bound = g_byTemplate.find(templateId);
+    if (bound == g_byTemplate.end() || !g_files[bound->second].def || At<uint8_t>(stars, 0x14))
+        return;
+    const EffectFile& f = g_files[bound->second];
+    void* visual = At<void*>(stars, 0x40);
+    if (!visual)
+        return;
+    if (f.def->replace && g_disableRendering)
+        g_disableRendering(visual, nullptr, 1);
+    const float* m = worldMatrix(visual);
+    if (!m)
+        return;
+    rvk::Device::FxAnchors a;
+    std::memcpy(a.head, m + 12, 12);
+    std::memcpy(a.source, m + 12, 12);
+    std::memcpy(a.target, m + 12, 12);
+    a.phase = rvk::fx::kFlight;
+    g_rvk.device->FxInstance(uint64_t(reinterpret_cast<uintptr_t>(stars)) ^ (uint64_t(templateId) << 32), f.id, a);
+}
+
 void FxPlay(int templateId)
 {
     g_playRequest.store(templateId, std::memory_order_relaxed);

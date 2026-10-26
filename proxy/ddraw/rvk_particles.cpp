@@ -104,6 +104,7 @@ bool Chosen(uint32_t id)
 uint32_t __fastcall StarsUpdate(void* self, void* /*edx*/)
 {
     uint32_t r = g_update(self);
+    FxStarsUpdate(self, g_worldMatrix);           // our own effects in its place (rvk_fx.cpp)
     const void* visual = At<const void*>(self, kStarsVisual);
     if (visual && Chosen(At<uint32_t>(self, kControlTemplate)))
         g_chosen[visual] = g_frame;

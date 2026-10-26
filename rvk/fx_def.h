@@ -4,7 +4,8 @@
 // An effect stands for one or more of the game's effect templates (gfxtweak.bin ids) and replaces them or plays with
 // them. It is a list of emitters. An emitter sits at one of the effect's points - its head (a projectile's, where it
 // flies), its source (the caster's hands), its target, or along the path from source to head - and emits during some of
-// its phases: charging (before a projectile leaves), flying, the impact. Each particle lives a while, moves under gravity,
+// its phases: charging (before a projectile leaves), flying, the impact. An effect that isn't cast - a sparkle on a
+// character - has one phase while it lives: "play" (the flight's, its points all at the effect's place). Each particle lives a while, moves under gravity,
 // drag, a curl-noise flow, a swirl and a pull back to its emitter, and changes size and colour over its life.
 #pragma once
 
@@ -32,6 +33,7 @@ struct Emitter {
     uint32_t during = kAllPhases;                // PhaseBits
     uint32_t shape = kSphere;
     float radius = 0.05f;                        // the shape's (world units)
+    float offset[3] = {0.0f, 0.0f, 0.0f};        // from its point (world units; a ring at the feet: y down)
     float rate = 100.0f;                         // particles a second
     float burst = 0.0f;                          // particles at once when one of its phases starts
     uint32_t count = 512;                        // live particles at most (<= kMaxParticles)
