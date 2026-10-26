@@ -5,6 +5,7 @@
 // buffer), Texture (one level of a mip chain; CPU shadow per level, uploaded on Unlock) and Plain
 // (system memory / offscreen plain: CPU only).
 #include "rvk_backend.h"
+#include "rvk_settings.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -64,6 +65,8 @@ namespace {
 int g_gameTextures;                              // texture surfaces (top levels) holding a GPU texture
 std::unordered_set<const RSurface*> g_aliveTextures;   // ... which ones (GameTextureReport)
 uint32_t g_texturesMade, g_texturesFreed;        // since the last report
+uint32_t g_copiesReadBack, g_copiesLost;         // CPU copies wanted again: read back from the GPU, or not possible
+uint32_t g_surfaceFrame;                         // frames presented (DropIdleCopies), for RSurface::touched
 
 void TextureMade(const RSurface* top)
 {
@@ -82,9 +85,17 @@ std::string GameTextureReport()
     std::unordered_map<uint64_t, Seen> byRdb;    // (type << 32 | id)
     std::map<std::pair<uint32_t, uint32_t>, uint32_t> unknownSizes;
     uint32_t identified = 0, unknown = 0;
-    uint64_t cpuBytes = 0;
+    uint64_t cpuBytes = 0, goneBytes = 0;
+    uint32_t keepers = 0, goneLevels = 0;
     for (const RSurface* s : g_aliveTextures) {
-        for (const RSurface* l = s; l; l = l->nextLevel) cpuBytes += l->shadow.capacity();
+        keepers += s->keepShadow;
+        for (const RSurface* l = s; l; l = l->nextLevel) {
+            cpuBytes += l->shadow.capacity();
+            if (l->shadowGone) {
+                goneBytes += uint64_t(l->Pitch()) * rvk::FormatRows(l->format, l->desc.dwHeight);
+                ++goneLevels;
+            }
+        }
         if (s->rdbId) {
             ++identified;
             Seen& seen = byRdb[(uint64_t(s->rdbType) << 32) | s->rdbId];
@@ -98,8 +109,10 @@ std::string GameTextureReport()
     }
     char buf[256];
     std::snprintf(buf, sizeof(buf), "game textures: %d alive (%u made, %u freed in the last 600 frames), their CPU copies "
-                  "%.0f MB; %u of a known RDB texture, %zu different", g_gameTextures, g_texturesMade, g_texturesFreed,
-                  double(cpuBytes) / 1048576.0, identified, byRdb.size());
+                  "%.1f MB (%.1f MB more, %u levels, given up once on the GPU; %u read back, %u not possible; %u textures "
+                  "keep theirs); %u of a known RDB texture, %zu different", g_gameTextures, g_texturesMade, g_texturesFreed,
+                  double(cpuBytes) / 1048576.0, double(goneBytes) / 1048576.0, goneLevels, g_copiesReadBack, g_copiesLost, keepers,
+                  identified, byRdb.size());
     std::string out = buf;
     // The RDB textures held more than once (one surface each is the game's way: more is a texture made again while
     // the last is still held).
@@ -129,7 +142,7 @@ std::string GameTextureReport()
                       sizes[i].first.second, sizes[i].second);
         out += buf;
     }
-    g_texturesMade = g_texturesFreed = 0;
+    g_texturesMade = g_texturesFreed = g_copiesReadBack = g_copiesLost = 0;
     return out;
 }
 
@@ -284,7 +297,26 @@ uint32_t RSurface::Pitch() const
 
 void RSurface::EnsureShadow()
 {
+    touched = g_surfaceFrame;
     size_t size = size_t(Pitch()) * rvk::FormatRows(format, desc.dwHeight);
+    if (shadowGone) {
+        // Wanted again (a Lock, a Blt to or from it): read back from the GPU - what the game wrote, byte for byte -
+        // and from now on the texture keeps its copies (one that is locked again is likely locked often).
+        shadowGone = false;
+        top->keepShadow = true;
+        shadow.assign(size, 0);
+        rvk::ThreadedDevice* dev = g_rvk.device;
+        if (dev && top->texture && dev->ReadTextureLevel(top->texture, level, shadow.data(), size)) {
+            ++g_copiesReadBack;
+        } else {
+            static int logged;
+            if (logged++ < 5)
+                RvkLog("textures: a %ux%u texture's level %u could not be read back for the game (its copy given up)",
+                       desc.dwWidth, desc.dwHeight, level);
+            ++g_copiesLost;
+        }
+        return;
+    }
     if (shadow.size() != size)
         shadow.assign(size, 0);
 }
@@ -394,6 +426,27 @@ void RSurface::Upload()
         dev->UpdateTexture(t->texture, level, 0, 0, w, h, argb.data(), w * 4);
     } else {
         dev->UpdateTexture(t->texture, level, 0, 0, w, h, shadow.data(), Pitch());
+    }
+    touched = g_surfaceFrame;
+}
+
+// Once a second (Present): the CPU copies of texture levels the GPU has whole and nobody touched for two seconds are
+// given up. Each texture's copy took the game's 32-bit address space - ~550 MB with a few zones' textures, 1.9 GB in
+// a player's long session, which ran out of it. Not at once: while loading, the game locks a texture again (5 of a
+// character's 9 in the harness). Kept: where the game wanted it again after all (keepShadow, from a read-back), levels
+// converted on upload (24-bit, palettized: a new palette converts from the copy, the ground reads it), RVK_TexKeepCpu.
+void RSurface::DropIdleCopies()
+{
+    if (++g_surfaceFrame % 60 != 0 || rvk_settings::Get("RVK_TexKeepCpu") != 0.0f)
+        return;
+    for (const RSurface* top : g_aliveTextures) {
+        if (top->keepShadow) continue;
+        for (RSurface* l = const_cast<RSurface*>(top); l; l = l->nextLevel)
+            if (!l->shadow.empty() && l->gpuWhole && !l->dirty && !l->m_locked && !l->convert24 && !l->palettized &&
+                g_surfaceFrame - l->touched > 120) {
+                std::vector<uint8_t>().swap(l->shadow);
+                l->shadowGone = true;
+            }
     }
 }
 

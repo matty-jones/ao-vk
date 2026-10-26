@@ -1568,24 +1568,30 @@ void Device::EnsureRingSpace(VkDeviceSize bytes)
         if (wasRendering)
             BeginRenderingOn(m_target);
     } else if (f.uploadsRecorded) {
-        FinishSkinUploads(f.upload);
-        vkEndCommandBuffer(f.upload);
-        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        si.commandBufferCount = 1;
-        si.pCommandBuffers = &f.upload;
-        f.serial = ++m_submitted;
-        // Between frames the slot's fence is signalled (UploadCommands waited on it); a fence must be
-        // unsignalled to be submitted, or waits return early while the GPU still runs the commands.
-        vkResetFences(m_device, 1, &f.fence);
-        vkQueueSubmit(m_queue, 1, &si, f.fence);
-        WaitFrame(f, "GPU frame work");
-        // Leave the fence signalled: BeginFrame waits on it before using this slot.
-        f.uploadsRecorded = false;
+        SubmitUploadsBetweenFrames(f);
     } else {
         WaitFrame(f, "GPU frame work");
     }
     f.ringOffset = 0;
     ++m_ringGeneration;
+}
+
+// Between frames: the uploads recorded so far run now, and are waited for.
+void Device::SubmitUploadsBetweenFrames(Frame& f)
+{
+    FinishSkinUploads(f.upload);
+    vkEndCommandBuffer(f.upload);
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &f.upload;
+    f.serial = ++m_submitted;
+    // Between frames the slot's fence is signalled (UploadCommands waited on it); a fence must be
+    // unsignalled to be submitted, or waits return early while the GPU still runs the commands.
+    vkResetFences(m_device, 1, &f.fence);
+    vkQueueSubmit(m_queue, 1, &si, f.fence);
+    WaitFrame(f, "GPU frame work");
+    // Leave the fence signalled: BeginFrame waits on it before using this slot.
+    f.uploadsRecorded = false;
 }
 
 void Device::WantRing(VkDeviceSize bytes)
@@ -2320,6 +2326,46 @@ bool Device::ReadPixels(Texture* target, void* out)
         vkFreeCommandBuffers(m_device, m_pool, 1, &cmd);
     }
     std::memcpy(out, info.pMappedData, size_t(bi.size));
+    vmaDestroyBuffer(m_allocator, buffer, allocation);
+    return true;
+}
+
+bool Device::ReadTextureLevel(Texture* t, uint32_t level, void* out, size_t bytes)
+{
+    if (!t || !t->m_image || t->m_renderTarget || level >= t->m_levels || t->m_layout == VK_IMAGE_LAYOUT_UNDEFINED)
+        return false;
+    const uint32_t w = std::max(1u, t->m_width >> level), h = std::max(1u, t->m_height >> level);
+    const VkDeviceSize size = VkDeviceSize(FormatRowBytes(t->m_format, w)) * FormatRows(t->m_format, h);
+    if (size != bytes)
+        return false;
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = size;
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VmaAllocationCreateInfo ac{};
+    ac.usage = VMA_MEMORY_USAGE_AUTO;
+    ac.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    VkBuffer buffer;
+    VmaAllocation allocation;
+    VmaAllocationInfo info;
+    if (vmaCreateBuffer(m_allocator, &bi, &ac, &buffer, &allocation, &info) != VK_SUCCESS)
+        return false;
+    // In the upload commands, after the uploads recorded so far (the level's last one among them), then run.
+    VkCommandBuffer cmd = UploadCommands();
+    Transition(cmd, t, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+    region.imageExtent = {w, h, 1};
+    vkCmdCopyImageToBuffer(cmd, t->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
+    Transition(cmd, t, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (m_inFrame) {
+        const bool wasRendering = m_rendering;
+        SubmitAndWait();                         // (the uploads first)
+        if (wasRendering)
+            BeginRenderingOn(m_target);
+    } else {
+        SubmitUploadsBetweenFrames(m_frames[m_frameIndex]);
+    }
+    std::memcpy(out, info.pMappedData, size_t(size));
     vmaDestroyBuffer(m_allocator, buffer, allocation);
     return true;
 }

@@ -289,6 +289,7 @@ void RvkState::Present()
     rnative::zone::Install();      // the teleport and loading screen, logged (docs/zone-handover-plan.md)
     Frame();                  // a present without any rendering still shows a frame
     device->EndFrame();
+    RSurface::DropIdleCopies();    // (once a second: idle textures' CPU copies, the game's address space)
     rnative::zone::Frame(device->FramesWithout3D());
     if (const uint32_t zone = rnative::zone::TakeSignals())
         device->ZoneSignal((zone & rnative::zone::kTeleport ? rvk::kZoneTeleport : 0u) |

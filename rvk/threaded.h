@@ -52,6 +52,7 @@ public:
     void EndFrame();
     bool InFrame() const { return m_inFrame; }
     bool ReadPixels(Texture* target, void* out);
+    bool ReadTextureLevel(Texture* texture, uint32_t level, void* out, size_t bytes);   // (drains the queue first)
     void RequestScreenshot(const std::string& bmpPath);
     void RequestFrameDump(const std::string& path, int frames = 1);
 

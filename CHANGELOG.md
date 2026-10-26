@@ -117,6 +117,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Long sessions and many zone changes no longer run the game out of memory and crash it. The game keeps every zone's
+  textures, and ao-vk kept a second copy of each in the game's memory as well (over half a gigabyte after a few
+  zones, nearly two in a long session; the game is a 32-bit program and has four at most). A texture's copy is now
+  dropped once it is on the graphics card. `RVK_TexKeepCpu` (randy-vk.ini) keeps them as before.
 - With frame generation on (`RVK_FrameGen`), the game could freeze for good on a loading screen when anything drawn
   over the picture appeared or went away there: switching on the performance readout during a zone change or at
   character select did it every time, and the interface coming or going during a load could too.

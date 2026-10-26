@@ -239,6 +239,10 @@ public:
     RSurface* top = nullptr;                       // level 0 (this for level 0)
     RSurface* nextLevel = nullptr;                 // owned by level 0
     std::vector<uint8_t> shadow;                   // CPU copy of this level (textures, plain surfaces)
+    bool shadowGone = false;                       // textures: given up once the GPU had the level whole (read back
+                                                   // from it when wanted again: EnsureShadow)
+    bool keepShadow = false;                       // level 0: the texture keeps its copies (it was locked again)
+    uint32_t touched = 0;                          // the frame its copy was last used (written, locked, uploaded)
     bool dirty = false;                            // shadow newer than the GPU copy
     bool anyDirty = false;                         // level 0 only: some level of the chain is dirty
     bool gpuWhole = false;                         // this level went to the GPU whole since the texture was made
@@ -255,6 +259,7 @@ public:
     void UploadRows(uint32_t y0, uint32_t y1);     // only rows [y0, y1) changed (a Lock's rectangle): just them
     uint32_t Pitch() const;
     void EnsureShadow();
+    static void DropIdleCopies();                  // each frame (Present): idle textures' CPU copies given up
 
 protected:
     void* Cast(REFIID iid) override { return iid == IID_IDirectDrawSurface7 || iid == IID_RvkSurface ? this : nullptr; }
