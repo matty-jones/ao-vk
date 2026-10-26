@@ -624,24 +624,24 @@ bool DirectBlobShadowsReplaced()
     return dev && dev->BlobShadowsReplaced();
 }
 
-// The interface layer (RVK_UiRate, docs/rvk.md): redraw the interface when its time has come (or the renderer has
-// none to show), else let the renderer show the last one. Off (0): drawn every frame, straight into the frame.
-double g_uiPeriodMs;                                // 0: off
+// Always capture the interface; RVK_UiRate only decides when its cached image is refreshed.
+double g_uiPeriodMs;                                // 0: redraw every frame
 int64_t g_uiLastRedraw;
 bool g_uiOpen;
 
 bool DirectInterfaceBegin()
 {
+    g_rvk.Frame();
     FlushOverlayText();                           // the world's floating text first, over the finished picture
     rvk::ThreadedDevice* dev = g_rvk.device;
-    if (!dev || g_uiPeriodMs <= 0.0 || g_uiOpen)
+    if (!dev || g_uiOpen)
         return true;
     LARGE_INTEGER now, frequency;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&frequency);
     const double sinceMs = double(now.QuadPart - g_uiLastRedraw) * 1000.0 / double(frequency.QuadPart);
     // (A little early rather than a whole frame late: redraws at the rate even when frames don't divide it evenly.)
-    const bool redraw = !dev->InterfaceLayerReady() || sinceMs >= g_uiPeriodMs * 0.95;
+    const bool redraw = g_uiPeriodMs <= 0.0 || !dev->InterfaceLayerReady() || sinceMs >= g_uiPeriodMs * 0.95;
     if (redraw)
         g_uiLastRedraw = now.QuadPart;
     g_uiOpen = true;
@@ -682,7 +682,6 @@ void SetInterfaceRate(float hz)
     g_uiPeriodMs = hz > 0.0f ? 1000.0 / double(hz) : 0.0;
 }
 
-bool InterfaceRateOn() { return g_uiPeriodMs > 0.0; }
 
 HRESULT RDevice::DoGetTexture(DWORD stage, LPDIRECTDRAWSURFACE7* out)
 {

@@ -5,6 +5,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+### Fixed
+- The interface stays in its own layer with `RVK_UiRate` 0 (every frame) and Native Direct or Device off,
+  including with frame generation enabled.
+
 ## 0.7.0 - 2026-10-20
 
 ### New

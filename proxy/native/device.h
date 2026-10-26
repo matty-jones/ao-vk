@@ -45,7 +45,7 @@ void SetDirect(const Direct* direct);       // null: none (the backend's device 
 // shadows' per-frame work (cat_skin.cpp: its callback over skinned positions) can be skipped.
 bool BlobShadowsReplaced();
 
-// The direct channel's interfaceBegin / interfaceEnd (true / nothing without it).
+// GUI boundaries use the backend callbacks even with Native Direct or Device off.
 bool InterfaceBegin();
 void InterfaceEnd();
 

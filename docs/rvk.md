@@ -59,9 +59,10 @@
   pattern back into the soft edge. The pre-pass uses the same noise, so the crown is lit about once per pixel, not
   once per layer of edges. Demo forest, 1440p: frame 3.59 ms with every plant two-pass, 3.38 past 30, 3.18 past 15,
   2.96 with all of them dithered (3.21 with `RVK_FolEdges` off).
-- **Interface refresh rate** (setting `RVK_UiRate`, General; 0 = every frame, the default): GUI.dll's drawing of the
-  interface costs the game thread ~1.5 ms a frame (its view tree, and ~1,000 draws). With a rate, the interface is
-  drawn only that many times a second into an image of its own, which is put over every frame. `rnative::gui`
+- **Interface refresh rate** (setting `RVK_UiRate`, General; 0 = every frame; default 60): GUI.dll's drawing of the
+  interface costs the game thread ~1.5 ms a frame (its view tree, and ~1,000 draws). The interface is always
+  captured into an image of its own; the rate only limits how often that image is redrawn. At 0 it is redrawn every
+  frame. `rnative::gui`
   (proxy/native/gui.cpp) wraps GUI.dll's `WindowController_c::Render` - the interface's per-frame work (what is under
   the mouse, the pointer's shape, tooltips) runs every frame - and makes its top-level `View::_CallRender` calls, the
   drawing, return at once on frames that don't redraw (the backend decides: `RVK_UiRate`, or the renderer has no
@@ -69,7 +70,7 @@
   redrawn interface into `m_uiLayer` (cleared; every draw blends, its alpha accumulating coverage, so the layer is
   premultiplied) and blends the layer over the main target (ONE, INV_SRC_ALPHA) at the end of `Render`. Exact for
   alpha-blended and additive interface draws; an unblended one keeps its texture's alpha as coverage, one multiplying
-  the frame is approximated. Hooks are only made with a rate set; the two entries' code is checked (MSVC's exception
+  the frame is approximated. Hooks are installed independently of the rate; the two entries' code is checked (MSVC's exception
   prologue calling GUI.dll's `_EH_prolog`), so another GUI.dll build is left alone (logged).
 - **Native ground** (setting `RVK_GroundOn`, Terrain; on; `rvk/native_ground.cpp`, `proxy/ddraw/rvk_ground.cpp`,
   docs/native-ground-plan.md, docs/ground-format.md): rvk draws the playfield's ground itself, from the game's own

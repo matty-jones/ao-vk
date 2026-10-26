@@ -61,7 +61,6 @@ void* PatchImport(HMODULE module, const char* dll, const char* function, void* h
 bool RvkBackend();                                // RANDYVK_DDRAW=rvk installed (com_trace.cpp)
 void CallLogFrame(uint64_t presented);            // each present (rvk_device.cpp: RANDYVK_CALLLOG)
 void SetInterfaceRate(float hz);                  // RVK_UiRate: interface redraws a second (0 = every frame)
-bool InterfaceRateOn();                           // ... not every frame (GUI.dll's drawing hooked)
 // Native deferred skinning (proxy/native/cat_skin.cpp): gives a vertex buffer its skin job; false if it can't take it.
 bool AttachSkin(void* d3dVertexBuffer, std::shared_ptr<rvk::skin::Job> job);
 }  // namespace rvkproxy
