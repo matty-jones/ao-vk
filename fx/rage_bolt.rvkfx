@@ -1,0 +1,76 @@
+{
+  // The cast of Lesser Controlled Rage and four others (Spell1 46116: Augment / Diminish Intelligence, Ice Flechette,
+  // ...): a burning bolt. ao-vk's own effect (docs/fx-plan.md); copy into <client>\randy-vk\fx.
+  "format": 1,
+  "name": "Rage bolt",
+  "templates": [46116],
+  "mode": "replace",
+  "emitters": [
+    {
+      "name": "embers in", "at": "source", "during": ["charge"],
+      "shape": "shell", "radius": 0.5, "rate": 180, "count": 256,
+      "life": [0.25, 0.45], "speed": [0.0, 0.1], "pull": 9.0, "drag": 2.0, "curl": 0.6, "curlScale": 0.3,
+      "size": [[0, 0.02], [0.6, 0.05], [1, 0.0]],
+      "colour": [[0, "#FF6020", 0.0], [0.4, "#FFA040", 1.0], [1, "#FFE0A0", 1.0]],
+      "intensity": 3.0, "sprite": "dot", "blend": "add"
+    },
+    {
+      "name": "fist", "at": "source", "during": ["charge"],
+      "shape": "point", "rate": 40, "count": 32,
+      "life": [0.12, 0.2], "speed": [0, 0],
+      "size": [[0, 0.15], [1, 0.45]],
+      "colour": [[0, "#FFD080", 0.9], [1, "#FF3010", 0.0]],
+      "intensity": 4.0, "sprite": "flare", "blend": "add"
+    },
+    {
+      "name": "core", "at": "head", "during": ["flight"],
+      "shape": "point", "rate": 90, "count": 64,
+      "life": [0.08, 0.14], "speed": [0, 0],
+      "size": [[0, 0.5], [1, 0.3]],
+      "colour": [[0, "#FFF0C0", 1.0], [1, "#FF6020", 0.0]],
+      "intensity": 5.0, "sprite": "flare", "blend": "add"
+    },
+    {
+      "name": "flames", "at": "head", "during": ["flight"],
+      "shape": "sphere", "radius": 0.08, "rate": 360, "count": 512,
+      "life": [0.2, 0.45], "speed": [0.1, 0.4], "gravity": [0, 1.5, 0], "drag": 2.0, "curl": 1.0, "curlScale": 0.3,
+      "size": [[0, 0.14], [1, 0.02]],
+      "colour": [[0, "#FFE0A0", 0.9], [0.3, "#FF8030", 0.7], [1, "#C02008", 0.0]],
+      "intensity": 3.0, "sprite": "smoke", "blend": "add"
+    },
+    {
+      "name": "smoke", "at": "head", "during": ["flight"],
+      "shape": "sphere", "radius": 0.06, "rate": 80, "count": 256,
+      "life": [0.6, 1.1], "speed": [0.05, 0.2], "gravity": [0, 0.5, 0], "drag": 1.5, "curl": 0.5, "curlScale": 0.5,
+      "size": [[0, 0.1], [1, 0.45]],
+      "colour": [[0, "#403028", 0.0], [0.2, "#302420", 0.45], [1, "#201814", 0.0]],
+      "intensity": 1.0, "sprite": "smoke", "blend": "alpha"
+    },
+    {
+      "name": "sparks", "at": "head", "during": ["flight"],
+      "shape": "point", "rate": 140, "count": 256,
+      "life": [0.15, 0.4], "speed": [1.0, 3.0], "forward": true, "direction": [0, 0, -1], "spread": 50,
+      "gravity": [0, -4, 0], "drag": 1.0,
+      "size": [[0, 0.04], [1, 0.01]],
+      "colour": [[0, "#FFF0C0", 1.0], [1, "#FF4010", 0.0]],
+      "intensity": 4.0, "sprite": "spark", "blend": "add", "stretch": 0.05
+    },
+    {
+      "name": "burst", "at": "target", "during": ["impact"],
+      "shape": "sphere", "radius": 0.15, "rate": 0, "burst": 160, "count": 256,
+      "life": [0.3, 0.8], "speed": [1.5, 4.5], "spread": 180,
+      "gravity": [0, -5, 0], "drag": 1.2,
+      "size": [[0, 0.05], [1, 0.01]],
+      "colour": [[0, "#FFF0C0", 1.0], [0.3, "#FFA040", 0.9], [1, "#C02008", 0.0]],
+      "intensity": 4.0, "sprite": "spark", "blend": "add", "stretch": 0.04
+    },
+    {
+      "name": "shock", "at": "target", "during": ["impact"],
+      "shape": "point", "rate": 0, "burst": 1, "count": 4,
+      "life": [0.4, 0.4], "speed": [0, 0],
+      "size": [[0, 0.2], [1, 2.2]],
+      "colour": [[0, "#FFD8A0", 0.9], [1, "#FF4010", 0.0]],
+      "intensity": 2.5, "sprite": "ring", "blend": "add"
+    }
+  ]
+}

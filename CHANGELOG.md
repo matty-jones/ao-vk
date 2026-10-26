@@ -10,6 +10,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   effects, drawn with ao-vk's particles - glowing, trailing, sparking - in place of the game's sprites. The first one,
   `nano_bolt.rvkfx`, replaces the bolt most nanos cast (Change Form, the Calia forms and some 700 others): light
   gathering at your hand, a bright bolt with a trail of motes and sparks, and a burst with a shock ring on the target.
+  `rage_bolt.rvkfx` does the same in fire for Lesser Controlled Rage's cast (and four other nanos').
   Edited files show at once; the console's `fx reload` reads them again. `RVK_Fx` (Particles) switches them off.
 - Shops' insides can be seen through their open doors from the street, in 3D, instead of a black doorway. A shop
   shows once you have been in one of its kind: going in records the room, and walking through a door remembers where
