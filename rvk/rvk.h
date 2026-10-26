@@ -3363,6 +3363,7 @@ private:
         std::string path;
         float apex[3] = {}, dir[3] = {};
         double lastNear = 0.0;
+        float nearDistance = 0.0f;               // ... the doorway's distance from the camera then
         std::unordered_map<uint64_t, std::vector<std::array<float, 3>>> placesOf;   // a prop's places, by its geometry
         std::vector<std::array<float, 3>> characters;   // where characters stood (their attachments are dropped)
         double lastNew = 0.0, lastSave = 0.0;

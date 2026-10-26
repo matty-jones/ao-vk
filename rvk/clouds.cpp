@@ -317,11 +317,11 @@ bool Device::CreateCloudResources(std::string* error)
             VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
             ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
             VkPipelineDepthStencilStateCreateInfo dss{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-            // (No depth test: the sky is behind everything drawn after it. farOnly: drawn at the far plane where the
-            // depth is still there - a street portal's opening, not the room around it.)
+            // (No depth test: the sky is behind everything drawn after it. farOnly: drawn at the far plane, only where
+            // the depth is still the far plane - a street portal's opening, not the room around it: 1 <= the depth.)
             if (farOnly) {
                 dss.depthTestEnable = VK_TRUE;
-                dss.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+                dss.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
             }
             VkPipelineColorBlendAttachmentState att[5] = {};
             for (auto& a : att) {

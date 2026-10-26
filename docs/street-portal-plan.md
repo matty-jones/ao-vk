@@ -128,7 +128,13 @@ ground, the pieces lit by the current sun, clip and mark. Settings: `RVK_StreetV
   3. the street's ground (phase 2), then its pieces (`PortalReplay`), kept from 5 cm out of the entrance's plane.
 - **Lit as recorded:** the hour of the capture, the rig off indoors.
 - **Check:** `rvk_demo --portal-capture-test` walks street, shop, street, shop: the last shot (-inside) shows the sky
-  and the street's box through the entrance.
+  and the street's box through the entrance, part of it behind a pillar in the room.
+- **Fixed in game (2026-10-25):** the sky's depth test passed everywhere in the opening's screen box (its far plane
+  is 1: "greater or equal" is always true), so the sky covered the room's walls in front of the opening (a black
+  rectangle through a wall: the sky below the horizon) and, with the camera in the door looking in (the box the whole
+  screen), the whole room. Now it is drawn only where the depth is still the far plane, and the box is the rectangle
+  cut at the camera's near limit (nothing when it is all behind the camera). Two walked-through doorways in reach
+  were recorded by turns, each capture restarted every frame: the one recorded is kept unless the other is 3 nearer.
 
 ### Phase 4: polish
 

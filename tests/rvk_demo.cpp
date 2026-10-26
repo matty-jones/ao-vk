@@ -4442,6 +4442,9 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
     AddCube(room, roomIdx, 0.0f, 3.0f, 8.0f, 8.0f);   // (the room: seen from inside)
     for (int i = 0; i < 4; ++i)
         AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
+    std::vector<VtxMesh> pillar;
+    std::vector<uint16_t> pillarIdx;
+    AddCube(pillar, pillarIdx, 0.7f, -3.5f, 4.0f, 0.7f);
     std::vector<VtxMesh> streetBoxes;
     std::vector<uint16_t> streetBoxIdx;
     for (int i = 0; i < 3; ++i)
@@ -4641,6 +4644,10 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
         dev.SetTexture(0, box);
         dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, props.data(), uint32_t(props.size()), propIdx.data(),
                                  uint32_t(propIdx.size()));
+        if (lookingBack) {                       // a pillar between the camera and the entrance: the street behind it hidden
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, pillar.data(), uint32_t(pillar.size()), pillarIdx.data(),
+                                     uint32_t(pillarIdx.size()));
+        }
         dev.SetDrawVisual(0, nullptr);
         dev.LightEnable(0, false);
         dev.EndFrame();

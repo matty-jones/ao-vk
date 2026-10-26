@@ -654,23 +654,40 @@ void Device::DrawStreetPortal()
     const d3d::Vector edgeV{0.0f, height, 0.0f};
     const d3d::Matrix viewProj = MulMatrix(m_aoView, m_aoProj);
     const float sw = float(m_scene->m_width), sh = float(m_scene->m_height);
+    // Its box on the screen: the rectangle (in clip space, its corners in order round it) cut where it passes behind
+    // the camera, the rest projected. Standing in the door looking into the room, the opening is behind the camera and
+    // nothing is left (taken as the whole screen, the street's passes ran over all of it).
     float x0 = sw, y0 = sh, x1 = 0.0f, y1 = 0.0f;
-    int behind = 0;
+    float corner[4][3];
     for (int k = 0; k < 4; ++k) {
-        const d3d::Vector p{origin.x + (k & 1 ? edgeU.x : 0.0f), origin.y + (k & 2 ? edgeV.y : 0.0f),
-                            origin.z + (k & 1 ? edgeU.z : 0.0f)};
+        const bool right = k == 1 || k == 2, top = k >= 2;
+        const d3d::Vector p{origin.x + (right ? edgeU.x : 0.0f), origin.y + (top ? edgeV.y : 0.0f),
+                            origin.z + (right ? edgeU.z : 0.0f)};
         const float* m = &viewProj.m[0][0];
-        const float cx = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
-        const float cy = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
-        const float cw = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
-        if (cw <= 0.05f) { ++behind; continue; }
+        corner[k][0] = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
+        corner[k][1] = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
+        corner[k][2] = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
+    }
+    constexpr float kNearW = 0.05f;
+    int kept = 0;
+    auto project = [&](float cx, float cy, float cw) {
         const float px = (cx / cw * 0.5f + 0.5f) * sw, py = (0.5f - cy / cw * 0.5f) * sh;
         x0 = std::min(x0, px); x1 = std::max(x1, px);
         y0 = std::min(y0, py); y1 = std::max(y1, py);
+        ++kept;
+    };
+    for (int k = 0; k < 4; ++k) {
+        const float* a = corner[k];
+        const float* b = corner[(k + 1) & 3];
+        if (a[2] > kNearW)
+            project(a[0], a[1], a[2]);
+        if ((a[2] > kNearW) != (b[2] > kNearW)) {   // (the edge crosses the near limit: where it does)
+            const float t = (kNearW - a[2]) / (b[2] - a[2]);
+            project(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, kNearW);
+        }
     }
-    if (behind == 4)
+    if (!kept)
         return;
-    if (behind) { x0 = 0.0f; y0 = 0.0f; x1 = sw; y1 = sh; }
     x0 = std::clamp(std::floor(x0) - 2.0f, 0.0f, sw);
     y0 = std::clamp(std::floor(y0) - 2.0f, 0.0f, sh);
     x1 = std::clamp(std::ceil(x1) + 2.0f, 0.0f, sw);

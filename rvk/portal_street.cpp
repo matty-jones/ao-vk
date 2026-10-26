@@ -26,6 +26,7 @@ using namespace detail;
 namespace {
 
 constexpr float kNear = 30.0f;             // a doorway this near the camera is recorded from
+constexpr float kSwitchNearer = 3.0f;      // ... another one recorded instead when it is this much nearer
 constexpr float kRange = 100.0f, kCos = 0.5f;   // what it sees: this far, inside 60 degrees of its facing
 constexpr double kQuiet = 1.5, kSaveEvery = 5.0, kGone = 3.0;
 constexpr size_t kMostPieces = 8192;
@@ -48,17 +49,24 @@ void Device::StreetCaptureNear(const PortalLink& link, const BlackQuad& q, const
     std::snprintf(name, sizeof(name), "street-%u-%ld-%ld.rvkp", link.outdoor, std::lround(link.centre[0]),
                   std::lround(link.centre[2]));
     const std::string path = PortalDir() + name;
+    const double now = Seconds();
     if (m_sc.on && m_sc.path == path) {
-        m_sc.lastNear = Seconds();
+        m_sc.lastNear = now;
+        m_sc.nearDistance = distance;
         return;
     }
+    // Another walked-through doorway in reach while one is recorded: kept to the one being recorded unless this one is
+    // clearly the nearer (two shop doors 35 apart in Borealis: recorded by turns, each restarted every frame).
+    if (m_sc.on && now - m_sc.lastNear < 1.0 && distance > m_sc.nearDistance - kSwitchNearer)
+        return;
     if (m_sc.on && (m_sc.unsaved || !m_sc.pending.empty()))
         m_scLeaving = std::move(m_sc);           // (another doorway's: saved at the next frame's start)
     m_sc = PortalCaptureState{};
     m_sc.on = true;
     m_sc.street = true;
     m_sc.path = path;
-    m_sc.lastNear = Seconds();
+    m_sc.lastNear = now;
+    m_sc.nearDistance = distance;
     std::memcpy(m_sc.apex, q.centre, sizeof(m_sc.apex));
     m_sc.dir[0] = out[0];
     m_sc.dir[2] = out[2];
