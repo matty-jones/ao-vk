@@ -5,6 +5,11 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+### New
+- `RVK_WinScale` and `RVK_HudScale` (General, 100% by default) resize windows and HUD independently, with matching
+  layout, clipping and mouse input. World labels and floating text, the cursor, and the developer console/readout
+  retain their sizes. Changes refresh cached UI immediately.
+
 ### Diagnostics
 - `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
 

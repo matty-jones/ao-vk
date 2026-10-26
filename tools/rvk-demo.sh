@@ -12,7 +12,7 @@ cd "$out" || exit 1
 WINEPREFIX=${WINEPREFIX:-$HOME/.wine-prk} WINEDEBUG=-all \
 VK_LAYER_PATH="$sdk/share/vulkan/explicit_layer.d" LD_LIBRARY_PATH="$sdk/lib" \
 VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
-    timeout 120 wine "$exe" --frames 3 --shot rvk_demo.bmp "$@" 2>&1 |
+    timeout "${RVK_DEMO_TIMEOUT:-120}" wine "$exe" --frames 3 --shot rvk_demo.bmp "$@" 2>&1 |
     grep -v -iE 'pci id|EGL' |
     # winevulkan itself enables VK_EXT_external_memory_dma_buf without its dependency; not ours.
     awk 'BEGIN {RS = ""; ORS = "\n\n"} !/external_memory_dma_buf/' | tee validation.log

@@ -3,6 +3,7 @@
 #include "native/mesh.h"
 #include "native/scene.h"
 #include "native/device.h"
+#include "native/gui.h"
 
 #include <cmath>
 #include <cstdarg>
@@ -641,7 +642,8 @@ bool DirectInterfaceBegin()
     QueryPerformanceFrequency(&frequency);
     const double sinceMs = double(now.QuadPart - g_uiLastRedraw) * 1000.0 / double(frequency.QuadPart);
     // (A little early rather than a whole frame late: redraws at the rate even when frames don't divide it evenly.)
-    const bool redraw = g_uiPeriodMs <= 0.0 || !dev->InterfaceLayerReady() || sinceMs >= g_uiPeriodMs * 0.95;
+    const bool redraw = rnative::gui::TakeScaleRedraw() || g_uiPeriodMs <= 0.0 || !dev->InterfaceLayerReady() ||
+                        sinceMs >= g_uiPeriodMs * 0.95;
     if (redraw)
         g_uiLastRedraw = now.QuadPart;
     g_uiOpen = true;

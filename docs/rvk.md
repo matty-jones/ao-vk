@@ -68,10 +68,14 @@
   drawing, return at once on frames that don't redraw (the backend decides: `RVK_UiRate`, or the renderer has no
   current layer). The renderer (rvk/interface.cpp) ends the scene where the interface's first draw would, draws a
   redrawn interface into `m_uiLayer` (cleared; every draw blends, its alpha accumulating coverage, so the layer is
-  premultiplied) and blends the layer over the main target (ONE, INV_SRC_ALPHA) at the end of `Render`. Exact for
+  premultiplied). Presentation and readback compose it over the processed world (ONE, INV_SRC_ALPHA), with labels
+  below it and the console and cursor above it. The world target stays free of overlays. Exact for
   alpha-blended and additive interface draws; an unblended one keeps its texture's alpha as coverage, one multiplying
   the frame is approximated. Hooks are installed independently of the rate; the two entries' code is checked (MSVC's exception
   prologue calling GUI.dll's `_EH_prolog`), so another GUI.dll build is left alone (logged).
+- **Window and HUD size** (`RVK_WinScale`, `RVK_HudScale`, General; 50–200%, default 100%): independent native
+  GUI coordinate scales, with the same transforms for drawing, clipping and mouse input. World labels, floating
+  text, cursor and developer console/readout keep their sizes. See [implementation and validation](ui-separation-scaling.md).
 - **Native ground** (setting `RVK_GroundOn`, Terrain; on; `rvk/native_ground.cpp`, `proxy/ddraw/rvk_ground.cpp`,
   docs/native-ground-plan.md, docs/ground-format.md): rvk draws the playfield's ground itself, from the game's own
   data, instead of the game's `AnarchyGround_t`. The first time the game tessellates or updates a ground

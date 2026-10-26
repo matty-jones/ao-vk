@@ -16,6 +16,11 @@
 
 namespace rnative::gui {
 
+void InstallScaling(HMODULE gui);
+bool BeginScaleFrame(void* controller);
+void ScaleDrawing(bool drawing);
+void EndScaleFrame();
+
 namespace {
 
 using RenderFn = void(__fastcall*)(void* self, void* edx, void* viewport, uint32_t time);
@@ -24,16 +29,19 @@ using CallRenderFn = void(__fastcall*)(void* view, void* edx, uint32_t order, vo
 RenderFn g_render;
 CallRenderFn g_callRender;
 int g_depth;                                        // _CallRender nesting (it recurses over the view tree)
+bool g_scaleRedraw;
 bool g_skip;                                        // this frame's interface isn't drawn
 
 // WindowController_c::Render (thiscall: this in ecx, two stack arguments).
 void __fastcall RenderHook(void* self, void* edx, void* viewport, uint32_t time)
 {
+    g_scaleRedraw = BeginScaleFrame(self);
     g_skip = !device::InterfaceBegin();
     g_depth = 0;
     g_render(self, edx, viewport, time);
     g_skip = false;
     device::InterfaceEnd();
+    EndScaleFrame();
 }
 
 // View::_CallRender (thiscall, six stack arguments).
@@ -42,9 +50,15 @@ void __fastcall CallRenderHook(void* view, void* edx, uint32_t order, void* view
 {
     if (g_depth == 0 && g_skip)
         return;
+    const bool root = g_depth == 0;
+    if (root) {
+        ScaleDrawing(true);
+        if (g_scaleRedraw) dirty = 1;
+    }
     ++g_depth;
     g_callRender(view, edx, order, viewport, clip, dirty, alpha, color);
     --g_depth;
+    if (root) ScaleDrawing(false);
 }
 
 // Both start with MSVC's exception frame prologue: mov eax, <handler>; call <GUI.dll's _EH_prolog> - checked, so a
@@ -92,6 +106,7 @@ void Install()
         return;
     g_render = reinterpret_cast<RenderFn>(
         HookAt(render, 10, kRel, 1, reinterpret_cast<void*>(&RenderHook), "WindowController_c::Render"));
+    if (g_render) InstallScaling(gui);
     Log("interface: GUI.dll %s", g_render ? "hooked (RVK_UiRate can redraw it less often)" : "not hooked");
 }
 

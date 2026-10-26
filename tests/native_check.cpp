@@ -2,6 +2,9 @@
 // synthetic input and compares the results, then times both. Run under Wine with tools/native-check.sh.
 //
 //   native_check.exe <path to randy31_orig.dll>
+#include "gui_scale_checks.h"
+#include "gui_client_check.h"
+#include "native/device.h"
 #include "native/cat_anim.h"
 #include "native/cat_query.h"
 #include "native/cat_skin.h"
@@ -1621,10 +1624,30 @@ void CheckFormat()
     Check(mism == 0, "format: std::string formatting");
 }
 
+void CheckInterfaceBoundary()
+{
+    static int begins, ends;
+    device::Direct callbacks{};
+    callbacks.interfaceBegin = +[]() { ++begins; return false; };
+    callbacks.interfaceEnd = +[]() { ++ends; };
+    device::SetDirect(&callbacks);
+    Check(!device::InterfaceBegin() && begins == 1, "interface begin with native optimizations uninstalled");
+    device::InterfaceEnd();
+    Check(ends == 1, "interface end with native optimizations uninstalled");
+    device::SetDirect(nullptr);
+    Check(device::InterfaceBegin(), "interface draws without a backend callback");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
 {
+    if (argc > 2 && std::strcmp(argv[1], "--gui-client-check") == 0)
+        return CheckGuiClient(argv[2]);
+    if (argc > 1 && std::strcmp(argv[1], "--gui-check") == 0) {
+        CheckInterfaceBoundary();
+        return CheckGuiScale() || g_failures ? 1 : 0;
+    }
     const char* path = argc > 1 ? argv[1] : "randy31_orig.dll";
     HMODULE orig = LoadLibraryExA(path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (!orig) {

@@ -7,4 +7,8 @@ namespace rnative::gui {
 // Hooks GUI.dll once it is loaded (the first presented frames); later calls do nothing.
 void Install();
 
+// Percent of the game's window and HUD sizes; both default to 100.
+void SetScale(float windows, float hud);
+bool TakeScaleRedraw();
+
 }  // namespace rnative::gui
