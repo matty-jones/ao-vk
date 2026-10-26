@@ -9,7 +9,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - Shops' insides can be seen through their open doors from the street, in 3D, instead of a black doorway. A shop
   shows once you have been in one of its kind: going in records the room, and walking through a door remembers where
   it leads (every Fair Trade of the same building then shows it too, until its own door says otherwise). By day the
-  room is a little dimmer than the street (`RVK_PortalDim`). `RVK_Portals` (General) switches it off. The records stay
+  room is a little dimmer than the street (`RVK_PortalDim`). The room's other doors show in it too (a shop seen
+  before this needs one more visit for them). `RVK_Portals` (General) switches it off. The records stay
   in `randy-vk\portals` in the client folder.
 - And the reverse: from inside a shop, its open door shows the street outside, with the sky behind it. The street
   shows once you have stood at that door outside (the buildings and props in front of it are recorded then).

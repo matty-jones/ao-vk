@@ -128,9 +128,13 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
         if (ids.first != ids.second)
             name = MeshIdName(*ids.first);
     }
+    if (!std::strstr(name, "door") && m_drawVisualName && std::strstr(m_drawVisualName, "door"))
+        name = m_drawVisualName;                 // (rvk_demo's doors: named by their visual - the game's are class names)
     if (std::strstr(name, "door")) {
-        // A door: not kept, but a candidate for the entrance - its bottom centre, and the horizontal axis it is
-        // thinnest along (in its model, turned by its world matrix): the way through it.
+        // A door: a candidate for the entrance - its bottom centre, and the horizontal axis it is thinnest along (in
+        // its model, turned by its world matrix): the way through it. Kept too, marked (portal::kDoorPiece): the room
+        // seen from the street showed its other doorways empty (the user, 2026-10-26); the entrance's is left out
+        // when it is drawn (PortalReplay).
         if (!m_drawMesh || std::strstr(name, "blocker"))
             return;
         const float* mn = m_drawMesh->boundsMin;
@@ -165,11 +169,13 @@ void Device::PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride
                 d.width = std::max(d.width, door.width);
                 d.height = std::max(d.height, door.height);
                 d.base[1] = std::min(d.base[1], door.base[1]);
+                PortalRecordPiece(m_pc, kind, primitive, fvf, stride, vertices, vertexCount, indices, indexCount, true);
                 return;
             }
         }
         if (m_pc.doors.size() < 32)
             m_pc.doors.push_back(door);
+        PortalRecordPiece(m_pc, kind, primitive, fvf, stride, vertices, vertexCount, indices, indexCount, true);
         return;
     }
     PortalRecordPiece(m_pc, kind, primitive, fvf, stride, vertices, vertexCount, indices, indexCount);
@@ -197,7 +203,8 @@ int32_t Device::PortalTextureOf(PortalCaptureState& st, Texture* t)
 // A piece into a capture (a room's, or a street's: portal_street.cpp) - once each, its geometry, place, textures (read
 // back between frames), material, states and lights.
 void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t primitive, uint32_t fvf, uint32_t stride,
-                               const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount)
+                               const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+                               bool door)
 {
     const auto& w = m_world.m;
     const int32_t at[3] = {int32_t(std::lround(w[3][0] * 100.0f)), int32_t(std::lround(w[3][1] * 100.0f)),
@@ -250,7 +257,7 @@ void Device::PortalRecordPiece(PortalCaptureState& st, VisualKind kind, uint32_t
     }
     portal::CapturedPiece p;
     p.key = key;
-    p.kind = uint32_t(kind);
+    p.kind = uint32_t(kind) | (door ? portal::kDoorPiece : 0u);
     p.fvf = fvf;
     p.primitive = primitive;
     p.stride = stride;
@@ -437,15 +444,17 @@ void Device::PortalNoteCharacters(PortalCaptureState& s)
 void Device::PortalCaptureSave(PortalCaptureState& s)
 {
     portal::Capture& c = *s.capture;
-    // The entrance: the door nearest the camera on arrival; into the room is towards the rooms' centre. (A street's
+    // The entrance: the door nearest the camera on arrival, within 6 of it (the room's other doors are recorded too
+    // now: one across the room is not where it was entered); into the room is towards the rooms' centre. (A street's
     // capture has its doorway's from the start: portal_street.cpp.)
-    if (!s.street && !c.entranceKnown && s.arrivalSet && !s.doors.empty() && s.roomPieces) {
-        const PortalDoor* best = nullptr;
-        float bestD = 1e30f;
+    const PortalDoor* best = nullptr;
+    float bestD = 6.0f * 6.0f;
+    if (s.arrivalSet)
         for (const PortalDoor& d : s.doors) {
             const float dx = d.base[0] - s.arrival[0], dz = d.base[2] - s.arrival[2];
             if (dx * dx + dz * dz < bestD) { bestD = dx * dx + dz * dz; best = &d; }
         }
+    if (!s.street && !c.entranceKnown && best && s.roomPieces) {
         float room[3];
         for (int j = 0; j < 3; ++j) room[j] = s.roomCentre[j] / float(s.roomPieces);
         float in[3] = {best->axis[0], 0.0f, best->axis[2]};
@@ -460,8 +469,8 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
             "room (%.3f 0 %.3f), %.2f wide and %.2f tall",
             c.playfield, best->name, double(std::sqrt(bestD)), double(c.entrance[0]), double(c.entrance[1]),
             double(c.entrance[2]), double(in[0]), double(in[2]), double(best->width), double(best->height));
-    } else if (!s.street && !c.entranceKnown && s.arrivalSet && s.doors.empty() && s.roomPieces && s.roomFloor < 1e29f) {
-        // No door named: where the camera arrived, on the rooms' floor, the way it looked.
+    } else if (!s.street && !c.entranceKnown && s.arrivalSet && s.roomPieces && s.roomFloor < 1e29f) {
+        // No door named near it: where the camera arrived, on the rooms' floor, the way it looked.
         float in[3] = {s.arrivalForward[0], 0.0f, s.arrivalForward[2]};
         const float len = std::sqrt(in[0] * in[0] + in[2] * in[2]);
         if (len > 1e-3f) {
@@ -546,7 +555,7 @@ void Device::PortalCaptureSave(PortalCaptureState& s)
                     mx[j] = std::max(mx[j], x);
                 }
             }
-            if (p.kind == uint32_t(VisualKind::Room) || mx[0] - mn[0] > 1.0f || mx[1] - mn[1] > 1.0f || mx[2] - mn[2] > 1.0f)
+            if (p.kind == uint32_t(VisualKind::Room) || (p.kind & portal::kDoorPiece) || mx[0] - mn[0] > 1.0f || mx[1] - mn[1] > 1.0f || mx[2] - mn[2] > 1.0f)
                 return false;
             const float cx = 0.5f * (mn[0] + mx[0]), cy = 0.5f * (mn[1] + mx[1]), cz = 0.5f * (mn[2] + mx[2]);
             for (const auto& ch : s.characters)

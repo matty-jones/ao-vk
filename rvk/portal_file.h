@@ -20,9 +20,13 @@ struct CapturedTexture {
     std::vector<uint8_t> level0;                 // FormatRowBytes x FormatRows bytes
 };
 
+// A room's door (in CapturedPiece::kind, over its VisualKind): drawn with the room seen from the street, but not the one
+// at its entrance - the street's own door stands there.
+constexpr uint32_t kDoorPiece = 0x100;
+
 struct CapturedPiece {
     uint64_t key = 0;                            // its geometry, place and texture (the same piece in two visits)
-    uint32_t kind = 0;                           // VisualKind
+    uint32_t kind = 0;                           // VisualKind (| kDoorPiece)
     uint32_t fvf = 0, primitive = 0, stride = 0, vertexCount = 0;
     d3d::Matrix world{};
     int32_t texture[2] = {-1, -1};               // into Capture::textures

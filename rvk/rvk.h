@@ -3345,7 +3345,8 @@ private:
     void PortalNoteCharacters(PortalCaptureState& state);
     void PortalCaptureReadBack(PortalCaptureState& state);
     void PortalRecordPiece(PortalCaptureState& state, VisualKind kind, uint32_t primitive, uint32_t fvf, uint32_t stride,
-                           const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount);
+                           const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+                           bool door = false);
     void PortalForgetTexture(Texture* texture);  // (DestroyTexture)
     bool ReadTexturesLevel0(const std::vector<Texture*>& textures, std::vector<std::vector<uint8_t>*>& out);   // (outside a frame)
     struct PortalDoor { float base[3], axis[3]; char name[48]; float width, height; };   // (size: its pieces' largest)
