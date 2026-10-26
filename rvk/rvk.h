@@ -4272,6 +4272,27 @@ private:
     std::vector<LightSlot> m_lights;
     std::array<Texture*, 2> m_textures{};
     d3d::Viewport m_viewport{};
+
+    // The street seen from inside a shop (portal.cpp): the room's door's draws this frame, drawn again over the street
+    // (its leaf swung open out of the room stands behind the opening, which the street covers).
+    struct StreetDoorDraw {
+        uint32_t primitive = 0, fvf = 0, vertexCount = 0;
+        std::vector<uint8_t> vertices;
+        std::vector<uint16_t> indices;
+        std::array<uint32_t, d3d::RS_COUNT> rs{};
+        std::array<std::array<uint32_t, d3d::TSS_COUNT>, 2> tss{};
+        std::array<Texture*, 2> textures{};
+        std::vector<LightSlot> lights;
+        d3d::Matrix world{};
+        d3d::Material material{};
+        const MeshInfo* mesh = nullptr;
+        uint32_t kind = 0, visual = 0, owner = 0;
+    };
+    std::vector<StreetDoorDraw> m_streetDoorDraws;
+    bool m_redrawingDoor = false;
+    void NoteStreetDoorDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
+                            const uint16_t* indices, uint32_t indexCount);
+    void RedrawStreetDoor(std::vector<StreetDoorDraw>& draws);
 };
 
 }  // namespace rvk
