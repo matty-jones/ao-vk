@@ -296,6 +296,7 @@ void RvkState::Present()
     ParticleFrame();
     WeatherFrame();
     SmokeFrame();
+    FxFrame();
     TimeFrame();
     StatelFrame();
     GroundFrame();

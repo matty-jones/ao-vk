@@ -466,6 +466,7 @@ const Command kCommands[] = {
     {"profile", "", "the profiling sweep: what each enhancement costs here (Ctrl+Shift+O)", aAction},
     {"luts", "", "reload the colour look-up tables (Ctrl+Shift+L)", aAction},
     {"lightdebug", "", "the lighting debug view on / off (Ctrl+Shift+F11)", aAction},
+    {"fx", "<template id>", "play one of the game's effect templates on your character (ao-assets: fx find)", aText},
     {"clear", "", "empty the console", aNone},
 };
 
@@ -759,6 +760,15 @@ void Execute(const std::string& text)
                 return;
             }
         Print(C(cError) + "no sky preset " + want);
+    } else if (cmd == "fx") {
+        const int id = w.size() >= 2 ? std::atoi(w[1].c_str()) : 0;
+        if (id <= 0) {
+            Print(C(cError) + "fx <template id>" + C(cDim) + "   fx 47119 (Lesser Controlled Rage)");
+            return;
+        }
+        FxPlay(id);
+        Print(C(cText) + "effect " + C(cValue) + std::to_string(id) + C(cText) + " played on your character" + C(cDim) +
+              "   (RVK_FxLog: what the game makes, in randy-vk.log)");
     } else if (const Command* c = FindCommand(cmd); c && c->arg == aAction) {
         RunAction(c->name);
         Print(C(cDim) + c->help);

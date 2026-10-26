@@ -413,6 +413,7 @@ Setting g_settings[] = {
     {"RVK_PartAdapt",  "Adapt to each effect's own motion (0 = all alike)",        "Particles",        Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_Particles"},
     {"RVK_PartFollow", "Young particles follow their sprite",                      "Particles",        Float, 0, 1, 0.05f, 0.7f, nullptr, 0, "RVK_Particles"},
     {"RVK_PartCore",   "Brightness of the game's sprites",     "Particles",        Float, 0, 1, 0.05f, 0.1f, nullptr, 0, "RVK_Particles"},
+    {"RVK_FxLog",      "Log every effect the game makes: template, anchor, who asked (randy-vk.log)", "Particles", Bool, 0, 1, 1, 0, nullptr, 0},
 };
 constexpr uint32_t kCount = sizeof(g_settings) / sizeof(g_settings[0]);
 
@@ -459,6 +460,7 @@ const char* const kHidden[] = {
     "RVK_Prepass", "RVK_PrepassEq", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
     "RVK_GrassTex", "RVK_ShadowMem", "RVK_FxGlowOn", "RVK_NightOn", "RVK_MoonOn", "RVK_GameSun", "RVK_HillShade",
     "RVK_DarkFloor", "RVK_GroundOne", "RVK_ZoneHoldMax", "RVK_PortalDist", "RVK_StreetNow",
+    "RVK_FxLog",
     // leaves
     "RVK_LeafSize", "RVK_LeafCore", "RVK_LeafWind", "RVK_LeafFlutter", "RVK_LeafOwn", "RVK_LeafTrees",
     "RVK_LeafShrubs", "RVK_LeafPalms", "RVK_LeafShadow",
@@ -712,6 +714,7 @@ const Cost kCosts[] = {
     {"RVK_DofFocus", "no cost"},
     {"RVK_Particles", "GPU: low"},
     {"RVK_PartCount", "GPU: more with the value"},
+    {"RVK_FxLog", "no cost"},
     {"RVK_PartBright", "no cost"},
     {"RVK_PartTrail", "GPU: low"},
 };
