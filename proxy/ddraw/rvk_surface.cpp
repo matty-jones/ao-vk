@@ -7,8 +7,13 @@
 #include "rvk_backend.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace rvkproxy {
 
@@ -57,10 +62,76 @@ void FillGpu(RSurface* s, const RECT* rect, uint32_t flags, uint32_t argb, float
 
 namespace {
 int g_gameTextures;                              // texture surfaces (top levels) holding a GPU texture
+std::unordered_set<const RSurface*> g_aliveTextures;   // ... which ones (GameTextureReport)
+uint32_t g_texturesMade, g_texturesFreed;        // since the last report
+
+void TextureMade(const RSurface* top)
+{
+    ++g_gameTextures;
+    ++g_texturesMade;
+    g_aliveTextures.insert(top);
+}
 }  // namespace
 
 // (Logged with the renderer's own texture count: the game holding them, or textures outliving their surfaces.)
 int GameTexturesAlive() { return g_gameTextures; }
+
+std::string GameTextureReport()
+{
+    struct Seen { uint32_t count = 0, w = 0, h = 0; };
+    std::unordered_map<uint64_t, Seen> byRdb;    // (type << 32 | id)
+    std::map<std::pair<uint32_t, uint32_t>, uint32_t> unknownSizes;
+    uint32_t identified = 0, unknown = 0;
+    uint64_t cpuBytes = 0;
+    for (const RSurface* s : g_aliveTextures) {
+        for (const RSurface* l = s; l; l = l->nextLevel) cpuBytes += l->shadow.capacity();
+        if (s->rdbId) {
+            ++identified;
+            Seen& seen = byRdb[(uint64_t(s->rdbType) << 32) | s->rdbId];
+            ++seen.count;
+            seen.w = s->desc.dwWidth;
+            seen.h = s->desc.dwHeight;
+        } else {
+            ++unknown;
+            ++unknownSizes[{s->desc.dwWidth, s->desc.dwHeight}];
+        }
+    }
+    char buf[256];
+    std::snprintf(buf, sizeof(buf), "game textures: %d alive (%u made, %u freed in the last 600 frames), their CPU copies "
+                  "%.0f MB; %u of a known RDB texture, %zu different", g_gameTextures, g_texturesMade, g_texturesFreed,
+                  double(cpuBytes) / 1048576.0, identified, byRdb.size());
+    std::string out = buf;
+    // The RDB textures held more than once (one surface each is the game's way: more is a texture made again while
+    // the last is still held).
+    std::vector<std::pair<uint64_t, Seen>> repeated;
+    uint32_t extra = 0;
+    for (const auto& [key, seen] : byRdb)
+        if (seen.count > 1) {
+            repeated.push_back({key, seen});
+            extra += seen.count - 1;
+        }
+    std::sort(repeated.begin(), repeated.end(), [](const auto& a, const auto& b) { return a.second.count > b.second.count; });
+    std::snprintf(buf, sizeof(buf), "; %u surfaces beyond one per RDB texture", extra);
+    out += buf;
+    for (size_t i = 0; i < repeated.size() && i < 5; ++i) {
+        std::snprintf(buf, sizeof(buf), "%s %u:%u x%u (%ux%u)", i ? "," : " - most:", unsigned(repeated[i].first >> 32),
+                      unsigned(repeated[i].first & 0xFFFFFFFFu), repeated[i].second.count, repeated[i].second.w,
+                      repeated[i].second.h);
+        out += buf;
+    }
+    // The unidentified ones by size (the interface's, the game's own drawing, ...).
+    std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint32_t>> sizes(unknownSizes.begin(), unknownSizes.end());
+    std::sort(sizes.begin(), sizes.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::snprintf(buf, sizeof(buf), "; %u not identified", unknown);
+    out += buf;
+    for (size_t i = 0; i < sizes.size() && i < 5; ++i) {
+        std::snprintf(buf, sizeof(buf), "%s %ux%u x%u", i ? "," : " - by size:", sizes[i].first.first,
+                      sizes[i].first.second, sizes[i].second);
+        out += buf;
+    }
+    g_texturesMade = g_texturesFreed = 0;
+    return out;
+}
 
 RSurface::RSurface(Kind k, const DDSURFACEDESC2& d) : kind(k), desc(d)
 {
@@ -74,8 +145,11 @@ RSurface::~RSurface()
     if (palette) palette->Release();
     if (nextLevel) nextLevel->Release();
     ForgetMaterialMaps(this);
-    if (top == this && texture && kind == Kind::Texture)
+    if (top == this && texture && kind == Kind::Texture) {
         --g_gameTextures;
+        ++g_texturesFreed;
+        g_aliveTextures.erase(this);
+    }
     if (top == this && texture && g_rvk.device)
         g_rvk.device->DestroyTexture(texture);
     if (g_rvk.mainSurface == this)
@@ -230,7 +304,7 @@ rvk::Texture* RSurface::RvkTexture()
     RSurface* t = top;
     if (!t->texture) {
         t->texture = dev->CreateTexture(t->desc.dwWidth, t->desc.dwHeight, t->format, t->levels);
-        if (t->texture) ++g_gameTextures;
+        if (t->texture) TextureMade(t);
         AttachMaterialMaps(t);
         for (RSurface* l = t; l; l = l->nextLevel) {
             l->gpuWhole = false;                   // (a new image: its contents undefined until a whole upload)
@@ -295,7 +369,7 @@ void RSurface::Upload()
     if (!t->texture) {
         t->texture = dev->CreateTexture(t->desc.dwWidth, t->desc.dwHeight, t->format, t->levels);
         if (!t->texture) return;
-        ++g_gameTextures;
+        TextureMade(t);
         AttachMaterialMaps(t);
         for (RSurface* l = t; l; l = l->nextLevel)
             l->gpuWhole = false;
