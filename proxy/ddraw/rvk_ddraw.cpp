@@ -531,6 +531,7 @@ void RvkState::Present()
         RvkLog("texture writes: %.1f a frame (%.1f only the rows locked), %.0f KB and %.3f ms on the game's thread a "
                "frame; the game's textures alive: %d", w.locks / 600.0, w.partial / 600.0,
                double(w.bytes) / 1024.0 / 600.0, w.ms / 600.0, GameTexturesAlive());
+        RvkLog("%s", GameTextureReport().c_str());
         g_drawCalls = 0;
         lastTick = now;
         slowest = 0;

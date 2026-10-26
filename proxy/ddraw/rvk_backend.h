@@ -24,6 +24,10 @@ const char* LogPath();
 // Texture writes through Lock on the game's thread since the last call (the 600-frame log line), then reset.
 struct TextureWrites { uint32_t locks, partial; uint64_t bytes; double ms; };
 int GameTexturesAlive();                          // the game's texture surfaces with a GPU texture now (rvk_surface.cpp)
+// What those are (the 600-frame log): made and freed since the last call, how many share an RDB texture, the sizes
+// of the unidentified ones, and their CPU copies' bytes - whether a count that only grows is the game keeping
+// textures (each a different one) or surfaces nobody frees (the same texture again and again). Then reset.
+std::string GameTextureReport();
 TextureWrites TakeTextureWrites();
 void RvkLog(const char* fmt, ...);
 void ParticleFrame();
