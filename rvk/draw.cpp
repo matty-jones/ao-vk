@@ -2963,8 +2963,10 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         // The room's door at the entrance, while the street shows through it: kept to be drawn again over the street
         // (portal.cpp). Here, after DrawMeshInfo: m_drawMesh is this draw's - before it, the previous draw's, and the
         // door's planks were passed over while the draw after them (its iron straps) was taken (the user, 2026-10-26).
-        if (m_streetShownFrame + 1 >= m_frameNumber && m_indoors && vertices && m_scenePhase && m_target == m_scene &&
-            (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ)
+        // Every frame indoors, not only after one the street was drawn in: a frame without it (no world camera, say)
+        // left the next without the door - gone for a frame as it opened (the user, 2026-10-26).
+        if (m_streetViewOn && m_portalsOn && m_indoors && m_enteredValid && m_streetRoom.known && vertices &&
+            m_scenePhase && m_target == m_scene && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ)
             NoteStreetDoorDraw(primitive, fvf, vertices, vertexCount, indices, indexCount);
     }
     ProfileDrawSection("draw: setup (mesh info)", since);

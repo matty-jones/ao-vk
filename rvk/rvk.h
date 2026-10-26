@@ -3342,6 +3342,7 @@ private:
     void PortalCaptureFrame();                   // (BeginFrame, before anything is recorded)
     struct PortalCaptureState;
     void PortalCaptureSave(PortalCaptureState& state);
+    void PortalNoteCharacters(PortalCaptureState& state);
     void PortalCaptureReadBack(PortalCaptureState& state);
     void PortalRecordPiece(PortalCaptureState& state, VisualKind kind, uint32_t primitive, uint32_t fvf, uint32_t stride,
                            const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount);
@@ -3492,7 +3493,7 @@ private:
     struct StreetLoaded {
         std::string path;
         LoadedPortal lp;
-        bool logged = false, doorLogged = false;
+        bool logged = false;
         float inset = 0.0f;
     } m_street;
     uint64_t m_streetShownFrame = 0;             // the last frame the street was drawn through the entrance
@@ -4292,9 +4293,13 @@ private:
         d3d::Matrix world{};
         d3d::Material material{};
         const MeshInfo* mesh = nullptr;
+        const char* visualName = "";
         uint32_t kind = 0, visual = 0, owner = 0;
     };
     std::vector<StreetDoorDraw> m_streetDoorDraws;
+    // What was taken, for the log: each piece once a visit, and frames that took fewer than the one before.
+    std::vector<std::pair<uint64_t, uint32_t>> m_streetDoorSeen;   // (geometry, vertices)
+    uint32_t m_streetDoorLast = 0, m_streetDoorLines = 0;
     bool m_redrawingDoor = false;
     void NoteStreetDoorDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
                             const uint16_t* indices, uint32_t indexCount);
