@@ -60,8 +60,40 @@ void Device::PortalNoteBlack(uint32_t primitive, uint32_t fvf, uint32_t stride, 
     key = portal::Hash(at, sizeof(at), key ^ vertexCount);
     auto it = m_blackDraws.find(key);
     if (it != m_blackDraws.end()) {
-        it->second.lastFrame = m_frameNumber;
-        PortalReportLinks(it->second);
+        BlackDraw& draw = it->second;
+        draw.lastFrame = m_frameNumber;
+        // Its building named since it was first split (mesh ids name a piece some frames after it is first drawn): the
+        // same doorway of the same building elsewhere can take its room now.
+        if (!draw.quads.empty() && !draw.quads[0].mesh[0] && m_drawMesh && m_drawMesh->geo) {
+            const auto ids = MeshIdsOf(m_drawMesh->geo);
+            if (ids.first != ids.second && *MeshIdName(*ids.first)) {
+                for (BlackQuad& q : draw.quads) {
+                    std::snprintf(q.mesh, sizeof(q.mesh), "%s", MeshIdName(*ids.first));
+                    q.piece = ids.first->piece;
+                }
+                draw.linksGen = ~0u;
+                draw.reportedIn = 0;
+                // ... and a link learned before it was named gets the name (saved without one, it passed to none).
+                PortalLoadLinks();
+                bool named = false;
+                for (PortalLink& l : m_portalLinks)
+                    for (const BlackQuad& q : draw.quads)
+                        if (!l.mesh[0] && l.outdoor == m_skyPlayfield && std::fabs(l.centre[0] - q.centre[0]) < 1.0f &&
+                            std::fabs(l.centre[1] - q.centre[1]) < 1.0f && std::fabs(l.centre[2] - q.centre[2]) < 1.0f) {
+                            std::memcpy(l.mesh, q.mesh, sizeof(l.mesh));
+                            l.piece = q.piece;
+                            std::memcpy(l.modelCentre, q.modelCentre, sizeof(l.modelCentre));
+                            named = true;
+                        }
+                if (named) {
+                    ++m_portalLinksGen;
+                    PortalSaveLinks();
+                    Log("portal link: the doorway of %s in playfield %u named in its link", draw.quads[0].mesh,
+                        m_skyPlayfield);
+                }
+            }
+        }
+        PortalReportLinks(draw);
         return;
     }
     if (m_blackDraws.size() > 4096)
