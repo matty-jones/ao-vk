@@ -232,6 +232,7 @@ void Device::PortalLinkTeleport()
 {
     if (PortalDir().empty() || m_indoors)
         return;                                  // (leaving a room: its own entrance isn't a doorway into anything)
+    KeepStreetLight();                           // (the street seen from inside lit as it is now: portal_street.cpp)
     // The player: the characters' head nearest the camera, else the camera.
     float player[3] = {};
     bool have = false;

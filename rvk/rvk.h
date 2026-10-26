@@ -312,7 +312,8 @@ struct DeviceInfo {
     X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */ \
     X(ZoneFade, m_zoneFade, 0)                        /* a zone change holds the old zone's picture, fades into the new */ \
     X(Portals, m_portalsOn, 0)                        /* shops' rooms seen through their doors (portal.cpp) */ \
-    X(StreetView, m_streetViewOn, 0)                  /* ... and the street from inside them */
+    X(StreetView, m_streetViewOn, 0)                  /* ... and the street from inside them */ \
+    X(StreetNow, m_streetNow, 0)                      /* ... lit for the hour it is now */
 enum class Knob : uint32_t {
 #define RVK_KNOB_NAME(name, member, refresh) name,
     RVK_FLOAT_KNOBS(RVK_KNOB_NAME) RVK_BOOL_KNOBS(RVK_KNOB_NAME)
@@ -3419,6 +3420,22 @@ private:
     void StreetCaptureGroundPass(bool light);    // (NativeGroundReplaces: the game's ground passes' states)
     void StreetCaptureLight();                   // (the hour's lightmap over the cut-out, once there is one)
     int32_t PortalTextureOf(PortalCaptureState& state, Texture* texture);   // (into its capture; read back later)
+    // The street's light now (phase 4): the game's light on the street's statics - its directional lights, ambient and
+    // fog - noted each outdoor frame (m_outdoorNow), kept with the ground's lightmap at the teleport into a room
+    // (m_streetLight): the street seen from inside is lit for the hour it is, not the hour it was recorded.
+    struct OutdoorLight {
+        bool known = false;
+        uint32_t playfield = 0;
+        uint64_t frame = 0;
+        std::vector<d3d::Light> directional;
+        uint32_t ambient = 0;
+        std::array<uint32_t, 8> fog{};           // (kOutdoorFogStates' values)
+        std::vector<uint32_t> lightPixels;       // the hour's lightmap over the playfield (cellsX x cellsZ cells)
+        uint32_t lightW = 0, lightH = 0, cellsX = 0, cellsZ = 0;
+        uint32_t generation = 0;
+    };
+    OutdoorLight m_outdoorNow, m_streetLight;
+    uint32_t m_streetLightGen = 0, m_streetGroundLightGen = 0;
     // Shop portals (portal.cpp): the rooms behind the linked doorways in view, drawn at the scene's end.
     struct LoadedPortal {
         std::shared_ptr<portal::Capture> capture;
@@ -3435,7 +3452,8 @@ private:
     bool PortalCopyDepth(VkCommandBuffer cmd);
     void DrawPortals();                          // (EndScene)
     bool PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied);
-    uint32_t PortalReplay(const portal::Capture& capture, const std::vector<Texture*>& textures, const d3d::Matrix& place);
+    uint32_t PortalReplay(const portal::Capture& capture, const std::vector<Texture*>& textures, const d3d::Matrix& place,
+                          const OutdoorLight* now = nullptr);
     void PortalSetLights(const std::vector<d3d::Light>& lights, const d3d::Matrix& place);
     void PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box);
     bool m_drawingPortal = false;                // a room's piece being drawn into a doorway: no side effects
@@ -3456,11 +3474,16 @@ private:
     // The street's ground (portal_street.cpp, phase 2): its capture's cut-out of the native ground, made a native
     // ground of its own - swapped into m_native to be made and drawn through the native ground's path.
     NativeState m_streetNative;
+    void NoteOutdoorLight();                     // (the draw path: a lit static outdoors)
+    void KeepStreetLight();                      // (PortalLinkTeleport: leaving the street through a doorway)
+    void StreetLightPiece(const OutdoorLight& now, std::array<uint32_t, d3d::RS_COUNT>& rs,
+                          const std::vector<d3d::Light>& lights, std::vector<d3d::Light>& out) const;
     bool m_streetGround = false;                 // it is drawing (its patches are the ground: IsTerrain)
     bool BuildStreetGround(const portal::Capture& capture, const std::vector<Texture*>& textures);
-    void DrawStreetGround(const portal::Capture& capture, const d3d::Matrix& place);
+    void DrawStreetGround(const portal::Capture& capture, const d3d::Matrix& place, const OutdoorLight* now);
     void DestroyStreetGround();
     bool m_streetViewOn = true;                  // RVK_StreetView
+    bool m_streetNow = true;                     // RVK_StreetNow: lit for the hour it is now (else as recorded)
     bool m_enteredValid = false;                 // the doorway walked in through (PortalLinkFrame)
     PortalLink m_enteredFrom;
     struct StreetRoom { uint32_t playfield = ~0u; bool known = false; float entrance[3] = {}, inward[3] = {}; } m_streetRoom;

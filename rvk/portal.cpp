@@ -256,9 +256,11 @@ bool Device::PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkR
 
 // A capture's pieces replayed through the draw path, each as the game drew it, moved by `place` (m_drawingPortal,
 // m_portalScissor and m_portalClip set by the caller, the device's state kept by it too). Returns how many were drawn.
-uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Texture*>& textures, const d3d::Matrix& place)
+uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Texture*>& textures, const d3d::Matrix& place,
+                              const OutdoorLight* now)
 {
     uint32_t drawn = 0;
+    std::vector<d3d::Light> lit;
     for (const portal::CapturedPiece& p : cap.pieces) {
         if (p.vertices.empty()) continue;
         m_rs = p.rs;
@@ -268,7 +270,9 @@ uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Text
             m_textures[s] = p.texture[s] >= 0 ? textures[size_t(p.texture[s])] : nullptr;
         m_world = MulMatrix(p.world, place);
         m_material = p.material;
-        PortalSetLights(p.lights, place);
+        if (now)                                 // (a street's, lit as it is now: portal_street.cpp)
+            StreetLightPiece(*now, m_rs, p.lights, lit);
+        PortalSetLights(now ? lit : p.lights, place);
         m_drawVisualKind = p.kind;
         m_constantsDirty = true;
         Draw(p.primitive, p.fvf, p.vertices.data(), p.vertexCount, p.indices.empty() ? nullptr : p.indices.data(),
@@ -569,6 +573,7 @@ void Device::DrawStreetPortal()
     const std::string path = PortalDir() + name;
     if (m_street.path != path || (!m_street.lp.ok && Seconds() - m_street.lp.tried > kRetryAfter)) {
         DestroyStreetGround();                   // (its tiles are the street's textures)
+        m_streetGroundLightGen = 0;              // (its lightmap the hour's again, once made)
         for (Texture* t : m_street.lp.textures)
             if (t) DestroyTexture(t);
         m_street = StreetLoaded{};
@@ -737,8 +742,12 @@ void Device::DrawStreetPortal()
     m_portalClip[2] = out[2];
     m_portalClip[3] = -(out[0] * e[0] + out[2] * e[2]) - 0.05f;
     // (The ground first, then the pieces: the street's pieces' feet on it.)
-    DrawStreetGround(street, place);
-    const uint32_t drawn = PortalReplay(street, m_street.lp.textures, place);
+    // Lit as the street is now, when it was just left (its light kept at the teleport), else as recorded.
+    const OutdoorLight* now = m_streetNow && m_streetLight.known && m_streetLight.playfield == m_enteredFrom.outdoor
+                                  ? &m_streetLight
+                                  : nullptr;
+    DrawStreetGround(street, place, now);
+    const uint32_t drawn = PortalReplay(street, m_street.lp.textures, place, now);
     m_drawingPortal = false;
     m_rs = rs;
     m_tss = tss;

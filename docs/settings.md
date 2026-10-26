@@ -17,11 +17,11 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-352 settings, 178 of them in the settings window.
+353 settings, 178 of them in the settings window.
 
 ## Sections
 
-- [General](#general) (14)
+- [General](#general) (15)
 - [Lighting](#lighting) (21)
 - [Materials](#materials) (15)
 - [Debug](#debug) (7)
@@ -53,6 +53,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PortalDist` | Shops' insides through their doors: drawn within this distance | 10 .. 200 | 60 | no cost | ini only; switch `RVK_Portals`; knob |
 | `RVK_PortalDim` | Shops' insides through their doors: their brightness by day (1 = as inside) | 0 .. 1 | 0.7 | no cost | window; switch `RVK_Portals`; knob |
 | `RVK_StreetView` | The street seen from inside a shop through its open door (once you have stood at that door outside) | on / off | on | GPU: low, with a shop's open door in view | window; switch `RVK_Portals`; game value off; knob |
+| `RVK_StreetNow` | The street seen from inside a shop: lit for the hour it is now (off: as when it was recorded) | on / off | on | no cost | ini only; switch `RVK_StreetView`; knob |
 | `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's | on / off | off | no cost | window |
 | `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | no cost | window; knob |
 | `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | CPU and GPU: more with the value | window |

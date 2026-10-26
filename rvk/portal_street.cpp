@@ -32,6 +32,11 @@ constexpr double kQuiet = 1.5, kSaveEvery = 5.0, kGone = 3.0;
 constexpr size_t kMostPieces = 8192;
 constexpr size_t kMostBytes = 24u << 20;   // (a street holds more than a room: Phase 0 measures it)
 
+// The fog's states: the street's pieces drawn with the fog of now (whether a piece fogs at all stays its own).
+constexpr uint32_t kOutdoorFogStates[8] = {d3d::RS_FOGENABLE, d3d::RS_FOGCOLOR, d3d::RS_FOGTABLEMODE, d3d::RS_FOGSTART,
+                                           d3d::RS_FOGEND, d3d::RS_FOGDENSITY, d3d::RS_RANGEFOGENABLE,
+                                           d3d::RS_FOGVERTEXMODE};
+
 double Seconds()
 {
     using namespace std::chrono;
@@ -83,6 +88,66 @@ void Device::StreetCaptureNear(const PortalLink& link, const BlackQuad& q, const
         q.mesh[0] ? q.mesh : "an unnamed mesh", double(q.centre[0]), double(q.centre[1]), double(q.centre[2]),
         link.interior, path.c_str());
     StreetCaptureGround(q, out);
+}
+
+// The street's light now (phase 4), noted from the first lit static of each outdoor frame: the game's directional
+// lights for it (the sun or the moon, at the hour), its ambient and its fog.
+void Device::NoteOutdoorLight()
+{
+    if (m_outdoorNow.frame == m_frameNumber && m_outdoorNow.known)
+        return;
+    if (m_indoors || m_external || m_target != m_scene || !m_rs[d3d::RS_LIGHTING] ||
+        VisualKind(m_drawVisualKind) != VisualKind::Static || m_drawSkin || m_drawIsLabel)
+        return;
+    m_outdoorNow.directional.clear();
+    for (const LightSlot& slot : m_lights)
+        if (slot.enabled && slot.light.type == d3d::LIGHT_DIRECTIONAL && m_outdoorNow.directional.size() < 4)
+            m_outdoorNow.directional.push_back(slot.light);
+    m_outdoorNow.ambient = m_rs[d3d::RS_AMBIENT];
+    for (int i = 0; i < 8; ++i) m_outdoorNow.fog[size_t(i)] = m_rs[kOutdoorFogStates[i]];
+    m_outdoorNow.playfield = m_skyPlayfield;
+    m_outdoorNow.frame = m_frameNumber;
+    m_outdoorNow.known = true;
+}
+
+// PortalLinkTeleport: leaving the street through a doorway - its light now kept for the street seen from inside, with
+// the hour's lightmap over the playfield (the ground's light).
+void Device::KeepStreetLight()
+{
+    if (!m_outdoorNow.known || m_outdoorNow.playfield != m_skyPlayfield || m_outdoorNow.frame + 120 < m_frameNumber)
+        return;
+    m_streetLight = m_outdoorNow;
+    m_streetLight.lightPixels.clear();
+    m_streetLight.lightW = m_streetLight.lightH = m_streetLight.cellsX = m_streetLight.cellsZ = 0;
+    if (m_native.ground && !m_native.lightPixels.empty() && m_native.lightW && m_native.lightH) {
+        m_streetLight.lightPixels = m_native.lightPixels;
+        m_streetLight.lightW = m_native.lightW;
+        m_streetLight.lightH = m_native.lightH;
+        m_streetLight.cellsX = m_native.ground->cellsX;
+        m_streetLight.cellsZ = m_native.ground->cellsZ;
+    }
+    m_streetLight.generation = ++m_streetLightGen;
+}
+
+// A street's piece (or its ground's pass) as lit now: its directional lights the street's now - where it had any (a
+// piece lit by lamps alone stays so) - its other lights its own, its ambient and fog now's.
+void Device::StreetLightPiece(const OutdoorLight& now, std::array<uint32_t, d3d::RS_COUNT>& rs,
+                              const std::vector<d3d::Light>& lights, std::vector<d3d::Light>& out) const
+{
+    out.clear();
+    bool sun = false;
+    for (const d3d::Light& l : lights) {
+        if (l.type == d3d::LIGHT_DIRECTIONAL) sun = true;
+        else out.push_back(l);
+    }
+    if (sun)
+        out.insert(out.end(), now.directional.begin(), now.directional.end());
+    else
+        out = lights;
+    if (rs[d3d::RS_LIGHTING])
+        rs[d3d::RS_AMBIENT] = now.ambient;
+    for (int i = 1; i < 8; ++i)                  // (not FOGENABLE: whether it fogs is the piece's own)
+        rs[kOutdoorFogStates[i]] = now.fog[size_t(i)];
 }
 
 // The native ground in front of the doorway (phase 2): its cells under the cone's box, a few round it - heights, tile
@@ -251,7 +316,7 @@ void Device::DestroyStreetGround()
 
 // The street's ground into the opening (DrawStreetPortal, m_drawingPortal and its clip set): its two passes as the
 // game drew them outside, its cells where they lay in the street, moved by `place` with the street's pieces.
-void Device::DrawStreetGround(const portal::Capture& cap, const d3d::Matrix& place)
+void Device::DrawStreetGround(const portal::Capture& cap, const d3d::Matrix& place, const OutdoorLight* now)
 {
     if (!m_streetNative.ground)
         return;
@@ -259,6 +324,26 @@ void Device::DrawStreetGround(const portal::Capture& cap, const d3d::Matrix& pla
     std::swap(m_native, m_streetNative);
     if (NativeMapsSignature() != m_native.mapsSignature)
         MakeNativeCodes();                       // (the settings or the tiles' maps changed)
+    // The hour's lightmap over its cells, kept when the street was left (else the one recorded with it).
+    if (now && now->generation != m_streetGroundLightGen) {
+        m_streetGroundLightGen = now->generation;
+        if (!now->lightPixels.empty() && now->cellsX >= cg.cellX0 + cg.cellsX && now->cellsZ >= cg.cellZ0 + cg.cellsZ) {
+            std::vector<uint32_t> px;
+            px.reserve(size_t(cg.cellsX) * cg.cellsZ);
+            for (uint32_t r = 0; r < cg.cellsZ; ++r)
+                for (uint32_t c = 0; c < cg.cellsX; ++c) {
+                    const uint32_t tx = std::min((cg.cellX0 + c) * now->lightW / now->cellsX, now->lightW - 1);
+                    const uint32_t ty = std::min((cg.cellZ0 + r) * now->lightH / now->cellsZ, now->lightH - 1);
+                    px.push_back(now->lightPixels[size_t(ty) * now->lightW + tx]);
+                }
+            if (m_native.lightmap) DestroyTexture(m_native.lightmap);
+            m_native.lightmap = CreateTexture(cg.cellsX, cg.cellsZ, px.data());
+        }
+    } else if (!now && m_streetGroundLightGen) {   // (RVK_StreetNow off: the one recorded with it again)
+        m_streetGroundLightGen = 0;
+        if (m_native.lightmap) DestroyTexture(m_native.lightmap);
+        m_native.lightmap = cg.light.empty() ? nullptr : CreateTexture(cg.lightW, cg.lightH, cg.light.data());
+    }
     d3d::Matrix offset{};                        // (its cells from where the cut-out began)
     offset.m[0][0] = offset.m[1][1] = offset.m[2][2] = offset.m[3][3] = 1.0f;
     offset.m[3][0] = float(cg.cellX0) * cg.cellX;
@@ -271,7 +356,13 @@ void Device::DrawStreetGround(const portal::Capture& cap, const d3d::Matrix& pla
         m_rs = light ? cg.lightRs : cg.baseRs;
         m_tss = light ? cg.lightTss : cg.baseTss;
         std::fill(m_textures.begin(), m_textures.end(), nullptr);
-        PortalSetLights(light ? cg.lights : std::vector<d3d::Light>{}, place);
+        std::vector<d3d::Light> lights = light ? cg.lights : std::vector<d3d::Light>{};
+        if (now) {
+            std::vector<d3d::Light> lit;
+            StreetLightPiece(*now, m_rs, lights, lit);
+            lights = std::move(lit);
+        }
+        PortalSetLights(lights, place);
         m_constantsDirty = true;
         DrawNativeGround(light);
     }
@@ -283,6 +374,7 @@ void Device::DrawStreetGround(const portal::Capture& cap, const d3d::Matrix& pla
 void Device::StreetCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices,
                                uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount)
 {
+    NoteOutdoorLight();
     if (!m_sc.on || m_indoors || m_external || m_target != m_scene || (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZ ||
         !vertices || !vertexCount || !stride || IsTerrain(fvf))
         return;

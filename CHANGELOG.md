@@ -14,7 +14,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - And the reverse: from inside a shop, its open door shows the street outside, with the sky behind it. The street
   shows once you have stood at that door outside (the buildings and props in front of it are recorded then).
   `RVK_StreetView` (General) switches it off. The ground in front of the door shows too, as ao-vk's ground draws
-  it; a street recorded before this needs another stand at its door to get its ground. No clouds through the door yet.
+  it; a street recorded before this needs another stand at its door to get its ground. The street is lit as it was
+  when you walked in (the hour's sun, ambient light and fog), not as when it was recorded (`RVK_StreetNow`, ini only).
+  No clouds through the door yet.
 - Zone changes no longer freeze on a blank picture: the last view of the zone you leave stays up, slowly drifting
   and dimming, while the next one loads, then fades into the new zone once it has settled, its ground and lighting
   already in place. The interface stays up throughout, and moving the camera ends the wait at once. `RVK_ZoneFade`

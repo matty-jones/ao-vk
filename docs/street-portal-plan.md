@@ -140,6 +140,20 @@ ground, the pieces lit by the current sun, clip and mark. Settings: `RVK_StreetV
 
 Clouds (the layer, at least), the suns, fog and the hour's haze in the opening, rain seen through the door.
 
+**Built (2026-10-25): lit for now** (`RVK_StreetNow`, ini only, on). The street seen from inside is the street just
+left, so its light now is the light it had at the teleport:
+- each outdoor frame notes the game's light on its first lit static (`NoteOutdoorLight`): its directional lights,
+  ambient and fog states;
+- at the teleport through a doorway (`PortalLinkTeleport` -> `KeepStreetLight`) they are kept, with the hour's
+  lightmap over the playfield;
+- the street's pieces and its ground's passes are replayed with those (`StreetLightPiece`): their directional lights
+  replaced by now's (a piece lit by lamps alone keeps its own), ambient and fog now's (whether a piece fogs stays its
+  own); the ground's lightmap is cut again from the kept one.
+- **Check:** in `--portal-capture-test` the street turns to evening (a low red sun, less ambient, a darker lightmap)
+  after it is recorded; with `--knob RVK_StreetNow=0` the -inside shot shows the recorded day, with it on the evening.
+- Not known: how the game lights a shop's street's statics by night (the moon as a directional light?), and whether a
+  long stay inside should follow the hour on (the light stays the one at the teleport).
+
 ## Risks
 
 - **The opening from inside may not be clear.** If the game draws something behind the open door (a black panel, a

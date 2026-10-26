@@ -4490,6 +4490,7 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
                 (*packed)[size_t(r) * (kCells / 2) + c / 2] = uint8_t(v << 4 | v);
             }
     }
+    auto packedEvening = std::make_shared<std::vector<uint8_t>>(*packed);
     bool groundSet = false;
     Matrix streetWorld = Identity();
     streetWorld.m[3][0] = kOx;
@@ -4527,6 +4528,15 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             dev.SetNativeGround(street ? ground : nullptr);
             if (street) dev.SetNativeGroundLightmap(packed, kCells, kCells, 0.45f);
         }
+        // The street's hour: day while its street is recorded, evening from frame 150 (its light, ambient and
+        // lightmap): seen from inside the shop afterwards it is the evening's, not the day it was recorded in.
+        const bool evening = frame >= 150;
+        Light sun{};
+        sun.type = LIGHT_DIRECTIONAL;
+        sun.diffuse = evening ? Color{0.9f, 0.45f, 0.25f, 1} : Color{0.9f, 0.85f, 0.75f, 1};
+        sun.direction = evening ? Vector{0.9f, -0.25f, 0.3f} : Vector{0.55f, -0.7f, 0.45f};
+        if (frame == 150)
+            dev.SetNativeGroundLightmap(packedEvening, kCells, kCells, 0.75f);
         if (street) {
             dev.SetTransform(View, LookAtLH({kOx, 1.8f, kOz}, {kOx, 1.6f, kOz + 3.0f}, {0, 1, 0}));
             dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
@@ -4542,10 +4552,6 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
                 const uint32_t kFvfT = FVF_XYZ | FVF_NORMAL | (2 << 8);
                 Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
                 dev.SetMaterial(mat);
-                Light sun{};
-                sun.type = LIGHT_DIRECTIONAL;
-                sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
-                sun.direction = {0.55f, -0.7f, 0.45f};
                 dev.SetLight(0, sun);
                 dev.LightEnable(0, true);
                 dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
@@ -4556,7 +4562,7 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
                 dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
                 dev.DrawIndexedPrimitive(TriangleList, kFvfT, chunk, 4, quadIdx, 6);
                 dev.SetRenderState(RS_LIGHTING, 1);
-                dev.SetRenderState(RS_AMBIENT, 0xFF515151);
+                dev.SetRenderState(RS_AMBIENT, evening ? 0xFF282430 : 0xFF515151);
                 dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
                 dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
                 dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
@@ -4578,10 +4584,19 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, wallQuad, 4, quadIdx, 6);
             dev.SetTexture(0, black);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, door, 4, quadIdx, 6);
-            // The street in front of the doorway (behind the camera): boxes the street's capture records.
+            // The street in front of the doorway (behind the camera): boxes the street's capture records, lit by the sun.
             dev.SetTexture(0, box);
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_AMBIENT, evening ? 0xFF282430 : 0xFF606060);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetLight(0, sun);
+            dev.LightEnable(0, true);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, streetBoxes.data(), uint32_t(streetBoxes.size()), streetBoxIdx.data(),
                                      uint32_t(streetBoxIdx.size()));
+            dev.LightEnable(0, false);
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
             // A solid wall behind the doorway's plane drawn after it (as the building's own insides): hidden by the room.
             const VtxMesh inside[4] = {{-3, 0, 5, 0, 0, -1, 0xFF808080, 0, 0}, {3, 0, 5, 0, 0, -1, 0xFF808080, 1, 0},
                                        {3, 4, 5, 0, 0, -1, 0xFF808080, 1, 1}, {-3, 4, 5, 0, 0, -1, 0xFF808080, 0, 1}};
