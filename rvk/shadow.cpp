@@ -483,8 +483,9 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
                                 uint32_t vertexCount, VkDeviceSize vbOffset, const uint16_t* indices, uint32_t indexCount,
                                 VkDeviceSize ibOffset, VkBuffer vb, VkBuffer ib)
 {
-    if (m_drawingPortal)
-        return;                                  // (a shop's room in its doorway: not in this playfield's light)
+    if (m_drawingPortal || m_redrawingDoor)
+        return;                                  // (a shop's room in its doorway: not in this playfield's light; a door
+                                                 // drawn again over the street: cast once already)
     if (!IsShadowCaster(primitive, fvf))
         return;
     // (Profiling: its share of "draw: geometry + casters", sampled as the per-draw sections are.)

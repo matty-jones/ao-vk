@@ -2631,6 +2631,10 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         if (o0 > -0.5f && o1 < 0.5f && a0 < 0.0f && a1 > 0.0f && a1 - a0 < 16.0f && u0 < 2.5f && u1 > 0.2f)
             return;
     }
+    // ... and the room's door at the entrance, kept to be drawn again over the street (portal.cpp).
+    if (m_streetShownFrame + 1 >= m_frameNumber && m_indoors && !m_drawingPortal && !m_redrawingDoor && vertices &&
+        m_scenePhase && m_target == m_scene && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ)
+        NoteStreetDoorDraw(primitive, fvf, vertices, vertexCount, indices, indexCount);
     // RVK_FrameGen: a 2D draw on the frame after the interface (the mouse pointer) goes on top of the overlay.
     if (m_fgUiLayer && m_target == m_main && !m_fgTopActive && !m_uiLayerActive && !m_external &&
         m_interfaceEndFrame == m_frameNumber && IsInterfaceDraw(fvf))
@@ -2953,7 +2957,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount, true);
     }
     DrawMeshInfo(fvf, layout.stride, vertices, vertexCount, indices, indexCount);
-    if (!m_drawingPortal) {                      // (a shop's room drawn into its doorway: none of the scene's notes)
+    // (A shop's room drawn into its doorway, or its door drawn again over the street: none of the scene's notes.)
+    if (!m_drawingPortal && !m_redrawingDoor) {
         PortalDiagDraw(fvf, vertexCount, indexCount);   // (shop portals' phase 0: portal_diag.cpp)
         PortalStreetDiagDraw(fvf, vertexCount, indexCount, layout.stride);   // (the reverse's phase 0: portal_diag.cpp)
         StreetCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_street.cpp)
@@ -2961,14 +2966,14 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         PortalNoteBlack(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);     // (portal_links.cpp)
     }
     ProfileDrawSection("draw: setup (mesh info)", since);
-    if (!m_drawingPortal)
+    if (!m_drawingPortal && !m_redrawingDoor)
         NoteMeshPiece();                         // (mesh ids: which mesh the object drawing is)
     // The object's entry in the per-object cache (objects.cpp): a static mesh at its world matrix.
     if (m_objectCache && m_drawMesh && m_drawMeshStatic && !m_external && !m_drawSkin && !m_drawGpu)
         m_drawObject = FindObject();
     ProfileDrawSection("draw: setup (mesh ids)", since);
     // (A GPU-skinned character has no vertices here: DrawSkinned hands the pick its CPU-skinned ones.)
-    if (m_pickActive && !m_external && !m_drawingPortal && (vertices || m_pickSkinned) && (m_textures[0] || m_drawVisual) &&
+    if (m_pickActive && !m_external && !m_drawingPortal && !m_redrawingDoor && (vertices || m_pickSkinned) && (m_textures[0] || m_drawVisual) &&
         (m_target == m_scene || m_target == m_main) && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ &&
         m_rs[d3d::RS_ZENABLE])
         PickDraw(primitive, layout, vertices ? vertices : m_pickSkinned, vertexCount, indices, indexCount, IsTerrain(fvf));
@@ -2983,13 +2988,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             !CharacterDraw(fvf, vertexCount))
             CaptureCover(primitive, layout, vertices, vertexCount, indices, indexCount);
     }
-    if (!m_drawingPortal)
+    if (!m_drawingPortal && !m_redrawingDoor)
         PushCandidateDraw(fvf);
     ProfileDrawSection("draw: setup (pick, grass cover)", since);
     // A canopy (leaves.cpp): its leaves, baked the first time it is seen, drawn just before it (DrawLeaves). A solid
     // draw may be a tree's trunk (where its fallen leaves lie).
     CanopyParams(primitive, fvf, layout, vertices, vertexCount, indices, indexCount);
-    if (!m_drawLeaves && !m_external && !m_drawingPortal)
+    if (!m_drawLeaves && !m_external && !m_drawingPortal && !m_redrawingDoor)
         NoteSolidDraw(fvf);
     // A swaying plant: its big quads split into small ones (cached), so they bend rather than tilt as a whole.
     float sway[4] = {};

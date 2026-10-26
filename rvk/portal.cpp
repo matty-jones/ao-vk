@@ -568,8 +568,101 @@ bool Device::StreetDeclined(const char* why)
     return why != nullptr;
 }
 
+// A draw of the room's door at the entrance, while the street shows through it (Draw, the frame after one it did):
+// kept, its vertices and the state it was drawn with, to be drawn again once the street is in (RedrawStreetDoor).
+// Opened, the door's leaf swings out of the room, behind the opening's plane: the opening clears what is there and the
+// street covers it - the door seemed to vanish as it opened (the user, 2026-10-26).
+void Device::NoteStreetDoorDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
+                                const uint16_t* indices, uint32_t indexCount)
+{
+    if (m_streetDoorDraws.size() >= 16 || vertexCount > 4096)
+        return;
+    // (Its mesh's name - or its visual's, for rvk_demo's leaf: the game's are class names.)
+    const char* name = "";
+    if (m_drawMesh) {
+        const auto ids = MeshIdsOf(m_drawMesh->geo);
+        if (ids.first != ids.second) name = MeshIdName(*ids.first);
+    }
+    if (!std::strstr(name, "door") && m_drawVisualName && std::strstr(m_drawVisualName, "door"))
+        name = m_drawVisualName;
+    if (!std::strstr(name, "door") || std::strstr(name, "blocker"))
+        return;
+    const auto& w = m_world.m;
+    const float dx = w[3][0] - m_streetRoom.entrance[0], dz = w[3][2] - m_streetRoom.entrance[2];
+    if (dx * dx + dz * dz > 4.0f * 4.0f)
+        return;
+    const uint32_t stride = FvfStride(fvf);
+    StreetDoorDraw d;
+    d.primitive = primitive;
+    d.fvf = fvf;
+    d.vertexCount = vertexCount;
+    d.vertices.assign(static_cast<const uint8_t*>(vertices), static_cast<const uint8_t*>(vertices) + size_t(vertexCount) * stride);
+    if (indices)
+        d.indices.assign(indices, indices + indexCount);
+    d.rs = m_rs;
+    d.tss = m_tss;
+    d.textures = m_textures;
+    d.lights = m_lights;
+    d.world = m_world;
+    d.material = m_material;
+    d.mesh = m_drawMesh;
+    d.kind = m_drawVisualKind;
+    d.visual = m_drawVisual;
+    d.owner = m_drawOwner;
+    m_streetDoorDraws.push_back(std::move(d));
+}
+
+// The door's draws again, after the street: through the draw path as the game drew them, depth tested - in front of
+// the street where the leaf is nearer, behind the street's pieces nearer than it. The caller's state is put back.
+void Device::RedrawStreetDoor(std::vector<StreetDoorDraw>& draws)
+{
+    if (draws.empty())
+        return;
+    const auto rs = m_rs;
+    const auto tss = m_tss;
+    const auto textures = m_textures;
+    const auto lights = m_lights;
+    const d3d::Matrix world = m_world;
+    const d3d::Material material = m_material;
+    const MeshInfo* mesh = m_drawMesh;
+    const uint32_t kind = m_drawVisualKind, visual = m_drawVisual, owner = m_drawOwner;
+    m_redrawingDoor = true;
+    for (const StreetDoorDraw& d : draws) {
+        m_rs = d.rs;
+        m_tss = d.tss;
+        m_textures = d.textures;
+        m_lights = d.lights;
+        ++m_lightsGen;
+        m_world = d.world;
+        m_material = d.material;
+        m_drawMesh = d.mesh;
+        m_drawVisualKind = d.kind;
+        m_drawVisual = d.visual;
+        m_drawOwner = d.owner;
+        m_constantsDirty = true;
+        Draw(d.primitive, d.fvf, d.vertices.data(), d.vertexCount, d.indices.empty() ? nullptr : d.indices.data(),
+             uint32_t(d.indices.size()));
+    }
+    m_redrawingDoor = false;
+    m_rs = rs;
+    m_tss = tss;
+    m_textures = textures;
+    m_lights = lights;
+    ++m_lightsGen;
+    m_world = world;
+    m_material = material;
+    m_drawMesh = mesh;
+    m_drawVisualKind = kind;
+    m_drawVisual = visual;
+    m_drawOwner = owner;
+    m_constantsDirty = true;
+}
+
 void Device::DrawStreetPortal()
 {
+    // (The door's draws noted this frame: drawn again over the street, or dropped.)
+    std::vector<StreetDoorDraw> doorDraws = std::move(m_streetDoorDraws);
+    m_streetDoorDraws.clear();
     if (!m_streetViewOn || !m_portalsOn || !m_indoors)
         return;
     // (Only a drawn street clears the reason: a check that passes on the way says nothing.)
@@ -791,6 +884,7 @@ void Device::DrawStreetPortal()
     m_drawVisual = visual;
     m_drawOwner = owner;
     m_constantsDirty = true;
+    RedrawStreetDoor(doorDraws);
     if (!m_street.logged) {
         m_street.logged = true;
         Log("street: drawn through playfield %u's entrance (%u pieces, the opening %.2f x %.2f, the screen box %d,%d %ux%u)",

@@ -4668,6 +4668,15 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
                                       {6.0f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 1, 1}, {-6.0f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 0, 1}};
             dev.SetTexture(0, black);
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, panel, 4, quadIdx, 6);
+            // The door's leaf, swung 70 degrees open out of the room (hinged at the doorway's right): behind the
+            // opening, it stays in front of the street.
+            const VtxMesh leaf[4] = {{1.2f, -5.0f, 0.5f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 0, 0},
+                                     {0.38f, -5.0f, -1.75f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 2, 0},
+                                     {0.38f, -1.9f, -1.75f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 2, 3},
+                                     {1.2f, -1.9f, 0.5f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 0, 3}};
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "door_leaf");
+            dev.SetTexture(0, wall);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, leaf, 4, quadIdx, 6);
         }
         dev.SetDrawVisual(0, nullptr);
         dev.LightEnable(0, false);
