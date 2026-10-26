@@ -91,6 +91,10 @@ void Device::SetSkyPlayfield(uint32_t playfield)
     if (playfield == m_skyPlayfield)
         return;
     m_skyPlayfield = playfield;
+    // The sun forgotten: held for 5 s through frames without it (SunKnown), a shop entered from the street took the
+    // street's for its first 5 s - lit as outdoors by night (the tone mapping's night darkening, the light rig) and
+    // then lighting up (the user, 2026-10-26). An outdoor zone's own is seen again at its first lit frame.
+    m_sunLightClock = -1.0;
     PortalDiagPlayfield(playfield);              // (shop portals' phase 0: portal_diag.cpp)
     PortalCapturePlayfield(playfield);           // (shop portals: portal_capture.cpp)
     m_skyZoneLean = 0.0f;

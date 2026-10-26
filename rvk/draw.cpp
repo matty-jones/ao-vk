@@ -1566,10 +1566,17 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
     // lightmap (stage 1), so the game leaves them out and lights it with moving ones (a character's own light); with
     // every lamp in reach its walls and floor had them twice - a shop's room washed out once lamps indoors were at the
     // game's strength (LampScale).
+    // A character's light isn't baked, though: it lights the room in its reach whichever of the room's sections the
+    // game gave it to - the game gives it to the section the character stands in alone, and stepping through a door
+    // the walls and floor beside it on the side just left went dark at once (the user, 2026-10-26).
     if (hits && VisualKind(m_drawVisualKind) == VisualKind::Room) {
         uint64_t kept = 0;
         for (uint64_t rest = hits; rest; rest &= rest - 1) {
             const uint32_t k = uint32_t(std::countr_zero(rest));
+            if (m_lightsPrev[m_frameLightIndices[k]].carried > 0.5f) {
+                kept |= uint64_t(1) << k;
+                continue;
+            }
             const d3d::Light& l = m_lightsPrev[m_frameLightIndices[k]].light;
             for (const LightSlot& slot : m_lights) {
                 if (!slot.enabled || slot.light.type == d3d::LIGHT_DIRECTIONAL || slot.light.range != l.range) continue;

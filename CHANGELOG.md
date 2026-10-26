@@ -114,6 +114,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Walking into a shop or other room from outside no longer leaves it dark for its first five seconds (it was lit as
+  the street by night until then).
+- Your character's own light keeps lighting the walls and floor around you as you step through a door between two
+  parts of a room, instead of going out on the side you just left.
 - Inside shops and other rooms, the props and characters were much darker than the walls and floor around them.
   Lamp brightness (`RVK_PtLight`) now only applies outdoors: in a room the lamps are its light, at the game's strength.
   A room's walls and floor take only the lights the game gives them (their lamps are already in their baked light), so
