@@ -189,6 +189,9 @@ public:
     void ParticleEmitter(uint64_t key, const float center[3], const float origin[3], const Device::ParticleSprite* sprites,
                          uint32_t count);
     void EndParticleEmitter();
+    void FxSetEffect(uint32_t id, std::shared_ptr<const fx::Effect> effect);
+    void FxForget(uint32_t id);
+    void FxInstance(uint64_t key, uint32_t effect, const Device::FxAnchors& anchors);
     // The water (Device::DrawWater): vertices and indices copied.
     void SetWaterParams(const Device::WaterParams& params);
     void SetWeatherParams(const Device::WeatherParams& params);

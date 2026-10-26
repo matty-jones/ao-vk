@@ -6,6 +6,7 @@
 #pragma once
 
 #include "d3d7.h"
+#include "fx_def.h"
 #include "skin.h"
 #include "vk.h"
 #include "water_surface.h"
@@ -822,6 +823,20 @@ public:
     void ParticleEmitter(uint64_t key, const float center[3], const float origin[3], const ParticleSprite* sprites,
                          uint32_t count);
     void EndParticleEmitter() { m_particlePending = nullptr; }
+
+    // Our own effects (fx.cpp; docs/fx-plan.md): definitions by id (FxSetEffect, again to change one, FxForget), and
+    // effects playing - each announced every frame it lives (FxInstance: the game effect it stands for, by a key stable
+    // while it lives, its points and the phase it is in). Each emitter of a playing effect is a block of particles,
+    // simulated on the GPU at the next frame's start and drawn at the scene's end; once an effect is no longer
+    // announced its particles live out their lives.
+    struct FxAnchors {
+        float head[3] = {}, source[3] = {}, target[3] = {};
+        uint32_t phase = fx::kFlight;            // the one of fx::PhaseBits it is in
+    };
+    void FxSetEffect(uint32_t id, std::shared_ptr<const fx::Effect> effect);
+    void FxForget(uint32_t id);
+    void FxInstance(uint64_t key, uint32_t effect, const FxAnchors& anchors);
+    static constexpr uint32_t kFxBlocks = 256, kFxDrawnBlocks = 128;
     static constexpr uint32_t kParticleSlots = 128, kParticleChildren = 32;
     static constexpr uint32_t kParticlesPerBlock = kParticleSlots * kParticleChildren, kParticleBlocks = 256;
     static constexpr uint32_t kParticleDrawnBlocks = 128;     // effects simulated and drawn per frame (nearest first)
@@ -3910,6 +3925,48 @@ private:
     uint32_t m_particleDraws = 0;                // this frame (frame dumps)
     bool CreateParticleResources(std::string* error);
     void DestroyParticleResources();
+    // Our own effects (fx.cpp).
+    struct FxEmitterRun {
+        int32_t block = -1;                      // its block of particles (-1: none yet / none free)
+        uint32_t cursor = 0;                     // where the next particles spawn in it
+        float carry = 0.0f;                      // the rate's fraction of a particle carried to the next frame
+        bool reset = true;                       // newly given its block: its particles start dead
+    };
+    struct FxPlaying {
+        uint64_t key = 0;
+        uint32_t effect = 0;
+        std::shared_ptr<const fx::Effect> def;   // (kept while its particles live, even once redefined)
+        FxAnchors now, prev;
+        bool havePrev = false, gone = false;
+        uint32_t lastPhase = 0;
+        uint64_t lastSeen = 0;                   // the frame it was last announced in
+        double goneAt = 0.0;
+        float noise = 0.0f;                      // its offset into the flow
+        std::vector<FxEmitterRun> runs;          // one an emitter
+    };
+    struct FxDrawn { uint32_t playing, emitter, region; };
+    std::unordered_map<uint32_t, std::shared_ptr<const fx::Effect>> m_fxEffects;
+    std::vector<FxPlaying> m_fxPlaying;
+    std::vector<uint32_t> m_fxFreeBlocks;
+    std::vector<FxDrawn> m_fxDrawn;              // this frame's simulated blocks, in quad-region order
+    VkDescriptorSetLayout m_fxSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout m_fxLayout = VK_NULL_HANDLE;
+    VkPipeline m_fxPipeline = VK_NULL_HANDLE;
+    VkBuffer m_fxState = VK_NULL_HANDLE, m_fxIndices = VK_NULL_HANDLE;
+    VmaAllocation_T* m_fxStateAllocation = nullptr;
+    VmaAllocation_T* m_fxIndicesAllocation = nullptr;
+    VkBuffer m_fxQuads[kFramesInFlight] = {};
+    VmaAllocation_T* m_fxQuadsAllocation[kFramesInFlight] = {};
+    Texture* m_fxAtlas = nullptr;                // the sprites (fx::Sprite), made at the first effect
+    bool m_fxStateCleared = false;
+    double m_fxLastClock = 0.0;
+    float m_fxTime = 0.0f;
+    uint32_t m_fxDraws = 0;
+    bool CreateFxResources(std::string* error);
+    void DestroyFxResources();
+    void SimulateFx(VkCommandBuffer cmd);        // BeginFrame, before rendering starts (last frame's announcements)
+    void DrawFx();                               // EndScene, before the portals
+    void MakeFxAtlas();
     void SimulateParticles(VkCommandBuffer cmd); // BeginFrame, before rendering starts
     void DrawParticles(ParticleBlock& block, bool orphan = false);   // right after the effect's own draw, with its state
     // Particles of effects the game didn't draw this frame (ended, or out of view): drawn with their effect's last state

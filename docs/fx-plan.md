@@ -117,6 +117,10 @@ The format is versioned and the editor writes it; randy-vk reads it with default
    Smoke_t on connectors; every character has WaterRipples 33000 and Shadow 37000.
 3. **Runtime.** `RvkFxControl`, `.rvkfx` loader with hot reload, the emitter system, `rvk_demo --fx`. One hand-written
    effect replacing Lesser Controlled Rage, seen in game.
+   *First round:* not our own control class yet - the game's cast (`_GfxControlSpell1_t`) keeps running (its flight,
+   homing, timing) with its drawing hidden, and announces ours from its update (proxy rvk_fx.cpp). The emitter system
+   is rvk fx.cpp / fx.comp (1024 particles an emitter, 256 blocks, 128 drawn), definitions fx_def.cpp, files in
+   `fx/` (first: `nano_bolt.rvkfx`, template 46133). Other control classes need an adapter each, or the control class.
 4. **Editor.** Effects panel, emitter forms, JS preview, play in game.
 5. **Effect set.** Effects for the common actions, in turn: nano cast / buffs, hits and impacts, heals,
    teleports and zoning, fire and ambient, projectiles and beams.

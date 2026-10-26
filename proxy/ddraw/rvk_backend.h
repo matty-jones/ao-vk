@@ -35,6 +35,7 @@ void SmokeFrame();                                // each presented frame (rvk_s
 // The game's effects watched (rvk_fx.cpp: RVK_FxLog); FxPlay plays a template on the player at the next FxFrame.
 void FxFrame();                                   // each presented frame
 void FxPlay(int templateId);
+void FxReload();                                  // our effects' files read again (console "fx reload")
 void TimeFrame();                                 // each presented frame (rvk_time.cpp: RVK_TimeOfDay)
 void StatelFrame();                               // each presented frame (rvk_statels.cpp: the playfield's pack)
 void GroundFrame();                               // each presented frame (rvk_ground.cpp: the native ground)

@@ -1193,6 +1193,21 @@ void ThreadedDevice::EndParticleEmitter()
     Enqueue([this](const uint8_t*) { m_device.EndParticleEmitter(); });
 }
 
+void ThreadedDevice::FxSetEffect(uint32_t id, std::shared_ptr<const fx::Effect> effect)
+{
+    Enqueue([this, id, effect = std::move(effect)](const uint8_t*) { m_device.FxSetEffect(id, effect); });
+}
+
+void ThreadedDevice::FxForget(uint32_t id)
+{
+    Enqueue([this, id](const uint8_t*) { m_device.FxForget(id); });
+}
+
+void ThreadedDevice::FxInstance(uint64_t key, uint32_t effect, const Device::FxAnchors& anchors)
+{
+    Enqueue([this, key, effect, anchors](const uint8_t*) { m_device.FxInstance(key, effect, anchors); });
+}
+
 void ThreadedDevice::SetWeatherParams(const Device::WeatherParams& params)
 {
     Enqueue([this, params](const uint8_t*) { m_device.SetWeatherParams(params); });

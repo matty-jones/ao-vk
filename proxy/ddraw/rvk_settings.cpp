@@ -413,6 +413,7 @@ Setting g_settings[] = {
     {"RVK_PartAdapt",  "Adapt to each effect's own motion (0 = all alike)",        "Particles",        Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_Particles"},
     {"RVK_PartFollow", "Young particles follow their sprite",                      "Particles",        Float, 0, 1, 0.05f, 0.7f, nullptr, 0, "RVK_Particles"},
     {"RVK_PartCore",   "Brightness of the game's sprites",     "Particles",        Float, 0, 1, 0.05f, 0.1f, nullptr, 0, "RVK_Particles"},
+    {"RVK_Fx",         "Our own effects in place of the game's (randy-vk\\fx\\*.rvkfx in the client folder)", "Particles", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_FxLog",      "Log every effect the game makes: template, anchor, who asked (randy-vk.log)", "Particles", Bool, 0, 1, 1, 0, nullptr, 0},
 };
 constexpr uint32_t kCount = sizeof(g_settings) / sizeof(g_settings[0]);
@@ -446,7 +447,7 @@ const Vanilla kVanilla[] = {
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_RenderScale", 100}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
-    {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
+    {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_Fx", 0}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
     {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_Rainbow", 0}, {"RVK_ViewRange", 1},
     {"RVK_LightRig", 0}, {"RVK_Metering", 0}, {"RVK_ZoneFade", 0}, {"RVK_Portals", 0}, {"RVK_StreetView", 0},
@@ -714,6 +715,7 @@ const Cost kCosts[] = {
     {"RVK_DofFocus", "no cost"},
     {"RVK_Particles", "GPU: low"},
     {"RVK_PartCount", "GPU: more with the value"},
+    {"RVK_Fx", "GPU: low, while an effect plays"},
     {"RVK_FxLog", "no cost"},
     {"RVK_PartBright", "no cost"},
     {"RVK_PartTrail", "GPU: low"},

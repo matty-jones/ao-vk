@@ -6,6 +6,11 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- ao-vk's own effects: an effect file in `randy-vk\fx` (in the client folder) can stand in for one of the game's
+  effects, drawn with ao-vk's particles - glowing, trailing, sparking - in place of the game's sprites. The first one,
+  `nano_bolt.rvkfx`, replaces the bolt most nanos cast (Change Form, the Calia forms and some 700 others): light
+  gathering at your hand, a bright bolt with a trail of motes and sparks, and a burst with a shock ring on the target.
+  Edited files show at once; the console's `fx reload` reads them again. `RVK_Fx` (Particles) switches them off.
 - Shops' insides can be seen through their open doors from the street, in 3D, instead of a black doorway. A shop
   shows once you have been in one of its kind: going in records the room, and walking through a door remembers where
   it leads (every Fair Trade of the same building then shows it too, until its own door says otherwise). By day the

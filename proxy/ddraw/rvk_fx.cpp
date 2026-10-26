@@ -10,6 +10,15 @@
 //
 // The console's "fx <template id>" plays a template on the player's character (CreateEffect2 with the client's
 // control dynel and the template's own body location), at the next presented frame, on the game's thread.
+//
+// Our own effects (RVK_Fx): the .rvkfx files in <client>\randy-vk\fx (looked at again every second: an edited file
+// shows at once), each standing for some of the game's templates. When the game makes one of those - for now a cast,
+// _GfxControlSpell1_t - it is noted at MakeHandle, and its update (vtable slot 1, patched) announces our effect every
+// frame after the game's own update: the caster's hand, the target, the bolt's head, and the phase from the cast's own
+// clock (charging until +0x78, flying until it hits, +0x7C, then the impact). Replacing it ("mode": "replace"), the
+// cast's own drawing is hidden: its sprites (+0x38) and the flares and cords at the hands (+0x140..+0x14C, their
+// sprites at +0x30), switched off after each update that switched them on; the bolt's head and the impact's effect
+// (templates +0x98, +0x9C, made later and only when non-zero) never made. Layouts: re/fx/spell1*.c, flarecord.c.
 #include "rvk_backend.h"
 #include "rvk_settings.h"
 
@@ -19,6 +28,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -56,6 +66,181 @@ std::unordered_map<uint32_t, Live> g_live;
 bool LogOn()
 {
     return rvk_settings::GetEffective("RVK_FxLog") != 0.0f;
+}
+
+bool FxOn()
+{
+    return rvk_settings::GetEffective("RVK_Fx") != 0.0f;
+}
+
+// --- our effects' files ---
+
+struct EffectFile {
+    std::string file;                            // its name in the folder
+    FILETIME written{};
+    uint32_t id = 0;
+    std::shared_ptr<const rvk::fx::Effect> def;  // null: didn't parse
+};
+std::vector<EffectFile> g_files;
+std::unordered_map<uint32_t, uint32_t> g_byTemplate;   // the game's template -> the file standing for it (index)
+uint32_t g_nextId = 1;
+uint64_t g_sentSerial = 0;                      // the device the effects were last given to
+uint32_t g_frame = 0;
+
+std::string FxDir()
+{
+    std::string dir = rvk_settings::IniPath();
+    const size_t slash = dir.find_last_of("\\/");
+    return (slash == std::string::npos ? std::string() : dir.substr(0, slash + 1)) + "randy-vk\\fx\\";
+}
+
+// The folder looked at again: new and changed files read, removed ones forgotten; the device told of each change (all
+// of them for a new device).
+void ScanEffects(bool force)
+{
+    const std::string dir = FxDir();
+    std::vector<EffectFile> seen;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA((dir + "*.rvkfx").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            EffectFile e;
+            e.file = fd.cFileName;
+            e.written = fd.ftLastWriteTime;
+            seen.push_back(std::move(e));
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    rvk::ThreadedDevice* device = g_rvk.device;
+    const bool newDevice = device && g_sentSerial != g_rvk.deviceSerial;
+    bool changed = false;
+    for (EffectFile& e : seen) {
+        auto old = std::find_if(g_files.begin(), g_files.end(), [&](const EffectFile& f) { return f.file == e.file; });
+        if (old != g_files.end() && !force && CompareFileTime(&old->written, &e.written) == 0) {
+            e = *old;
+            continue;
+        }
+        e.id = old != g_files.end() ? old->id : g_nextId++;
+        std::string text;
+        if (FILE* f = std::fopen((dir + e.file).c_str(), "rb")) {
+            char buf[4096];
+            for (size_t n; (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) text.append(buf, n);
+            std::fclose(f);
+        }
+        auto def = std::make_shared<rvk::fx::Effect>();
+        std::string error;
+        if (rvk::fx::Parse(text, *def, &error)) {
+            e.def = def;
+            std::string ids;
+            for (uint32_t t : def->templates) ids += (ids.empty() ? "" : ", ") + std::to_string(t);
+            RvkLog("fx: %s: \"%s\", %zu emitters, %s templates %s", e.file.c_str(), def->name.c_str(), def->emitters.size(),
+                   def->replace ? "replacing" : "with", ids.empty() ? "(none)" : ids.c_str());
+        } else {
+            RvkLog("fx: %s: not loaded - %s", e.file.c_str(), text.empty() ? "can't read it" : error.c_str());
+        }
+        changed = true;
+    }
+    for (const EffectFile& f : g_files)
+        if (std::none_of(seen.begin(), seen.end(), [&](const EffectFile& e) { return e.file == f.file; })) {
+            RvkLog("fx: %s gone", f.file.c_str());
+            if (device) device->FxForget(f.id);
+            changed = true;
+        }
+    g_files = std::move(seen);
+    if (changed || newDevice) {
+        g_byTemplate.clear();
+        for (uint32_t i = 0; i < g_files.size(); ++i)
+            if (g_files[i].def)
+                for (uint32_t t : g_files[i].def->templates) g_byTemplate[t] = i;
+        if (device)
+            for (const EffectFile& f : g_files)
+                if (f.def) device->FxSetEffect(f.id, f.def);
+        if (device) g_sentSerial = g_rvk.deviceSerial;
+    }
+}
+
+// --- the cast (_GfxControlSpell1_t) ---
+
+using ProcessFn = void(__fastcall*)(void* self, void* edx);
+using DisableRenderingFn = void(__fastcall*)(void* visual, void* edx, int disable);
+ProcessFn g_spellProcess;
+DisableRenderingFn g_disableRendering;
+uintptr_t g_spellVtable, g_flareVtable, g_cordVtable;
+// Gamecode.dll (image base 0x10000000): the vtables, Spell1's update (slot 1).
+constexpr uint32_t kSpellVtable = 0x1016CBAC - 0x10000000, kSpellUpdate = 0x100F3A04 - 0x10000000;
+constexpr uint32_t kFlareVtable = 0x1016BCF4 - 0x10000000, kCordVtable = 0x1016B524 - 0x10000000;
+
+struct Cast {
+    uint32_t file = 0;                           // index in g_files
+    uint32_t id = 0;                             // its effect id
+    uint32_t templateId = 0;
+    bool replace = true;
+    uint32_t lastFrame = 0;
+};
+std::unordered_map<const void*, Cast> g_casts;
+
+template <class T> T At(const void* object, uint32_t offset)
+{
+    T v;
+    std::memcpy(&v, static_cast<const uint8_t*>(object) + offset, sizeof(T));
+    return v;
+}
+
+// A cast the game just made: one of ours stands for its template? Then noted, and (replacing it) the bolt's head and
+// the impact's effect made by it later left unmade.
+void NoteCast(void* control, uint32_t templateId)
+{
+    if (!g_spellVtable || !control || At<uintptr_t>(control, 0) != g_spellVtable || !FxOn())
+        return;
+    auto bound = g_byTemplate.find(templateId);
+    if (bound == g_byTemplate.end() || !g_files[bound->second].def)
+        return;
+    const EffectFile& f = g_files[bound->second];
+    Cast c{bound->second, f.id, templateId, f.def->replace, g_frame};
+    g_casts[control] = c;
+    if (c.replace) {
+        const uint32_t none = 0;
+        std::memcpy(static_cast<uint8_t*>(control) + 0x98, &none, 4);
+        std::memcpy(static_cast<uint8_t*>(control) + 0x9C, &none, 4);
+    }
+}
+
+void __fastcall SpellProcessHook(void* self, void* edx)
+{
+    g_spellProcess(self, edx);
+    auto it = g_casts.find(self);
+    if (it == g_casts.end() || At<uint32_t>(self, 4) != it->second.templateId)
+        return;
+    Cast& c = it->second;
+    c.lastFrame = g_frame;
+    if (At<uint8_t>(self, 0x14) || !FxOn() || !g_rvk.device)   // (done: the game deletes it)
+        return;
+    if (c.replace && g_disableRendering) {
+        if (void* visual = At<void*>(self, 0x38)) g_disableRendering(visual, nullptr, 1);
+        for (uint32_t offset = 0x140; offset <= 0x14C; offset += 4) {
+            const void* child = At<const void*>(self, offset);
+            if (!child) continue;
+            const uintptr_t vt = At<uintptr_t>(child, 0);
+            if (vt == g_flareVtable || vt == g_cordVtable)
+                if (void* visual = At<void*>(child, 0x30)) g_disableRendering(visual, nullptr, 1);
+        }
+    }
+    const float age = At<float>(self, 0x0C), leaves = At<float>(self, 0x78), hits = At<float>(self, 0x7C);
+    rvk::Device::FxAnchors a;
+    std::memcpy(a.source, static_cast<const uint8_t*>(self) + 0xE4, 12);
+    std::memcpy(a.target, static_cast<const uint8_t*>(self) + 0xFC, 12);
+    if (age < leaves) {
+        a.phase = rvk::fx::kCharge;
+        std::memcpy(a.head, a.source, 12);
+    } else if (age <= hits) {
+        a.phase = rvk::fx::kFlight;
+        std::memcpy(a.head, static_cast<const uint8_t*>(self) + 0x130, 12);
+    } else {
+        a.phase = rvk::fx::kImpact;
+        std::memcpy(a.head, a.target, 12);
+    }
+    g_rvk.device->FxInstance(uint64_t(reinterpret_cast<uintptr_t>(self)) ^ (uint64_t(c.templateId) << 32), c.id, a);
 }
 
 // "Gamecode.dll+0x0d1b5a" for a code address.
@@ -180,6 +365,8 @@ std::string Callers(void* const* frame, int count)
 uint32_t __fastcall MakeHandleHook(void* self, void* edx, void* control, uint32_t templateId)
 {
     const uint32_t handle = g_makeHandle(self, edx, control, templateId);
+    if (handle)
+        NoteCast(control, templateId);
     if (!handle || !LogOn())
         return handle;
     // This hook stands in MakeHandle's place: its return address is in CreateEffect2, and CreateEffect2's frame
@@ -263,6 +450,19 @@ void Install()
     g_gaveUp = false;
     g_installed = true;
     RvkLog("fx: _EffectHandler_t watched (%zu CreateEffect2 / CreateTracer overloads)", g_overloads.size());
+    // The cast's update, for our effects in its place.
+    if (HMODULE ds = GetModuleHandleA("DisplaySystem.dll"))
+        g_disableRendering = reinterpret_cast<DisableRenderingFn>(GetProcAddress(ds, "?DisableRendering@GfxVisual@@QAEXH@Z"));
+    void* update = nullptr;
+    if (g_disableRendering && PatchSlot(gc, kSpellVtable, 1, kSpellUpdate, reinterpret_cast<void*>(&SpellProcessHook), &update,
+                                        "fx: _GfxControlSpell1_t update")) {
+        g_spellProcess = reinterpret_cast<ProcessFn>(update);
+        const uintptr_t base = reinterpret_cast<uintptr_t>(gc);
+        g_spellVtable = base + kSpellVtable;
+        g_flareVtable = base + kFlareVtable;
+        g_cordVtable = base + kCordVtable;
+        RvkLog("fx: casts (_GfxControlSpell1_t) can be ours");
+    }
 }
 
 void Play(int templateId)
@@ -287,11 +487,21 @@ void FxPlay(int templateId)
 
 void FxFrame()
 {
+    ++g_frame;
     if (!g_installed && !g_gaveUp)
         Install();
     if (!g_installed)
         return;
+    if (g_frame % 60 == 1 || (g_rvk.device && g_sentSerial != g_rvk.deviceSerial))
+        ScanEffects(false);
+    if (g_frame % 120 == 0)                      // (casts the game has deleted: no update for a while)
+        std::erase_if(g_casts, [](const auto& c) { return c.second.lastFrame + 30 < g_frame; });
     if (int id = g_playRequest.exchange(0, std::memory_order_relaxed)) Play(id);
+}
+
+void FxReload()
+{
+    ScanEffects(true);
 }
 
 }  // namespace rvkproxy

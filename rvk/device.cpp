@@ -243,6 +243,7 @@ Device::~Device()
     DestroyDarknessResources();
     DestroyProfiler();
     DestroyParticleResources();
+    DestroyFxResources();
     DestroySkinResources();
     DestroyGrassResources();
     DestroyLeafResources();
@@ -1298,7 +1299,7 @@ bool Device::CreatePipelines(std::string* error)
             for (VkShaderModule m : bySet) vkDestroyShaderModule(m_device, m, nullptr);
     if (!ok || !CreateShadowResources(error) || !CreatePointShadowResources(error) || !CreateHdrResources(error) ||
         !CreateDarknessResources(error) ||
-        !CreateParticleResources(error) || !CreateSkinResources(error))
+        !CreateParticleResources(error) || !CreateFxResources(error) || !CreateSkinResources(error))
         return false;
     CreateGrassResources(error);                 // not fatal: without it the ground grass is simply unavailable
     {
@@ -1966,6 +1967,7 @@ void Device::BeginFrame()
     m_particleOrphanTrigger = "none";
     m_particleSaw3D = false;
     SimulateParticles(f.main);                   // last frame's effects; reads last frame's world camera
+    SimulateFx(f.main);                          // our own effects (fx.cpp): last frame's announcements
     ProfileMark("particle simulation");
     m_inFrame = true;
     BeginScene();

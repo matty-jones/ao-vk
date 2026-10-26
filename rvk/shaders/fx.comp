@@ -1,0 +1,232 @@
+// Our own effects' particles (fx.cpp; docs/fx-plan.md): one invocation per particle of each active emitter's block.
+// Spawns, simulates, then writes the particle's camera-facing quad in the game's sprite vertex format (FVF 0x142:
+// position, D3DCOLOR, uv; 24 bytes), drawn through the scene's draw path with the emitter's sprite and blending.
+//
+// Spawning goes round each block's particles as a ring: this frame's new ones are the `count` slots from the block's
+// cursor on (the CPU advances it), each placed along the emitter point's motion over the frame so a moving emitter
+// leaves an even trail, then offset by the emitter's shape. A live particle falls under gravity, is pulled back to the
+// emitter point, and takes on - at the rate `drag` - a flow of curl noise (divergence free: it swirls like smoke) and a
+// swirl round the emitter's vertical axis. Its size and colour follow the emitter's keys over its life.
+#version 450
+
+layout(local_size_x = 64) in;
+
+const uint PER_BLOCK = 1024u;
+
+struct Block {
+    vec4 point;         // the emitter point now; w: particles spawned this frame
+    vec4 prevPoint;     // ... last frame; w: the spawn cursor (uint bits)
+    vec4 shape;         // x: shape (0 point, 1 sphere, 2 shell, 3 ring, 4 disc), y: radius, z: count, w: state offset (bits)
+    vec4 dir;           // launch direction (world); w: cos of half the spread
+    vec4 lifeSpeed;     // life min, max; speed min, max
+    vec4 forces;        // drag, curl speed, curl feature size, swirl
+    vec4 gravity;       // xyz; w: pull
+    vec4 misc;          // x: inherit, y: stretch (s), z: 1 = reset (all dead), w: 1 = spawn along the path
+    vec4 vel;           // the emitter point's velocity; w: noise offset
+    vec4 sizeT;         // size keys: times
+    vec4 sizeV;         // ... sizes
+    vec4 colourT;       // colour keys: times
+    vec4 colour[4];     // ... rgba
+    vec4 uv;            // the sprite's cell in the atlas: u, v, width, height
+    uvec4 keys;         // x: size keys, y: colour keys, z: quad region (place in this frame's list), w: -
+    vec4 pathStart;     // path: where it starts (the source); xyz
+};
+struct Particle {
+    vec4 posAge;        // world position, age (s)
+    vec4 velLife;       // velocity, life (s; 0 = dead)
+    uvec4 meta;         // x: random bits
+};
+
+layout(std430, binding = 0) readonly buffer Blocks { Block blocks[]; };
+layout(std430, binding = 1) buffer State { Particle particles[]; };
+layout(std430, binding = 2) writeonly buffer Quads { uint quads[]; };
+
+layout(push_constant) uniform Params {
+    vec4 a;             // dt, time, frame number, -
+    vec4 right;         // camera right (world)
+    vec4 up;            // camera up (world)
+} pc;
+
+uint Hash(uint x)
+{
+    x ^= x >> 16; x *= 0x7feb352du;
+    x ^= x >> 15; x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+float Rand(inout uint s)
+{
+    s = Hash(s);
+    return float(s >> 8) * (1.0 / 16777216.0);
+}
+
+vec3 RandDir(inout uint s)
+{
+    float z = Rand(s) * 2.0 - 1.0, a = Rand(s) * 6.2831853, r = sqrt(max(0.0, 1.0 - z * z));
+    return vec3(r * cos(a), z, r * sin(a));
+}
+
+// A direction within the cone round `axis` whose half angle has cosine cosHalf (uniform over the cap).
+vec3 RandCone(inout uint s, vec3 axis, float cosHalf)
+{
+    float z = mix(1.0, cosHalf, Rand(s)), a = Rand(s) * 6.2831853, r = sqrt(max(0.0, 1.0 - z * z));
+    vec3 n = normalize(length(axis) > 1e-5 ? axis : vec3(0.0, 1.0, 0.0));
+    vec3 t = normalize(abs(n.y) < 0.99 ? cross(n, vec3(0.0, 1.0, 0.0)) : cross(n, vec3(1.0, 0.0, 0.0)));
+    vec3 b = cross(n, t);
+    return n * z + (t * cos(a) + b * sin(a)) * r;
+}
+
+vec3 Gradient(ivec3 i)
+{
+    uvec3 q = uvec3(i);
+    uint h = Hash(q.x + Hash(q.y + Hash(q.z)));
+    return vec3(float(h & 1023u), float((h >> 10) & 1023u), float((h >> 20) & 1023u)) * (1.0 / 511.5) - 1.0;
+}
+
+// Gradient noise and its derivatives (value, d/dx, d/dy, d/dz), quintic interpolation (as particles.comp).
+vec4 Noise(vec3 x)
+{
+    ivec3 i = ivec3(floor(x));
+    vec3 f = fract(x);
+    vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    vec3 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+    vec3 ga = Gradient(i + ivec3(0, 0, 0)), gb = Gradient(i + ivec3(1, 0, 0));
+    vec3 gc = Gradient(i + ivec3(0, 1, 0)), gd = Gradient(i + ivec3(1, 1, 0));
+    vec3 ge = Gradient(i + ivec3(0, 0, 1)), gf = Gradient(i + ivec3(1, 0, 1));
+    vec3 gg = Gradient(i + ivec3(0, 1, 1)), gh = Gradient(i + ivec3(1, 1, 1));
+    float va = dot(ga, f - vec3(0, 0, 0)), vb = dot(gb, f - vec3(1, 0, 0));
+    float vc = dot(gc, f - vec3(0, 1, 0)), vd = dot(gd, f - vec3(1, 1, 0));
+    float ve = dot(ge, f - vec3(0, 0, 1)), vf = dot(gf, f - vec3(1, 0, 1));
+    float vg = dot(gg, f - vec3(0, 1, 1)), vh = dot(gh, f - vec3(1, 1, 1));
+    float value = va + u.x * (vb - va) + u.y * (vc - va) + u.z * (ve - va) + u.x * u.y * (va - vb - vc + vd) +
+                  u.y * u.z * (va - vc - ve + vg) + u.z * u.x * (va - vb - ve + vf) +
+                  (-va + vb + vc - vd + ve - vf - vg + vh) * u.x * u.y * u.z;
+    vec3 grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.z * (ge - ga) + u.x * u.y * (ga - gb - gc + gd) +
+                u.y * u.z * (ga - gc - ge + gg) + u.z * u.x * (ga - gb - ge + gf) +
+                (-ga + gb + gc - gd + ge - gf - gg + gh) * u.x * u.y * u.z +
+                du * (vec3(vb, vc, ve) - va + u.yzx * vec3(va - vb - vc + vd, va - vc - ve + vg, va - vb - ve + vf) +
+                      u.zxy * vec3(va - vb - ve + vf, va - vb - vc + vd, va - vc - ve + vg) +
+                      u.yzx * u.zxy * (-va + vb + vc - vd + ve - vf - vg + vh));
+    return vec4(value, grad);
+}
+
+vec3 Curl(vec3 p)
+{
+    vec4 nx = Noise(p), ny = Noise(p + vec3(31.416, -47.853, 12.793)), nz = Noise(p + vec3(-233.145, -113.408, -185.31));
+    return vec3(nz.z - ny.w, nx.w - nz.y, ny.y - nx.z);
+}
+
+float SizeAt(Block B, float t)
+{
+    uint n = max(B.keys.x, 1u);
+    if (n == 1u || t <= B.sizeT.x) return B.sizeV.x;
+    for (uint k = 1u; k < n; ++k)
+        if (t <= B.sizeT[k])
+            return mix(B.sizeV[k - 1u], B.sizeV[k], (t - B.sizeT[k - 1u]) / max(B.sizeT[k] - B.sizeT[k - 1u], 1e-5));
+    return B.sizeV[n - 1u];
+}
+
+vec4 ColourAt(Block B, float t)
+{
+    uint n = max(B.keys.y, 1u);
+    if (n == 1u || t <= B.colourT.x) return B.colour[0];
+    for (uint k = 1u; k < n; ++k)
+        if (t <= B.colourT[k])
+            return mix(B.colour[k - 1u], B.colour[k], (t - B.colourT[k - 1u]) / max(B.colourT[k] - B.colourT[k - 1u], 1e-5));
+    return B.colour[n - 1u];
+}
+
+void WriteVertex(uint v, vec3 pos, uint colour, vec2 uv)
+{
+    uint o = v * 6u;
+    quads[o + 0u] = floatBitsToUint(pos.x);
+    quads[o + 1u] = floatBitsToUint(pos.y);
+    quads[o + 2u] = floatBitsToUint(pos.z);
+    quads[o + 3u] = colour;
+    quads[o + 4u] = floatBitsToUint(uv.x);
+    quads[o + 5u] = floatBitsToUint(uv.y);
+}
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    Block B = blocks[gl_WorkGroupID.y];
+    uint count = uint(B.shape.z);
+    if (i >= count)
+        return;
+    uint index = floatBitsToUint(B.shape.w) + i;
+    Particle P = particles[index];
+    if (B.misc.z > 0.5)
+        P.velLife.w = 0.0;
+    float dt = pc.a.x;
+    uint seed = Hash(index * 747796405u + uint(pc.a.z) * 2891336453u);
+    uint cursor = floatBitsToUint(B.prevPoint.w) % count, spawned = uint(B.point.w);
+    uint slot = (i + count - cursor) % count;    // its place after the cursor
+
+    if (slot < spawned) {
+        // Born this frame: along the emitter's motion over the frame (or the path), then the shape's offset.
+        float along = (float(slot) + Rand(seed)) / float(max(spawned, 1u));
+        vec3 base = B.misc.w > 0.5 ? mix(B.pathStart.xyz, B.point.xyz, Rand(seed))
+                                   : mix(B.prevPoint.xyz, B.point.xyz, along);
+        uint shape = uint(B.shape.x);
+        float r = B.shape.y;
+        vec3 off = vec3(0.0);
+        if (shape == 1u) off = RandDir(seed) * r * pow(Rand(seed), 1.0 / 3.0);
+        else if (shape == 2u) off = RandDir(seed) * r;
+        else if (shape >= 3u) {
+            float a = Rand(seed) * 6.2831853, d = shape == 3u ? r : r * sqrt(Rand(seed));
+            off = vec3(cos(a) * d, 0.0, sin(a) * d);
+        }
+        vec3 dir = RandCone(seed, B.dir.xyz, B.dir.w);
+        float speed = mix(B.lifeSpeed.z, B.lifeSpeed.w, Rand(seed));
+        float life = mix(B.lifeSpeed.x, B.lifeSpeed.y, Rand(seed));
+        P.posAge = vec4(base + off, 0.0);
+        P.velLife = vec4(dir * speed + B.vel.xyz * B.misc.x, life);
+        P.meta = uvec4(Hash(seed), 0u, 0u, 0u);
+    } else if (P.velLife.w > 0.0 && P.posAge.w < P.velLife.w) {
+        vec3 pos = P.posAge.xyz, vel = P.velLife.xyz;
+        vec3 rel = pos - B.point.xyz;
+        vel += (B.gravity.xyz - rel * B.gravity.w) * dt;
+        // The flow the particle eases into: curl noise, and the swirl round the emitter's vertical axis.
+        vec3 flow = vec3(0.0);
+        if (B.forces.y != 0.0)
+            flow += Curl(pos / max(B.forces.z, 0.01) + vec3(B.vel.w, pc.a.y * 0.15, -B.vel.w)) * B.forces.y;
+        if (B.forces.w != 0.0)
+            flow += cross(vec3(0.0, 1.0, 0.0), vec3(rel.x, 0.0, rel.z)) * B.forces.w;
+        vel = flow + (vel - flow) * exp(-B.forces.x * dt);
+        P.posAge.xyz = pos + vel * dt;
+        P.velLife.xyz = vel;
+        P.posAge.w += dt;
+    } else {
+        P.velLife.w = 0.0;
+    }
+    particles[index] = P;
+
+    // The quad: the emitter's size and colour at its age; stretched back along its motion across the screen.
+    bool live = P.velLife.w > 0.0 && P.posAge.w < P.velLife.w;
+    float t = live ? P.posAge.w / P.velLife.w : 1.0;
+    float extent = live ? SizeAt(B, t) * 0.5 : 0.0;
+    vec4 c = clamp(ColourAt(B, t), 0.0, 1.0);
+    uint colour = live ? (uint(c.a * 255.0 + 0.5) << 24) | (uint(c.r * 255.0 + 0.5) << 16) |
+                         (uint(c.g * 255.0 + 0.5) << 8) | uint(c.b * 255.0 + 0.5) : 0u;
+    vec2 screenVel = vec2(dot(P.velLife.xyz, pc.right.xyz), dot(P.velLife.xyz, pc.up.xyz));
+    float speed = length(screenVel);
+    float trail = speed * B.misc.y;
+    vec3 along = pc.right.xyz, across = pc.up.xyz;
+    if (trail > extent * 0.05 && speed > 1e-4) {
+        vec2 d = screenVel / speed;
+        along = d.x * pc.right.xyz + d.y * pc.up.xyz;
+        across = -d.y * pc.right.xyz + d.x * pc.up.xyz;
+    } else {
+        trail = 0.0;
+    }
+    vec3 head = along * extent, tail = -along * (extent + trail), side = across * extent;
+    uint v = (B.keys.z * PER_BLOCK + i) * 4u;
+    vec3 p = P.posAge.xyz;
+    vec4 uv = B.uv;
+    WriteVertex(v + 0u, p + tail - side, colour, vec2(uv.x, uv.y + uv.w));
+    WriteVertex(v + 1u, p + head - side, colour, vec2(uv.x + uv.z, uv.y + uv.w));
+    WriteVertex(v + 2u, p + tail + side, colour, vec2(uv.x, uv.y));
+    WriteVertex(v + 3u, p + head + side, colour, vec2(uv.x + uv.z, uv.y));
+}
