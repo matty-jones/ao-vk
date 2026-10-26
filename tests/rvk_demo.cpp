@@ -4659,6 +4659,16 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
         dev.SetTexture(0, box);
         dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, props.data(), uint32_t(props.size()), propIdx.data(),
                                  uint32_t(propIdx.size()));
+        // A door in the room's back wall, away from its entrance: recorded with the room and seen from the street.
+        {
+            const VtxMesh backDoor[4] = {{3.0f, -5.0f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 0, 0}, {5.4f, -5.0f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 1, 0},
+                                         {5.4f, -1.8f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 1, 2}, {3.0f, -1.8f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 0, 2}};
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "door_inner");
+            dev.SetTexture(0, box);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, backDoor, 4, quadIdx, 6);
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t");
+            dev.SetTexture(0, box);
+        }
         if (lookingBack) {                       // a pillar between the camera and the entrance: the street behind it hidden
             dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, pillar.data(), uint32_t(pillar.size()), pillarIdx.data(),
                                      uint32_t(pillarIdx.size()));

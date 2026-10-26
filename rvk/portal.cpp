@@ -263,6 +263,25 @@ uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Text
     std::vector<d3d::Light> lit;
     for (const portal::CapturedPiece& p : cap.pieces) {
         if (p.vertices.empty()) continue;
+        if ((p.kind & portal::kDoorPiece) && cap.entranceKnown) {   // (the entrance's door: the street's own is there)
+            // (Where its geometry is: the middle of its vertices in the world - not its matrix's place, which can be
+            // anywhere for geometry already in the world's space.)
+            float mn[2] = {1e30f, 1e30f}, mx[2] = {-1e30f, -1e30f};
+            const auto& w = p.world.m;
+            for (uint32_t v = 0; v < p.vertexCount; ++v) {
+                float m[3];
+                std::memcpy(m, p.vertices.data() + size_t(v) * p.stride, 12);
+                for (int k = 0; k < 2; ++k) {
+                    const int j = k * 2;
+                    const float x = m[0] * w[0][j] + m[1] * w[1][j] + m[2] * w[2][j] + w[3][j];
+                    mn[k] = std::min(mn[k], x);
+                    mx[k] = std::max(mx[k], x);
+                }
+            }
+            const float dx = 0.5f * (mn[0] + mx[0]) - cap.entrance[0], dz = 0.5f * (mn[1] + mx[1]) - cap.entrance[2];
+            if (dx * dx + dz * dz < 2.5f * 2.5f)
+                continue;
+        }
         m_rs = p.rs;
         m_tss = p.tss;
         std::fill(m_textures.begin(), m_textures.end(), nullptr);
@@ -273,7 +292,7 @@ uint32_t Device::PortalReplay(const portal::Capture& cap, const std::vector<Text
         if (now)                                 // (a street's, lit as it is now: portal_street.cpp)
             StreetLightPiece(*now, m_rs, p.lights, lit);
         PortalSetLights(now ? lit : p.lights, place);
-        m_drawVisualKind = p.kind;
+        m_drawVisualKind = p.kind & ~portal::kDoorPiece;
         m_constantsDirty = true;
         Draw(p.primitive, p.fvf, p.vertices.data(), p.vertexCount, p.indices.empty() ? nullptr : p.indices.data(),
              uint32_t(p.indices.size()));
