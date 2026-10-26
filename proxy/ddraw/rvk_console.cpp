@@ -1369,7 +1369,7 @@ void HudFrame(rvk::ThreadedDevice* device)
         if (v > 0.0f) std::snprintf(out, size, "%-6s %5.2f ms", name, v);
         else std::snprintf(out, size, "%-6s     - ms", name);
     };
-    char lines[6][48];
+    char lines[8][48];
     std::snprintf(lines[0], sizeof(lines[0]), "%4.0f fps  %5.2f ms", fps, fps > 0.0 ? 1000.0 / fps : 0.0);
     ms(lines[1], sizeof(lines[1]), "game", game);
     ms(lines[2], sizeof(lines[2]), "render", t.renderMs > 0.0f ? render : 0.0f);
@@ -1382,8 +1382,27 @@ void HudFrame(rvk::ThreadedDevice* device)
         std::snprintf(lines[4], sizeof(lines[4]), "CPU    %3.0f%%  game %3.0f%%", cpu, std::max(0.0, cpuGame));
     else
         std::snprintf(lines[4], sizeof(lines[4]), "CPU      -");
-    int count = 5;
-    if (shownFps > 0.0) std::snprintf(lines[count++], sizeof(lines[5]), "%4.0f shown (frame gen)", shownFps);
+    // Client memory: how much of the game's address space is taken (a 32-bit program: 4 GB at most, and a zone's load
+    // needs a large free block - long sessions that ran it out ended the game). Video memory: against the driver's budget.
+    MEMORYSTATUSEX mem{};
+    mem.dwLength = sizeof(mem);
+    const bool memKnown = GlobalMemoryStatusEx(&mem) && mem.ullTotalVirtual > 0;
+    const uint64_t memFree = memKnown ? mem.ullAvailVirtual : 0;
+    const bool memLow = memKnown && memFree < (512ull << 20);
+    if (memKnown)
+        std::snprintf(lines[5], sizeof(lines[5]), "client mem %3.0f%%  %4u MB free",
+                      100.0 * double(mem.ullTotalVirtual - memFree) / double(mem.ullTotalVirtual), unsigned(memFree >> 20));
+    else
+        std::snprintf(lines[5], sizeof(lines[5]), "client mem   -");
+    uint64_t vramUsed, vramBudget;
+    device->Vram(&vramUsed, &vramBudget);
+    if (vramBudget)
+        std::snprintf(lines[6], sizeof(lines[6]), "VRAM   %3.0f%%  %.1f of %.1f GB", 100.0 * double(vramUsed) / double(vramBudget),
+                      double(vramUsed) / double(1ull << 30), double(vramBudget) / double(1ull << 30));
+    else
+        std::snprintf(lines[6], sizeof(lines[6]), "VRAM     -");
+    int count = 7;
+    if (shownFps > 0.0) std::snprintf(lines[count++], sizeof(lines[7]), "%4.0f shown (frame gen)", shownFps);
     Metrics(w, h);
     const int cw = g.font.cw, ch = g.font.ch, pad = std::max(3, ch / 3);
     size_t widest = 0;
@@ -1399,7 +1418,9 @@ void HudFrame(rvk::ThreadedDevice* device)
         Text(pad, pad + i * ch, C(limits ? cWarn : cText) + lines[i]);
     }
     Text(pad, pad + 4 * ch, C(cText) + lines[4]);
-    if (count == 6) Text(pad, pad + 5 * ch, C(cValue) + lines[5]);
+    Text(pad, pad + 5 * ch, C(memLow ? cWarn : cText) + lines[5]);
+    Text(pad, pad + 6 * ch, C(cText) + lines[6]);
+    if (count == 8) Text(pad, pad + 7 * ch, C(cValue) + lines[7]);
     device->SetConsoleImage(g.width, g.height, g.pixels.data());
     g_hud.shown = true;
     g.shown = false;                             // (the console's own image: none now)

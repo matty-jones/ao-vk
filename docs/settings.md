@@ -55,7 +55,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PortalDim` | Shops' insides through their doors: their brightness by day (1 = as inside) | 0 .. 1 | 0.7 | no cost | window; switch `RVK_Portals`; knob |
 | `RVK_StreetView` | The street seen from inside a shop through its open door (once you have stood at that door outside) | on / off | on | GPU: low, with a shop's open door in view | window; switch `RVK_Portals`; game value off; knob |
 | `RVK_StreetNow` | The street seen from inside a shop: lit for the hour it is now (off: as when it was recorded) | on / off | on | no cost | ini only; switch `RVK_StreetView`; knob |
-| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's | on / off | off | no cost | window |
+| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's, client memory and VRAM | on / off | off | no cost | window |
 | `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | no cost | window; knob |
 | `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | CPU and GPU: more with the value | window |
 | `RVK_ViewRange` | How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws) | 1 .. 3 | 1.5 | CPU and GPU: more with the value | window; game value 1 |

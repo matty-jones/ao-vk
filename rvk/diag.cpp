@@ -54,6 +54,24 @@ void Device::BeginFrameDump()
                  m_scene ? m_scene->m_height : 0u);
 }
 
+// The device-local heaps' usage and budget, summed (with VK_EXT_memory_budget the driver's figures: the whole process,
+// the game's own and the driver's allocations too; else rvk's allocations and the heaps' sizes). Safe from any thread.
+void Device::VramUse(uint64_t* used, uint64_t* budget) const
+{
+    *used = *budget = 0;
+    if (!m_allocator)
+        return;
+    const VkPhysicalDeviceMemoryProperties* memory = nullptr;
+    vmaGetMemoryProperties(m_allocator, &memory);
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS] = {};
+    vmaGetHeapBudgets(m_allocator, budgets);
+    for (uint32_t h = 0; h < memory->memoryHeapCount; ++h)
+        if (memory->memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+            *used += budgets[h].usage;
+            *budget += budgets[h].budget;
+        }
+}
+
 // GPU memory in one line: each memory heap's usage against the driver's budget for it (with VK_EXT_memory_budget the
 // driver's own figures for this process; else what rvk has allocated there), then what rvk's allocations are for - the
 // game's textures, render targets (rvk's own and the game's), the frame rings, the static-geometry and shadow-caster

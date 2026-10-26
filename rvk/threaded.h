@@ -31,6 +31,8 @@ public:
     // generation on, the frames put on screen so far (real and generated; 0 without it).
     struct LiveTimes { float frameMs, gameWaitMs, renderMs, gpuWaitMs, gpuMs; uint64_t shown; };
     LiveTimes Live() const;
+    // Video memory in use and the driver's budget for it, bytes (the GPU's own heaps; any thread).
+    void Vram(uint64_t* used, uint64_t* budget) const { m_device.VramUse(used, budget); }
     ThreadedDevice();
     ~ThreadedDevice();
     ThreadedDevice(const ThreadedDevice&) = delete;

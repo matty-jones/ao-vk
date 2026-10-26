@@ -56,7 +56,7 @@ Setting g_settings[] = {
     {"RVK_PortalDim", "Shops' insides through their doors: their brightness by day (1 = as inside)", "General", Float, 0, 1, 0.05f, 0.7f, nullptr, 0, "RVK_Portals"},
     {"RVK_StreetView", "The street seen from inside a shop through its open door (once you have stood at that door outside)", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Portals"},
     {"RVK_StreetNow", "The street seen from inside a shop: lit for the hour it is now (off: as when it was recorded)", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_StreetView"},
-    {"RVK_PerfHud", "Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's", "General", Bool, 0, 1, 1, 0, nullptr, 0},
+    {"RVK_PerfHud", "Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's, client memory and VRAM", "General", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_AlienMap", "AI missions' PF map: rooms shown black on green (the game's is black on black)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
     {"RVK_ViewRange",   "How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws)", "General", Float, 1, 3, 0.25f, 1.5f, nullptr, 0},

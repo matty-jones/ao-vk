@@ -81,6 +81,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   instead of numbers (ours / AMD CACAO / ray traced, FSR 2.2 / FSR 3.1, off / 16x, ...), and AMD's tuning moved from
   randy-vk.ini into the Advanced tab: `RVK_SssrThick`, `RVK_GiSky` and `RVK_VrsCutoff`. The console shows the cost
   too. Needs the matching AOReloaded.
+- The performance readout (`RVK_PerfHud`) shows client memory and VRAM. Client memory is how much of the game's 4 GB it
+  has taken, with the MB still free; it turns orange under 512 MB, where long sessions start to fail on zone changes
+  (the game is a 32-bit program). VRAM is the graphics card's memory in use against what the driver allows the game.
 
 ### Changed
 - Day and night share one light (`RVK_LightRig`, on; off brings back the old night lighting). At sunset buildings and
