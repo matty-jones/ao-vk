@@ -424,6 +424,8 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                 }
                 uint8_t* ranks = lightPass ? tile->lightRank : tile->rank;
                 bool changed = false;
+                Texture* tileTexs[4] = {};       // the native ground's tile textures its cells read (bases, below)
+                bool tileTexsOverflow = false;
                 for (int cz = cz0; cz <= cz1; ++cz)
                     for (int cx = cx0; cx <= cx1; ++cx) {
                         const int idx = cz * kGroundN + cx;
@@ -438,6 +440,30 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                             continue;
                         const float u = l0 * ua[0] + l1 * ub[0] + l2 * uc[0];
                         const float v = l0 * ua[1] + l1 * ub[1] + l2 * uc[1];
+                        // The native ground's colour from its cell's tile texture - which the game streams in and fills
+                        // again later: until its picture can be read the cell stays unknown (taken as bare for good, a
+                        // lawn grew nothing), and the tile is noted so that a new picture captures the ground again
+                        // (the grass kept the pictures it first saw: blades on paving, a lawn bare beside it - the
+                        // user, 2026-10-26).
+                        uint8_t rgb[3] = {0x3C, 0x6A, 0x2A};      // a default grass green (no filter, or no texel read)
+                        bool have = false;
+                        if (!lightPass && filter && native) {
+                            Texture* tt = nullptr;
+                            have = NativeGroundRgb(u, v, rgb, &tt);
+                            if (tt) {
+                                bool known = false;
+                                for (Texture* p : tileTexs)
+                                    known = known || p == tt;
+                                for (Texture*& p : tileTexs)
+                                    if (!known && !p) {
+                                        p = tt;
+                                        known = true;
+                                    }
+                                tileTexsOverflow = tileTexsOverflow || !known;
+                            }
+                            if (!have)
+                                continue;
+                        }
                         ranks[idx] = rank;
                         if (lightPass) {
                             uint8_t l[3] = {0, 0, 0};
@@ -452,10 +478,8 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                             continue;
                         }
                         const float y = l0 * pa[1] + l1 * pb[1] + l2 * pc[1];
-                        uint8_t rgb[3] = {0x3C, 0x6A, 0x2A};      // a default grass green (no filter, or no texel read)
-                        bool have = false;
-                        if (filter)
-                            have = native ? NativeGroundRgb(u, v, rgb) : tex->TexelRgbAt(u, v, rgb);
+                        if (filter && !native)
+                            have = tex->TexelRgbAt(u, v, rgb);
                         const bool grass = !filter || (have && GreenRgb(rgb));
                         const uint32_t colour = uint32_t(rgb[0]) << 16 | uint32_t(rgb[1]) << 8 | rgb[2] |
                                                 (grass ? 1u << 24 : 0u);
@@ -484,18 +508,25 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                     ++tile->version;
                     tile->lastChange = m_frameNumber;
                 }
-                if (!lightPass && filter && !native) {   // which base textures it holds (a re-upload recaptures the ground)
+                // Which base textures it holds (a re-upload recaptures the ground): the draw's, or the native ground's
+                // tiles.
+                auto noteBase = [&](Texture* b) {
                     bool known = false;
                     for (const void* p : tile->bases)
-                        known = known || p == tex;
+                        known = known || p == b;
                     for (const void*& p : tile->bases)
                         if (!known && !p) {
-                            p = tex;
+                            p = b;
                             known = true;
                         }
                     tile->basesOverflow = tile->basesOverflow || !known;
-                    tex->m_groundBase = true;
-                }
+                    b->m_groundBase = true;
+                };
+                if (!lightPass && filter && !native)
+                    noteBase(tex);
+                for (Texture* b : tileTexs)
+                    if (b) noteBase(b);
+                tile->basesOverflow = tile->basesOverflow || tileTexsOverflow;
                 if (lightPass) {                 // which lightmaps it holds (a re-upload recaptures the light)
                     bool known = false;
                     for (const void* p : tile->lightmaps)

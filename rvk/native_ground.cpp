@@ -423,14 +423,18 @@ void Device::FillNativeLights(detail::FrameLights* fl)
     fl->terrainLight2[3] = std::clamp(m_native.sun, 0.0f, 1.0f);
 }
 
-bool Device::NativeGroundRgb(float u, float v, uint8_t rgb[3]) const
+bool Device::NativeGroundRgb(float u, float v, uint8_t rgb[3], Texture** tileTex) const
 {
+    if (tileTex) *tileTex = nullptr;
     if (!m_native.ground) return false;
     const NativeGround& g = *m_native.ground;
     const int c = std::clamp(int(std::floor(u)), 0, int(g.cellsX) - 1), r = std::clamp(int(std::floor(v)), 0, int(g.cellsZ) - 1);
     const uint16_t code = g.codes[size_t(r) * g.cellsX + c];
     const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
     if (tile >= g.tiles.size() || !g.tiles[tile]) return false;
+    if (tileTex) *tileTex = g.tiles[tile];
+    // (A tile texture of 32 x 32 or less is the game's stand-in while the real one streams in, as for its own ground.)
+    if (g.tiles[tile]->Width() * g.tiles[tile]->Height() <= 32u * 32u) return false;
     const float a = std::clamp(u - float(c), 0.0f, 1.0f), b = std::clamp(v - float(r), 0.0f, 1.0f);
     const float tu[4] = {a, 1.0f - b, 1.0f - a, b}, tv[4] = {1.0f - b, 1.0f - a, b, a};   // (terrain.glsl NativeTurn)
     return g.tiles[tile]->TexelRgbAt(tu[turn], tv[turn], rgb);

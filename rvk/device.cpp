@@ -1372,8 +1372,8 @@ bool Device::CreateFrames(std::string* error)
         VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         ai.commandPool = m_pool;
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        ai.commandBufferCount = 6;
-        VkCommandBuffer cmds[6];
+        ai.commandBufferCount = 8;
+        VkCommandBuffer cmds[8];
         if (!Check(vkAllocateCommandBuffers(m_device, &ai, cmds), "vkAllocateCommandBuffers", error))
             return false;
         f.upload = cmds[0];
@@ -1382,6 +1382,8 @@ bool Device::CreateFrames(std::string* error)
         f.mainB = cmds[3];
         f.clouds = cmds[4];                      // the clouds' own pass (clouds.cpp)
         f.rays = cmds[5];                        // the ray-traced sun shadows (raytrace.cpp)
+        f.prepass2 = cmds[6];                    // a second pre-pass segment (prepass.cpp PrepassContinue)
+        f.mainC = cmds[7];
         VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -2009,6 +2011,7 @@ void Device::BeginFrame()
     m_profileDraws += m_frameDraw;               // last frame's batching (the profile's log)
     m_frameDraw = 0;
     m_prepassEndedThisFrame = false;
+    m_waterEndedPrepass = false;
     m_grassDrawnThisFrame = false;
     m_profileGroupCalls += m_groupCalls;
     m_profileGroupDraws += m_groupDraws;
@@ -2158,7 +2161,7 @@ void Device::EndFrame()
         FgBeforePresent(f.main);                 // (frame generation: whether to generate, the interface's layer)
     vkEndCommandBuffer(f.main);
 
-    VkCommandBuffer cmds[6];
+    VkCommandBuffer cmds[8];
     uint32_t cmdCount = 0;
     if (f.uploadsRecorded) {
         FinishSkinUploads(f.upload);
@@ -2208,7 +2211,7 @@ void Device::SubmitAndWait()
     m_renderEndCause = kEndFlush;
     EndRendering();
     vkEndCommandBuffer(f.main);
-    VkCommandBuffer cmds[6];
+    VkCommandBuffer cmds[8];
     uint32_t n = 0;
     if (f.uploadsRecorded) {
         FinishSkinUploads(f.upload);

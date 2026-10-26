@@ -299,6 +299,7 @@ struct DeviceInfo {
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
+    X(PrepassMore, m_prepassMore, 0)                  /* a second pre-pass segment after the water's copy */ \
     X(FolEdges, m_foliageEdges, 0)                    /* plants' soft edges in a second pass */ \
     X(OwnLight, m_carrierLit, C)                      /* a character's own light lights the character */ \
     X(OwnShadow, m_carrierCasts, 0)                   /* a character casts a shadow in its own light */ \
@@ -1037,6 +1038,10 @@ private:
         // one being recorded (mainA unless split). Submitted in that order.
         VkCommandBuffer mainA = VK_NULL_HANDLE, prepass = VK_NULL_HANDLE, mainB = VK_NULL_HANDLE;
         bool split = false;
+        // ... and once more where a copy of the scene broke the rendering (the water's: PrepassContinue) - `prepass2`
+        // (the depth of the opaque draws after it, over the depth so far), `mainC` from there on.
+        VkCommandBuffer prepass2 = VK_NULL_HANDLE, mainC = VK_NULL_HANDLE;
+        bool split2 = false;
         // Clouds (clouds.cpp DrawClouds): their shadow map and half-size march, recorded where the sky ends but run
         // between the pre-pass and mainB - outside the scene's rendering, which goes on unbroken (its pre-pass too).
         VkCommandBuffer clouds = VK_NULL_HANDLE;
@@ -1248,8 +1253,9 @@ private:
     uint64_t NativeMapsSignature() const;
     float SandWindBearing() const;
     // The native ground for the grass's capture (grass.cpp): the colour of the ground at cell coordinates (u, v) - its
-    // cell's tile, turned - and its light at lightmap coordinates.
-    bool NativeGroundRgb(float u, float v, uint8_t rgb[3]) const;
+    // cell's tile, turned (false while that tile's picture can't be read yet; *tile: its texture all the same) - and its
+    // light at lightmap coordinates.
+    bool NativeGroundRgb(float u, float v, uint8_t rgb[3], Texture** tile = nullptr) const;
     bool NativeLightRgb(float u, float v, uint8_t rgb[3]) const;
     void PollNativeSky();
     void FitNativeLight();
@@ -2166,6 +2172,8 @@ private:
     VkPipeline m_prepassCutoutPipeline = VK_NULL_HANDLE;
     VkPipeline m_leafPrepassPipeline = VK_NULL_HANDLE;   // ... leaf.vert + prepass_cutout.frag (our own canopy's sprigs)
     bool m_prepassEqual = true;                  // RVK_PrepassEq: pre-passed draws test EQUAL, no depth write
+    bool m_prepassMore = true;                   // RVK_PrepassMore: a second segment after the water's copy
+    bool m_waterEndedPrepass = false;            // the water's copy ended this frame's segment (PrepassContinue)
     bool m_prepassSway = true;                   // swaying plants in the pre-pass too (RANDYVK_PREPASS_SWAY=0: not)
     struct PrepassCache {
         bool bound = false;                      // pipeline, front face, depth state, arrays, set 1
@@ -2201,6 +2209,8 @@ private:
     bool m_prepassEndedThisFrame = false;        // a segment ended: later draws are "after end"
     bool PrepassArm(const VkClearRect* rects, uint32_t count, float z);   // at a scene depth clear: split, arm
     void PrepassEnd(uint32_t cause);             // end the armed segment (its commands are complete)
+    bool PrepassContinue();                      // after the water's copy: a second segment over the depth so far
+    VkCommandBuffer PrepassCommands() const;     // the armed segment's pre-pass command buffer
     uint32_t PrepassCheck(uint32_t primitive, uint32_t fvf, bool swaying) const;   // kPreIn: into the pre-pass
     uint32_t AlphaOneCheck(uint32_t fvf) const;  // kPreIn: the output alpha is provably 1; else the input in the way
     bool BackdropCull(uint32_t fvf) const;       // the current draw gets the backdrop cull (m_drawBackdrop)
@@ -2209,7 +2219,7 @@ private:
                      VkDeviceSize vbOffset, VkDeviceSize ibOffset, VkBuffer vb, VkBuffer ib,
                      VkDeviceSize frameLightsOffset, VkBuffer prevBuffer, VkDeviceSize prevOffset, VkDeviceSize prevBytes,
                      VkBuffer smoothBuffer, VkDeviceSize smoothOffset, VkDeviceSize smoothBytes, uint32_t recordIndex, bool cutout);
-    uint32_t FrameCommands(Frame& f, VkCommandBuffer out[5]);   // what a submission runs (ends the pre-pass)
+    uint32_t FrameCommands(Frame& f, VkCommandBuffer out[7]);   // what a submission runs (ends the pre-pass)
     void FrameCommandsSubmitted(Frame& f);       // back to one main command buffer
     // Shared with ApplyDynamicState: the D3D viewport as Vulkan's (and its scissor), the FVF's vertex input.
     void ViewportState(VkViewport* vp, VkRect2D* scissor) const;

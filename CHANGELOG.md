@@ -114,6 +114,12 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Forests next to water no longer cost far more than other forests: the trees drawn after a pond or river were
+  shaded once for every layer of leaves (about 46 fps under a Newland tree, where a forest without water stays fast).
+  `RVK_PrepassMore` (ini only) switches the fix off for comparison.
+- Ground grass grows on the grass again, not beside it: in a busy town (the Borealis lawns) blades stood on the
+  paving while patches of lawn next to them stayed bare. The grass took the ground's look while its textures were still
+  loading and kept it; it now waits for them, and looks again whenever one changes.
 - Walking into a shop or other room from outside no longer leaves it dark for its first five seconds (it was lit as
   the street by night until then).
 - Your character's own light keeps lighting the walls and floor around you as you step through a door between two
