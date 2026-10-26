@@ -113,6 +113,9 @@ const uint32_t kUiCompositeSpirv[] = {
 const uint32_t kPortalOpenSpirv[] = {
 #include "portal_open.frag.inc"
 };
+const uint32_t kPortalMarkSpirv[] = {
+#include "portal_mark.frag.inc"
+};
 const uint32_t kHandoverSpirv[] = {
 #include "handover.frag.inc"
 };
@@ -360,6 +363,8 @@ bool Device::CreateHdrResources(std::string* error)
                          &m_uiOverlayPipeline) &&
               fullscreen(kHandoverSpirv, sizeof(kHandoverSpirv), kColorFormat, 2, m_bloomLayout, &m_handoverPipeline) &&
               fullscreen(kPortalOpenSpirv, sizeof(kPortalOpenSpirv), kColorFormat, 3, m_bloomLayout, &m_portalOpenPipeline) &&
+              fullscreen(kPortalMarkSpirv, sizeof(kPortalMarkSpirv), GetFormatInfo(Format::RGBA8).vk, false, m_bloomLayout,
+                         &m_portalMarkPipeline) &&
               fullscreen(kMotionBlurSpirv, sizeof(kMotionBlurSpirv), kColorFormat, false, m_bloomLayout, &m_motionPipeline) &&
               fullscreen(kTileMaxSpirv, sizeof(kTileMaxSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_tileMaxPipeline) &&
@@ -442,7 +447,7 @@ void Device::DestroyHdrResources()
                           &m_atmosViewPipeline, &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
                           &m_gbufferPipeline, &m_sssrResolvePipeline, &m_cacaoPackPipeline, &m_sssrEnvPipeline, &m_brixPackPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
-                          &m_uiOverlayPipeline, &m_handoverPipeline, &m_portalOpenPipeline,
+                          &m_uiOverlayPipeline, &m_handoverPipeline, &m_portalOpenPipeline, &m_portalMarkPipeline,
                           &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,

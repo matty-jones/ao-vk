@@ -3405,7 +3405,7 @@ private:
     VkRect2D m_portalScissor{};                  // ... kept to the doorway's box on the scene
     float m_portalClip[4] = {};                  // ... and behind its plane (DrawTransform clip)
     std::unordered_set<uint64_t> m_portalLogged; // (the doorways logged as drawn since arriving)
-    VkPipeline m_portalOpenPipeline = VK_NULL_HANDLE;
+    VkPipeline m_portalOpenPipeline = VK_NULL_HANDLE, m_portalMarkPipeline = VK_NULL_HANDLE;
     VkImage m_portalDepthCopy = VK_NULL_HANDLE;
     VkImageView m_portalDepthCopyView = VK_NULL_HANDLE;
     VmaAllocation_T* m_portalDepthCopyAllocation = nullptr;

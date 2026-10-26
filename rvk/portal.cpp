@@ -304,6 +304,12 @@ void Device::DrawPortals()
         if (x1 - x0 < 1.0f || y1 - y0 < 1.0f)
             continue;
         const VkRect2D box{{int32_t(x0), int32_t(y0)}, {uint32_t(x1 - x0), uint32_t(y1 - y0)}};
+        // The doorway's rectangle for the opening and the mark (portal_open.frag).
+        float push[32];
+        std::memcpy(push, &inverse.m[0][0], 64);
+        const float rest[16] = {origin.x, origin.y, origin.z, 0.0f, edgeU.x, edgeU.y, edgeU.z, 0.0f,
+                                edgeV.x, edgeV.y, edgeV.z, 0.0f, sw, sh, m_aoProj.m[2][2], m_aoProj.m[3][2]};
+        std::memcpy(push + 16, rest, sizeof(rest));
         // 1. The opening.
         m_renderEndCause = kEndCopy;
         EndRendering();
@@ -332,11 +338,6 @@ void Device::DrawPortals()
             wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             wr.pImageInfo = &image;
             vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_bloomLayout, 0, 1, &wr);
-            float push[32];
-            std::memcpy(push, &inverse.m[0][0], 64);
-            const float rest[16] = {origin.x, origin.y, origin.z, 0.0f, edgeU.x, edgeU.y, edgeU.z, 0.0f,
-                                    edgeV.x, edgeV.y, edgeV.z, 0.0f, sw, sh, m_aoProj.m[2][2], m_aoProj.m[3][2]};
-            std::memcpy(push + 16, rest, sizeof(rest));
             vkCmdPushConstants(cmd, m_bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
             vkCmdDraw(cmd, 3, 1, 0, 0);
             vkCmdEndRendering(cmd);
@@ -426,6 +427,20 @@ void Device::DrawPortals()
             Draw(d3d::TriangleStrip, d3d::FVF_XYZ | d3d::FVF_DIFFUSE, quad, 4, nullptr, 0);
         }
         m_drawingPortal = false;
+        // 4. The opening's pixels marked lit by the room's own lamps in the local-light target (portal_mark.frag): the
+        // passes after the scene leave them be - not the street's sun shadows, ambient occlusion or reflections (the
+        // traced occlusion darkened a patch of the floor: the room's own draws' mark didn't hold there).
+        if (m_portalMarkPipeline && m_localFraction) {
+            m_renderEndCause = kEndCopy;
+            EndRendering();
+            FullscreenPass(cmd, m_localFraction, m_portalMarkPipeline, m_portalDepthCopyView, m_portalDepthCopyView,
+                           m_pointSampler, push, sizeof(push), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &box);
+            m_cache = StateCache{};
+            m_arenaBound = false;
+            m_bindlessBound = false;
+            m_constantsDirty = true;
+            BeginRenderingOn(m_scene);
+        }
         m_rs = rs;
         m_tss = tss;
         m_textures = textures;

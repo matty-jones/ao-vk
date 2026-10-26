@@ -2,7 +2,12 @@
 // A shop portal's opening (portal.cpp): where the doorway's rectangle is the surface seen - the scene's depth (a copy,
 // binding 0) at or behind its plane - the depth is pushed to the far plane, so the interior drawn next shows there.
 // Where anything is in front of it (the door, the recess's walls, a character) the depth stays.
+// RVK_PORTAL_MARK (portal_mark.frag): the same pixels, after the room is drawn, marked in the local-light target as lit
+// by their own lamps - not the street's sun, ambient occlusion or reflections (occlusion.glsl, the traced passes).
 layout(set = 0, binding = 0) uniform sampler2D sceneDepth;
+#ifdef RVK_PORTAL_MARK
+layout(location = 0) out vec4 outLocal;
+#endif
 layout(push_constant) uniform Params {
     vec4 inv[4];       // rows of the inverse view-projection (D3D: a row vector times the matrix)
     vec4 origin;       // the rectangle's bottom-left corner (world)
@@ -37,5 +42,9 @@ void main()
     float stored = texelFetch(sceneDepth, ivec2(gl_FragCoord.xy), 0).r;
     float plane = mix(ViewDepth(0.0), ViewDepth(1.0), t);
     if (stored < 1.0 && ViewDepth(stored) < plane - 0.05) discard;
+#ifdef RVK_PORTAL_MARK
+    outLocal = vec4(1.0, 0.0, 0.0, 1.0);
+#else
     gl_FragDepth = 1.0;
+#endif
 }

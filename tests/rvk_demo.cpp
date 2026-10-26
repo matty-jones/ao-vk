@@ -4414,6 +4414,7 @@ void RunPortalView(D& dev, int frames, const std::string& shot)
 // The capture writes DIR\4242.rvkp (which --portal-view draws) and the link DIR\links.tsv; back in the street the
 // doorway is known.
 std::string g_portalCaptureDir;
+std::string g_portalDump;          // (--dump with --portal-capture-test: the last frame's dump, the portal in view)
 
 template <typename D>
 void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
@@ -4442,6 +4443,8 @@ void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
         AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
     frames = std::max(frames, 200);
     for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1 && !g_portalDump.empty())
+            dev.RequestFrameDump(g_portalDump);
         if (frame == 20 || frame == 70 || frame == frames - 1) {
             std::string name = shot;
             name.insert(name.size() - 4, frame == 20 ? "-street" : frame == 70 ? "-room" : "-portal");
@@ -5991,6 +5994,7 @@ int main(int argc, char** argv)
     } else if (!g_portalView.empty()) {
         RunPortalView(dev, frames, shot);
     } else if (!g_portalCaptureDir.empty()) {
+        g_portalDump = dump;
         RunPortalCaptureTest(dev, frames, shot);
     } else if (!g_leafTrees.empty()) {
         RunLeafScene(dev, frames, shot, dump);
