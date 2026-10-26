@@ -2631,10 +2631,6 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         if (o0 > -0.5f && o1 < 0.5f && a0 < 0.0f && a1 > 0.0f && a1 - a0 < 16.0f && u0 < 2.5f && u1 > 0.2f)
             return;
     }
-    // ... and the room's door at the entrance, kept to be drawn again over the street (portal.cpp).
-    if (m_streetShownFrame + 1 >= m_frameNumber && m_indoors && !m_drawingPortal && !m_redrawingDoor && vertices &&
-        m_scenePhase && m_target == m_scene && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ)
-        NoteStreetDoorDraw(primitive, fvf, vertices, vertexCount, indices, indexCount);
     // RVK_FrameGen: a 2D draw on the frame after the interface (the mouse pointer) goes on top of the overlay.
     if (m_fgUiLayer && m_target == m_main && !m_fgTopActive && !m_uiLayerActive && !m_external &&
         m_interfaceEndFrame == m_frameNumber && IsInterfaceDraw(fvf))
@@ -2964,6 +2960,12 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         StreetCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_street.cpp)
         PortalCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_capture.cpp)
         PortalNoteBlack(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);     // (portal_links.cpp)
+        // The room's door at the entrance, while the street shows through it: kept to be drawn again over the street
+        // (portal.cpp). Here, after DrawMeshInfo: m_drawMesh is this draw's - before it, the previous draw's, and the
+        // door's planks were passed over while the draw after them (its iron straps) was taken (the user, 2026-10-26).
+        if (m_streetShownFrame + 1 >= m_frameNumber && m_indoors && vertices && m_scenePhase && m_target == m_scene &&
+            (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ)
+            NoteStreetDoorDraw(primitive, fvf, vertices, vertexCount, indices, indexCount);
     }
     ProfileDrawSection("draw: setup (mesh info)", since);
     if (!m_drawingPortal && !m_redrawingDoor)

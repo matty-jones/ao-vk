@@ -3489,7 +3489,12 @@ private:
     bool m_enteredValid = false;                 // the doorway walked in through (PortalLinkFrame)
     PortalLink m_enteredFrom;
     struct StreetRoom { uint32_t playfield = ~0u; bool known = false; float entrance[3] = {}, inward[3] = {}; } m_streetRoom;
-    struct StreetLoaded { std::string path; LoadedPortal lp; bool logged = false; float inset = 0.0f; } m_street;
+    struct StreetLoaded {
+        std::string path;
+        LoadedPortal lp;
+        bool logged = false, doorLogged = false;
+        float inset = 0.0f;
+    } m_street;
     uint64_t m_streetShownFrame = 0;             // the last frame the street was drawn through the entrance
     std::string m_streetWhy;                     // why it isn't drawn, as last logged (StreetDeclined)
     uint32_t m_streetWhyLines = 0;               // ... lines this visit
