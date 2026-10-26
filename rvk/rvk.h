@@ -327,6 +327,9 @@ public:
     // Reads a target (null = main) as B8G8R8A8 rows of width*4 bytes. Mid-frame this submits the work
     // recorded so far and waits for it (rendering then continues in the same frame).
     bool ReadPixels(Texture* target, void* out);
+    // A texture's level as it is on the GPU, its own format's bytes, rows packed (`bytes` must be that size): what
+    // the game last wrote there, for a surface whose CPU copy was given up after the upload (rvk_surface.cpp).
+    bool ReadTextureLevel(Texture* texture, uint32_t level, void* out, size_t bytes);
     void RequestScreenshot(const std::string& bmpPath);   // saved during the next EndFrame()
     void RequestFrameDump(const std::string& path, int frames = 1);   // the next frame's (frames') 3D draws, as text (diag.cpp)
     void SetDumpVertexCount(uint32_t count) { m_dumpVertexCount = count; }   // frame dumps list these draws' vertices
@@ -3477,6 +3480,7 @@ private:
     void EndRendering();
     bool EnsureDepth(uint32_t width, uint32_t height);   // grows the shared depth buffer if needed
     void SubmitAndWait();                                // mid-frame flush; recording continues
+    void SubmitUploadsBetweenFrames(Frame& f);           // between frames: the recorded uploads run, waited for
     void Transition(VkCommandBuffer cmd, Texture* t, VkImageLayout to);
     VkCommandBuffer UploadCommands();
     void SaveScreenshot();

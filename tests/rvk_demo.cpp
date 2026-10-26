@@ -715,6 +715,54 @@ double Benchmark(D& dev, int frames)
     return total * 1000.0 / std::max(frames - 10, 1);
 }
 
+bool g_readbackTest = false;    // --readback-test: RunReadbackTest
+
+// --readback-test: texture levels read back from the GPU exactly as they were uploaded (ReadTextureLevel - a game
+// texture whose CPU copy was given up is read back so when the game locks it again): every format the game uses,
+// compressed too, every mip level; uploaded between frames and inside one, read back both ways.
+template <typename D>
+bool RunReadbackTest(D& dev)
+{
+    const Format formats[] = {Format::A8R8G8B8, Format::R5G6B5, Format::A4R4G4B4, Format::A1R5G5B5, Format::L8,
+                              Format::A8L8, Format::DXT1, Format::DXT3, Format::DXT5};
+    const uint32_t w = 64, h = 32, levels = 7;
+    uint32_t seed = 12345, failed = 0, checked = 0;
+    auto bytesOf = [&](Format f, uint32_t l) {
+        return size_t(FormatRowBytes(f, std::max(1u, w >> l))) * FormatRows(f, std::max(1u, h >> l));
+    };
+    for (int pass = 0; pass < 2; ++pass)          // 0: uploaded between frames, 1: inside a frame
+        for (Format f : formats) {
+            Texture* t = dev.CreateTexture(w, h, f, levels);
+            std::vector<std::vector<uint8_t>> data(levels);
+            if (pass) dev.BeginFrame();
+            for (uint32_t l = 0; l < levels; ++l) {
+                data[l].resize(bytesOf(f, l));
+                for (uint8_t& b : data[l]) b = uint8_t((seed = seed * 1103515245u + 12345u) >> 16);
+                dev.UpdateTexture(t, l, 0, 0, std::max(1u, w >> l), std::max(1u, h >> l), data[l].data(),
+                                  FormatRowBytes(f, std::max(1u, w >> l)));
+            }
+            for (int inFrame = 0; inFrame < 2; ++inFrame) {   // read back: as it is (between or in), then the other
+                if (inFrame && !pass) dev.BeginFrame();
+                if (!inFrame && pass) dev.EndFrame();
+                for (uint32_t l = 0; l < levels; ++l) {
+                    std::vector<uint8_t> back(data[l].size(), 0xEE);
+                    const bool read = dev.ReadTextureLevel(t, l, back.data(), back.size());
+                    ++checked;
+                    if (!read || back != data[l]) {
+                        ++failed;
+                        std::printf("readback: FAIL format %u level %u (%s, uploaded %s, read %s)\n", unsigned(f), l,
+                                    read ? "differs" : "not read", pass ? "in a frame" : "between frames",
+                                    (inFrame == 0) == (pass == 0) ? "the same way" : "the other way");
+                    }
+                }
+            }
+            if (!pass) dev.EndFrame();
+            dev.DestroyTexture(t);
+        }
+    std::printf("readback: %u of %u levels read back exactly\n", checked - failed, checked);
+    return failed == 0;
+}
+
 template <typename D>
 void RunDemo(D& dev, bool windowed, bool stress, int frames, const std::string& shot)
 {
@@ -4795,6 +4843,7 @@ int main(int argc, char** argv)
         else if (a == "--grass-late" && i + 1 < argc) g_grassLate = std::atoi(argv[++i]);
         else if (a == "--grass-field") { g_grassFieldOn = true; hdr = true; }
         else if (a == "--grass-bench") { g_grassFieldOn = g_grassBench = true; hdr = true; }
+        else if (a == "--readback-test") g_readbackTest = true;
         else if (a == "--terrain-test") g_terrainTest = true;
         else if (a == "--native-ground-test") g_nativeGroundTest = true;
         else if (a == "--native-on") g_nativeOn = true;
@@ -5331,9 +5380,12 @@ int main(int argc, char** argv)
         tdev.SetLightOverride(lightOverride);
         tdev.SetShadows(shadows);
         if (!dump.empty() && !shadowTest && g_statelPack.empty()) tdev.RequestFrameDump(dump);
-        if (!g_statelPack.empty()) RunStatelTest(tdev, frames, shot, dump);
+        if (g_readbackTest) RunReadbackTest(tdev);
+        else if (!g_statelPack.empty()) RunStatelTest(tdev, frames, shot, dump);
         else if (shadowTest) RunShadowTest(tdev, frames, shot, cacheTest, frameMs, dump);
         else RunDemo(tdev, windowed, stress, frames, shot);
+    } else if (g_readbackTest) {
+        RunReadbackTest(dev);
     } else if (!g_statelPack.empty()) {
         RunStatelTest(dev, frames, shot, dump);
     } else if (!g_leafTrees.empty()) {

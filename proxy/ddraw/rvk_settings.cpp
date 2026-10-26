@@ -229,6 +229,7 @@ Setting g_settings[] = {
     {"RVK_Occlusion",   "The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws)", "Debug", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_TimeOfDay",   "Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h)", "Debug", Float, -1, 27, 0.25f, -1, nullptr, 0},
     {"RVK_TimeSpeed",   "Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own)", "Debug", Float, 0, 500, 0.5f, 1, nullptr, 0},
+    {"RVK_TexKeepCpu",  "Keep a CPU copy of every texture (off: given up once on the graphics card, read back if the game locks it again - saves the game's 32-bit address space)", "Debug", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_HeapCheck",   "Testing: the heap checked for corruption at points, the first broken one logged (0 off, 1 round the grass and each frame, 2 also round every object's grass cover - slow)", "Debug", Float, 0, 2, 1, 0, nullptr, 0},
     {"RVK_SkyVary",     "Clouds: the sky changes, clear to overcast (0: always some cloud)", "Sky", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_ProcSky",     "Sky: our own sky in place of the game's - blue by day, sunsets, the blue hour and night from the sun's height (off: the game's sky)", "Sky", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Hdr"},
@@ -427,7 +428,7 @@ const Vanilla kVanilla[] = {
 // changes, and most of the experimental features' tuning - each keeps its value, its game value and its part in the
 // presets. A setting whose feature switch is listed here is left out with it.
 const char* const kHidden[] = {
-    "RVK_HeapCheck",
+    "RVK_HeapCheck", "RVK_TexKeepCpu",
     "RVK_Prepass", "RVK_PrepassEq", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
     "RVK_GrassTex", "RVK_ShadowMem", "RVK_FxGlowOn", "RVK_NightOn", "RVK_MoonOn", "RVK_GameSun", "RVK_HillShade",
     "RVK_DarkFloor", "RVK_GroundOne",

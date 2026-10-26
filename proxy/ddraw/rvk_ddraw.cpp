@@ -284,6 +284,7 @@ void RvkState::Present()
     rnative::ground::Install();    // DisplaySystem.dll's ground, once it is loaded (RVK_GroundRange)
     Frame();                  // a present without any rendering still shows a frame
     device->EndFrame();
+    RSurface::DropIdleCopies();    // (once a second: idle textures' CPU copies, the game's address space)
     PollMaterialMaps();       // material maps decoded in the background, uploaded between frames
     ParticleFrame();
     WeatherFrame();

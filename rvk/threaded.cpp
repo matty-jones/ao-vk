@@ -395,6 +395,12 @@ bool ThreadedDevice::ReadPixels(Texture* target, void* out)
     return m_device.ReadPixels(target, out);
 }
 
+bool ThreadedDevice::ReadTextureLevel(Texture* texture, uint32_t level, void* out, size_t bytes)
+{
+    Sync();                                            // (its uploads recorded first)
+    return m_device.ReadTextureLevel(texture, level, out, bytes);
+}
+
 bool ThreadedDevice::Resize(uint32_t width, uint32_t height)
 {
     Sync();

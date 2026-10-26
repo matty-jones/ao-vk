@@ -15,14 +15,14 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-327 settings, 159 of them in the settings window.
+328 settings, 159 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (8)
 - [Lighting](#lighting) (17)
 - [Materials](#materials) (14)
-- [Debug](#debug) (7)
+- [Debug](#debug) (8)
 - [Terrain](#terrain) (22)
 - [Plants](#plants) (38)
 - [Water](#water) (22)
@@ -101,6 +101,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_Occlusion` | The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws) | on / off | on | ini only |
 | `RVK_TimeOfDay` | Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h) | -1 .. 27 | -1 | ini only |
 | `RVK_TimeSpeed` | Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own) | 0 .. 500 | 1 | ini only |
+| `RVK_TexKeepCpu` | Keep a CPU copy of every texture (off: given up once on the graphics card, read back if the game locks it again - saves the game's 32-bit address space) | on / off | off | ini only |
 | `RVK_HeapCheck` | Testing: the heap checked for corruption at points, the first broken one logged (0 off, 1 round the grass and each frame, 2 also round every object's grass cover - slow) | 0 .. 2 | 0 | ini only |
 
 ## Terrain
