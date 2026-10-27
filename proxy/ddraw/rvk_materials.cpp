@@ -492,6 +492,12 @@ std::unordered_set<RSurface*> g_identified;       // surfaces holding an RDB tex
 std::unordered_map<uint64_t, std::string> g_names;   // RDB texture -> the name the game gave it
 }  // namespace
 
+std::string RdbTextureName(uint32_t type, uint32_t id)
+{
+    auto it = g_names.find(KeyOf(type, id));
+    return it == g_names.end() ? std::string() : it->second;
+}
+
 void ForgetMaterialMaps(RSurface* top)
 {
     g_identified.erase(top);
