@@ -1,5 +1,9 @@
 # Interface separation and scaling
 
+Local gameplay testing at 4K rejected the initial scaling implementation: enlarged text remains a stretched
+bitmap, and changing scales can permanently move the native layout. The atlas correction fixes one confirmed
+rendering defect; it does not make scaling ready for use. See the [follow-up investigation](ui-scaling-investigation.md).
+
 `RVK_UiRate` controls redraw frequency only. At 0 the interface redraws every frame and still uses its own
 display-sized image. Capture callbacks work with Native Direct and Native Device disabled. GUI controller work
 continues each frame when drawing is cached, including mouse tracking and tooltips.

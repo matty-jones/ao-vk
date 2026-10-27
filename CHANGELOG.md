@@ -6,14 +6,16 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
-- `RVK_WinScale` and `RVK_HudScale` (General, 100% by default) resize windows and HUD independently, with matching
+- Experimental `RVK_WinScale` and `RVK_HudScale` (General, 100% by default) resize windows and HUD independently, with matching
   layout, clipping and mouse input. World labels and floating text, the cursor, and the developer console/readout
   retain their sizes. Changes refresh cached UI immediately.
+  Enlarged text resolution and layout drift remain unresolved after local 4K testing.
 
 ### Diagnostics
 - `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
 
 ### Fixed
+- Enlarging interface images no longer distorts their texture sampling when clipped at a window edge.
 - Names, floating combat text and the mouse pointer stay separate from world effects and temporal processing,
   whether frame generation is on or off. Screenshots use the same overlay order as the displayed frame.
 - The interface stays in its own layer with `RVK_UiRate` 0 (every frame) and Native Direct or Device off,

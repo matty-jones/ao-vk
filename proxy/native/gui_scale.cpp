@@ -42,6 +42,8 @@ int g_coordinates;
 float g_placementScale;
 using PlacementFn = void(__fastcall*)(void*, void*, uint32_t);
 PlacementFn g_placement;
+using VerticesFn = void(__fastcall*)(void*, void*, void*, const Rect*);
+VerticesFn g_vertices;
 
 struct Coordinates {
     bool outer = g_coordinates++ == 0;
@@ -127,6 +129,28 @@ Scale DrawingScale(void* view)
     return scale;
 }
 
+void __fastcall VerticesHook(void* area, void* edx, void* view, const Rect* clip)
+{
+    const Scale scale = For(view);
+    if (scale.value == 1.0f) {
+        g_vertices(area, edx, view, clip);
+        return;
+    }
+    Rect logical = *clip;
+    scale.FromScreen(logical);
+    {
+        // Native clipping derives atlas coordinates from logical distances.
+        Coordinates scope;
+        g_vertices(area, edx, view, &logical);
+    }
+    if (!*(static_cast<const uint8_t*>(area) + 0x7C)) return;
+    for (int i = 0; i < 4; ++i) {
+        auto* position = reinterpret_cast<float*>(static_cast<uint8_t*>(area) + i * 28);
+        position[0] = (position[0] + 0.5f) * scale.value - 0.5f;
+        position[1] = (position[1] + 0.5f) * scale.value - 0.5f;
+    }
+}
+
 // The value and pointer overloads recurse differently in GUI.dll. Transform only at the outermost boundary.
 #define SCREEN_HOOKS(Type, Tag) \
     using Tag##ValueFn = Type*(__fastcall*)(void*, void*, Type*, const Type*, uint32_t); \
@@ -197,6 +221,8 @@ struct Hook {
 };
 
 Hook g_hooks[] = {
+    {"?_UpdateVertices@ViewArea_c@@AAEXPAVView@@ABVRect@@@Z", 0x151898, "", 10,
+      reinterpret_cast<void*>(&VerticesHook), reinterpret_cast<void**>(&g_vertices)},
     {"?MoveToMouse@Window@@QAEX_N@Z", 0x154E16, "", 10,
       reinterpret_cast<void*>(&PlacementHook), reinterpret_cast<void**>(&g_placement)},
     {"?ConvertToScreen@View@@QBE?AVPoint@@ABV2@_N@Z", 0x14BFC7, "", 10,

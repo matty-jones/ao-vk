@@ -117,6 +117,43 @@ inline int CheckGuiClient(const char* client)
     put(child, 0x188, Rect{4, 6, 0, 0});
     windowMouse(owner.bytes, &output);
     check(equal(output, {-1, -2}), "window mouse query accounts for scaled borders");
+    // Compare a clipped textured quad against the native 100% reference.
+    using Vertices = void(__thiscall*)(void*, void*, const Rect*);
+    auto vertices = reinterpret_cast<Vertices>(symbol("?_UpdateVertices@ViewArea_c@@AAEXPAVView@@ABVRect@@@Z"));
+    Object area, node, slot, texture;
+    put(area, 0x80, Rect{10, 20, 109, 69});
+    put(area, 0x90, Rect{0, 0, 99, 49});
+    pointer(area, 0xA0, node); pointer(node, 0xC, slot); pointer(slot, 0, texture);
+    put(texture, 8, uint32_t(256)); put(texture, 12, uint32_t(256));
+    auto uv = [&](int i, int coord) {
+        float v; std::memcpy(&v, area.bytes + i * 28 + 20 + coord * 4, 4); return v;
+    };
+    put(rootData, 0x20, Rect{0, 0, 199, 99});
+    put(hudData, 0x20, Rect{0, 0, 199, 99});
+    put(childData, 0x20, Rect{120, 60, 199, 99});
+    SetScale(100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    const Rect clip100{150, 60, 199, 109};
+    vertices(area.bytes, child.bytes, &clip100);
+    float reference[8], positions[8];
+    for (int i = 0; i < 4; ++i) for (int c = 0; c < 2; ++c) {
+        reference[i * 2 + c] = uv(i, c);
+        std::memcpy(&positions[i * 2 + c], area.bytes + i * 28 + c * 4, 4);
+    }
+    for (float factor : {0.5f, 0.75f, 1.25f, 1.5f, 2.0f, 1.0f}) {
+        SetScale(factor * 100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+        Rect clip = clip100;
+        Scale{factor}.ToScreen(clip);
+        vertices(area.bytes, child.bytes, &clip);
+        bool sameUv = true, correctPositions = true;
+        for (int i = 0; i < 4; ++i) for (int c = 0; c < 2; ++c) {
+            sameUv = sameUv && reference[i * 2 + c] == uv(i, c);
+            float position;
+            std::memcpy(&position, area.bytes + i * 28 + c * 4, 4);
+            correctPositions = correctPositions && position == (positions[i * 2 + c] + 0.5f) * factor - 0.5f;
+        }
+        check(sameUv, "clipped atlas sampling must be invariant under scaling");
+        check(correctPositions, "clipped vertices scale with their half-pixel convention intact");
+    }
     EndScaleFrame(); *instance = saved;
     std::printf("GUI.dll: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;
