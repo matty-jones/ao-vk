@@ -458,7 +458,10 @@ uint32_t SourceBytesPerPixel(int32_t format)   // D3DX_SURFACEFORMAT; 0: not cac
 void __fastcall LoadTextureFromMemory(void* self, void*, void* surface, uint32_t level, void* data, void* palette,
                                       int32_t format, uint32_t pitch, void* rect, int32_t filter)
 {
-    auto** dds = surface ? static_cast<IDirectDrawSurface7**>(orig::surface_t_GetSurfacePointer(surface)) : nullptr;
+    // The surface_t's IDirectDrawSurface7 read straight from it, as the original does (**surface_t): GetSurfacePointer
+    // counts a user too, which nothing gave back - every texture loaded here kept its surface after the game freed
+    // it (zoning between two playfields, VRAM climbed by its 16x16 and 64x64 textures, thousands of them).
+    auto** dds = surface ? static_cast<IDirectDrawSurface7**>(surface) : nullptr;
     IDirectDrawSurface7* top = dds ? *dds : nullptr;
     const uint32_t bpp = SourceBytesPerPixel(format);
     DDSURFACEDESC2 sd{};

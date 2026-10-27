@@ -117,6 +117,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Zoning no longer fills the graphics card's memory: textures the game let go of when leaving a zone (small interface
+  and ground pieces, thousands of them after a few zone changes) stayed on the card for the rest of the session.
 - Long sessions and many zone changes no longer run the game out of memory and crash it. The game keeps every zone's
   textures, and ao-vk kept a second copy of each in the game's memory as well (over half a gigabyte after a few
   zones, nearly two in a long session; the game is a 32-bit program and has four at most). A texture's copy is now
