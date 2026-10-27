@@ -5,11 +5,14 @@
 #endif
 #include "native/gui_scale.h"
 #include "native/gui.h"
+#include "native/gui_font.h"
 #include "native/vc10.h"
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
+#include <cstdlib>
 
 namespace rnative::gui {
 void InstallScaling(HMODULE gui);
@@ -231,6 +234,116 @@ inline int CheckGuiClient(const char* client)
     SetScale(100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
     to(icon.bytes, &output, &input, 1);
     check(equal(output, {3703, 2004}), "nested HUD layout round trip restores original positions");
+    check(FontScalingReady(), "native text-cache hooks installed");
+    using FontCtor = void*(__thiscall*)(void*);
+    using FontDtor = void(__thiscall*)(void*);
+    struct IPoint { int x, y; };
+    using RenderString = void(__thiscall*)(void*, IPoint*, int, int, int, void*, uint32_t, uint32_t, uint32_t);
+    auto fontCtor = reinterpret_cast<FontCtor>(symbol("??0FontInfo_t@@QAE@XZ"));
+    auto fontDtor = reinterpret_cast<FontDtor>(symbol("??1FontInfo_t@@QAE@XZ"));
+    auto renderString = reinterpret_cast<RenderString>(symbol("?_RenderString@TextRenderer_c@@AAEXPAVIPoint@@HHHPAVFontInfo_t@@I_N2@Z"));
+    alignas(16) uint8_t fontInfo[0x1418]{};
+    fontCtor(fontInfo);
+    LOGFONTA description{};
+    description.lfHeight = -16; description.lfWeight = FW_NORMAL; description.lfCharSet = DEFAULT_CHARSET;
+    std::memcpy(description.lfFaceName, "Verdana", 8);
+    HFONT fontHandle = CreateFontIndirectA(&description);
+    HDC dc = CreateCompatibleDC(nullptr);
+    HGDIOBJ oldFont = SelectObject(dc, fontHandle);
+    TEXTMETRICA metrics{}; GetTextMetricsA(dc, &metrics);
+    char face[LF_FACESIZE]{}; GetTextFaceA(dc, LF_FACESIZE, face);
+    std::printf("GUI font: requested Verdana, resolved %s (charset %u)\n", face, unsigned(metrics.tmCharSet));
+    SelectObject(dc, oldFont); DeleteDC(dc);
+    auto rawPut = [](void* object, size_t offset, const auto& value) { std::memcpy(static_cast<uint8_t*>(object) + offset, &value, sizeof(value)); };
+    rawPut(fontInfo, 0x1018, fontHandle); rawPut(fontInfo, 0xFFC, uint8_t(1)); rawPut(fontInfo, 0xFF0, int(metrics.tmHeight));
+    Object text, textData;
+    view(text, textData, owner, {0, 0, 383, 39});
+    rnative::vc10::String content{}; content.init(); content.assign("Verdana 4K: Agjp 123", 20);
+    put(text, 0x14C, content);
+    std::vector<uint32_t> baseline;
+    IPoint baselinePen{};
+    for (float factor : {1.0f, 2.0f, 1.5f, 1.1f, 1.76f, 1.0f}) {
+        alignas(16) uint8_t bitmap[0x44]{};
+        CreateTextBitmap(bitmap, 384, 40, factor);
+        void* cache = bitmap; put(text, 0x248, cache);
+        IPoint pen{4, 4};
+        renderString(text.bytes, &pen, metrics.tmHeight, 0, int(content.size), fontInfo, 0xFFFFFF, 0, 0);
+        uint8_t* data; int width, height, pitch, bytesPerPixel;
+        std::memcpy(&data, bitmap, 4); std::memcpy(&width, bitmap + 0xC, 4); std::memcpy(&height, bitmap + 8, 4);
+        std::memcpy(&pitch, bitmap + 0x20, 4); std::memcpy(&bytesPerPixel, bitmap + 0x24, 4);
+        std::vector<uint32_t> rendered(size_t(width) * height);
+        for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+            if (bytesPerPixel == 4) std::memcpy(&rendered[size_t(y) * width + x], data + size_t(y) * pitch + x * 4, 4);
+            else {
+                uint16_t pixel; std::memcpy(&pixel, data + size_t(y) * pitch + x * 2, 2);
+                rendered[size_t(y) * width + x] = (pixel & 0x8000 ? 0xFF000000 : 0) | (pixel & 0x7FFF ? 0xFFFFFF : 0);
+            }
+        }
+        const auto* pixels = rendered.data();
+        int visible = 0, antialias = 0;
+        for (int i = 0; i < width * height; ++i) {
+            const uint32_t alpha = pixels[i] >> 24;
+            if (alpha) ++visible;
+            if (alpha && alpha < 255) ++antialias;
+        }
+        check(visible > 0, "native text string produces visible glyphs");
+        if (factor == 1.0f && baseline.empty()) { baseline.assign(pixels, pixels + width * height); baselinePen = pen; }
+        check(pen.x == baselinePen.x && pen.y == baselinePen.y, "font raster size leaves native text advances unchanged");
+        if (factor > 1.0f) check(antialias > 0, "larger text uses freshly rasterized antialiased outlines");
+        if (factor == 2.0f) {
+            int differences = 0;
+            for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x)
+                if (pixels[size_t(y) * width + x] != baseline[size_t(y / 2) * 384 + x / 2]) ++differences;
+            check(differences > 0, "200% text is not a magnified copy of the native bitmap");
+        }
+        if (factor > 1.0f) {
+            IPoint selectedPen{4, 4};
+            renderString(text.bytes, &selectedPen, metrics.tmHeight, 0, int(content.size), fontInfo, 0xFFFFFF, 1, 1);
+            uint32_t selectedPixel;
+            const int corner = int(std::lround(4 * factor));
+            std::memcpy(&selectedPixel, data + size_t(corner) * pitch + corner * 4, 4);
+            check((selectedPixel >> 24) == 255, "selection and underline drawing use the high-resolution cache");
+            check(selectedPen.x == baselinePen.x && selectedPen.y == baselinePen.y, "selected text retains native advances");
+        }
+        Object surface;
+        put(surface, 0x3D, uint8_t(1)); put(surface, 0x3E, uint8_t(1));
+        put(surface, 4, Rect{0, 0, float(width - 1), float(height - 1)});
+        put(surface, 0x14, Rect{0, 0, float(width - 1), float(height - 1)});
+        put(surface, 0x34, float(width)); put(surface, 0x38, float(height));
+        void* textureSurface = surface.bytes; put(text, 0x240, textureSurface);
+        put(text, 0x28C, 1.0f); put(text, 0x290, 1.0f);
+        using LayoutSurface = void(__thiscall*)(void*);
+        using SurfaceFrame = Rect*(__thiscall*)(void*, Rect*);
+        auto layoutSurface = reinterpret_cast<LayoutSurface>(symbol("?_LayoutRenderSurface@TextRenderer_c@@AAEXXZ"));
+        auto sourceFrame = reinterpret_cast<SurfaceFrame>(symbol("?GetSrcFrame@ViewSurface_c@@QBE?AVRect@@XZ"));
+        auto destinationFrame = reinterpret_cast<SurfaceFrame>(symbol("?GetDstFrame@ViewSurface_c@@QBE?AVRect@@XZ"));
+        layoutSurface(text.bytes);
+        Rect textureFrame, logicalFrame;
+        sourceFrame(surface.bytes, &textureFrame); destinationFrame(surface.bytes, &logicalFrame);
+        check(textureFrame.right - textureFrame.left + 1 == width, "text texture retains its full raster resolution");
+        check(logicalFrame.right - logicalFrame.left + 1 == 384 && logicalFrame.bottom - logicalFrame.top + 1 == 40,
+              "larger font texture retains its native logical layout size");
+        if (factor == 1.0f) check(std::memcmp(pixels, baseline.data(), baseline.size() * 4) == 0, "100% retains the exact native text raster");
+        char* prefix = nullptr; size_t prefixSize = 0;
+        _dupenv_s(&prefix, &prefixSize, "RANDYVK_GUI_FONT_SHOT");
+        if (prefix) {
+            const std::string path = std::string(prefix) + "-" + std::to_string(int(factor * 100)) + ".bmp";
+            FILE* outputFile = nullptr;
+            if (fopen_s(&outputFile, path.c_str(), "wb") == 0 && outputFile) {
+                BITMAPFILEHEADER file{}; file.bfType = 0x4D42; file.bfOffBits = sizeof(file) + sizeof(BITMAPINFOHEADER); file.bfSize = file.bfOffBits + width * height * 4;
+                BITMAPINFOHEADER image{}; image.biSize = sizeof(image); image.biWidth = width; image.biHeight = -height; image.biPlanes = 1; image.biBitCount = 32;
+                std::fwrite(&file, sizeof(file), 1, outputFile); std::fwrite(&image, sizeof(image), 1, outputFile);
+                for (int i = 0; i < width * height; ++i) {
+                    const uint32_t value = (pixels[i] >> 24) * 0x010101;
+                    std::fwrite(&value, 4, 1, outputFile);
+                }
+                std::fclose(outputFile);
+            }
+        }
+        std::free(prefix);
+        rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
+    }
+    content.release(); fontDtor(fontInfo);
     EndScaleFrame(); *instance = saved;
     std::printf("GUI.dll: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;

@@ -1,8 +1,8 @@
 # Interface separation and scaling
 
-Local gameplay testing confirmed that the atlas correction restores usable compass/icon sampling. Font resolution
-is still under correction. Scale changes now use display transforms without changing native rectangles; the new
-layout path has native regression coverage and still needs a gameplay check. See the [investigation](ui-scaling-investigation.md).
+Local gameplay testing confirmed that the atlas correction restores usable compass/icon sampling. The font and
+layout corrections below have native regression coverage and still need a gameplay check. See the
+[investigation](ui-scaling-investigation.md) for the original defects and evidence.
 
 `RVK_UiRate` controls redraw frequency only. At 0 the interface redraws every frame and still uses its own
 display-sized image. Capture callbacks work with Native Direct and Native Device disabled. GUI controller work
@@ -33,6 +33,19 @@ The scaling hook group recognises GUI.dll timestamp `0x5CD32BEA`, image size `0x
 addresses and entry instructions before patching. Unknown builds remain at 100% and log the reason. No client
 object layout or allocation size changes. The earlier [source audit](ui-rendering-audit.md) is preserved separately.
 
+GUI text above 100% uses a larger RGBA bitmap and new outline glyphs at the requested scale. The text renderer's
+native font metrics and line layout stay unchanged; only its private raster cache changes resolution. Texture
+sampling sees the complete larger image, while layout sees the original logical dimensions. Selection,
+underlines, inline bitmaps and shadows use the same cache mapping. Returning to 100% rebuilds the native cache.
+TrueType faces and styles are cloned from the original GUI font; legacy bitmap fonts use Verdana as an outline
+fallback, retaining their logical advances. Glyphs with no scalable outline retain their source bitmap. The
+separate world-label, floating-text, cursor and console/readout paths do not enter this cache.
+
+The font entry group and GUI import slots are checked before activation. The log reports
+`interface fonts: display-resolution text cache hooked` on success. Font/glyph caches are bounded and released
+with their owning resources. Embedded browser text and other externally rendered images keep their own raster
+paths; this correction covers native GUI text.
+
 ## Validation
 
 The Linux cross-build produces the 32-bit proxy and checks. A 64-bit renderer-only build runs headlessly through
@@ -43,8 +56,15 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
   4K at 200%, independent factors, inclusive clips and inverse input transforms.
 - `native_check.exe --gui-client-check <client-directory>` invokes the actual checked GUI.dll exports on synthetic
   native-layout view trees. It checks nested conversions and overloads, independent 200% window/150% HUD factors,
-  clipping, parent hit tests, window mouse borders, logical workspace, unchanged physical controller coordinates,
-  and deferred activation at frame boundaries. The final run passed with zero failures.
+  clipping, parent hit tests, window mouse borders, unchanged layout workspace and controller coordinates,
+  and deferred activation at frame boundaries. Scale round trips preserve native rectangles, and the actual
+  native preference writer is checked while controller work is active. Full-width HUD container checks cover
+  enlarged child clipping and nested input mapping.
+- The same check invokes the actual native string renderer and surface-layout methods at 100%, 110%, 150%,
+  176% and 200%. It checks fresh antialiased glyph pixels, unchanged advances, logical surface dimensions,
+  selection/underline drawing and exact native raster restoration at 100%. `RANDYVK_GUI_FONT_SHOT=<prefix>`
+  saves the test cache images for inspection. The Wine fixture uses a registered DejaVu Sans substitute for
+  Verdana; these images validate the native hook path, not a full game session or exact Microsoft font pixels.
 - `rvk_demo.exe --interface-test` checks no-3D menus, redraw/cached frames, labels and floating overlays, opaque
   black and translucent UI, temporary render-target copies, opaque-format blits, cursor order, hidden UI, resize,
   viewport state, and readback both during and after a frame. HDR/TAA at 50% world resolution and threaded

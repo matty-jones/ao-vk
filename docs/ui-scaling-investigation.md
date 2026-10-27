@@ -64,13 +64,13 @@ The user subsequently confirmed that `4b11319` restores usable icons and compass
 now leaves native view rectangles untouched, using reversible display placement and anchored HUD subtrees.
 Native regressions cover scale round trips, clamping, nested full-width HUD containers, input mapping, and
 the actual native preference writer while controller work is active. Static screen queries retain the original
-workspace, including when preferences are loaded at a non-default scale. It
-still needs a local gameplay check; the font-resolution correction remains in progress.
+workspace, including when preferences are loaded at a non-default scale. The font correction uses higher-resolution
+private GUI bitmaps and fresh outline glyphs with unchanged native metrics. Native string, selection/underline,
+surface-layout and 100% restoration checks cover fractional scales including 176%.
 
-The atlas regression is a focused native-function check, not a rendered game session. Sharp font rendering,
-reversible layout, real compass geometry, and default/custom skin interaction remain open. A corrected build
-must pass 4K visual comparisons and repeated 100% to intermediate/extreme scale to 100% cycles, including
-dragging and restarting. Do not ask for another local acceptance run based only on the atlas fix.
+The new font/layout paths still need a rendered game session. Confirm 4K text quality, default/custom skin
+interaction, and repeated 100% to intermediate/extreme scale to 100% cycles, including dragging and restarting.
+The native regressions and cache images cannot establish full gameplay acceptance.
 
-Until those corrections are complete, use 100%/100% or restore the prior renderer. Returning to 100% does not
-recover positions already lost; restoring an existing preferences backup is required for exact recovery.
+The new layout path preserves the layout it starts with. It cannot recover positions lost by the previous build;
+restore an existing preferences backup or arrange the UI at 100% before judging further round trips.

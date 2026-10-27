@@ -1,6 +1,7 @@
 // Per-window logical coordinates: layout and input share the scale used to draw and clip each view.
 #include "native/gui.h"
 #include "native/gui_scale.h"
+#include "native/gui_font.h"
 #include "native/native.h"
 #include "native/vc10.h"
 
@@ -392,6 +393,8 @@ void InstallScaling(HMODULE gui)
     if (!g_windowScreen) return;
     g_installed = true;
     Log("interface scaling: window and HUD coordinates hooked");
+    InstallFontScaling(gui);
+    if (!FontScalingReady()) Log("interface fonts: text hooks unavailable, original cache retained");
 }
 
 bool BeginScaleFrame(void* controller)
@@ -472,6 +475,8 @@ bool BeginScaleFrame(void* controller)
     g_controllerWork = true;
     return g_redraw;
 }
+
+float ScaleForView(void* view) { return For(view).value; }
 
 void ScaleDrawing(bool drawing) { g_controllerWork = !drawing; }
 void EndScaleFrame() { g_controllerWork = false; }
