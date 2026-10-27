@@ -121,6 +121,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (Newland City's midtech shop, from the arcade beside it). The room also no longer sticks out round the doorway:
   through a wide doorway its walls showed past the frame, and with the camera in the doorway the screen filled with
   broken triangles.
+- A shop's room seen through its doorway is no longer turned at an angle to the building (30 degrees at Newland City's
+  midtech shop, whose doorway is a pointed recess rather than a flat panel), and no longer shows over the walls just
+  inside the doorway: it shows only where the doorway's black is.
 - Zoning no longer fills the graphics card's memory: textures the game let go of when leaving a zone (small interface
   and ground pieces, thousands of them after a few zone changes) stayed on the card for the rest of the session.
 - Long sessions and many zone changes no longer run the game out of memory and crash it. The game keeps every zone's

@@ -213,8 +213,10 @@ bool Device::PortalCopyDepth(VkCommandBuffer cmd)
 }
 
 // The opening (portal_open.frag): the scene's depth copied (unless `copied`), then pushed to the far plane where the
-// rectangle in `push` is the surface seen, inside `box`. The scene's rendering is ended and begun again.
-bool Device::PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied)
+// rectangle in `push` is the surface seen, inside `box` - or where one of `triangles` is (each drawn, mode 3), or as
+// push's mode says. `pipeline`: other than the opening's (the restore's). The scene's rendering is ended and begun again.
+bool Device::PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied,
+                            const std::vector<float>* triangles, VkPipeline pipeline)
 {
     const float sw = float(m_scene->m_width), sh = float(m_scene->m_height);
     m_renderEndCause = kEndCopy;
@@ -237,7 +239,7 @@ bool Device::PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkR
     VkViewport viewport{0.0f, 0.0f, sw, sh, 0.0f, 1.0f};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &box);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_portalOpenPipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline ? pipeline : m_portalOpenPipeline);
     VkDescriptorImageInfo image{m_pointSampler, m_portalDepthCopyView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     wr.dstBinding = 0;
@@ -245,8 +247,17 @@ bool Device::PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkR
     wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     wr.pImageInfo = &image;
     vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_bloomLayout, 0, 1, &wr);
-    vkCmdPushConstants(cmd, m_bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 * sizeof(float), push);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    if (triangles) {
+        for (size_t t = 0; t + 9 <= triangles->size(); t += 9) {
+            float tri[32];
+            PortalTrianglePush(push, triangles->data() + t, tri);
+            vkCmdPushConstants(cmd, m_bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 * sizeof(float), tri);
+            vkCmdDraw(cmd, 3, 1, 0, 0);
+        }
+    } else {
+        vkCmdPushConstants(cmd, m_bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 * sizeof(float), push);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+    }
     vkCmdEndRendering(cmd);
     m_cache = StateCache{};                      // (the pass bound its own pipeline and set 0)
     m_arenaBound = false;
@@ -319,17 +330,31 @@ void Device::PortalSetLights(const std::vector<d3d::Light>& lights, const d3d::M
     ++m_lightsGen;
 }
 
+// A doorway's triangle (9 floats) in place of push's rectangle: its corners, mode 3 (portal_open.frag).
+void Device::PortalTrianglePush(const float push[32], const float* triangle, float out[32])
+{
+    std::memcpy(out, push, 32 * sizeof(float));
+    for (int k = 0; k < 3; ++k)
+        std::memcpy(out + 16 + k * 4, triangle + k * 3, 3 * sizeof(float));
+    out[19] = 3.0f;
+}
+
 // The opening's pixels (as PortalOpenPass found them) marked in the local-light target as lit by their own lamps
 // (portal_mark.frag): the passes after the scene - the street's sun shadows, ambient occlusion, reflections - leave
 // them be (the traced occlusion darkened a patch of a room's floor: its own draws' mark didn't hold there).
-void Device::PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box)
+void Device::PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box,
+                            const std::vector<float>& triangles)
 {
     if (!m_portalMarkPipeline || !m_localFraction)
         return;
     m_renderEndCause = kEndCopy;
     EndRendering();
-    FullscreenPass(cmd, m_localFraction, m_portalMarkPipeline, m_portalDepthCopyView, m_portalDepthCopyView,
-                   m_pointSampler, push, 32 * sizeof(float), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &box);
+    for (size_t t = 0; t + 9 <= triangles.size(); t += 9) {
+        float tri[32];
+        PortalTrianglePush(push, triangles.data() + t, tri);
+        FullscreenPass(cmd, m_localFraction, m_portalMarkPipeline, m_portalDepthCopyView, m_portalDepthCopyView,
+                       m_pointSampler, tri, 32 * sizeof(float), true, VK_NULL_HANDLE, VK_NULL_HANDLE, &box);
+    }
     m_cache = StateCache{};
     m_arenaBound = false;
     m_bindlessBound = false;
@@ -393,11 +418,16 @@ void Device::DrawPortals()
         c.origin = {q.centre[0] - across[0] * half, q.sill, q.centre[2] - across[2] * half};
         c.edgeU = {across[0] * q.width, 0.0f, across[2] * q.width};
         c.edgeV = {0.0f, q.height, 0.0f};
+        // Its box: round its triangles (a recess's reach past its rectangle), else the rectangle.
         float x0 = sw, y0 = sh, x1 = 0.0f, y1 = 0.0f;
         int behind = 0;
-        for (int k = 0; k < 4; ++k) {
-            const d3d::Vector p{c.origin.x + (k & 1 ? c.edgeU.x : 0.0f), c.origin.y + (k & 2 ? c.edgeV.y : 0.0f),
-                                c.origin.z + (k & 1 ? c.edgeU.z : 0.0f)};
+        const size_t corners = q.triangles.empty() ? 4 : q.triangles.size() / 3;
+        for (size_t k = 0; k < corners; ++k) {
+            const d3d::Vector p = q.triangles.empty()
+                                      ? d3d::Vector{c.origin.x + (k & 1 ? c.edgeU.x : 0.0f),
+                                                    c.origin.y + (k & 2 ? c.edgeV.y : 0.0f),
+                                                    c.origin.z + (k & 1 ? c.edgeU.z : 0.0f)}
+                                      : d3d::Vector{q.triangles[k * 3], q.triangles[k * 3 + 1], q.triangles[k * 3 + 2]};
             const float* m = &viewProj.m[0][0];
             const float cx = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
             const float cy = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
@@ -407,7 +437,7 @@ void Device::DrawPortals()
             x0 = std::min(x0, px); x1 = std::max(x1, px);
             y0 = std::min(y0, py); y1 = std::max(y1, py);
         }
-        if (behind == 4)
+        if (behind == int(corners))
             return false;                        // (all of it behind the camera)
         if (behind) { x0 = 0.0f; y0 = 0.0f; x1 = sw; y1 = sh; }   // (across the camera's plane: anywhere)
         x0 = std::clamp(std::floor(x0) - 2.0f, 0.0f, sw);
@@ -478,11 +508,13 @@ void Device::DrawPortals()
         const float rest[16] = {origin.x, origin.y, origin.z, 0.0f, edgeU.x, edgeU.y, edgeU.z, 0.0f,
                                 edgeV.x, edgeV.y, edgeV.z, 0.0f, sw, sh, m_aoProj.m[2][2], m_aoProj.m[3][2]};
         std::memcpy(push + 16, rest, sizeof(rest));
-        // 1. The opening, the rest of its box shut (portal_open.frag mode 1): the room shows in the opening only.
+        // 1. Its box shut (portal_open.frag mode 1), then opened where its black triangles are seen (mode 3): the room
+        // shows in the opening only.
         push[19] = 1.0f;
         copied = false;                          // (the scene's depth as it is now: the rooms drawn before it in)
         if (!PortalOpenPass(cmd, push, box, copied))
             return;
+        PortalOpenPass(cmd, push, box, copied, &q.triangles);
         // 2. The room, as the game drew it, moved into the doorway.
         const auto rs = m_rs;
         const auto tss = m_tss;
@@ -537,12 +569,13 @@ void Device::DrawPortals()
             Draw(d3d::TriangleStrip, d3d::FVF_XYZ | d3d::FVF_DIFFUSE, quad, 4, nullptr, 0);
         }
         m_drawingPortal = false;
-        // 4. The rest of the box given its depth back (mode 2), then the opening's pixels marked lit by the room's own lamps in the local-light target (portal_mark.frag): the
-        // passes after the scene leave them be - not the street's sun shadows, ambient occlusion or reflections (the
-        // traced occlusion darkened a patch of the floor: the room's own draws' mark didn't hold there).
+        // 4. The box given its depth back where the room left none nearer (mode 2, depth GREATER), then the opening's
+        // pixels marked lit by the room's own lamps in the local-light target (portal_mark.frag): the passes after the
+        // scene leave them be - not the street's sun shadows, ambient occlusion or reflections (the traced occlusion
+        // darkened a patch of the floor: the room's own draws' mark didn't hold there).
         push[19] = 2.0f;
-        PortalOpenPass(cmd, push, box, copied);
-        PortalMarkPass(cmd, push, box);
+        PortalOpenPass(cmd, push, box, copied, nullptr, m_portalRestorePipeline);
+        PortalMarkPass(cmd, push, box, q.triangles);
         m_rs = rs;
         m_tss = tss;
         m_textures = textures;

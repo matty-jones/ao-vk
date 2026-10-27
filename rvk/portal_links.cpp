@@ -138,22 +138,42 @@ void Device::PortalNoteBlack(uint32_t primitive, uint32_t fvf, uint32_t stride, 
         BlackQuad q;
         std::snprintf(q.mesh, sizeof(q.mesh), "%s", mesh);
         q.piece = piece;
-        // Its facing: its first triangle's (world).
-        float p0[3], p1[3], p2[3], m0[3], m1[3], m2[3];
-        model(indices[t * 3], m0), world(m0, p0);
-        model(indices[t * 3 + 1], m1), world(m1, p1);
-        model(indices[t * 3 + 2], m2), world(m2, p2);
-        {
-            const float u[3] = {m1[0] - m0[0], m1[1] - m0[1], m1[2] - m0[2]};
-            const float v[3] = {m2[0] - m0[0], m2[1] - m0[1], m2[2] - m0[2]};
-            float n[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
-            const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-            if (len > 1e-12f)
-                for (int j = 0; j < 3; ++j) q.modelNormal[j] = n[j] / len;
+        // Its facing: its triangles' together, each by its area (world, and on the mesh) - a doorway's black is not always
+        // one flat rectangle: Newland's midtech shop's is a pointed recess of four facets, the first of them 30 degrees
+        // off the wall, and its room stood turned by that (the user, 2026-10-27). Its triangles kept for the opening.
+        // (Facets facing every way - none overall - the first triangle's.)
+        float n[3] = {}, mn3[3] = {}, firstN[3] = {}, firstM[3] = {}, area = 0.0f;
+        auto cross = [](const float a[3], const float b[3], const float c[3], float out[3]) {
+            const float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+            const float v[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+            out[0] = u[1] * v[2] - u[2] * v[1];
+            out[1] = u[2] * v[0] - u[0] * v[2];
+            out[2] = u[0] * v[1] - u[1] * v[0];
+        };
+        for (uint32_t k = t; k < triangles; ++k) {
+            const uint32_t a = indices[k * 3], b = indices[k * 3 + 1], c = indices[k * 3 + 2];
+            if (a >= vertexCount || b >= vertexCount || c >= vertexCount || root(a) != r) continue;
+            float m0[3], m1[3], m2[3], p0[3], p1[3], p2[3], wn[3], mn[3];
+            model(a, m0), world(m0, p0);
+            model(b, m1), world(m1, p1);
+            model(c, m2), world(m2, p2);
+            cross(p0, p1, p2, wn);
+            cross(m0, m1, m2, mn);
+            if (k == t) {
+                std::memcpy(firstN, wn, sizeof(wn));
+                std::memcpy(firstM, mn, sizeof(mn));
+            }
+            for (int j = 0; j < 3; ++j) { n[j] += wn[j]; mn3[j] += mn[j]; }
+            area += std::sqrt(wn[0] * wn[0] + wn[1] * wn[1] + wn[2] * wn[2]);
+            q.triangles.insert(q.triangles.end(), {p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], p2[0], p2[1], p2[2]});
         }
-        const float u[3] = {p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]};
-        const float v[3] = {p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]};
-        float n[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+        if (std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) < 0.25f * area) {
+            std::memcpy(n, firstN, sizeof(n));
+            std::memcpy(mn3, firstM, sizeof(mn3));
+        }
+        const float ml = std::sqrt(mn3[0] * mn3[0] + mn3[1] * mn3[1] + mn3[2] * mn3[2]);
+        if (ml > 1e-12f)
+            for (int j = 0; j < 3; ++j) q.modelNormal[j] = mn3[j] / ml;
         const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         if (len < 1e-8f) continue;
         for (float& x : n) x /= len;
@@ -248,15 +268,33 @@ bool Device::PortalOutward(const BlackQuad& q, const PortalLink& link, float out
     float n[3];
     if (own) {
         std::memcpy(n, link.normal, sizeof(n));
-        if (mo[0] == 0.0f && mo[1] == 0.0f && mo[2] == 0.0f &&
+        const float d = q.normal[0] * n[0] + q.normal[1] * n[1] + q.normal[2] * n[2];
+        const bool unknown = mo[0] == 0.0f && mo[1] == 0.0f && mo[2] == 0.0f;
+        // (Learned: the doorway's normal on the mesh, turned as its normal in the world is to the outward. And a link
+        // saved with its doorway's facing taken from its first triangle alone - 30 degrees off at Newland's midtech
+        // shop - takes the doorway's facing now, on the side it faced.)
+        if ((unknown || std::fabs(d) < 0.999f) &&
             (q.modelNormal[0] != 0.0f || q.modelNormal[1] != 0.0f || q.modelNormal[2] != 0.0f)) {
-            // (Learned: the doorway's normal on the mesh, turned as its normal in the world is to the outward.)
-            const float s = q.normal[0] * n[0] + q.normal[1] * n[1] + q.normal[2] * n[2] < 0.0f ? -1.0f : 1.0f;
-            for (int j = 0; j < 3; ++j) link.modelOutward[j] = s * q.modelNormal[j];
+            const float s = d < 0.0f ? -1.0f : 1.0f;
+            const bool turned = std::fabs(d) < 0.999f;
+            PortalLink& l = const_cast<PortalLink&>(link);   // (one of m_portalLinks)
+            for (int j = 0; j < 3; ++j) {
+                l.modelOutward[j] = s * q.modelNormal[j];
+                if (turned) n[j] = l.normal[j] = s * q.normal[j];
+            }
+            if (turned) {
+                l.width = q.width;
+                l.height = q.height;
+                l.sill = q.sill;
+            }
             const bool saved = PortalSaveLinks();
-            Log("portal link: the doorway of %s at (%.2f %.2f %.2f) - its outward on the mesh learned (%.3f %.3f %.3f)%s",
+            Log("portal link: the doorway of %s at (%.2f %.2f %.2f) - its outward on the mesh learned (%.3f %.3f %.3f)%s%s",
                 q.mesh[0] ? q.mesh : "an unnamed mesh", double(q.centre[0]), double(q.centre[1]), double(q.centre[2]),
-                double(mo[0]), double(mo[1]), double(mo[2]), saved ? "" : " - NOT SAVED");
+                double(mo[0]), double(mo[1]), double(mo[2]),
+                turned ? (", its facing turned to (" + std::to_string(n[0]).substr(0, 6) + " " +
+                          std::to_string(n[2]).substr(0, 6) + ")").c_str()
+                       : "",
+                saved ? "" : " - NOT SAVED");
         }
     } else {
         if (mo[0] == 0.0f && mo[1] == 0.0f && mo[2] == 0.0f)

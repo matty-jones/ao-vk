@@ -250,7 +250,8 @@ bool Device::CreateHdrResources(std::string* error)
     if (!module(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), &vert))
         return false;
     // A full-target triangle with one fragment shader, no depth. blend: 0 none, 1 additive (the bloom upsampling), 2
-    // a premultiplied image over the target (the interface layer); 3 no colour, the depth written (UpsampleDepth).
+    // a premultiplied image over the target (the interface layer); 3 no colour, the depth written (UpsampleDepth); 5 the
+    // same, only where it is greater (a shop portal's box given its depth back, the room drawn keeping its own).
     auto fullscreen = [&](const uint32_t* code, size_t size, VkFormat format, int blend, VkPipelineLayout layout,
                           VkPipeline* out) {
         VkShaderModule frag;
@@ -299,15 +300,16 @@ bool Device::CreateHdrResources(std::string* error)
             att.colorBlendOp = att.alphaBlendOp = VK_BLEND_OP_ADD;
         }
         VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        cb.attachmentCount = blend == 3 ? 0 : 1;
+        const bool depthOnly = blend == 3 || blend == 5;
+        cb.attachmentCount = depthOnly ? 0 : 1;
         cb.pAttachments = &att;
         VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-        rendering.colorAttachmentCount = blend == 3 ? 0 : 1;
+        rendering.colorAttachmentCount = depthOnly ? 0 : 1;
         rendering.pColorAttachmentFormats = &format;
-        if (blend == 3) {
+        if (depthOnly) {
             rendering.depthAttachmentFormat = kDepthFormat;
             dss.depthTestEnable = dss.depthWriteEnable = VK_TRUE;
-            dss.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+            dss.depthCompareOp = blend == 5 ? VK_COMPARE_OP_GREATER : VK_COMPARE_OP_ALWAYS;
         }
         VkGraphicsPipelineCreateInfo gi{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
         gi.pNext = &rendering;
@@ -363,6 +365,8 @@ bool Device::CreateHdrResources(std::string* error)
                          &m_uiOverlayPipeline) &&
               fullscreen(kHandoverSpirv, sizeof(kHandoverSpirv), kColorFormat, 2, m_bloomLayout, &m_handoverPipeline) &&
               fullscreen(kPortalOpenSpirv, sizeof(kPortalOpenSpirv), kColorFormat, 3, m_bloomLayout, &m_portalOpenPipeline) &&
+              fullscreen(kPortalOpenSpirv, sizeof(kPortalOpenSpirv), kColorFormat, 5, m_bloomLayout,
+                         &m_portalRestorePipeline) &&
               fullscreen(kPortalMarkSpirv, sizeof(kPortalMarkSpirv), GetFormatInfo(Format::RGBA8).vk, false, m_bloomLayout,
                          &m_portalMarkPipeline) &&
               fullscreen(kMotionBlurSpirv, sizeof(kMotionBlurSpirv), kColorFormat, false, m_bloomLayout, &m_motionPipeline) &&
@@ -448,7 +452,7 @@ void Device::DestroyHdrResources()
                           &m_gbufferPipeline, &m_sssrResolvePipeline, &m_cacaoPackPipeline, &m_sssrEnvPipeline, &m_brixPackPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
                           &m_uiOverlayPipeline, &m_handoverPipeline, &m_portalOpenPipeline, &m_portalMarkPipeline,
-                          &m_motionPipeline,
+                          &m_portalRestorePipeline, &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,
                           &m_dofFinalPipeline, &m_depthUpPipeline, &m_motionFillPipeline,

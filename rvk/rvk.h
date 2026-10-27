@@ -3402,6 +3402,7 @@ private:
     struct BlackQuad {
         float centre[3] = {}, normal[3] = {}, modelCentre[3] = {};
         float modelNormal[3] = {};               // (normal on the mesh, before its world matrix)
+        std::vector<float> triangles;            // its triangles in the world (9 floats each: the opening, portal.cpp)
         float sill = 0, width = 0, height = 0;
         char mesh[48] = {};
         uint16_t piece = 0;
@@ -3482,16 +3483,19 @@ private:
     void DestroyPortals();
     bool PortalCopyDepth(VkCommandBuffer cmd);
     void DrawPortals();                          // (EndScene)
-    bool PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied);
+    bool PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied,
+                        const std::vector<float>* triangles = nullptr, VkPipeline pipeline = VK_NULL_HANDLE);
     uint32_t PortalReplay(const portal::Capture& capture, const std::vector<Texture*>& textures, const d3d::Matrix& place,
                           const OutdoorLight* now = nullptr);
     void PortalSetLights(const std::vector<d3d::Light>& lights, const d3d::Matrix& place);
-    void PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box);
+    void PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, const std::vector<float>& triangles);
+    static void PortalTrianglePush(const float push[32], const float* triangle, float out[32]);
     bool m_drawingPortal = false;                // a room's piece being drawn into a doorway: no side effects
     VkRect2D m_portalScissor{};                  // ... kept to the doorway's box on the scene
     float m_portalClip[4] = {};                  // ... and behind its plane (DrawTransform clip)
     std::unordered_set<uint64_t> m_portalLogged; // (the doorways logged as drawn since arriving)
     VkPipeline m_portalOpenPipeline = VK_NULL_HANDLE, m_portalMarkPipeline = VK_NULL_HANDLE;
+    VkPipeline m_portalRestorePipeline = VK_NULL_HANDLE;   // (the open pass's, depth GREATER: mode 2)
     VkImage m_portalDepthCopy = VK_NULL_HANDLE;
     VkImageView m_portalDepthCopyView = VK_NULL_HANDLE;
     VmaAllocation_T* m_portalDepthCopyAllocation = nullptr;
