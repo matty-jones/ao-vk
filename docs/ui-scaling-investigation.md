@@ -58,6 +58,39 @@ canonical layout separately from temporary display placement, distinguish delibe
 movement, and keep preference saving/restoration stable across restart. It must cover independent window/HUD
 changes, edge clamping, screen resize, and complete round trips without drift.
 
+## Subsequent gameplay and interaction fixes
+
+The user confirmed that the higher-resolution font cache fixes enlarged text, and that expanding, shrinking and
+expanding again retains window positions. Further gameplay found missing hover tooltips, repeated Perk-tab
+position jumps, a title-bar drag offset, a displaced lockpick drag image, and narrow fragments around pinned
+Friends-list text and shortcut icons.
+
+Native border movement converts an already logical input point back to screen coordinates. Applying the display
+transform there mixes physical coordinates with the native drag rectangle and grab offset. Border mouse-down,
+movement and frame application now keep those calculations in canonical coordinates. `ResizeClientTo` also reads
+the original view frame, so tab-driven size changes no longer feed a displayed position back into layout.
+
+The old `GetFrame@View` wrapper supplied displayed bounds broadly during controller work but original bounds
+outside it. `UpdateToolTip` also runs from mouse events outside rendering, so it could miss enlarged windows.
+The general frame getter is now untouched. Only the checked cursor/tooltip hit-test calls at `0x15731B` and
+`0x1578F0` request displayed bounds. Native tooltip hit detection and timer text are exercised outside rendering.
+Mouse-relative placement refreshes its display transform instead of retaining a previous edge-clamp offset.
+
+`DragObject_c::SlotMouseMoved` moves its image window using physical cursor coordinates plus a logical hotspot.
+Scaling that position around the screen origin displaces the image. The transient image instead inherits the
+source window/HUD scale around the physical cursor; the cursor and drop coordinates remain unchanged. Native
+drag movement tests cover both source categories and positions near the screen edge.
+
+Packed UI images share texture storage without gutters. Magnification can blend a texel from the adjacent
+allocation into an image's edge. Scaled source bounds now stop at their own texel centres, and interface samplers
+use the top mip without forced anisotropy. A Vulkan test with neighbouring green/red allocations reproduced
+317 contaminated pixels in unguarded draws and zero in guarded draws. A following non-interface draw confirms
+that normal mip sampling is restored. This establishes the sampling defect; the specific Friends-list and skin
+artefacts still require gameplay confirmation.
+
+Window-scale activation now waits for the primary mouse button to be released. The slider value can change
+during the drag without moving Preferences or changing its input mapping. HUD scaling continues to preview live.
+
 ## Remaining acceptance
 
 The user subsequently confirmed that `4b11319` restores usable icons and compass geometry. The layout correction
@@ -68,9 +101,10 @@ workspace, including when preferences are loaded at a non-default scale. The fon
 private GUI bitmaps and fresh outline glyphs with unchanged native metrics. Native string, selection/underline,
 surface-layout and 100% restoration checks cover fractional scales including 176%.
 
-The new font/layout paths still need a rendered game session. Confirm 4K text quality, default/custom skin
-interaction, and repeated 100% to intermediate/extreme scale to 100% cycles, including dragging and restarting.
-The native regressions and cache images cannot establish full gameplay acceptance.
+The font quality and scale round trips have local confirmation. Confirm the newer fixes in the same 4K client:
+title-bar attachment, Perk tab changes, hover tooltips, lockpick/image hotspot, pinned Friends-list text, shortcut
+icon edges and stable Preferences slider dragging. Repeat the layout checks after restarting. Native regressions
+and synthetic Vulkan images cannot establish full gameplay acceptance.
 
 The new layout path preserves the layout it starts with. It cannot recover positions lost by the previous build;
 restore an existing preferences backup or arrange the UI at 100% before judging further round trips.

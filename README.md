@@ -256,8 +256,9 @@ ao-vk spends that idle graphics card on its effects, and takes work off the game
   The supported GUI.dll uses logical layout and input coordinates, with full-resolution UI drawing. Labels and
   floating text, the cursor, and the developer console/readout keep their sizes. Unsupported GUI builds are logged
   and keep their original scale.
-  Scaling is experimental: the font and layout corrections have native regression coverage and need a gameplay
-  check. See the [implementation](docs/ui-separation-scaling.md) and [investigation](docs/ui-scaling-investigation.md).
+  Scaling is experimental: local testing confirms text quality and scale round trips; interaction and texture-edge
+  corrections need gameplay confirmation. See the [implementation](docs/ui-separation-scaling.md) and
+  [investigation](docs/ui-scaling-investigation.md).
 - The interface can be redrawn fewer times a second than the 3D (`RVK_UiRate`, 60 recommended).
 
 And it can draw the 3D world at less than the screen's size and bring it back up, or put frames of its own between

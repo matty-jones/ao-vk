@@ -3142,6 +3142,7 @@ private:
     void UpsampleDepth(VkCommandBuffer cmd);
     void SwapDepth();
     bool SceneMipBias() const;                   // the scene's textures sample finer mips (resources.cpp SamplerKey)
+    bool InterfaceSampler() const;
     // A per-frame offset (0..1) for the noise patterns of sampled effects while the TAA averages frames; else 0.
     float FrameNoise() const { return TaaActive() ? float(m_frameNumber % 64 * 618034 % 1000000) * 1e-6f : 0.0f; }
     bool TaaParams(float out[28]);               // before MotionBlurParams (it moves on the last frame's camera)

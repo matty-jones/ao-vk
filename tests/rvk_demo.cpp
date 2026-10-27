@@ -7,6 +7,7 @@
 #include "rvk.h"
 #include "threaded.h"
 #include "material_maps.h"
+#include "../proxy/native/gui_scale.h"
 
 #include <chrono>
 #include <thread>
@@ -4774,6 +4775,83 @@ int RunInterfaceTest(D& dev, const std::string& shot)
     return failures ? 1 : 0;
 }
 
+template <typename D>
+int RunUiAtlasTest(D& dev, const std::string& shot)
+{
+    using rnative::gui::Point;
+    using rnative::gui::AtlasCentres;
+    using rnative::gui::GuardAtlas;
+    Texture* atlas = dev.CreateTexture(64, 64, Format::A8R8G8B8, 3);
+    std::vector<uint32_t> texels(64 * 64, 0xFFFF0000);
+    for (int y = 16; y < 32; ++y) for (int x = 16; x < 32; ++x) texels[y * 64 + x] = 0xFF00FF00;
+    dev.UpdateTexture(atlas, 0, 0, 0, 64, 64, texels.data(), 64 * 4);
+    for (int level = 1; level < 3; ++level)
+        dev.UpdateTexture(atlas, level, 0, 0, 64 >> level, 64 >> level, texels.data(), (64 >> level) * 4);
+    dev.SetAnisotropy(16);
+    dev.BeginFrame();
+    dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF202020, 1);
+    dev.SetRenderState(RS_ZENABLE, 0); dev.SetRenderState(RS_ZWRITEENABLE, 0);
+    dev.SetRenderState(RS_CULLMODE, CULL_NONE); dev.SetRenderState(RS_LIGHTING, 0);
+    dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+    dev.SetTexture(0, atlas);
+    dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+    dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+    dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+    dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+    dev.SetTextureStageState(1, TSS_COLOROP, TOP_DISABLE);
+    dev.SetTextureStageState(0, TSS_MAGFILTER, TFG_LINEAR);
+    dev.SetTextureStageState(0, TSS_MINFILTER, TFN_LINEAR);
+    dev.SetTextureStageState(0, TSS_MIPFILTER, TFP_LINEAR);
+    dev.InterfaceBegin(true);
+    struct Probe { float left, top, size; bool guarded; };
+    std::vector<Probe> probes;
+    const auto centres = AtlasCentres({0, 0, 15, 15}, {16, 16}, {64, 64});
+    for (float factor : {0.5f, 0.75f, 1.1f, 1.5f, 1.76f, 2.0f}) {
+        for (bool guarded : {false, true}) {
+            const float left = 20.25f + float(probes.size() / 2) * 64, top = guarded ? 100.25f : 20.25f;
+            const float size = 16 * factor;
+            Point low{16.0f / 64, 16.0f / 64}, high{32.0f / 64, 32.0f / 64};
+            if (guarded) { GuardAtlas(low, centres); GuardAtlas(high, centres); }
+            const VtxRhwDiffuseTex quad[] = {
+                {left - .5f, top - .5f, 0, 1, 0xFFFFFFFF, low.x, low.y},
+                {left + size - .5f, top - .5f, 0, 1, 0xFFFFFFFF, high.x, low.y},
+                {left - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, low.x, high.y},
+                {left + size - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, high.x, high.y}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, quad, 4);
+            probes.push_back({left, top, size, guarded});
+        }
+    }
+    dev.InterfaceEnd();
+    const VtxRhwDiffuseTex outside[] = {
+        {19.5f, 199.5f, 0, 1, 0xFFFFFFFF, .25f, .25f}, {27.5f, 199.5f, 0, 1, 0xFFFFFFFF, .5f, .25f},
+        {19.5f, 207.5f, 0, 1, 0xFFFFFFFF, .25f, .5f}, {27.5f, 207.5f, 0, 1, 0xFFFFFFFF, .5f, .5f}};
+    dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, outside, 4);
+    dev.RequestScreenshot(shot); dev.EndFrame();
+    std::vector<uint32_t> pixels(size_t(g_width) * g_height);
+    int failures = 0, reproduced = 0;
+    if (!dev.ReadPixels(nullptr, pixels.data())) ++failures;
+    else for (const Probe& probe : probes) {
+        int foreign = 0;
+        for (int y = int(std::ceil(probe.top - .5f)); y < probe.top + probe.size - .5f; ++y)
+            for (int x = int(std::ceil(probe.left - .5f)); x < probe.left + probe.size - .5f; ++x) {
+                const uint32_t pixel = pixels[size_t(y) * g_width + x];
+                if ((pixel & 0xFF0000) || (pixel & 0xFFFF) != 0xFF00) ++foreign;
+            }
+        if (probe.guarded && foreign) {
+            std::printf("UI atlas: %.2f scale leaked %d neighbouring texels\n", probe.size / 16, foreign);
+            ++failures;
+        }
+        if (!probe.guarded) reproduced += foreign;
+    }
+    if (!reproduced) { std::printf("UI atlas: unguarded magnification did not reproduce bleeding\n"); ++failures; }
+    if ((pixels[size_t(204) * g_width + 24] & 0xFFFFFF) != 0xFF0000) {
+        std::printf("UI atlas: mip sampling outside the interface changed\n"); ++failures;
+    }
+    dev.DestroyTexture(atlas);
+    std::printf("UI atlas: %s (%d failures; %d unguarded contaminated pixels)\n", failures ? "FAILED" : "passed", failures, reproduced);
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv)
 {
     SetUnhandledExceptionFilter(&Crashed);
@@ -4796,7 +4874,7 @@ int main(int argc, char** argv)
     int renderScale = 100;                       // --render-scale N: RVK_RenderScale (needs --hdr --taa)
     int upscaler = 0;                            // --upscaler N: RVK_Upscaler (1: FSR 2, 2: FSR 3)
     bool frameGen = false;                       // --frame-gen: RVK_FrameGen (needs --window)
-    bool normalMapTest = false, pbrTest = false, glowOccludeTest = false, interfaceTest = false;
+    bool normalMapTest = false, pbrTest = false, glowOccludeTest = false, interfaceTest = false, uiAtlasTest = false;
     uint32_t anisotropy = 1;
     float motionBlur = 0.0f, dof = 0.0f, dofFocus = 0.0f;
     bool dofBokeh = true, dofFar = true;
@@ -5132,6 +5210,7 @@ int main(int argc, char** argv)
         else if (a == "--frame-gen") frameGen = true;
         else if (a == "--ui-window") g_uiWindow = true;
         else if (a == "--interface-test") interfaceTest = true;
+        else if (a == "--ui-atlas-test") uiAtlasTest = true;
         else if (a == "--shine-pass" && i + 1 < argc) g_shinePass = std::atoi(argv[++i]);
         else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
@@ -5317,14 +5396,14 @@ int main(int argc, char** argv)
     dev.SetMotionBlurMode(motionMode);
     dev.SetDof(dof > 0.0f, dofBokeh, true, dof, 16.0f, dofFocus, 0.2f, dofFar, 3.0f);
     dev.SetPointShadowFadeIn(fadeIn);    // frames here are milliseconds apart: no fade-in unless asked
-    if (interfaceTest) {
-        if (!threaded) return RunInterfaceTest(dev, shot);
+    if (interfaceTest || uiAtlasTest) {
+        if (!threaded) return uiAtlasTest ? RunUiAtlasTest(dev, shot) : RunInterfaceTest(dev, shot);
         ThreadedDevice queued;
         if (!queued.Init(nullptr, g_width, g_height, &error)) return 1;
         queued.SetHdr(hdr);
         queued.SetTaa(taa, sharpen);
         queued.SetRenderScale(uint32_t(renderScale));
-        return RunInterfaceTest(queued, shot);
+        return uiAtlasTest ? RunUiAtlasTest(queued, shot) : RunInterfaceTest(queued, shot);
     }
     if (glowOccludeTest) {
         RunGlowOccludeTest(dev, frames, shot);

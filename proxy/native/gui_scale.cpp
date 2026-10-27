@@ -19,6 +19,7 @@ using NameFn = vc10::String*(__thiscall*)(void*, vc10::String*);
 using SizeFn = Point*(__thiscall*)(void*, Point*);
 using FrameFn = Rect*(__fastcall*)(void*, void*, Rect*);
 ViewFn g_top, g_child, g_sibling, g_parent, g_looper, g_windowClient;
+ViewFn g_dragObject, g_dragSource;
 NameFn g_name;
 SizeFn g_screen;
 Point g_screenSize{};
@@ -26,8 +27,6 @@ FrameFn g_frame, g_bounds, g_borders;
 SizeFn g_windowMouse;
 using ScreenFn = Point*(__cdecl*)(Point*);
 ScreenFn g_windowScreen;
-using WindowFrameFn = Rect*(__fastcall*)(void*, void*, Rect*, uint32_t);
-WindowFrameFn g_windowFrame;
 
 struct Window {
     void* owner;
@@ -40,18 +39,44 @@ struct Clip { Rect logical, screen; Point origin; };
 std::unordered_map<void*, Clip> g_clips;
 float g_windowScale = 1.0f, g_hudScale = 1.0f;
 float g_wantedWindow = 1.0f, g_wantedHud = 1.0f;
-bool g_installed, g_controllerWork, g_redraw;
+bool g_installed, g_redraw;
 int g_coordinates;
 float g_placementScale;
 using PlacementFn = void(__fastcall*)(void*, void*, uint32_t);
 PlacementFn g_placement;
 using VerticesFn = void(__fastcall*)(void*, void*, void*, const Rect*);
 VerticesFn g_vertices;
+using MouseDownFn = void(__fastcall*)(void*, void*, const Point*, int, int);
+using MouseMoveFn = void(__fastcall*)(void*, void*, const Point*, uint32_t, uint32_t, void*);
+MouseDownFn g_borderDown;
+MouseMoveFn g_borderMove;
+using SetFrameFn = void(__fastcall*)(void*, void*, const Rect*);
+SetFrameFn g_borderFrame;
+constexpr uint32_t kScreenFrameCalls[] = {0x15731B, 0x1578F0};
 
 struct Coordinates {
     bool outer = g_coordinates++ == 0;
     ~Coordinates() { --g_coordinates; }
 };
+
+void __fastcall BorderDownHook(void* view, void* edx, const Point* point, int button, int clicks)
+{
+    Coordinates scope;
+    g_borderDown(view, edx, point, button, clicks);
+}
+
+void __fastcall BorderMoveHook(void* view, void* edx, const Point* point, uint32_t transition, uint32_t buttons, void* message)
+{
+    // Dispatch already supplied logical coordinates; native dragging also needs a logical screen and frame.
+    Coordinates scope;
+    g_borderMove(view, edx, point, transition, buttons, message);
+}
+
+void __fastcall BorderFrameHook(void* view, void* edx, const Rect* frame)
+{
+    Coordinates scope;
+    g_borderFrame(view, edx, frame);
+}
 
 bool Hud(void* window);
 
@@ -89,10 +114,10 @@ bool Hud(void* window)
            name == "notification_window" || name.compare(0, 3, "cc_") == 0 || name.compare(0, 2, "CC") == 0;
 }
 
-Rect* __fastcall FrameHook(void* view, void* edx, Rect* out)
+Rect* __fastcall ScreenFrameHook(void* view, void* edx, Rect* out)
 {
     g_frame(view, edx, out);
-    if (g_controllerWork && !g_coordinates && g_placementScale == 0.0f) {
+    if (!g_coordinates) {
         auto clip = g_clips.find(view);
         if (clip != g_clips.end()) {
             const Point parent{out->left - clip->second.origin.x, out->top - clip->second.origin.y};
@@ -101,16 +126,6 @@ Rect* __fastcall FrameHook(void* view, void* edx, Rect* out)
         } else ParentSpace(view, *out, true);
     }
     return out;
-}
-
-Rect* __fastcall WindowFrameHook(void* window, void* edx, Rect* out, uint32_t client)
-{
-    struct ModelSpace {
-        bool saved = g_controllerWork;
-        ModelSpace() { g_controllerWork = false; }
-        ~ModelSpace() { g_controllerWork = saved; }
-    } scope;
-    return g_windowFrame(window, edx, out, client);
 }
 
 Point* __cdecl WindowScreenHook(Point* out)
@@ -139,6 +154,16 @@ void __fastcall PlacementHook(void* window, void* edx, uint32_t centered)
     const float saved = g_placementScale;
     g_placementScale = g_installed ? (Hud(window) ? g_hudScale : g_windowScale) : 1.0f;
     g_placement(window, edx, centered);
+    if (g_installed) {
+        void* root = g_parent(g_windowClient(window));
+        Rect frame;
+        Point screen;
+        g_frame(root, nullptr, &frame); g_windowScreen(&screen);
+        const Transform map = Place(frame, screen, g_placementScale, false);
+        g_windows.insert_or_assign(root, Window{window, map, false});
+        g_views.insert_or_assign(root, map);
+        g_redraw = true;
+    }
     g_placementScale = saved;
 }
 
@@ -167,11 +192,23 @@ void __fastcall VerticesHook(void* area, void* edx, void* view, const Rect* clip
         g_vertices(area, edx, view, &logical);
     }
     if (!*(static_cast<const uint8_t*>(area) + 0x7C)) return;
+    const auto* bytes = static_cast<const uint8_t*>(area);
+    const auto* node = *reinterpret_cast<const uint8_t* const*>(bytes + 0xA0);
+    Rect centres{};
+    if (node) {
+        const auto* material = **reinterpret_cast<const uint8_t* const* const*>(node + 0xC);
+        const Point extent{float(*reinterpret_cast<const uint32_t*>(material + 8)),
+                           float(*reinterpret_cast<const uint32_t*>(material + 12))};
+        centres = AtlasCentres(*reinterpret_cast<const Rect*>(bytes + 0x80),
+                               *reinterpret_cast<const Point*>(node + 0x10), extent);
+    }
     for (int i = 0; i < 4; ++i) {
         auto* position = reinterpret_cast<float*>(static_cast<uint8_t*>(area) + i * 28);
         Point point{position[0] + 0.5f, position[1] + 0.5f};
         scale.ToScreen(point);
         position[0] = point.x - 0.5f; position[1] = point.y - 0.5f;
+        // Packed images have no gutter; magnification must not sample a neighbouring allocation.
+        if (node) GuardAtlas(*reinterpret_cast<Point*>(position + 5), centres);
     }
 }
 
@@ -276,8 +313,12 @@ struct Hook {
 };
 
 Hook g_hooks[] = {
-    {"?GetFrame@Window@@QBE?AVRect@@_N@Z", 0x154615, "", 10,
-      reinterpret_cast<void*>(&WindowFrameHook), reinterpret_cast<void**>(&g_windowFrame)},
+    {"?DoSetFrame@WndBorder@@AAEXABVRect@@@Z", 0x159888, "", 10,
+      reinterpret_cast<void*>(&BorderFrameHook), reinterpret_cast<void**>(&g_borderFrame)},
+    {"?MouseDown@WndBorder@@UAEXABVPoint@@HH@Z", 0x1595F7, "\x55\x8B\xEC\x83\xEC\x20", 6,
+      reinterpret_cast<void*>(&BorderDownHook), reinterpret_cast<void**>(&g_borderDown)},
+    {"?MouseMove@WndBorder@@UAEXABVPoint@@W4MouseTransition_e@@IPAVMessage@@@Z", 0x159C27, "", 10,
+      reinterpret_cast<void*>(&BorderMoveHook), reinterpret_cast<void**>(&g_borderMove)},
     {"?_UpdateVertices@ViewArea_c@@AAEXPAVView@@ABVRect@@@Z", 0x151898, "", 10,
       reinterpret_cast<void*>(&VerticesHook), reinterpret_cast<void**>(&g_vertices)},
     {"?MoveToMouse@Window@@QAEX_N@Z", 0x154E16, "", 10,
@@ -306,8 +347,6 @@ Hook g_hooks[] = {
       reinterpret_cast<void*>(&ParentRectValue), reinterpret_cast<void**>(&g_parentRectValue)},
     {"?ConvertFromParent@View@@QBEXPAVRect@@@Z", 0x14BB74, "\x55\x8b\xec\x8b\x81\xac\x00\x00\x00", 9,
       reinterpret_cast<void*>(&ParentRectPointer), reinterpret_cast<void**>(&g_parentRectPointer)},
-    {"?GetFrame@View@@QBE?AVRect@@XZ", 0x14AF23, "\x55\x8b\xec\x51\x8b\x45\x08", 7,
-      reinterpret_cast<void*>(&FrameHook), reinterpret_cast<void**>(&g_frame)},
     {"?GetMousePosition@Window@@QBE?AVPoint@@XZ", 0x1542FB, "", 10,
       reinterpret_cast<void*>(&WindowMouseHook), reinterpret_cast<void**>(&g_windowMouse)},
 };
@@ -320,7 +359,6 @@ void SetScale(float windows, float hud)
     windows = factor(windows); hud = factor(hud);
     if (windows == g_wantedWindow && hud == g_wantedHud) return;
     g_wantedWindow = windows; g_wantedHud = hud;
-    g_redraw = true;
 }
 
 bool TakeScaleRedraw()
@@ -344,15 +382,28 @@ void InstallScaling(HMODULE gui)
     g_child = reinterpret_cast<ViewFn>(address("?GetTopChild@View@@QBEPAV1@XZ"));
     g_sibling = reinterpret_cast<ViewFn>(address("?GetLowerSibling@View@@QBEPAV1@XZ"));
     g_windowClient = reinterpret_cast<ViewFn>(address("?_GetClientView@Window@@ABEPAVView@@XZ"));
+    g_dragObject = reinterpret_cast<ViewFn>(address("?GetDragObject@WindowController_c@@QBEPAVDragObject_c@@XZ"));
+    g_dragSource = reinterpret_cast<ViewFn>(address("?GetSource@DragObject_c@@QBEPAVView@@XZ"));
+    g_frame = reinterpret_cast<FrameFn>(address("?GetFrame@View@@QBE?AVRect@@XZ"));
     g_bounds = reinterpret_cast<FrameFn>(address("?GetBounds@View@@QBE?AVRect@@XZ"));
     g_borders = reinterpret_cast<FrameFn>(address("?GetBorderSizes@TabView@@QBE?AVRect@@XZ"));
     g_screen = reinterpret_cast<SizeFn>(address("?GetScreenSize@WindowController_c@@QBE?AVPoint@@XZ"));
     HMODULE utils = GetModuleHandleA("Utils.dll");
     g_looper = utils ? reinterpret_cast<ViewFn>(GetProcAddress(utils, "?GetLooper@Handler@@QBEPAVLooper@@XZ")) : nullptr;
     g_name = utils ? reinterpret_cast<NameFn>(GetProcAddress(utils, "?GetName@Looper@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ")) : nullptr;
-    if (!g_top || !g_parent || !g_child || !g_sibling || !g_windowClient || !g_bounds || !g_borders || !g_screen || !g_looper || !g_name) {
+    if (!g_top || !g_parent || !g_child || !g_sibling || !g_windowClient || !g_dragObject || !g_dragSource || !g_frame ||
+        !g_bounds || !g_borders || !g_screen || !g_looper || !g_name) {
         Log("interface scaling: required GUI exports unavailable, left at 100%%");
         return;
+    }
+    auto* base = reinterpret_cast<uint8_t*>(gui);
+    for (uint32_t rva : kScreenFrameCalls) {
+        int32_t relative;
+        std::memcpy(&relative, base + rva + 1, 4);
+        if (base[rva] != 0xE8 || base + rva + 5 + relative != reinterpret_cast<uint8_t*>(g_frame)) {
+            Log("interface scaling: screen hit-test query changed, left at 100%%");
+            return;
+        }
     }
     // Check the entire group before patching; a partial group never enables scaling.
     for (const Hook& h : g_hooks) {
@@ -391,6 +442,15 @@ void InstallScaling(HMODULE gui)
     g_windowScreen = reinterpret_cast<ScreenFn>(HookAt(screenEntry, 8, &screenRel, 1,
                                                      reinterpret_cast<void*>(&WindowScreenHook), "Window::GetScreenSize"));
     if (!g_windowScreen) return;
+    // Only cursor hit tests need displayed frames. Native layout queries always keep their original units.
+    for (uint32_t rva : kScreenFrameCalls) {
+        DWORD protect;
+        if (!VirtualProtect(base + rva, 5, PAGE_EXECUTE_READWRITE, &protect)) return;
+        const int32_t relative = int32_t(reinterpret_cast<uintptr_t>(&ScreenFrameHook) - reinterpret_cast<uintptr_t>(base + rva + 5));
+        std::memcpy(base + rva + 1, &relative, 4);
+        VirtualProtect(base + rva, 5, protect, &protect);
+        FlushInstructionCache(GetCurrentProcess(), base + rva, 5);
+    }
     g_installed = true;
     Log("interface scaling: window and HUD coordinates hooked");
     InstallFontScaling(gui);
@@ -400,8 +460,13 @@ void InstallScaling(HMODULE gui)
 bool BeginScaleFrame(void* controller)
 {
     if (!g_installed) return false;
-    g_controllerWork = false;
-    g_windowScale = g_wantedWindow;
+    // Keep the preferences slider under the mouse until its drag ends.
+    const uint32_t buttons = *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(controller) + 0x58);
+    if (!(buttons & 1) && g_windowScale != g_wantedWindow) {
+        g_windowScale = g_wantedWindow;
+        g_redraw = true;
+    }
+    if (g_hudScale != g_wantedHud) g_redraw = true;
     g_hudScale = g_wantedHud;
     Point screen;
     g_screen(controller, &screen);
@@ -411,6 +476,10 @@ bool BeginScaleFrame(void* controller)
     std::unordered_map<void*, Window> current;
     std::unordered_map<void*, Transform> views;
     std::unordered_map<void*, Clip> clips;
+    void* drag = g_dragObject(controller);
+    void* dragWindow = drag ? *reinterpret_cast<void**>(static_cast<uint8_t*>(drag) + 0x54) : nullptr;
+    void* dragSource = drag ? g_dragSource(drag) : nullptr;
+    void* sourceOwner = dragSource ? g_looper(dragSource) : nullptr;
     auto assign = [&](auto&& self, void* view, void* owner, Transform inherited, bool split) -> Rect {
         Rect frame;
         g_frame(view, nullptr, &frame);
@@ -453,7 +522,8 @@ bool BeginScaleFrame(void* controller)
         void* owner = g_looper(root);
         if (!owner) continue;
         const bool hud = Hud(owner);
-        const float factor = hud ? g_hudScale : g_windowScale;
+        const float factor = owner == dragWindow && sourceOwner ? (Hud(sourceOwner) ? g_hudScale : g_windowScale) :
+                             hud ? g_hudScale : g_windowScale;
         Rect frame;
         g_frame(root, nullptr, &frame);
         auto previous = g_windows.find(root);
@@ -461,7 +531,10 @@ bool BeginScaleFrame(void* controller)
         const bool full = !std::strcmp(TypeOf(owner), ".?AVControlCenterWindow_c@@") ||
                           (hud && frame.right - frame.left + 1 >= screen.x - 1 && frame.bottom - frame.top + 1 >= screen.y - 1);
         Transform map;
-        if (!full) {
+        if (owner == dragWindow) {
+            const Point cursor = *reinterpret_cast<const Point*>(static_cast<const uint8_t*>(controller) + 0x48);
+            map = {factor, {(1 - factor) * cursor.x, (1 - factor) * cursor.y}};
+        } else if (!full) {
             if (!resized && known && previous->second.transform.value == factor) map = previous->second.transform;
             else map = Place(frame, screen, factor, false);
         }
@@ -472,13 +545,9 @@ bool BeginScaleFrame(void* controller)
     g_windows.swap(current);
     g_views.swap(views);
     g_clips.swap(clips);
-    g_controllerWork = true;
     return g_redraw;
 }
 
 float ScaleForView(void* view) { return For(view).value; }
-
-void ScaleDrawing(bool drawing) { g_controllerWork = !drawing; }
-void EndScaleFrame() { g_controllerWork = false; }
 
 }  // namespace rnative::gui

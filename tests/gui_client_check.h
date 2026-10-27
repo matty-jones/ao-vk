@@ -17,8 +17,6 @@
 namespace rnative::gui {
 void InstallScaling(HMODULE gui);
 bool BeginScaleFrame(void* controller);
-void ScaleDrawing(bool drawing);
-void EndScaleFrame();
 }
 
 inline int __fastcall CaptureGuiWindowRect(void* message, void*, const char*, const rnative::gui::Rect* frame)
@@ -27,13 +25,100 @@ inline int __fastcall CaptureGuiWindowRect(void* message, void*, const char*, co
     return 0;
 }
 
+struct GuiCheckPatch {
+    void* entry;
+    uint8_t saved[5];
+    GuiCheckPatch(void* at, void* target) : entry(at)
+    {
+        std::memcpy(saved, entry, sizeof(saved));
+        DWORD protection;
+        VirtualProtect(entry, sizeof(saved), PAGE_EXECUTE_READWRITE, &protection);
+        uint8_t jump[5]{0xE9};
+        const int32_t relative = int32_t(reinterpret_cast<uintptr_t>(target) - reinterpret_cast<uintptr_t>(entry) - 5);
+        std::memcpy(jump + 1, &relative, 4); std::memcpy(entry, jump, 5);
+        VirtualProtect(entry, sizeof(saved), protection, &protection);
+        FlushInstructionCache(GetCurrentProcess(), entry, sizeof(saved));
+    }
+    ~GuiCheckPatch()
+    {
+        DWORD protection;
+        VirtualProtect(entry, sizeof(saved), PAGE_EXECUTE_READWRITE, &protection);
+        std::memcpy(entry, saved, sizeof(saved));
+        VirtualProtect(entry, sizeof(saved), protection, &protection);
+        FlushInstructionCache(GetCurrentProcess(), entry, sizeof(saved));
+    }
+};
+
+inline void __fastcall GuiCheckCaptureMouse(void*, void*, uint32_t) {}
+inline void __fastcall GuiCheckPointer(void*, void*, uint32_t) {}
+inline void __fastcall GuiCheckMoveFrame(void* view, void*, const rnative::gui::Rect* frame)
+{
+    void* data; std::memcpy(&data, static_cast<uint8_t*>(view) + 0xAC, sizeof(data));
+    std::memcpy(static_cast<uint8_t*>(data) + 0x20, frame, sizeof(*frame));
+}
+inline void __fastcall GuiCheckSetFrame(void* view, void*, const rnative::gui::Rect* frame, uint32_t)
+{
+    GuiCheckMoveFrame(view, nullptr, frame);
+}
+inline void __fastcall GuiCheckMovePosition(void* view, void*, const rnative::gui::Point* position)
+{
+    void* data; std::memcpy(&data, static_cast<uint8_t*>(view) + 0xAC, sizeof(data));
+    auto& frame = *reinterpret_cast<rnative::gui::Rect*>(static_cast<uint8_t*>(data) + 0x20);
+    frame.right += position->x - frame.left; frame.bottom += position->y - frame.top;
+    frame.left = position->x; frame.top = position->y;
+}
+inline bool __fastcall GuiCheckNoCapture(void*, void*) { return false; }
+inline rnative::gui::Point g_guiTipPoint;
+inline int g_guiTipCalls;
+inline void* __cdecl GuiCheckTooltip(void* view, rnative::gui::Point point, rnative::vc10::String* title, rnative::vc10::String*)
+{
+    g_guiTipPoint = point; ++g_guiTipCalls;
+    title->assign("Tooltip probe", 13);
+    return view;
+}
+inline void* __cdecl GuiCheckDisplay() { static uint8_t dummy[16]{}; return dummy; }
+inline void __fastcall GuiCheckUpdateArea(void*, void*, const void*) {}
+
+struct GuiCheckImport {
+    void** slot;
+    void* saved;
+    GuiCheckImport(void** address, void* target) : slot(address), saved(*address) { Set(target); }
+    ~GuiCheckImport() { Set(saved); }
+    void Set(void* value) {
+        DWORD protection;
+        VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &protection);
+        *slot = value;
+        VirtualProtect(slot, sizeof(void*), protection, &protection);
+    }
+};
+
+inline LONG WINAPI GuiCheckException(EXCEPTION_POINTERS* exception)
+{
+    if (exception->ExceptionRecord->ExceptionCode != EXCEPTION_FLT_INVALID_OPERATION &&
+        exception->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) return EXCEPTION_CONTINUE_SEARCH;
+    std::printf("GUI.dll: exception %08lx at %p\n", exception->ExceptionRecord->ExceptionCode,
+                exception->ExceptionRecord->ExceptionAddress);
+    TerminateProcess(GetCurrentProcess(), 3);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 inline int CheckGuiClient(const char* client)
 {
     using namespace rnative::gui;
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    AddVectoredExceptionHandler(1, &GuiCheckException);
+    std::printf("GUI.dll: loading supported client\n");
     SetDllDirectoryA(client);
     const std::string path = std::string(client) + "/GUI.dll";
     HMODULE module = LoadLibraryExA(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (!module) { std::printf("GUI.dll: load failed (%lu)\n", GetLastError()); return 1; }
+    const auto* bytes = reinterpret_cast<const uint8_t*>(module);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(bytes);
+    const auto* pe = reinterpret_cast<const IMAGE_NT_HEADERS*>(bytes + dos->e_lfanew);
+    if (pe->FileHeader.TimeDateStamp != 0x5CD32BEA || pe->OptionalHeader.SizeOfImage != 0x2B0000) {
+        std::printf("GUI.dll: unsupported fixture layout\n"); return 1;
+    }
+    std::printf("GUI.dll: client loaded\n");
     auto symbol = [&](const char* name) { return GetProcAddress(module, name); };
     using ValuePoint = Point*(__thiscall*)(void*, Point*, const Point*, uint32_t);
     using PointerPoint = void(__thiscall*)(void*, Point*, uint32_t);
@@ -88,12 +173,12 @@ inline int CheckGuiClient(const char* client)
     auto check = [&](bool ok, const char* what) { if (!ok) { ++failures; std::printf("GUI.dll: %s\n", what); } };
     auto equal = [](Point a, Point b) { return a.x == b.x && a.y == b.y; };
     InstallScaling(module);
+    std::printf("GUI.dll: scaling installed\n");
     SetScale(200, 150);
     Point pending;
     screen(&pending);
     check(equal(pending, {3840, 2160}), "scale change waits for the next GUI frame");
     BeginScaleFrame(controller.bytes);
-    ScaleDrawing(true);
     Point input{3, 4}, output, restored;
     to(child.bytes, &output, &input, 1);
     check(equal(output, {246, 128}), "window drawing uses 200%");
@@ -128,6 +213,7 @@ inline int CheckGuiClient(const char* client)
     windowMouse(owner.bytes, &output);
     check(equal(output, {-1, -2}), "window mouse query accounts for scaled borders");
     // Compare a clipped textured quad against the native 100% reference.
+    std::printf("GUI.dll: checking native atlas vertices\n");
     using Vertices = void(__thiscall*)(void*, void*, const Rect*);
     auto vertices = reinterpret_cast<Vertices>(symbol("?_UpdateVertices@ViewArea_c@@AAEXPAVView@@ABVRect@@@Z"));
     Object area, node, slot, texture;
@@ -141,7 +227,7 @@ inline int CheckGuiClient(const char* client)
     put(rootData, 0x20, Rect{0, 0, 199, 99});
     put(hudData, 0x20, Rect{0, 0, 199, 99});
     put(childData, 0x20, Rect{120, 60, 199, 99});
-    SetScale(100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    SetScale(100, 100); BeginScaleFrame(controller.bytes);
     const Rect clip100{150, 60, 199, 109};
     vertices(area.bytes, child.bytes, &clip100);
     float reference[8], positions[8];
@@ -150,29 +236,31 @@ inline int CheckGuiClient(const char* client)
         std::memcpy(&positions[i * 2 + c], area.bytes + i * 28 + c * 4, 4);
     }
     for (float factor : {0.5f, 0.75f, 1.25f, 1.5f, 2.0f, 1.0f}) {
-        SetScale(factor * 100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+        SetScale(factor * 100, 100); BeginScaleFrame(controller.bytes);
         Rect clip = clip100;
         Scale{factor}.ToScreen(clip);
         vertices(area.bytes, child.bytes, &clip);
         bool sameUv = true, correctPositions = true;
         for (int i = 0; i < 4; ++i) for (int c = 0; c < 2; ++c) {
-            sameUv = sameUv && reference[i * 2 + c] == uv(i, c);
+            const Rect centres = AtlasCentres({10, 20, 109, 69}, {}, {256, 256});
+            Point expectedUv{reference[i * 2], reference[i * 2 + 1]};
+            if (factor != 1.0f) GuardAtlas(expectedUv, centres);
+            sameUv = sameUv && (c ? expectedUv.y : expectedUv.x) == uv(i, c);
             float position;
             std::memcpy(&position, area.bytes + i * 28 + c * 4, 4);
             correctPositions = correctPositions && position == (positions[i * 2 + c] + 0.5f) * factor - 0.5f;
         }
-        check(sameUv, "clipped atlas sampling must be invariant under scaling");
+        check(sameUv, "clipped atlas sampling stays inside its own texels when scaled");
         check(correctPositions, "clipped vertices scale with their half-pixel convention intact");
     }
     // Slider changes leave the native frames used by preferences untouched.
     const Rect edge{3500, 1900, 3799, 2099};
     put(rootData, 0x20, edge);
     for (float percent : {100.0f, 200.0f, 75.0f, 150.0f, 100.0f}) {
-        SetScale(percent, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+        SetScale(percent, 100); BeginScaleFrame(controller.bytes);
         using WindowFrame = Rect*(__thiscall*)(void*, Rect*, uint32_t);
         auto windowFrame = reinterpret_cast<WindowFrame>(symbol("?GetFrame@Window@@QBE?AVRect@@_N@Z"));
         Rect actual;
-        ScaleDrawing(false);
         windowFrame(owner.bytes, &actual, 0);
         check(std::memcmp(&actual, &edge, sizeof(actual)) == 0, "native window queries and preference saves use canonical coordinates");
         using SaveWindow = void(__thiscall*)(void*, void*);
@@ -190,7 +278,6 @@ inline int CheckGuiClient(const char* client)
             *rectSink = originalSink;
             VirtualProtect(rectSink, sizeof(void*), protection, &protection);
         } else check(false, "preference serialization fixture could not install its sink");
-        ScaleDrawing(true);
         std::memcpy(&actual, rootData.bytes + 0x20, sizeof(actual));
         check(std::memcmp(&actual, &edge, sizeof(actual)) == 0, "scale changes never move or resize the native frame");
         to(child.bytes, &output, &input, 1);
@@ -201,7 +288,7 @@ inline int CheckGuiClient(const char* client)
     check(equal(output, {3623, 1964}), "100% restores the original edge placement exactly");
     put(hudData, 0x20, Rect{0, 0, 3839, 2159});
     put(hudChildData, 0x20, Rect{3700, 2000, 3799, 2099});
-    SetScale(100, 200); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    SetScale(100, 200); BeginScaleFrame(controller.bytes);
     to(hudChild.bytes, &output, &input, 1);
     check(equal(output, {3566, 1848}), "full-screen HUD children scale around their screen edge");
     from(hudChild.bytes, &restored, &output, 1);
@@ -213,14 +300,14 @@ inline int CheckGuiClient(const char* client)
     parent(hud.bytes, &output, &hudHit);
     parent(hudChild.bytes, &restored, &output);
     check(equal(restored, input), "HUD hit testing crosses the anchored subtree boundary once");
-    SetScale(100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    SetScale(100, 100); BeginScaleFrame(controller.bytes);
     to(hudChild.bytes, &output, &input, 1);
     check(equal(output, {3703, 2004}), "HUD scale round trip restores original coordinates");
     Object icon, iconData;
     view(icon, iconData, hudOwner, {3700, 0, 3799, 79});
     pointer(iconData, 0x10, hudChild); pointer(hudChildData, 0, icon);
     put(hudChildData, 0x20, Rect{0, 2000, 3839, 2099});
-    SetScale(100, 200); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    SetScale(100, 200); BeginScaleFrame(controller.bytes);
     to(icon.bytes, &output, &input, 1);
     check(equal(output, {3566, 1848}), "wide HUD containers preserve child anchoring");
     Point iconHit = output;
@@ -231,9 +318,157 @@ inline int CheckGuiClient(const char* client)
     const Rect strip{0, 0, 3839, 99};
     toRect(hudChild.bytes, &drawn, &strip, 1);
     check(drawn.top == 1840 && drawn.bottom == 2099, "HUD container clipping includes enlarged children");
-    SetScale(100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    SetScale(100, 100); BeginScaleFrame(controller.bytes);
     to(icon.bytes, &output, &input, 1);
     check(equal(output, {3703, 2004}), "nested HUD layout round trip restores original positions");
+    std::printf("GUI.dll: checking native border input\n");
+    // Run native border input through dispatch's inverse, isolating only cursor capture and frame application.
+    {
+        GuiCheckPatch pointerPatch(reinterpret_cast<void*>(symbol("?UpdateMousePointer@WndBorder@@AAEXW4hit_item@1@@Z")),
+                                   reinterpret_cast<void*>(&GuiCheckPointer));
+        GuiCheckPatch movePatch(reinterpret_cast<void*>(symbol("?DoSetFrame@WndBorder@@AAEXABVRect@@@Z")),
+                                reinterpret_cast<void*>(&GuiCheckMoveFrame));
+        using Down = void(__thiscall*)(void*, const Point*, int, int);
+        using Move = void(__thiscall*)(void*, const Point*, uint32_t, uint32_t, void*);
+        auto down = reinterpret_cast<Down>(symbol("?MouseDown@WndBorder@@UAEXABVPoint@@HH@Z"));
+        auto move = reinterpret_cast<Move>(symbol("?MouseMove@WndBorder@@UAEXABVPoint@@W4MouseTransition_e@@IPAVMessage@@@Z"));
+        void* table[64]{}; table[0xAC / 4] = reinterpret_cast<void*>(&GuiCheckCaptureMouse);
+        void* vtable = table; put(root, 0, vtable);
+        put(ownerData, 0x3C, uint32_t(0x30));
+        put(root, 0x23C, Rect{0, 0, 299, 15});
+        for (float factor : {0.5f, 1.5f, 1.76f, 2.0f, 1.0f}) {
+            put(rootData, 0x20, edge);
+            SetScale(factor * 100, 100); BeginScaleFrame(controller.bytes);
+            Point grip{30, 5}, cursor, local;
+            to(root.bytes, &cursor, &grip, 1);
+            from(root.bytes, &local, &cursor, 1);
+            down(root.bytes, &local, 1, 1);
+            Rect dragFrame;
+            std::memcpy(&dragFrame, root.bytes + 0x1C4, sizeof(dragFrame));
+            check(std::memcmp(&dragFrame, &edge, sizeof(edge)) == 0, "native drag starts with the canonical window frame");
+            move(root.bytes, &local, 0, 1, nullptr);
+            std::memcpy(&dragFrame, rootData.bytes + 0x20, sizeof(dragFrame));
+            check(std::fabs(dragFrame.left - edge.left) < 0.001f && std::fabs(dragFrame.top - edge.top) < 0.001f,
+                  "pressing a scaled title bar does not move the window");
+            cursor.x -= 60; cursor.y -= 30;
+            from(root.bytes, &local, &cursor, 1);
+            move(root.bytes, &local, 0, 1, nullptr);
+            Point attached;
+            to(root.bytes, &attached, &grip, 1);
+            check(std::fabs(attached.x - cursor.x) < 0.001f && std::fabs(attached.y - cursor.y) < 0.001f,
+                  "native dragging keeps the same scaled title-bar point attached to the cursor");
+        }
+        put(root, 0, static_cast<void*>(nullptr)); put(ownerData, 0x3C, uint32_t(0));
+        put(rootData, 0x20, edge);
+    }
+    SetScale(100, 100); BeginScaleFrame(controller.bytes);
+    to(root.bytes, &output, &input, 1);
+    const Point beforeSlider = output;
+    put(controller, 0x58, uint32_t(1));
+    SetScale(176, 150); BeginScaleFrame(controller.bytes);
+    to(root.bytes, &output, &input, 1);
+    check(equal(output, beforeSlider), "window scale waits while the primary mouse button is held");
+    SetScale(200, 150); BeginScaleFrame(controller.bytes);
+    to(root.bytes, &output, &input, 1);
+    check(equal(output, beforeSlider), "dragging the scale slider keeps its window and hit mapping stable");
+    put(controller, 0x58, uint32_t(0)); BeginScaleFrame(controller.bytes);
+    to(root.bytes, &output, &input, 1);
+    check(!equal(output, beforeSlider), "releasing the scale slider applies its final value");
+    std::printf("GUI.dll: checking native tab resizing\n");
+    {
+        using Frame = Rect*(__thiscall*)(void*, Rect*);
+        auto frame = reinterpret_cast<Frame>(symbol("?GetFrame@View@@QBE?AVRect@@XZ"));
+        Rect canonical;
+        frame(root.bytes, &canonical);
+        check(std::memcmp(&canonical, &edge, sizeof(edge)) == 0, "view frame queries always retain canonical layout units");
+        void* borderTable[64]{};
+        borderTable[0xB8 / 4] = reinterpret_cast<void*>(&GuiCheckSetFrame);
+        borderTable[0xC8 / 4] = reinterpret_cast<void*>(&GuiCheckMovePosition);
+        borderTable[0xF0 / 4] = reinterpret_cast<void*>(symbol("?SetFrame@WndBorder@@UAEXABVRect@@@Z"));
+        void* clientTable[64]{}; clientTable[0xB8 / 4] = reinterpret_cast<void*>(&GuiCheckSetFrame);
+        put(root, 0, static_cast<void*>(borderTable)); put(child, 0, static_cast<void*>(clientTable));
+        put(root, 0x2CC, Rect{}); put(root, 0x2DC, Rect{});
+        put(root, 0x2EC, Point{1, 1}); put(root, 0x2F4, Point{10000, 10000});
+        put(root, 0x3CC, int(0)); put(root, 0x3D0, int(0));
+        put(root, 0x3D4, int(10000)); put(root, 0x3D8, int(10000)); put(root, 0x1D4, uint32_t(0));
+        put(root, 0x3DC, int(1)); put(root, 0x3E0, int(1));
+        auto* base = reinterpret_cast<uint8_t*>(module);
+        GuiCheckPatch setFrame(reinterpret_cast<void*>(symbol("?SetFrame@View@@UAEXABVRect@@_N@Z")),
+                               reinterpret_cast<void*>(&GuiCheckSetFrame));
+        GuiCheckImport display(reinterpret_cast<void**>(base + 0x1A744C), reinterpret_cast<void*>(&GuiCheckDisplay));
+        GuiCheckImport update(reinterpret_cast<void**>(base + 0x1A7398), reinterpret_cast<void*>(&GuiCheckUpdateArea));
+        using Resize = void(__thiscall*)(void*, const Point*);
+        auto resize = reinterpret_cast<Resize>(symbol("?ResizeClientTo@WndBorder@@QAEXABVPoint@@@Z"));
+        for (Point size : {Point{350, 240}, Point{299, 199}, Point{350, 240}, Point{299, 199}}) {
+            resize(root.bytes, &size);
+            frame(root.bytes, &canonical);
+            check(canonical.left == edge.left && canonical.top == edge.top,
+                  "native client resizing during tab changes retains the window position");
+        }
+        put(child, 0x188, Rect{});
+        put(controller, 0x48, Point{1800, 1000});
+        using Placement = void(__thiscall*)(void*, uint32_t);
+        auto placement = reinterpret_cast<Placement>(symbol("?MoveToMouse@Window@@QAEX_N@Z"));
+        placement(owner.bytes, 1); BeginScaleFrame(controller.bytes);
+        const Point centre{149.5f, 99.5f};
+        to(root.bytes, &output, &centre, 1);
+        check(std::fabs(output.x - 1800) <= 2 && std::fabs(output.y - 1000) <= 2,
+              "native mouse placement discards the previous edge-clamp offset");
+        put(root, 0, static_cast<void*>(nullptr)); put(child, 0, static_cast<void*>(nullptr));
+        put(rootData, 0x20, edge);
+    }
+    SetScale(176, 150); BeginScaleFrame(controller.bytes);
+    std::printf("GUI.dll: checking native tooltip hit testing\n");
+    {
+        // The real tooltip controller must find displayed bounds even outside Render.
+        auto* base = reinterpret_cast<uint8_t*>(module);
+        GuiCheckPatch tooltip(base + 0x156D66, reinterpret_cast<void*>(&GuiCheckTooltip));
+        void* table[64]{}; table[0x38 / 4] = reinterpret_cast<void*>(&GuiCheckNoCapture);
+        put(owner, 0, static_cast<void*>(table));
+        auto* title = reinterpret_cast<rnative::vc10::String*>(controller.bytes + 0xA4);
+        auto* body = reinterpret_cast<rnative::vc10::String*>(controller.bytes + 0xC0);
+        title->init(); body->init(); pointer(controller, 0xA0, root);
+        using Tooltip = void(__thiscall*)(void*, uint32_t);
+        auto updateTooltip = reinterpret_cast<Tooltip>(symbol("?UpdateToolTip@WindowController_c@@AAEX_N@Z"));
+        const Point hover{10, 10};
+        to(root.bytes, &output, &hover, 1); put(controller, 0x48, output);
+        g_guiTipCalls = 0;
+        updateTooltip(controller.bytes, 0);
+        check(g_guiTipCalls == 1 && std::fabs(g_guiTipPoint.x - hover.x) < 0.001f && std::fabs(g_guiTipPoint.y - hover.y) < 0.001f,
+              "native tooltip hit testing finds the scaled window and logical hover point");
+        check(title->size == 13, "native tooltip timer receives its hovered text");
+        title->release(); body->release();
+        put(owner, 0, static_cast<void*>(nullptr)); put(controller, 0xA0, static_cast<void*>(nullptr));
+    }
+    std::printf("GUI.dll: checking native item dragging\n");
+    {
+        Object drag, image, imageData, imageOwner, imageOwnerData;
+        view(image, imageData, imageOwner, {0, 0, 31, 31});
+        put(imageOwner, 0x60, static_cast<void*>(&name)); pointer(imageOwner, 0x70, imageOwnerData);
+        pointer(imageOwnerData, 0x80, image); pointer(imageData, 0x10, top); pointer(hudData, 8, image);
+        pointer(controller, 0x194, drag); pointer(drag, 0x54, imageOwner);
+        put(drag, 0x58, Point{-8, -5});
+        void* table[64]{}; table[0xC8 / 4] = reinterpret_cast<void*>(&GuiCheckMovePosition);
+        put(image, 0, static_cast<void*>(table));
+        using DragMove = void(__thiscall*)(void*, const Point*);
+        auto dragMove = reinterpret_cast<DragMove>(symbol("?SlotMouseMoved@DragObject_c@@AAEXABVPoint@@@Z"));
+        for (bool fromHud : {false, true}) {
+            pointer(drag, 0x60, fromHud ? hudChild : child);
+            SetScale(176, 150);
+            for (Point cursor : {Point{1000, 600}, Point{2400, 1200}, Point{10, 10}}) {
+                put(controller, 0x48, cursor);
+                dragMove(drag.bytes, &cursor);
+                BeginScaleFrame(controller.bytes);
+                const Point grip{8, 5};
+                to(image.bytes, &output, &grip, 1);
+                check(std::fabs(output.x - cursor.x) < 0.001f && std::fabs(output.y - cursor.y) < 0.001f,
+                      "native dragged item image keeps its hotspot on the physical cursor");
+            }
+        }
+        put(controller, 0x194, static_cast<void*>(nullptr)); put(hudData, 8, static_cast<void*>(nullptr));
+        put(controller, 0x48, Point{246, 128});
+    }
+    SetScale(100, 100); BeginScaleFrame(controller.bytes);
     check(FontScalingReady(), "native text-cache hooks installed");
     using FontCtor = void*(__thiscall*)(void*);
     using FontDtor = void(__thiscall*)(void*);
@@ -344,7 +579,7 @@ inline int CheckGuiClient(const char* client)
         rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
     }
     content.release(); fontDtor(fontInfo);
-    EndScaleFrame(); *instance = saved;
+    *instance = saved;
     std::printf("GUI.dll: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;
 }

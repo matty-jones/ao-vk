@@ -18,8 +18,6 @@ namespace rnative::gui {
 
 void InstallScaling(HMODULE gui);
 bool BeginScaleFrame(void* controller);
-void ScaleDrawing(bool drawing);
-void EndScaleFrame();
 
 namespace {
 
@@ -41,7 +39,6 @@ void __fastcall RenderHook(void* self, void* edx, void* viewport, uint32_t time)
     g_render(self, edx, viewport, time);
     g_skip = false;
     device::InterfaceEnd();
-    EndScaleFrame();
 }
 
 // View::_CallRender (thiscall, six stack arguments).
@@ -50,15 +47,10 @@ void __fastcall CallRenderHook(void* view, void* edx, uint32_t order, void* view
 {
     if (g_depth == 0 && g_skip)
         return;
-    const bool root = g_depth == 0;
-    if (root) {
-        ScaleDrawing(true);
-        if (g_scaleRedraw) dirty = 1;
-    }
+    if (g_depth == 0 && g_scaleRedraw) dirty = 1;
     ++g_depth;
     g_callRender(view, edx, order, viewport, clip, dirty, alpha, color);
     --g_depth;
-    if (root) ScaleDrawing(false);
 }
 
 // Both start with MSVC's exception frame prologue: mov eax, <handler>; call <GUI.dll's _EH_prolog> - checked, so a

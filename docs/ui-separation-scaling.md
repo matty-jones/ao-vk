@@ -1,7 +1,7 @@
 # Interface separation and scaling
 
-Local gameplay testing confirmed that the atlas correction restores usable compass/icon sampling. The font and
-layout corrections below have native regression coverage and still need a gameplay check. See the
+Local gameplay testing confirmed usable compass/icon scaling, freshly rendered text and retained positions across
+scale round trips. The follow-up interaction and texture-edge fixes below still need a gameplay check. See the
 [investigation](ui-scaling-investigation.md) for the original defects and evidence.
 
 `RVK_UiRate` controls redraw frequency only. At 0 the interface redraws every frame and still uses its own
@@ -17,13 +17,22 @@ formats retain opaque alpha when copied. `RANDYVK_WORLD_SHOT=1` saves the world 
 `RVK_WinScale` and `RVK_HudScale` are independent percentages in General (50–200, default 100). Scaling happens
 in GUI.dll's native view coordinates, before drawing into the display-sized interface image. Rectangle transforms
 include the last pixel, so clipping and input use the same bounds as drawing. Native layout keeps its original
-workspace; the controller's physical screen and mouse coordinates stay unchanged. Changes take effect together
-at the next GUI frame and force a fresh cached image. The client's layout remains in its original coordinates.
+workspace; the controller's physical screen and mouse coordinates stay unchanged. HUD changes take effect at the
+next GUI frame. Window changes wait while the primary mouse button is held, keeping the Preferences slider still,
+then apply at the first GUI frame after release. Applied changes force a fresh cached image.
+The client's layout remains in its original coordinates.
 Clamping affects only display placement, so returning to 100% restores the unchanged model. Full-screen HUD
 containers keep their native dimensions; their widget groups scale around the nearest screen edge or centre.
 Their clipping and input bounds include the enlarged children. No scale-driven move/resize calls or separate
-preferences file are used. Window-frame queries used by the native preference writer remain canonical even
-while controller hit testing uses display bounds. Deliberate dragging continues through the inverse display transform.
+preferences file are used. Native frame queries always remain canonical. Only the controller's cursor and tooltip
+hit-test call sites request displayed frames, including outside rendering. Border dragging and frame updates use
+canonical screen coordinates after input dispatch has inverted the display transform. Tab-driven resizing therefore
+retains the window position. Mouse-relative window placement resets any old display-clamp offset. Dragged item
+images inherit the source window/HUD scale around the physical cursor, retaining their native hotspot.
+
+Packed UI textures have no gutters between images. Scaled quads restrict UV edges to their own source texel
+centres; clipped interior coordinates remain unchanged. Interface sampling uses the top mip level and skips forced
+anisotropy so filtering cannot reach neighbouring allocations. World and cursor sampling retain their original state.
 
 HUD classification covers the character bars, compass, shortcut bars, control centre and notifications through
 their native window types and names. Other GUI windows use the window factor. World labels and floating text,
@@ -57,9 +66,12 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
 - `native_check.exe --gui-client-check <client-directory>` invokes the actual checked GUI.dll exports on synthetic
   native-layout view trees. It checks nested conversions and overloads, independent 200% window/150% HUD factors,
   clipping, parent hit tests, window mouse borders, unchanged layout workspace and controller coordinates,
-  and deferred activation at frame boundaries. Scale round trips preserve native rectangles, and the actual
-  native preference writer is checked while controller work is active. Full-width HUD container checks cover
+  and deferred activation at frame boundaries/mouse release. Scale round trips preserve native rectangles, and the actual
+  native preference writer is checked under non-default scales. Full-width HUD container checks cover
   enlarged child clipping and nested input mapping.
+- The same native check exercises border mouse-down/move, client resizing, mouse-relative placement, tooltip
+  hit detection/timer text outside rendering, and dragged item movement from both windows and HUD. Synthetic
+  fixtures isolate native cursor capture, layout callbacks, tooltip content and display invalidation.
 - The same check invokes the actual native string renderer and surface-layout methods at 100%, 110%, 150%,
   176% and 200%. It checks fresh antialiased glyph pixels, unchanged advances, logical surface dimensions,
   selection/underline drawing and exact native raster restoration at 100%. `RANDYVK_GUI_FONT_SHOT=<prefix>`
@@ -69,12 +81,17 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
   black and translucent UI, temporary render-target copies, opaque-format blits, cursor order, hidden UI, resize,
   viewport state, and readback both during and after a frame. HDR/TAA at 50% world resolution and threaded
   rendering exercise the same boundaries. A world-only screenshot checks for overlay contamination.
+- `rvk_demo.exe --ui-atlas-test --size 480 240` renders adjacent contrasting atlas allocations at 50%, 75%,
+  110%, 150%, 176% and 200%, with fractional placement and forced anisotropy configured. Unguarded quads reproduce
+  foreign edge pixels; guarded UI quads must contain none. A draw outside the interface checks that normal mip
+  sampling is restored. Immediate and threaded rendering exercise the sampler cache boundary.
 - The full native comparison against the client's original renderer passed with zero failures. Generated settings
   documentation and whitespace checks passed.
 
-Full game GUI interaction remains unverified: the client exits during startup before a rendered GUI frame in
-this environment. Live dragging, maps/browser interaction, all font variants and persistent layout changes need
-a playable client session. The fixed world-look check timed out even with an extended limit; its baseline was
+The latest interaction and texture-edge changes still need local gameplay confirmation: the cloud client exits
+during startup before a rendered GUI frame. Native checks cannot establish the complete behaviour of every skin,
+tab, tooltip and item action. Maps/browser interaction and persistent layout after restart also need a playable
+client session. The fixed world-look check timed out even with an extended limit; its baseline was
 not changed. Software Vulkan exposes only one queue, so hardware frame generation remains untested. It also
 reports the existing external-memory extension dependency validation error
 `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`. QEMU/Wine helper teardown can report a signal after

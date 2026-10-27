@@ -857,12 +857,14 @@ uint64_t Device::SamplerKey(uint32_t stage) const
            uint64_t(t[d3d::TSS_ADDRESSV] & 7) << 12 | uint64_t(t[d3d::TSS_MAXMIPLEVEL] & 15) << 15 |
            uint64_t(t[d3d::TSS_BORDERCOLOR] >> 24 ? 1 : 0) << 19 |
            uint64_t(m_anisotropy) << 20 |      // samplers made at another level stay valid for work in flight
-           uint64_t(SceneMipBias() ? 100 - m_renderScale : 0) << 26;
+           uint64_t(SceneMipBias() ? 100 - m_renderScale : 0) << 26 |
+           uint64_t(InterfaceSampler()) << 40;
 }
 
 // RVK_RenderScale: the scene's textures sample a finer mip level by log2(scale), as sharp as at the output's size
 // (the TAA resolves the extra detail); not the interface's, drawn at the output's size.
 bool Device::SceneMipBias() const { return m_target == m_scene && SceneScaled(); }
+bool Device::InterfaceSampler() const { return m_uiLayerActive && m_target == m_uiLayer; }
 
 // Samplers are never destroyed while the device lives (SamplerFor's map owns them), so a stage whose sampler state
 // is unchanged keeps its slot. Only a successful registration is remembered.
@@ -907,8 +909,9 @@ VkSampler Device::SamplerFor(uint32_t stage)
     ci.magFilter = t[d3d::TSS_MAGFILTER] == d3d::TFG_POINT ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
     ci.minFilter = t[d3d::TSS_MINFILTER] == d3d::TFN_POINT ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
     ci.mipmapMode = t[d3d::TSS_MIPFILTER] == d3d::TFP_LINEAR ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    ci.minLod = float(t[d3d::TSS_MAXMIPLEVEL]);           // D3D MAXMIPLEVEL = most detailed level used
-    ci.maxLod = t[d3d::TSS_MIPFILTER] == d3d::TFP_NONE ? ci.minLod : VK_LOD_CLAMP_NONE;
+    const bool ui = InterfaceSampler();
+    ci.minLod = ui ? 0.0f : float(t[d3d::TSS_MAXMIPLEVEL]);           // D3D MAXMIPLEVEL = most detailed level used
+    ci.maxLod = ui || t[d3d::TSS_MIPFILTER] == d3d::TFP_NONE ? ci.minLod : VK_LOD_CLAMP_NONE;
     ci.addressModeU = AddressMode(addrU);
     ci.addressModeV = AddressMode(addrV);
     ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -918,7 +921,7 @@ VkSampler Device::SamplerFor(uint32_t stage)
     // DXVK's forced anisotropy does.
     if (SceneMipBias() && t[d3d::TSS_MIPFILTER] != d3d::TFP_NONE)
         ci.mipLodBias = std::log2(float(m_renderScale) / 100.0f);
-    if (m_anisotropy > 1 && ci.minFilter == VK_FILTER_LINEAR && ci.magFilter == VK_FILTER_LINEAR) {
+    if (!ui && m_anisotropy > 1 && ci.minFilter == VK_FILTER_LINEAR && ci.magFilter == VK_FILTER_LINEAR) {
         ci.anisotropyEnable = VK_TRUE;
         ci.maxAnisotropy = float(m_anisotropy);
     }

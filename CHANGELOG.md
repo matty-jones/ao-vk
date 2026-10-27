@@ -8,13 +8,18 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### New
 - Experimental `RVK_WinScale` and `RVK_HudScale` (General, 100% by default) resize windows and HUD independently, with matching
   layout, clipping and mouse input. World labels and floating text, the cursor, and the developer console/readout
-  retain their sizes. Changes refresh cached UI immediately.
+  retain their sizes. Applied changes refresh cached UI immediately.
   Font and layout corrections have native regression coverage; broader gameplay validation is pending.
 
 ### Diagnostics
 - `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
 
 ### Fixed
+- Scaled windows stay attached to the point where their title bar was grabbed, and dragged item images follow
+  the cursor. Changing tabs or resizing a window no longer moves its saved position; hover tooltips use scaled bounds.
+- The Window size slider applies its final scale after releasing the mouse, so Preferences stays still while dragging it.
+- Scaled icons and text keep their texture samples inside their own image, preventing fragments from adjacent
+  images. World texture filtering stays unchanged.
 - Enlarged GUI text is rendered into a larger antialiased cache instead of magnifying its original pixels.
   Native wrapping, selection and mouse measurements stay unchanged; 100% keeps the original text renderer.
 - Window and HUD scale changes leave the saved layout untouched. Returning to 100% restores its original

@@ -47,7 +47,7 @@ Setting g_settings[] = {
     {"RVK_Enhance",    "All enhancements (Ctrl+Shift+E)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Prepass",    "Depth pre-pass", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PrepassEq",  "Depth pre-pass: what it covers shaded only where it is seen", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
-    {"RVK_WinScale", "Window size (%)", "General", Int, 50, 200, 5, 100, nullptr, 0},
+    {"RVK_WinScale", "Window size (%) - release to apply", "General", Int, 50, 200, 5, 100, nullptr, 0},
     {"RVK_HudScale", "HUD size (%)", "General", Int, 50, 200, 5, 100, nullptr, 0},
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
     {"RVK_PerfHud", "Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's", "General", Bool, 0, 1, 1, 0, nullptr, 0},

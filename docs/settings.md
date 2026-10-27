@@ -44,7 +44,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_Enhance` | All enhancements (Ctrl+Shift+E) | on / off | on | window |
 | `RVK_Prepass` | Depth pre-pass | on / off | on | ini only; knob |
 | `RVK_PrepassEq` | Depth pre-pass: what it covers shaded only where it is seen | on / off | on | ini only; switch `RVK_Prepass`; knob |
-| `RVK_WinScale` | Window size (%) | 50 .. 200 | 100 | window |
+| `RVK_WinScale` | Window size (%) - release to apply | 50 .. 200 | 100 | window |
 | `RVK_HudScale` | HUD size (%) | 50 .. 200 | 100 | window |
 | `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 / 30 / 60 / 90 / 120 | 60 | window |
 | `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's | on / off | off | window |
