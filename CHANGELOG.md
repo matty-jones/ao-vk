@@ -15,6 +15,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
 
 ### Fixed
+- Window and HUD scale changes leave the saved layout untouched. Returning to 100% restores its original
+  positions; edge clamping affects only display placement.
 - Enlarging interface images no longer distorts their texture sampling when clipped at a window edge.
 - Names, floating combat text and the mouse pointer stay separate from world effects and temporal processing,
   whether frame generation is on or off. Screenshots use the same overlay order as the displayed frame.

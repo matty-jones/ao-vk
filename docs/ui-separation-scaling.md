@@ -1,8 +1,8 @@
 # Interface separation and scaling
 
-Local gameplay testing at 4K rejected the initial scaling implementation: enlarged text remains a stretched
-bitmap, and changing scales can permanently move the native layout. The atlas correction fixes one confirmed
-rendering defect; it does not make scaling ready for use. See the [follow-up investigation](ui-scaling-investigation.md).
+Local gameplay testing confirmed that the atlas correction restores usable compass/icon sampling. Font resolution
+is still under correction. Scale changes now use display transforms without changing native rectangles; the new
+layout path has native regression coverage and still needs a gameplay check. See the [investigation](ui-scaling-investigation.md).
 
 `RVK_UiRate` controls redraw frequency only. At 0 the interface redraws every frame and still uses its own
 display-sized image. Capture callbacks work with Native Direct and Native Device disabled. GUI controller work
@@ -16,10 +16,14 @@ formats retain opaque alpha when copied. `RANDYVK_WORLD_SHOT=1` saves the world 
 
 `RVK_WinScale` and `RVK_HudScale` are independent percentages in General (50–200, default 100). Scaling happens
 in GUI.dll's native view coordinates, before drawing into the display-sized interface image. Rectangle transforms
-include the last pixel, so clipping and input use the same bounds as drawing. Window layout sees a logical
+include the last pixel, so clipping and input use the same bounds as drawing. Native layout keeps its original
 workspace; the controller's physical screen and mouse coordinates stay unchanged. Changes take effect together
-at the next GUI frame and force a fresh cached image. Windows retain their physical origin where possible and
-are clamped into the workspace; the full-screen control centre reflows to the HUD workspace.
+at the next GUI frame and force a fresh cached image. The client's layout remains in its original coordinates.
+Clamping affects only display placement, so returning to 100% restores the unchanged model. Full-screen HUD
+containers keep their native dimensions; their widget groups scale around the nearest screen edge or centre.
+Their clipping and input bounds include the enlarged children. No scale-driven move/resize calls or separate
+preferences file are used. Window-frame queries used by the native preference writer remain canonical even
+while controller hit testing uses display bounds. Deliberate dragging continues through the inverse display transform.
 
 HUD classification covers the character bars, compass, shortcut bars, control centre and notifications through
 their native window types and names. Other GUI windows use the window factor. World labels and floating text,

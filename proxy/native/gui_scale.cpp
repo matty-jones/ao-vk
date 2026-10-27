@@ -17,24 +17,26 @@ using ViewFn = void*(__thiscall*)(void*);
 using NameFn = vc10::String*(__thiscall*)(void*, vc10::String*);
 using SizeFn = Point*(__thiscall*)(void*, Point*);
 using FrameFn = Rect*(__fastcall*)(void*, void*, Rect*);
-using MoveFn = void(__thiscall*)(void*, float, float);
-ViewFn g_top, g_child, g_sibling, g_looper, g_windowClient;
+ViewFn g_top, g_child, g_sibling, g_parent, g_looper, g_windowClient;
 NameFn g_name;
 SizeFn g_screen;
 Point g_screenSize{};
-FrameFn g_frame, g_borders;
-MoveFn g_resize, g_move;
+FrameFn g_frame, g_bounds, g_borders;
 SizeFn g_windowMouse;
 using ScreenFn = Point*(__cdecl*)(Point*);
 ScreenFn g_windowScreen;
+using WindowFrameFn = Rect*(__fastcall*)(void*, void*, Rect*, uint32_t);
+WindowFrameFn g_windowFrame;
 
 struct Window {
     void* owner;
-    Scale scale;
+    Transform transform;
     bool fullScreen;
 };
 std::unordered_map<void*, Window> g_windows;
-std::unordered_map<void*, Scale> g_scales;
+std::unordered_map<void*, Transform> g_views;
+struct Clip { Rect logical, screen; Point origin; };
+std::unordered_map<void*, Clip> g_clips;
 float g_windowScale = 1.0f, g_hudScale = 1.0f;
 float g_wantedWindow = 1.0f, g_wantedHud = 1.0f;
 bool g_installed, g_controllerWork, g_redraw;
@@ -52,14 +54,17 @@ struct Coordinates {
 
 bool Hud(void* window);
 
-Scale For(void* view)
+Transform For(void* view)
 {
-    if (!g_installed || (g_windowScale == 1.0f && g_hudScale == 1.0f)) return {};
-    void* owner = g_looper(view);
-    auto it = g_scales.find(owner);
-    if (it != g_scales.end()) return it->second;
-    return owner ? Scale{Hud(owner) ? g_hudScale : g_windowScale} : Scale{};
+    if (!g_installed || !view || (g_windowScale == 1.0f && g_hudScale == 1.0f)) return {};
+    for (void* ancestor = view; ancestor; ancestor = g_parent(ancestor)) {
+        auto it = g_views.find(ancestor);
+        if (it != g_views.end()) return it->second;
+    }
+    return {};
 }
+
+template <class T> void ParentSpace(void* view, T& coordinates, bool outward);
 
 const char* TypeOf(void* window)
 {
@@ -87,16 +92,30 @@ Rect* __fastcall FrameHook(void* view, void* edx, Rect* out)
 {
     g_frame(view, edx, out);
     if (g_controllerWork && !g_coordinates && g_placementScale == 0.0f) {
-        auto it = g_windows.find(view);
-        if (it != g_windows.end()) it->second.scale.ToScreen(*out);
+        auto clip = g_clips.find(view);
+        if (clip != g_clips.end()) {
+            const Point parent{out->left - clip->second.origin.x, out->top - clip->second.origin.y};
+            *out = clip->second.screen;
+            out->left += parent.x; out->right += parent.x; out->top += parent.y; out->bottom += parent.y;
+        } else ParentSpace(view, *out, true);
     }
     return out;
+}
+
+Rect* __fastcall WindowFrameHook(void* window, void* edx, Rect* out, uint32_t client)
+{
+    struct ModelSpace {
+        bool saved = g_controllerWork;
+        ModelSpace() { g_controllerWork = false; }
+        ~ModelSpace() { g_controllerWork = saved; }
+    } scope;
+    return g_windowFrame(window, edx, out, client);
 }
 
 Point* __cdecl WindowScreenHook(Point* out)
 {
     g_windowScreen(out);
-    Scale{g_installed ? (g_placementScale > 0.0f ? g_placementScale : g_windowScale) : 1.0f}.FromScreen(*out);
+    if (g_installed && g_placementScale > 0.0f) Scale{g_placementScale}.FromScreen(*out);
     return out;
 }
 
@@ -104,7 +123,7 @@ Point* __fastcall WindowMouseHook(void* window, void*, Point* out)
 {
     g_windowMouse(window, out);
     void* client = g_windowClient(window);
-    const Scale scale = For(client);
+    const Transform scale = For(client);
     if (scale.value != 1.0f) {
         Rect border;
         g_borders(client, nullptr, &border);
@@ -122,17 +141,20 @@ void __fastcall PlacementHook(void* window, void* edx, uint32_t centered)
     g_placementScale = saved;
 }
 
-Scale DrawingScale(void* view)
+Transform DrawingScale(void* view)
 {
-    Scale scale = For(view);
-    if (g_placementScale > 0.0f) scale.value /= g_placementScale;
+    Transform scale = For(view);
+    if (g_placementScale > 0.0f) {
+        scale.value /= g_placementScale;
+        scale.offset.x /= g_placementScale; scale.offset.y /= g_placementScale;
+    }
     return scale;
 }
 
 void __fastcall VerticesHook(void* area, void* edx, void* view, const Rect* clip)
 {
-    const Scale scale = For(view);
-    if (scale.value == 1.0f) {
+    const Transform scale = For(view);
+    if (scale.Identity()) {
         g_vertices(area, edx, view, clip);
         return;
     }
@@ -146,9 +168,18 @@ void __fastcall VerticesHook(void* area, void* edx, void* view, const Rect* clip
     if (!*(static_cast<const uint8_t*>(area) + 0x7C)) return;
     for (int i = 0; i < 4; ++i) {
         auto* position = reinterpret_cast<float*>(static_cast<uint8_t*>(area) + i * 28);
-        position[0] = (position[0] + 0.5f) * scale.value - 0.5f;
-        position[1] = (position[1] + 0.5f) * scale.value - 0.5f;
+        Point point{position[0] + 0.5f, position[1] + 0.5f};
+        scale.ToScreen(point);
+        position[0] = point.x - 0.5f; position[1] = point.y - 0.5f;
     }
+}
+
+void ClipBounds(void*, const Point&, Point&) {}
+void ClipBounds(void* view, const Rect& input, Rect& output)
+{
+    auto it = g_clips.find(view);
+    if (it != g_clips.end() && std::memcmp(&input, &it->second.logical, sizeof(input)) == 0)
+        output = it->second.screen;
 }
 
 // The value and pointer overloads recurse differently in GUI.dll. Transform only at the outermost boundary.
@@ -160,15 +191,17 @@ void __fastcall VerticesHook(void* area, void* edx, void* view, const Rect* clip
     Type* __fastcall To##Tag##Value(void* view, void* edx, Type* out, const Type* in, uint32_t scaled) \
     { \
         Coordinates scope; \
+        const Type original = *in; \
         g_to##Tag##Value(view, edx, out, in, scaled); \
-        if (scope.outer && scaled) DrawingScale(view).ToScreen(*out); \
+        if (scope.outer && scaled) { DrawingScale(view).ToScreen(*out); ClipBounds(view, original, *out); } \
         return out; \
     } \
     void __fastcall To##Tag##Pointer(void* view, void* edx, Type* in, uint32_t scaled) \
     { \
         Coordinates scope; \
+        const Type original = *in; \
         g_to##Tag##Pointer(view, edx, in, scaled); \
-        if (scope.outer && scaled) DrawingScale(view).ToScreen(*in); \
+        if (scope.outer && scaled) { DrawingScale(view).ToScreen(*in); ClipBounds(view, original, *in); } \
     } \
     Type* __fastcall From##Tag##Value(void* view, void* edx, Type* out, const Type* in, uint32_t scaled) \
     { \
@@ -187,6 +220,29 @@ SCREEN_HOOKS(Point, Point)
 SCREEN_HOOKS(Rect, Rect)
 #undef SCREEN_HOOKS
 
+template <class T> void Translate(T& coordinates, Point delta);
+template <> void Translate(Point& p, Point delta) { p.x += delta.x; p.y += delta.y; }
+template <> void Translate(Rect& r, Point delta)
+{
+    r.left += delta.x; r.right += delta.x; r.top += delta.y; r.bottom += delta.y;
+}
+
+template <class T> void ParentSpace(void* view, T& coordinates, bool outward)
+{
+    void* parent = g_parent(view);
+    const Transform childMap = For(view), parentMap = For(parent);
+    if (childMap == parentMap) return;
+    Point origin{}, zero{};
+    if (parent) {
+        Coordinates scope;
+        g_toPointValue(parent, nullptr, &origin, &zero, 1);
+    }
+    Translate(coordinates, origin);
+    if (outward) { childMap.ToScreen(coordinates); parentMap.FromScreen(coordinates); }
+    else { parentMap.ToScreen(coordinates); childMap.FromScreen(coordinates); }
+    Translate(coordinates, Point{-origin.x, -origin.y});
+}
+
 #define PARENT_HOOKS(Type, Tag) \
     using Tag##ParentValueFn = Type*(__fastcall*)(void*, void*, Type*, const Type*); \
     using Tag##ParentPointerFn = void(__fastcall*)(void*, void*, Type*); \
@@ -196,15 +252,13 @@ SCREEN_HOOKS(Rect, Rect)
     { \
         Coordinates scope; \
         Type logical = *in; \
-        auto it = g_windows.find(view); \
-        if (scope.outer && it != g_windows.end()) it->second.scale.FromScreen(logical); \
+        if (scope.outer) ParentSpace(view, logical, false); \
         return g_parent##Tag##Value(view, edx, out, &logical); \
     } \
     void __fastcall Parent##Tag##Pointer(void* view, void* edx, Type* in) \
     { \
         Coordinates scope; \
-        auto it = g_windows.find(view); \
-        if (scope.outer && it != g_windows.end()) it->second.scale.FromScreen(*in); \
+        if (scope.outer) ParentSpace(view, *in, false); \
         g_parent##Tag##Pointer(view, edx, in); \
     }
 PARENT_HOOKS(Point, Point)
@@ -221,6 +275,8 @@ struct Hook {
 };
 
 Hook g_hooks[] = {
+    {"?GetFrame@Window@@QBE?AVRect@@_N@Z", 0x154615, "", 10,
+      reinterpret_cast<void*>(&WindowFrameHook), reinterpret_cast<void**>(&g_windowFrame)},
     {"?_UpdateVertices@ViewArea_c@@AAEXPAVView@@ABVRect@@@Z", 0x151898, "", 10,
       reinterpret_cast<void*>(&VerticesHook), reinterpret_cast<void**>(&g_vertices)},
     {"?MoveToMouse@Window@@QAEX_N@Z", 0x154E16, "", 10,
@@ -283,17 +339,17 @@ void InstallScaling(HMODULE gui)
     }
     auto address = [&](const char* name) { return GetProcAddress(gui, name); };
     g_top = reinterpret_cast<ViewFn>(address("?GetToplevelView@WindowController_c@@QBEPAVView@@XZ"));
+    g_parent = reinterpret_cast<ViewFn>(address("?GetParent@View@@QBEPAV1@XZ"));
     g_child = reinterpret_cast<ViewFn>(address("?GetTopChild@View@@QBEPAV1@XZ"));
     g_sibling = reinterpret_cast<ViewFn>(address("?GetLowerSibling@View@@QBEPAV1@XZ"));
     g_windowClient = reinterpret_cast<ViewFn>(address("?_GetClientView@Window@@ABEPAVView@@XZ"));
+    g_bounds = reinterpret_cast<FrameFn>(address("?GetBounds@View@@QBE?AVRect@@XZ"));
     g_borders = reinterpret_cast<FrameFn>(address("?GetBorderSizes@TabView@@QBE?AVRect@@XZ"));
     g_screen = reinterpret_cast<SizeFn>(address("?GetScreenSize@WindowController_c@@QBE?AVPoint@@XZ"));
-    g_resize = reinterpret_cast<MoveFn>(address("?ResizeTo@Window@@QAEXMM@Z"));
-    g_move = reinterpret_cast<MoveFn>(address("?MoveTo@Window@@QAEXMM@Z"));
     HMODULE utils = GetModuleHandleA("Utils.dll");
     g_looper = utils ? reinterpret_cast<ViewFn>(GetProcAddress(utils, "?GetLooper@Handler@@QBEPAVLooper@@XZ")) : nullptr;
     g_name = utils ? reinterpret_cast<NameFn>(GetProcAddress(utils, "?GetName@Looper@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ")) : nullptr;
-    if (!g_top || !g_child || !g_sibling || !g_windowClient || !g_borders || !g_screen || !g_resize || !g_move || !g_looper || !g_name) {
+    if (!g_top || !g_parent || !g_child || !g_sibling || !g_windowClient || !g_bounds || !g_borders || !g_screen || !g_looper || !g_name) {
         Log("interface scaling: required GUI exports unavailable, left at 100%%");
         return;
     }
@@ -350,42 +406,69 @@ bool BeginScaleFrame(void* controller)
     g_screenSize = screen;
     if (resized) g_redraw = true;
     std::unordered_map<void*, Window> current;
+    std::unordered_map<void*, Transform> views;
+    std::unordered_map<void*, Clip> clips;
+    auto assign = [&](auto&& self, void* view, void* owner, Transform inherited, bool split) -> Rect {
+        Rect frame;
+        g_frame(view, nullptr, &frame);
+        const float width = frame.right - frame.left + 1, height = frame.bottom - frame.top + 1;
+        const bool scaffold = split && (width >= screen.x * 0.9f || height >= screen.y * 0.9f);
+        Rect bounds, global;
+        g_bounds(view, nullptr, &bounds);
+        {
+            Coordinates scope;
+            g_toRectValue(view, nullptr, &global, &bounds, 1);
+        }
+        Transform map = inherited;
+        if (split && !scaffold) {
+            auto previous = g_windows.find(view);
+            if (!resized && previous != g_windows.end() && previous->second.owner == owner &&
+                previous->second.transform.value == g_hudScale) map = previous->second.transform;
+            else {
+                map = Place(global, screen, g_hudScale, true);
+            }
+            current.emplace(view, Window{owner, map, false});
+        }
+        views.emplace(view, map);
+        Rect displayed = global;
+        map.ToScreen(displayed);
+        if (!scaffold) return displayed;
+        for (void* child = g_child(view); child; child = g_sibling(child)) {
+            const Rect content = self(self, child, owner, map, scaffold);
+            if (scaffold && g_hudScale != 1.0f) {
+                displayed.left = std::min(displayed.left, content.left);
+                displayed.top = std::min(displayed.top, content.top);
+                displayed.right = std::max(displayed.right, content.right);
+                displayed.bottom = std::max(displayed.bottom, content.bottom);
+            }
+        }
+        if (scaffold && g_hudScale != 1.0f)
+            clips.emplace(view, Clip{bounds, displayed, {global.left, global.top}});
+        return displayed;
+    };
     for (void* root = g_child(g_top(controller)); root; root = g_sibling(root)) {
         void* owner = g_looper(root);
         if (!owner) continue;
         const bool hud = Hud(owner);
-        const Scale scale{hud ? g_hudScale : g_windowScale};
+        const float factor = hud ? g_hudScale : g_windowScale;
         Rect frame;
         g_frame(root, nullptr, &frame);
         auto previous = g_windows.find(root);
         const bool known = previous != g_windows.end() && previous->second.owner == owner;
-        const bool full = known ? previous->second.fullScreen :
-                          !std::strcmp(TypeOf(owner), ".?AVControlCenterWindow_c@@") ||
+        const bool full = !std::strcmp(TypeOf(owner), ".?AVControlCenterWindow_c@@") ||
                           (hud && frame.right - frame.left + 1 >= screen.x - 1 && frame.bottom - frame.top + 1 >= screen.y - 1);
-        current.emplace(root, Window{owner, scale, full});
-        g_scales[owner] = scale;
-        if (full) {
-            const float width = screen.x / scale.value, height = screen.y / scale.value;
-            if (std::abs(frame.right - frame.left + 1 - width) > 0.5f ||
-                std::abs(frame.bottom - frame.top + 1 - height) > 0.5f) {
-                g_resize(owner, width, height);
-                g_redraw = true;
-            }
-        } else if (resized || !known || previous->second.scale.value != scale.value) {
-            if (scale.value != 1.0f || (known && previous->second.scale.value != 1.0f)) {
-                const float oldScale = known ? previous->second.scale.value : scale.value;
-                const float x = std::clamp(frame.left * oldScale / scale.value, 0.0f,
-                                          std::max(0.0f, screen.x / scale.value - (frame.right - frame.left + 1)));
-                const float y = std::clamp(frame.top * oldScale / scale.value, 0.0f,
-                                          std::max(0.0f, screen.y / scale.value - (frame.bottom - frame.top + 1)));
-                if (x != frame.left || y != frame.top) g_move(owner, x, y);
-            }
-            g_redraw = true;
+        Transform map;
+        if (!full) {
+            if (!resized && known && previous->second.transform.value == factor) map = previous->second.transform;
+            else map = Place(frame, screen, factor, false);
         }
+        if (!known || !(previous->second.transform == map)) g_redraw = true;
+        current.emplace(root, Window{owner, map, full});
+        assign(assign, root, owner, map, full);
     }
     g_windows.swap(current);
-    g_scales.clear();
-    for (const auto& [root, window] : g_windows) g_scales.emplace(window.owner, window.scale);
+    g_views.swap(views);
+    g_clips.swap(clips);
     g_controllerWork = true;
     return g_redraw;
 }

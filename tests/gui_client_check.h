@@ -18,6 +18,12 @@ void ScaleDrawing(bool drawing);
 void EndScaleFrame();
 }
 
+inline int __fastcall CaptureGuiWindowRect(void* message, void*, const char*, const rnative::gui::Rect* frame)
+{
+    std::memcpy(message, frame, sizeof(*frame));
+    return 0;
+}
+
 inline int CheckGuiClient(const char* client)
 {
     using namespace rnative::gui;
@@ -70,6 +76,7 @@ inline int CheckGuiClient(const char* client)
     pointer(rootData, 0x10, top); pointer(childData, 0x10, root);
     pointer(hudData, 0x10, top); pointer(hudChildData, 0x10, hud);
     pointer(root, 0x1B8, child); pointer(hud, 0x1B8, hudChild);
+    pointer(rootData, 0, child); pointer(hudData, 0, hudChild);
     pointer(topData, 0, root); pointer(rootData, 8, hud);
     pointer(controller, 0x94, top); put(controller, 0x80, Point{3840, 2160});
     put(controller, 0x48, Point{246, 128});
@@ -107,7 +114,7 @@ inline int CheckGuiClient(const char* client)
     check(drawn.left == 240 && drawn.top == 120 && drawn.right == 279 && drawn.bottom == 139, "clip bounds map to physical pixels");
     fromRect(child.bytes, &inverse, &drawn, 1);
     check(std::memcmp(&rectangle, &inverse, sizeof(rectangle)) == 0, "clip inverse retains inclusive bounds");
-    screen(&output); check(equal(output, {1920, 1080}), "window layout sees the logical 4K workspace");
+    screen(&output); check(equal(output, {3840, 2160}), "native layout retains the canonical 4K workspace");
     physical(controller.bytes, &output); check(equal(output, {3840, 2160}), "physical output extent stays unchanged");
     mouse(controller.bytes, &output); check(equal(output, {246, 128}), "cursor and world mouse coordinates stay physical");
     SetScale(100, 100);
@@ -154,6 +161,76 @@ inline int CheckGuiClient(const char* client)
         check(sameUv, "clipped atlas sampling must be invariant under scaling");
         check(correctPositions, "clipped vertices scale with their half-pixel convention intact");
     }
+    // Slider changes leave the native frames used by preferences untouched.
+    const Rect edge{3500, 1900, 3799, 2099};
+    put(rootData, 0x20, edge);
+    for (float percent : {100.0f, 200.0f, 75.0f, 150.0f, 100.0f}) {
+        SetScale(percent, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+        using WindowFrame = Rect*(__thiscall*)(void*, Rect*, uint32_t);
+        auto windowFrame = reinterpret_cast<WindowFrame>(symbol("?GetFrame@Window@@QBE?AVRect@@_N@Z"));
+        Rect actual;
+        ScaleDrawing(false);
+        windowFrame(owner.bytes, &actual, 0);
+        check(std::memcmp(&actual, &edge, sizeof(actual)) == 0, "native window queries and preference saves use canonical coordinates");
+        using SaveWindow = void(__thiscall*)(void*, void*);
+        auto saveWindow = reinterpret_cast<SaveWindow>(symbol("?SaveWndConfig@Window@@QAEXPAVMessage@@@Z"));
+        auto** rectSink = reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(module) + 0x1A800C);
+        void* originalSink = *rectSink;
+        DWORD protection;
+        if (VirtualProtect(rectSink, sizeof(void*), PAGE_READWRITE, &protection)) {
+            *rectSink = reinterpret_cast<void*>(&CaptureGuiWindowRect);
+            put(ownerData, 0x3C, uint32_t(0x800));
+            Rect savedFrame{};
+            saveWindow(owner.bytes, &savedFrame);
+            check(std::memcmp(&savedFrame, &edge, sizeof(savedFrame)) == 0, "actual native preference serialization excludes display transforms");
+            put(ownerData, 0x3C, uint32_t(0));
+            *rectSink = originalSink;
+            VirtualProtect(rectSink, sizeof(void*), protection, &protection);
+        } else check(false, "preference serialization fixture could not install its sink");
+        ScaleDrawing(true);
+        std::memcpy(&actual, rootData.bytes + 0x20, sizeof(actual));
+        check(std::memcmp(&actual, &edge, sizeof(actual)) == 0, "scale changes never move or resize the native frame");
+        to(child.bytes, &output, &input, 1);
+        from(child.bytes, &restored, &output, 1);
+        check(equal(restored, input), "edge-clamped drawing and input agree");
+    }
+    to(child.bytes, &output, &input, 1);
+    check(equal(output, {3623, 1964}), "100% restores the original edge placement exactly");
+    put(hudData, 0x20, Rect{0, 0, 3839, 2159});
+    put(hudChildData, 0x20, Rect{3700, 2000, 3799, 2099});
+    SetScale(100, 200); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    to(hudChild.bytes, &output, &input, 1);
+    check(equal(output, {3566, 1848}), "full-screen HUD children scale around their screen edge");
+    from(hudChild.bytes, &restored, &output, 1);
+    check(equal(restored, input), "anchored HUD input inverts its display transform");
+    Rect full;
+    std::memcpy(&full, hudData.bytes + 0x20, sizeof(full));
+    check(full.right == 3839 && full.bottom == 2159, "HUD scaling never reflows the native full-screen root");
+    Point hudHit{3566, 1848};
+    parent(hud.bytes, &output, &hudHit);
+    parent(hudChild.bytes, &restored, &output);
+    check(equal(restored, input), "HUD hit testing crosses the anchored subtree boundary once");
+    SetScale(100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    to(hudChild.bytes, &output, &input, 1);
+    check(equal(output, {3703, 2004}), "HUD scale round trip restores original coordinates");
+    Object icon, iconData;
+    view(icon, iconData, hudOwner, {3700, 0, 3799, 79});
+    pointer(iconData, 0x10, hudChild); pointer(hudChildData, 0, icon);
+    put(hudChildData, 0x20, Rect{0, 2000, 3839, 2099});
+    SetScale(100, 200); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    to(icon.bytes, &output, &input, 1);
+    check(equal(output, {3566, 1848}), "wide HUD containers preserve child anchoring");
+    Point iconHit = output;
+    parent(hud.bytes, &output, &iconHit);
+    parent(hudChild.bytes, &restored, &output);
+    parent(icon.bytes, &output, &restored);
+    check(equal(output, input), "nested HUD input crosses a full-width container correctly");
+    const Rect strip{0, 0, 3839, 99};
+    toRect(hudChild.bytes, &drawn, &strip, 1);
+    check(drawn.top == 1840 && drawn.bottom == 2099, "HUD container clipping includes enlarged children");
+    SetScale(100, 100); BeginScaleFrame(controller.bytes); ScaleDrawing(true);
+    to(icon.bytes, &output, &input, 1);
+    check(equal(output, {3703, 2004}), "nested HUD layout round trip restores original positions");
     EndScaleFrame(); *instance = saved;
     std::printf("GUI.dll: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;

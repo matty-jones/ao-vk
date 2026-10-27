@@ -43,6 +43,18 @@ inline int CheckGuiScale()
     Point window{320, 120}, hud = window;
     Scale{2.0f}.ToScreen(window); Scale{1.5f}.ToScreen(hud);
     check(window.x == 640 && window.y == 240 && hud.x == 480 && hud.y == 180, "window and HUD factors are independent");
+    const Rect model{3500, 1900, 3799, 2099};
+    for (float factor : {1.0f, 2.0f, 0.75f, 1.5f, 1.0f}) {
+        Rect display = model;
+        const Transform map = Place(model, {3840, 2160}, factor, false);
+        map.ToScreen(display);
+        if (factor == 2.0f) check(display.left == 3240 && display.right == 3839, "edge placement clamps only display coordinates");
+        map.FromScreen(display);
+        check(std::memcmp(&display, &model, sizeof(model)) == 0, "clamped placement retains its inverse");
+    }
+    Rect restored = model;
+    Place(model, {3840, 2160}, 1.0f, false).ToScreen(restored);
+    check(std::memcmp(&restored, &model, sizeof(model)) == 0, "100% uses the untouched canonical rectangle");
     std::printf("GUI scale: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
     return failures;
 }

@@ -60,6 +60,13 @@ changes, edge clamping, screen resize, and complete round trips without drift.
 
 ## Remaining acceptance
 
+The user subsequently confirmed that `4b11319` restores usable icons and compass geometry. The layout correction
+now leaves native view rectangles untouched, using reversible display placement and anchored HUD subtrees.
+Native regressions cover scale round trips, clamping, nested full-width HUD containers, input mapping, and
+the actual native preference writer while controller work is active. Static screen queries retain the original
+workspace, including when preferences are loaded at a non-default scale. It
+still needs a local gameplay check; the font-resolution correction remains in progress.
+
 The atlas regression is a focused native-function check, not a rendered game session. Sharp font rendering,
 reversible layout, real compass geometry, and default/custom skin interaction remain open. A corrected build
 must pass 4K visual comparisons and repeated 100% to intermediate/extreme scale to 100% cycles, including
