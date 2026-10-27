@@ -127,9 +127,11 @@ std::string GameTextureReport()
     std::snprintf(buf, sizeof(buf), "; %u surfaces beyond one per RDB texture", extra);
     out += buf;
     for (size_t i = 0; i < repeated.size() && i < 5; ++i) {
-        std::snprintf(buf, sizeof(buf), "%s %u:%u x%u (%ux%u)", i ? "," : " - most:", unsigned(repeated[i].first >> 32),
-                      unsigned(repeated[i].first & 0xFFFFFFFFu), repeated[i].second.count, repeated[i].second.w,
-                      repeated[i].second.h);
+        const uint32_t type = uint32_t(repeated[i].first >> 32), id = uint32_t(repeated[i].first & 0xFFFFFFFFu);
+        const std::string name = RdbTextureName(type, id);
+        std::snprintf(buf, sizeof(buf), "%s %u:%u%s%.40s%s x%u (%ux%u)", i ? "," : " - most:", type, id,
+                      name.empty() ? "" : " \"", name.c_str(), name.empty() ? "" : "\"", repeated[i].second.count,
+                      repeated[i].second.w, repeated[i].second.h);
         out += buf;
     }
     // The unidentified ones by size (the interface's, the game's own drawing, ...).
@@ -141,6 +143,18 @@ std::string GameTextureReport()
         std::snprintf(buf, sizeof(buf), "%s %ux%u x%u", i ? "," : " - by size:", sizes[i].first.first,
                       sizes[i].first.second, sizes[i].second);
         out += buf;
+    }
+    // The game's own counts (randy31_orig's globals, kept by our native parts too): RTexture_t objects alive and
+    // their references, all resources' references. Climbing with the surfaces: whole textures are held (a reference
+    // never given back); steady: the textures go but their surfaces stay.
+    if (const auto* orig = reinterpret_cast<const uint8_t*>(GetModuleHandleA("randy31_orig.dll"))) {
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(orig + reinterpret_cast<const IMAGE_DOS_HEADER*>(orig)->e_lfanew);
+        if (nt->OptionalHeader.SizeOfImage > 0x17D498) {
+            auto at = [&](uint32_t rva) { return *reinterpret_cast<const int32_t*>(orig + rva); };
+            std::snprintf(buf, sizeof(buf), "; the game's RTexture_t: %d alive, %d references; resource references %d",
+                          at(0x17D490), at(0x17D494), at(0x17D444));
+            out += buf;
+        }
     }
     g_texturesMade = g_texturesFreed = g_copiesReadBack = g_copiesLost = 0;
     return out;

@@ -82,6 +82,7 @@ class RSurface;
 void AttachMaterialMaps(RSurface* top);           // after the surface's rvk texture is (re)created
 void PollMaterialMaps();                          // each present: uploads maps decoded in the background
 void ForgetMaterialMaps(RSurface* top);           // the surface is going: it no longer waits for maps
+std::string RdbTextureName(uint32_t type, uint32_t id);   // the name the game gave an RDB texture (empty: not seen)
 // What an rvk texture is, for texture picking: "RDB texture T:ID 'name', WxH; maps: _n.png ..." (reference: "T:ID").
 std::string DescribeTexture(const rvk::Texture* texture, std::string* reference = nullptr);
 // What a picked visual was made from: "RDB mesh 1010001:3545" (reference: "T:ID"), see rvk_materials.cpp.
