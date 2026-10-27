@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Always run from the repository root
+cd "$(dirname "$0")"
+
+# Build environment
+export VULKAN_SDK="$HOME/vulkan-sdk/1.4.363.0/x86_64"
+export PATH="/usr/lib/llvm-21/bin:$VULKAN_SDK/bin:$PATH"
+
+# Paths
+DLL="build/linux-release/randy31.dll"
+DEST="$HOME/Games/Project-Rubi-Ka/client/randy31.dll"
+
+# Compile
+echo "Building ao-vk..."
+cmake --build --preset linux-release \
+    --target randy31 --parallel 8
+
+# Deploy (only if compilation succeeded)
+echo "Deploying to Project Rubi-Ka..."
+cp "$DLL" "$DEST"
+
+echo "Done! ao-vk compiled and deployed."
