@@ -13,8 +13,14 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ### Diagnostics
 - `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
+- Console `profileui` compares interface scales in the current scene. `[Native] UiScaling=off` skips scaling and
+  font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Small scaled letters retain their natural stroke widths and descenders; bitmap-font letters use fresh outlines.
+  Login and character-selection windows keep their native screen layout regardless of saved gameplay UI scales.
+- At 100%/100%, scaling skips its per-frame window hierarchy rebuild. Empty text no longer repeatedly requests
+  the same unavailable bitmap solely because scaling is active.
 - Scaled windows stay attached to the point where their title bar was grabbed, and dragged item images follow
   the cursor. Changing tabs or resizing a window no longer moves its saved position; hover tooltips use scaled bounds.
 - The Window size slider applies its final scale after releasing the mouse, so Preferences stays still while dragging it.

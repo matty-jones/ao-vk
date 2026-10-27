@@ -156,9 +156,9 @@ void RvkState::SetWindow(HWND hwnd)
 // Ctrl+Shift+O: what each enhancement costs here - every one switched off in turn (in effect only, not saved) for
 // kSweepSettle + kSweepMeasure frames, the GPU passes measured over the last kSweepMeasure, logged as
 // "sweep <label>: gpu ms: ...". A baseline first and last (drift). Stand still while it runs (~7-8 min at 60 fps, ~3.5 at 130: 56 steps of 420 frames).
-static void ProfileSweep(bool start)
+static void ProfileSweep(bool start, bool uiOnly)
 {
-    struct Step { const char* label; const char* setting; float value; };
+    struct Step { const char* label; const char* setting; float value; const char* second = nullptr; float secondValue = 0; };
     static const Step kSteps[] = {
         {"baseline", nullptr, 0}, {"depth pre-pass off", "RVK_Prepass", 0}, {"soft shadows off", "RVK_SunSoft", 0}, {"point shadows off", "RVK_PtOn", 0},
         {"sun shadows off", "RVK_SunShadow", 0}, {"contact shadows off", "RVK_ContactOn", 0},
@@ -185,22 +185,34 @@ static void ProfileSweep(bool start)
         {"normal maps off", "RVK_NormalMaps", 0}, {"pbr off", "RVK_Pbr", 0}, {"albedo maps off", "RVK_Albedo", 0},
         {"hdr off", "RVK_Hdr", 0}, {"baseline again", nullptr, 0},
     };
+    static const Step kUiSteps[] = {
+        {"UI baseline", nullptr, 0},
+        {"UI 100/100", "RVK_WinScale", 100, "RVK_HudScale", 100},
+        {"UI 150/150", "RVK_WinScale", 150, "RVK_HudScale", 150},
+        {"UI 200/200", "RVK_WinScale", 200, "RVK_HudScale", 200},
+        {"UI baseline again", nullptr, 0},
+    };
     constexpr unsigned kSweepSettle = 120, kSweepMeasure = 300;
-    constexpr unsigned kCount = sizeof(kSteps) / sizeof(kSteps[0]);
+    static bool ui;
     static int step = -1;
     static unsigned frame;
     static DWORD stepTick;
     rvk::ThreadedDevice* device = g_rvk.device;
     if (!device) return;
     if (start && step < 0) {
+        ui = uiOnly;
         step = 0;
         frame = 0;
         RvkLog("sweep: started - stand still");
+        if (ui) RvkLog("sweep: UI saved scales %.0f/%.0f, interface refresh %.0f Hz",
+                       rvk_settings::Get("RVK_WinScale"), rvk_settings::Get("RVK_HudScale"), rvk_settings::Get("RVK_UiRate"));
     }
     if (step < 0) return;
-    const Step& s = kSteps[step];
-    if (frame == 0 && s.setting)
-        rvk_settings::ApplyTemporary(s.setting, s.value);
+    const Step& s = ui ? kUiSteps[step] : kSteps[step];
+    if (frame == 0 && s.setting) {
+        if (s.second) rvk_settings::ApplyTemporarySet({{s.setting, s.value}, {s.second, s.secondValue}});
+        else rvk_settings::ApplyTemporary(s.setting, s.value);
+    }
     if (frame == kSweepSettle) {
         device->ProfileWindow(true, "");
         stepTick = GetTickCount();
@@ -211,8 +223,10 @@ static void ProfileSweep(bool start)
                   1000.0 * kSweepMeasure / std::max<double>(GetTickCount() - stepTick, 1.0));
     device->ProfileWindow(false, label);
     if (s.setting) rvk_settings::Restore(s.setting);
+    if (s.second) rvk_settings::Restore(s.second);
     frame = 0;
-    if (++step == int(kCount)) {
+    const size_t count = ui ? sizeof(kUiSteps) / sizeof(kUiSteps[0]) : sizeof(kSteps) / sizeof(kSteps[0]);
+    if (++step == int(count)) {
         step = -1;
         device->ProfileManualEnd();
         RvkLog("sweep: done");
@@ -221,6 +235,7 @@ static void ProfileSweep(bool start)
 
 namespace {
 bool g_sweepRequested = false;                   // RunAction("profile"): the sweep starts at the next present
+bool g_uiSweepRequested = false;
 }
 
 // A dump of the next frame's 3D draws + a screenshot next to the log (logs\rvk-frame-HHMMSS.*); burst: the next 60
@@ -258,6 +273,8 @@ bool RunAction(const char* name)
         RequestFrameDump(device, false);
     } else if (std::strcmp(name, "profile") == 0) {
         g_sweepRequested = true;
+    } else if (std::strcmp(name, "profileui") == 0) {
+        g_uiSweepRequested = true;
     } else {
         return false;
     }
@@ -489,9 +506,11 @@ void RvkState::Present()
     if ((f9 && !f9Down) || ++presented == dumpAt)
         RequestFrameDump(device, (GetAsyncKeyState(VK_MENU) & 0x8000) != 0);   // (Alt too: 60 frames' draws)
     f9Down = f9;
-    const bool sweep = pressed('O') || g_sweepRequested;
+    const bool uiSweep = g_uiSweepRequested;
+    const bool sweep = pressed('O') || g_sweepRequested || uiSweep;
     g_sweepRequested = false;
-    ProfileSweep(sweep);
+    g_uiSweepRequested = false;
+    ProfileSweep(sweep, uiSweep);
     // The console (the key left of 1): its typing, commands and image (drawn over the next frame).
     ConsoleFrame(device, window);
     // Slow frames: averages hide stutter, so each frame's time is checked too. A frame over 50 ms gets a line with

@@ -83,6 +83,7 @@ layout(set = 1, binding = 1) uniform sampler bindlessSamplers[256];
 #define ORMTEX sampler2D(texImages[D.mat.x], bindlessSamplers[D.mat.y])
 #define EMISSIVETEX sampler2D(texImages[D.mat.w], bindlessSamplers[D.mat.y])
 
+const uint UI_ATLAS_FVF = 0x80245u;
 const uint F_LIGHTING = 1u, F_COLORVERTEX = 2u, F_SPECULAR = 4u, F_NORMALIZE = 8u, F_FOG = 16u,
            F_RANGEFOG = 32u, F_LOCALVIEWER = 64u, F_TEX0 = 128u, F_TEX1 = 256u, F_ALPHATEST = 512u,
            F_PERPIXEL = 1024u,    // lighting evaluated in ffp.frag (set together with F_LIGHTING)

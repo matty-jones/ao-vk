@@ -7,7 +7,6 @@
 #include "rvk.h"
 #include "threaded.h"
 #include "material_maps.h"
-#include "../proxy/native/gui_scale.h"
 
 #include <chrono>
 #include <thread>
@@ -4778,15 +4777,19 @@ int RunInterfaceTest(D& dev, const std::string& shot)
 template <typename D>
 int RunUiAtlasTest(D& dev, const std::string& shot)
 {
-    using rnative::gui::Point;
-    using rnative::gui::AtlasCentres;
-    using rnative::gui::GuardAtlas;
+    if (g_width < 400 || g_height < 220) return 1;
     Texture* atlas = dev.CreateTexture(64, 64, Format::A8R8G8B8, 3);
-    std::vector<uint32_t> texels(64 * 64, 0xFFFF0000);
-    for (int y = 16; y < 32; ++y) for (int x = 16; x < 32; ++x) texels[y * 64 + x] = 0xFF00FF00;
+    Texture* reference = dev.CreateTexture(16, 16, Format::A8R8G8B8, 1);
+    std::vector<uint32_t> texels(64 * 64, 0xFFFF0000), tile(16 * 16);
+    for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+        const uint32_t colour = (x % 3 == 1 || y == 15) ? 0xFFFFFFFF : 0xFF00FF00;
+        tile[y * 16 + x] = texels[(y + 16) * 64 + x + 16] = colour;
+    }
     dev.UpdateTexture(atlas, 0, 0, 0, 64, 64, texels.data(), 64 * 4);
+    dev.UpdateTexture(reference, 0, 0, 0, 16, 16, tile.data(), 16 * 4);
+    std::vector<uint32_t> red(32 * 32, 0xFFFF0000);
     for (int level = 1; level < 3; ++level)
-        dev.UpdateTexture(atlas, level, 0, 0, 64 >> level, 64 >> level, texels.data(), (64 >> level) * 4);
+        dev.UpdateTexture(atlas, level, 0, 0, 64 >> level, 64 >> level, red.data(), (64 >> level) * 4);
     dev.SetAnisotropy(16);
     dev.BeginFrame();
     dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF202020, 1);
@@ -4802,51 +4805,84 @@ int RunUiAtlasTest(D& dev, const std::string& shot)
     dev.SetTextureStageState(0, TSS_MAGFILTER, TFG_LINEAR);
     dev.SetTextureStageState(0, TSS_MINFILTER, TFN_LINEAR);
     dev.SetTextureStageState(0, TSS_MIPFILTER, TFP_LINEAR);
-    dev.InterfaceBegin(true);
-    struct Probe { float left, top, size; bool guarded; };
+    dev.SetTextureStageState(0, TSS_ADDRESSU, TADDRESS_CLAMP);
+    dev.SetTextureStageState(0, TSS_ADDRESSV, TADDRESS_CLAMP);
+    dev.InterfaceBegin(true, true);
+    struct Probe { float left, top, size; int row; };
+    struct ReferenceVertex { float x, y, z, rhw; uint32_t diffuse, specular; float u, v; };
     std::vector<Probe> probes;
-    const auto centres = AtlasCentres({0, 0, 15, 15}, {16, 16}, {64, 64});
+    int column = 0;
     for (float factor : {0.5f, 0.75f, 1.1f, 1.5f, 1.76f, 2.0f}) {
-        for (bool guarded : {false, true}) {
-            const float left = 20.25f + float(probes.size() / 2) * 64, top = guarded ? 100.25f : 20.25f;
+        for (int row = 0; row < 3; ++row) {
+            const float left = 20.25f + float(column) * 64, top = 20.25f + row * 60;
             const float size = 16 * factor;
-            Point low{16.0f / 64, 16.0f / 64}, high{32.0f / 64, 32.0f / 64};
-            if (guarded) { GuardAtlas(low, centres); GuardAtlas(high, centres); }
+            const float low = row == 2 ? 0 : .25f, high = row == 2 ? 1 : .5f;
             const VtxRhwDiffuseTex quad[] = {
-                {left - .5f, top - .5f, 0, 1, 0xFFFFFFFF, low.x, low.y},
-                {left + size - .5f, top - .5f, 0, 1, 0xFFFFFFFF, high.x, low.y},
-                {left - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, low.x, high.y},
-                {left + size - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, high.x, high.y}};
-            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, quad, 4);
-            probes.push_back({left, top, size, guarded});
+                {left - .5f, top - .5f, 0, 1, 0xFFFFFFFF, low, low},
+                {left + size - .5f, top - .5f, 0, 1, 0xFFFFFFFF, high, low},
+                {left - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, low, high},
+                {left + size - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, high, high}};
+            dev.SetTexture(0, row == 2 ? reference : atlas);
+            if (row == 1) {
+                if (column % 3 == 0) dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, quad, 4);
+                else if (column % 3 == 1) {
+                    const uint16_t indices[]{0, 1, 2, 2, 1, 3};
+                    dev.DrawIndexedPrimitive(TriangleList, kFvfRhwDiffuseTex, quad, 4, indices, 6);
+                } else {
+                    const VtxRhwDiffuseTex triangles[]{quad[0], quad[1], quad[2], quad[2], quad[1], quad[3]};
+                    dev.DrawPrimitive(TriangleList, kFvfRhwDiffuseTex, triangles, 6);
+                }
+            } else {
+                // A different layout deliberately bypasses automatic atlas guarding.
+                ReferenceVertex raw[4];
+                for (int i = 0; i < 4; ++i) raw[i] = {quad[i].x, quad[i].y, quad[i].z, quad[i].rhw, 0xFFFFFFFF, 0, quad[i].u, quad[i].v};
+                dev.DrawPrimitive(TriangleStrip, 0x1C4, raw, 4);
+            }
+            probes.push_back({left, top, size, row});
         }
+        ++column;
     }
     dev.InterfaceEnd();
+    dev.SetTexture(0, atlas);
     const VtxRhwDiffuseTex outside[] = {
         {19.5f, 199.5f, 0, 1, 0xFFFFFFFF, .25f, .25f}, {27.5f, 199.5f, 0, 1, 0xFFFFFFFF, .5f, .25f},
         {19.5f, 207.5f, 0, 1, 0xFFFFFFFF, .25f, .5f}, {27.5f, 207.5f, 0, 1, 0xFFFFFFFF, .5f, .5f}};
     dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, outside, 4);
+    dev.SetTextureStageState(0, TSS_MIPFILTER, TFP_NONE);
+    struct TwoTexVertex { VtxRhwDiffuseTex base; float extra[4]; };
+    TwoTexVertex caller[4];
+    for (int i = 0; i < 4; ++i) { caller[i] = {outside[i], {0, 0, 0, 0}}; caller[i].base.x += 60; }
+    dev.DrawPrimitive(TriangleStrip, 0x80244, caller, 4);
     dev.RequestScreenshot(shot); dev.EndFrame();
     std::vector<uint32_t> pixels(size_t(g_width) * g_height);
     int failures = 0, reproduced = 0;
     if (!dev.ReadPixels(nullptr, pixels.data())) ++failures;
     else for (const Probe& probe : probes) {
-        int foreign = 0;
+        int foreign = 0, distorted = 0;
         for (int y = int(std::ceil(probe.top - .5f)); y < probe.top + probe.size - .5f; ++y)
             for (int x = int(std::ceil(probe.left - .5f)); x < probe.left + probe.size - .5f; ++x) {
                 const uint32_t pixel = pixels[size_t(y) * g_width + x];
-                if ((pixel & 0xFF0000) || (pixel & 0xFFFF) != 0xFF00) ++foreign;
+                if (((pixel >> 16) & 255) > ((pixel >> 8) & 255)) ++foreign;
+                if (probe.row == 1) {
+                    const uint32_t expected = pixels[size_t(y + 60) * g_width + x];
+                    for (int shift : {0, 8, 16, 24})
+                        if (std::abs(int((pixel >> shift) & 255) - int((expected >> shift) & 255)) > 1) { ++distorted; break; }
+                }
             }
-        if (probe.guarded && foreign) {
-            std::printf("UI atlas: %.2f scale leaked %d neighbouring texels\n", probe.size / 16, foreign);
+        if (probe.row == 1 && (foreign || distorted)) {
+            std::printf("UI atlas: %.2f scale leaked %d, distorted %d pixels\n", probe.size / 16, foreign, distorted);
             ++failures;
         }
-        if (!probe.guarded) reproduced += foreign;
+        if (probe.row == 0) reproduced += foreign;
     }
     if (!reproduced) { std::printf("UI atlas: unguarded magnification did not reproduce bleeding\n"); ++failures; }
     if ((pixels[size_t(204) * g_width + 24] & 0xFFFFFF) != 0xFF0000) {
         std::printf("UI atlas: mip sampling outside the interface changed\n"); ++failures;
     }
+    if ((pixels[size_t(204) * g_width + 84] & 0xFF00) != 0xFF00) {
+        std::printf("UI atlas: a caller's valid two-texture FVF was reinterpreted\n"); ++failures;
+    }
+    dev.DestroyTexture(reference);
     dev.DestroyTexture(atlas);
     std::printf("UI atlas: %s (%d failures; %d unguarded contaminated pixels)\n", failures ? "FAILED" : "passed", failures, reproduced);
     return failures ? 1 : 0;

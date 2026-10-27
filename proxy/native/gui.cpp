@@ -33,10 +33,14 @@ bool g_skip;                                        // this frame's interface is
 // WindowController_c::Render (thiscall: this in ecx, two stack arguments).
 void __fastcall RenderHook(void* self, void* edx, void* viewport, uint32_t time)
 {
+    const int64_t scaleStart = device::GameClock();
     g_scaleRedraw = BeginScaleFrame(self);
+    device::GameSectionSince("game: UI scaling", scaleStart);
     g_skip = !device::InterfaceBegin();
     g_depth = 0;
+    const int64_t renderStart = device::GameClock();
     g_render(self, edx, viewport, time);
+    device::GameSectionSince(g_skip ? "game: UI cached" : "game: UI drawing", renderStart);
     g_skip = false;
     device::InterfaceEnd();
 }

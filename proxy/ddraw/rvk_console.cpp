@@ -463,6 +463,7 @@ const Command kCommands[] = {
     {"freecam", "", "the free camera on / off (Ctrl+Shift+C)", aAction},
     {"dump", "", "the next frame's draws + a screenshot next to the log (Ctrl+Shift+F9)", aAction},
     {"profile", "", "the profiling sweep: what each enhancement costs here (Ctrl+Shift+O)", aAction},
+    {"profileui", "", "compare saved, 100%, 150% and 200% interface scaling; stand still", aAction},
     {"luts", "", "reload the colour look-up tables (Ctrl+Shift+L)", aAction},
     {"lightdebug", "", "the lighting debug view on / off (Ctrl+Shift+F11)", aAction},
     {"clear", "", "empty the console", aNone},

@@ -1,8 +1,9 @@
 # Interface separation and scaling
 
-Local gameplay testing confirmed usable compass/icon scaling, freshly rendered text and retained positions across
-scale round trips. The follow-up interaction and texture-edge fixes below still need a gameplay check. See the
-[investigation](ui-scaling-investigation.md) for the original defects and evidence.
+Local gameplay testing confirmed usable compass/icon scaling and retained positions across scale round trips.
+The next text, login and performance corrections still need a gameplay check. See the
+[investigation](ui-scaling-investigation.md) and [performance audit](ui-scaling-performance-audit.md) for evidence
+and the controlled local comparison.
 
 `RVK_UiRate` controls redraw frequency only. At 0 the interface redraws every frame and still uses its own
 display-sized image. Capture callbacks work with Native Direct and Native Device disabled. GUI controller work
@@ -30,8 +31,12 @@ canonical screen coordinates after input dispatch has inverted the display trans
 retains the window position. Mouse-relative window placement resets any old display-clamp offset. Dragged item
 images inherit the source window/HUD scale around the physical cursor, retaining their native hotspot.
 
-Packed UI textures have no gutters between images. Scaled quads restrict UV edges to their own source texel
-centres; clipped interior coordinates remain unchanged. Interface sampling uses the top mip level and skips forced
+Login and character-selection windows retain native scale and placement; saved gameplay percentages remain intact.
+At 100%/100%, hierarchy mapping is skipped. `[Native] UiScaling=off` leaves coordinate and font hooks uninstalled
+after a restart, retaining interface capture and overlay separation.
+
+Packed UI textures have no gutters between images. Scaled quads retain their UV endpoints and clamp fragment
+samples to their source texel centres, preserving interior strokes. Interface sampling uses the top mip level and skips forced
 anisotropy so filtering cannot reach neighbouring allocations. World and cursor sampling retain their original state.
 
 HUD classification covers the character bars, compass, shortcut bars, control centre and notifications through
@@ -42,7 +47,9 @@ The scaling hook group recognises GUI.dll timestamp `0x5CD32BEA`, image size `0x
 addresses and entry instructions before patching. Unknown builds remain at 100% and log the reason. No client
 object layout or allocation size changes. The earlier [source audit](ui-rendering-audit.md) is preserved separately.
 
-GUI text above 100% uses a larger RGBA bitmap and new outline glyphs at the requested scale. The text renderer's
+GUI text above 100% uses a larger RGBA bitmap and new outline glyphs at the requested scale, including any native
+text zoom. Glyphs retain natural outline widths rather than squeezing each character into its native advance.
+The text renderer's
 native font metrics and line layout stay unchanged; only its private raster cache changes resolution. Texture
 sampling sees the complete larger image, while layout sees the original logical dimensions. Selection,
 underlines, inline bitmaps and shadows use the same cache mapping. Returning to 100% rebuilds the native cache.
@@ -77,13 +84,18 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
   selection/underline drawing and exact native raster restoration at 100%. `RANDYVK_GUI_FONT_SHOT=<prefix>`
   saves the test cache images for inspection. The Wine fixture uses a registered DejaVu Sans substitute for
   Verdana; these images validate the native hook path, not a full game session or exact Microsoft font pixels.
+- Small-font checks compare complete ink coverage against natural GDI outlines at 9, 12 and 16 pixels, including
+  descenders and narrow strokes. Bitmap letters, inline icons, native text zoom, empty-cache retries, fixed login
+  geometry and the 100% hierarchy fast path have native regression checks. `--gui-scaling-off-check` verifies
+  untouched GUI entries/imports with scaling disabled; `--gui-bench` reports synthetic coordinate/mapping costs.
 - `rvk_demo.exe --interface-test` checks no-3D menus, redraw/cached frames, labels and floating overlays, opaque
   black and translucent UI, temporary render-target copies, opaque-format blits, cursor order, hidden UI, resize,
   viewport state, and readback both during and after a frame. HDR/TAA at 50% world resolution and threaded
   rendering exercise the same boundaries. A world-only screenshot checks for overlay contamination.
 - `rvk_demo.exe --ui-atlas-test --size 480 240` renders adjacent contrasting atlas allocations at 50%, 75%,
   110%, 150%, 176% and 200%, with fractional placement and forced anisotropy configured. Unguarded quads reproduce
-  foreign edge pixels; guarded UI quads must contain none. A draw outside the interface checks that normal mip
+  foreign edge pixels; guarded UI quads must match an isolated patterned texture, including bottom rows and thin
+  strokes. A draw outside the interface checks that normal mip
   sampling is restored. Immediate and threaded rendering exercise the sampler cache boundary.
 - The full native comparison against the client's original renderer passed with zero failures. Generated settings
   documentation and whitespace checks passed.

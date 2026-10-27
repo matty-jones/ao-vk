@@ -1,5 +1,6 @@
 // D3D7 state, Clear, and drawing.
 #include "internal.h"
+#include "ui_atlas.h"
 
 #include <algorithm>
 #include <bit>
@@ -2834,6 +2835,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         VisualKind(m_drawVisualKind) != VisualKind::Sky)
         DrawGrassTiles(cmd);
     ProfileDrawSection("draw: setup (sky, terrain notes, grass tiles)", since);
+    std::vector<UiAtlasVertex> uiVertices;
+    if (m_uiAtlasGuard && m_uiLayerActive && m_target == m_uiLayer && !m_external && !m_drawGpu &&
+        fvf == 0x144 && m_textures[0] && m_tss[1][d3d::TSS_COLOROP] == d3d::TOP_DISABLE &&
+        m_tss[0][d3d::TSS_TEXCOORDINDEX] == 0 && m_tss[0][d3d::TSS_TEXTURETRANSFORMFLAGS] == 0 &&
+        ((primitive == d3d::TriangleStrip && vertexCount == 4) || primitive == d3d::TriangleList)) {
+        const uint32_t corners = primitive == d3d::TriangleStrip || indices ? 4 : 6;
+        if (UiAtlasVertices(vertices, vertexCount, corners, float(m_textures[0]->m_width), float(m_textures[0]->m_height), uiVertices)) {
+            vertices = uiVertices.data();
+            fvf = kUiAtlasFvf;
+        }
+    }
     FvfLayout layout = DecodeFvf(fvf);
     // RVK_GrassOn: the terrain's ground heights feed the procedural grass (grass.cpp CaptureTerrain / RenderGrassField).
     // The native ground in one pass (RVK_GroundOne) is its base pass too: the grass takes its heights and colours from

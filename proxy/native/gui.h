@@ -10,5 +10,6 @@ void Install();
 // Percent of the game's window and HUD sizes; both default to 100.
 void SetScale(float windows, float hud);
 bool TakeScaleRedraw();
+bool ScalingActive();
 
 }  // namespace rnative::gui

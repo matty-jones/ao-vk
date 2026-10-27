@@ -7,18 +7,6 @@ namespace rnative::gui {
 struct Point { float x, y; bool operator==(const Point&) const = default; };
 struct Rect { float left, top, right, bottom; };
 
-inline Rect AtlasCentres(Rect source, Point origin, Point extent)
-{
-    return {(origin.x + source.left + 0.5f) / extent.x, (origin.y + source.top + 0.5f) / extent.y,
-            (origin.x + source.right + 0.5f) / extent.x, (origin.y + source.bottom + 0.5f) / extent.y};
-}
-
-inline void GuardAtlas(Point& uv, Rect centres)
-{
-    uv.x = std::clamp(uv.x, centres.left, centres.right);
-    uv.y = std::clamp(uv.y, centres.top, centres.bottom);
-}
-
 struct Scale {
     float value = 1.0f;
     void ToScreen(Point& p) const { if (value != 1.0f) { p.x *= value; p.y *= value; } }

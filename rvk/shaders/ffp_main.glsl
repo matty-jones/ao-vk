@@ -135,6 +135,7 @@ vec4 Sample(uint stage)
     bool bound = (C.flags.x & (stage == 0u ? F_TEX0 : F_TEX1)) != 0u;
     if (!bound) return vec4(0.0, 0.0, 0.0, 1.0);
     if (stage == 0u && gParallax) return textureGrad(TEX0, gUv0, gUv0Dx, gUv0Dy);
+    if (stage == 0u && C.vtx.x == UI_ATLAS_FVF) tc.xy = clamp(tc.xy, vSet0, vTex1.xy);
     return stage == 0u ? texture(TEX0, tc.xy) : texture(TEX1, tc.xy);
 }
 

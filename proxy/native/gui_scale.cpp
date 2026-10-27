@@ -40,6 +40,7 @@ std::unordered_map<void*, Clip> g_clips;
 float g_windowScale = 1.0f, g_hudScale = 1.0f;
 float g_wantedWindow = 1.0f, g_wantedHud = 1.0f;
 bool g_installed, g_redraw;
+bool g_active;
 int g_coordinates;
 float g_placementScale;
 using PlacementFn = void(__fastcall*)(void*, void*, uint32_t);
@@ -61,12 +62,14 @@ struct Coordinates {
 
 void __fastcall BorderDownHook(void* view, void* edx, const Point* point, int button, int clicks)
 {
+    if (!g_active) { g_borderDown(view, edx, point, button, clicks); return; }
     Coordinates scope;
     g_borderDown(view, edx, point, button, clicks);
 }
 
 void __fastcall BorderMoveHook(void* view, void* edx, const Point* point, uint32_t transition, uint32_t buttons, void* message)
 {
+    if (!g_active) { g_borderMove(view, edx, point, transition, buttons, message); return; }
     // Dispatch already supplied logical coordinates; native dragging also needs a logical screen and frame.
     Coordinates scope;
     g_borderMove(view, edx, point, transition, buttons, message);
@@ -74,15 +77,17 @@ void __fastcall BorderMoveHook(void* view, void* edx, const Point* point, uint32
 
 void __fastcall BorderFrameHook(void* view, void* edx, const Rect* frame)
 {
+    if (!g_active) { g_borderFrame(view, edx, frame); return; }
     Coordinates scope;
     g_borderFrame(view, edx, frame);
 }
 
 bool Hud(void* window);
+bool NativeScreen(void* window);
 
 Transform For(void* view)
 {
-    if (!g_installed || !view || (g_windowScale == 1.0f && g_hudScale == 1.0f)) return {};
+    if (!g_active || !view) return {};
     for (void* ancestor = view; ancestor; ancestor = g_parent(ancestor)) {
         auto it = g_views.find(ancestor);
         if (it != g_views.end()) return it->second;
@@ -97,6 +102,14 @@ const char* TypeOf(void* window)
     const auto* table = *static_cast<const uintptr_t* const*>(window);
     const auto* locator = table ? reinterpret_cast<const uint32_t*>(table[-1]) : nullptr;
     return locator && locator[3] ? reinterpret_cast<const char*>(locator[3] + 8) : "";
+}
+
+bool NativeScreen(void* window)
+{
+    const char* type = TypeOf(window);
+    return !std::strcmp(type, ".?AVLoginWindow_c@@") || !std::strcmp(type, ".?AVLoginBrowserWindow_c@@") ||
+           !std::strcmp(type, ".?AVCharSelectWindow_c@@") || !std::strcmp(type, ".?AVLimboWindow_c@@") ||
+           !std::strcmp(type, ".?AVCharDeleteWindow_c@@") || !std::strcmp(type, ".?AVCharActivateWindow_c@@");
 }
 
 bool Hud(void* window)
@@ -117,7 +130,7 @@ bool Hud(void* window)
 Rect* __fastcall ScreenFrameHook(void* view, void* edx, Rect* out)
 {
     g_frame(view, edx, out);
-    if (!g_coordinates) {
+    if (g_active && !g_coordinates) {
         auto clip = g_clips.find(view);
         if (clip != g_clips.end()) {
             const Point parent{out->left - clip->second.origin.x, out->top - clip->second.origin.y};
@@ -138,6 +151,7 @@ Point* __cdecl WindowScreenHook(Point* out)
 Point* __fastcall WindowMouseHook(void* window, void*, Point* out)
 {
     g_windowMouse(window, out);
+    if (!g_active) return out;
     void* client = g_windowClient(window);
     const Transform scale = For(client);
     if (scale.value != 1.0f) {
@@ -151,6 +165,7 @@ Point* __fastcall WindowMouseHook(void* window, void*, Point* out)
 
 void __fastcall PlacementHook(void* window, void* edx, uint32_t centered)
 {
+    if (!g_active || NativeScreen(window)) { g_placement(window, edx, centered); return; }
     const float saved = g_placementScale;
     g_placementScale = g_installed ? (Hud(window) ? g_hudScale : g_windowScale) : 1.0f;
     g_placement(window, edx, centered);
@@ -192,23 +207,11 @@ void __fastcall VerticesHook(void* area, void* edx, void* view, const Rect* clip
         g_vertices(area, edx, view, &logical);
     }
     if (!*(static_cast<const uint8_t*>(area) + 0x7C)) return;
-    const auto* bytes = static_cast<const uint8_t*>(area);
-    const auto* node = *reinterpret_cast<const uint8_t* const*>(bytes + 0xA0);
-    Rect centres{};
-    if (node) {
-        const auto* material = **reinterpret_cast<const uint8_t* const* const*>(node + 0xC);
-        const Point extent{float(*reinterpret_cast<const uint32_t*>(material + 8)),
-                           float(*reinterpret_cast<const uint32_t*>(material + 12))};
-        centres = AtlasCentres(*reinterpret_cast<const Rect*>(bytes + 0x80),
-                               *reinterpret_cast<const Point*>(node + 0x10), extent);
-    }
     for (int i = 0; i < 4; ++i) {
         auto* position = reinterpret_cast<float*>(static_cast<uint8_t*>(area) + i * 28);
         Point point{position[0] + 0.5f, position[1] + 0.5f};
         scale.ToScreen(point);
         position[0] = point.x - 0.5f; position[1] = point.y - 0.5f;
-        // Packed images have no gutter; magnification must not sample a neighbouring allocation.
-        if (node) GuardAtlas(*reinterpret_cast<Point*>(position + 5), centres);
     }
 }
 
@@ -228,6 +231,7 @@ void ClipBounds(void* view, const Rect& input, Rect& output)
     Tag##PointerFn g_to##Tag##Pointer, g_from##Tag##Pointer; \
     Type* __fastcall To##Tag##Value(void* view, void* edx, Type* out, const Type* in, uint32_t scaled) \
     { \
+        if (!g_active || g_coordinates) return g_to##Tag##Value(view, edx, out, in, scaled); \
         Coordinates scope; \
         const Type original = *in; \
         g_to##Tag##Value(view, edx, out, in, scaled); \
@@ -236,6 +240,7 @@ void ClipBounds(void* view, const Rect& input, Rect& output)
     } \
     void __fastcall To##Tag##Pointer(void* view, void* edx, Type* in, uint32_t scaled) \
     { \
+        if (!g_active || g_coordinates) { g_to##Tag##Pointer(view, edx, in, scaled); return; } \
         Coordinates scope; \
         const Type original = *in; \
         g_to##Tag##Pointer(view, edx, in, scaled); \
@@ -243,6 +248,7 @@ void ClipBounds(void* view, const Rect& input, Rect& output)
     } \
     Type* __fastcall From##Tag##Value(void* view, void* edx, Type* out, const Type* in, uint32_t scaled) \
     { \
+        if (!g_active || g_coordinates) return g_from##Tag##Value(view, edx, out, in, scaled); \
         Coordinates scope; \
         Type logical = *in; \
         if (scope.outer && scaled) For(view).FromScreen(logical); \
@@ -250,6 +256,7 @@ void ClipBounds(void* view, const Rect& input, Rect& output)
     } \
     void __fastcall From##Tag##Pointer(void* view, void* edx, Type* in, uint32_t scaled) \
     { \
+        if (!g_active || g_coordinates) { g_from##Tag##Pointer(view, edx, in, scaled); return; } \
         Coordinates scope; \
         if (scope.outer && scaled) For(view).FromScreen(*in); \
         g_from##Tag##Pointer(view, edx, in, scaled); \
@@ -288,6 +295,7 @@ template <class T> void ParentSpace(void* view, T& coordinates, bool outward)
     Tag##ParentPointerFn g_parent##Tag##Pointer; \
     Type* __fastcall Parent##Tag##Value(void* view, void* edx, Type* out, const Type* in) \
     { \
+        if (!g_active || g_coordinates) return g_parent##Tag##Value(view, edx, out, in); \
         Coordinates scope; \
         Type logical = *in; \
         if (scope.outer) ParentSpace(view, logical, false); \
@@ -295,6 +303,7 @@ template <class T> void ParentSpace(void* view, T& coordinates, bool outward)
     } \
     void __fastcall Parent##Tag##Pointer(void* view, void* edx, Type* in) \
     { \
+        if (!g_active || g_coordinates) { g_parent##Tag##Pointer(view, edx, in); return; } \
         Coordinates scope; \
         if (scope.outer) ParentSpace(view, *in, false); \
         g_parent##Tag##Pointer(view, edx, in); \
@@ -370,6 +379,10 @@ bool TakeScaleRedraw()
 
 void InstallScaling(HMODULE gui)
 {
+    if (GetMode("UiScaling", Mode::On) == Mode::Off) {
+        Log("interface scaling: disabled ([Native] UiScaling=off); coordinate and font hooks not installed");
+        return;
+    }
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(gui);
     const auto* pe = reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const uint8_t*>(gui) + dos->e_lfanew);
     if (pe->FileHeader.TimeDateStamp != 0x5CD32BEA || pe->OptionalHeader.SizeOfImage != 0x2B0000) {
@@ -468,6 +481,16 @@ bool BeginScaleFrame(void* controller)
     }
     if (g_hudScale != g_wantedHud) g_redraw = true;
     g_hudScale = g_wantedHud;
+    const bool active = g_windowScale != 1.0f || g_hudScale != 1.0f;
+    if (!active) {
+        if (g_active) {
+            g_windows.clear(); g_views.clear(); g_clips.clear();
+            g_redraw = true;
+        }
+        g_active = false;
+        return g_redraw;
+    }
+    g_active = true;
     Point screen;
     g_screen(controller, &screen);
     const bool resized = screen.x != g_screenSize.x || screen.y != g_screenSize.y;
@@ -522,7 +545,8 @@ bool BeginScaleFrame(void* controller)
         void* owner = g_looper(root);
         if (!owner) continue;
         const bool hud = Hud(owner);
-        const float factor = owner == dragWindow && sourceOwner ? (Hud(sourceOwner) ? g_hudScale : g_windowScale) :
+        const float factor = NativeScreen(owner) ? 1.0f :
+                             owner == dragWindow && sourceOwner ? (Hud(sourceOwner) ? g_hudScale : g_windowScale) :
                              hud ? g_hudScale : g_windowScale;
         Rect frame;
         g_frame(root, nullptr, &frame);
@@ -549,5 +573,6 @@ bool BeginScaleFrame(void* controller)
 }
 
 float ScaleForView(void* view) { return For(view).value; }
+bool ScalingActive() { return g_active; }
 
 }  // namespace rnative::gui

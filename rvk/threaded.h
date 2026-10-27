@@ -110,7 +110,7 @@ public:
     void SetLeaves(const Device::LeafSettings& s);
     void SetGrassShadows(bool on);
     // The interface layer (Device::InterfaceBegin / InterfaceEnd).
-    void InterfaceBegin(bool redraw);
+    void InterfaceBegin(bool redraw, bool guardAtlas = false);
     void InterfaceEnd();
     void OverlayBegin();
     bool InterfaceLayerReady() const { return m_device.InterfaceLayerReady(); }

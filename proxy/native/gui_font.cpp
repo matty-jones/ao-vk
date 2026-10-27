@@ -1,5 +1,7 @@
 #include "native/gui_font.h"
 #include "native/gui_scale.h"
+#include "native/gui.h"
+#include "native/device.h"
 #include "native/pixfmt.h"
 #include "native/vc10.h"
 
@@ -56,8 +58,15 @@ Bitmap Info(void* bitmap)
     auto it = g_bitmaps.find(bitmap);
     return it == g_bitmaps.end() ? Bitmap{1, 0, 0} : it->second;
 }
-bool Target(void* bitmap) { return g_enabled && g_context.view && bitmap == Field<void*>(g_context.view, 0x248) && Info(bitmap).factor > 1; }
+bool Target(void* bitmap) { return g_enabled && g_context.factor > 1 && g_context.view && bitmap == Field<void*>(g_context.view, 0x248); }
 int Pixel(float coordinate) { return int(std::lround(coordinate)); }
+float Density(void* view)
+{
+    const float scale = ScaleForView(view);
+    if (scale <= 1) return 1;
+    const float native = std::max(Field<float>(view, 0x28C), Field<float>(view, 0x290));
+    return scale * (std::isfinite(native) ? std::max(1.0f, native) : 1);
+}
 
 struct Glyph { int width = 0, height = 0, x = 0, y = 0; std::vector<uint8_t> coverage; };
 struct Font {
@@ -65,10 +74,14 @@ struct Font {
     HDC dc = nullptr;
     HGDIOBJ previous = nullptr;
     TEXTMETRICA metrics{};
+    int cellHeight = 0;
+    uint64_t used = 0;
     std::unordered_map<uint64_t, Glyph> glyphs;
     ~Font() { if (dc) { if (previous) SelectObject(dc, previous); DeleteDC(dc); } if (handle) DeleteObject(handle); }
 };
 std::unordered_map<std::string, std::unique_ptr<Font>> g_fonts;
+uint64_t g_fontUse;
+std::unordered_map<void*, float> g_attempts;
 
 Font* RasterFont(void* info, float factor)
 {
@@ -83,9 +96,15 @@ Font* RasterFont(void* info, float factor)
     description.lfHeight = Pixel(description.lfHeight * factor);
     description.lfWidth = Pixel(description.lfWidth * factor);
     description.lfQuality = ANTIALIASED_QUALITY;
-    const std::string key(reinterpret_cast<const char*>(&description), sizeof(description));
-    if (auto it = g_fonts.find(key); it != g_fonts.end()) return it->second.get();
-    if (g_fonts.size() >= 32) g_fonts.clear();
+    std::string key(reinterpret_cast<const char*>(&description), sizeof(description));
+    key.append(reinterpret_cast<const char*>(&factor), sizeof(factor));
+    const int cellHeight = std::max(1, int(std::ceil(Field<int>(info, 0xFF0) * factor)));
+    key.append(reinterpret_cast<const char*>(&cellHeight), sizeof(cellHeight));
+    if (auto it = g_fonts.find(key); it != g_fonts.end()) { it->second->used = ++g_fontUse; return it->second.get(); }
+    if (g_fonts.size() >= 64) {
+        auto oldest = std::min_element(g_fonts.begin(), g_fonts.end(), [](const auto& a, const auto& b) { return a.second->used < b.second->used; });
+        g_fonts.erase(oldest);
+    }
     auto font = std::make_unique<Font>();
     font->handle = CreateFontIndirectA(&description);
     if (!font->handle) return nullptr;
@@ -93,14 +112,15 @@ Font* RasterFont(void* info, float factor)
     if (!font->dc) return nullptr;
     font->previous = SelectObject(font->dc, font->handle);
     if (!GetTextMetricsA(font->dc, &font->metrics)) return nullptr;
+    font->cellHeight = cellHeight; font->used = ++g_fontUse;
     Font* result = font.get();
     g_fonts.emplace(key, std::move(font));
     return result;
 }
 
-const Glyph* RasterGlyph(Font& font, uint32_t character, int advance)
+const Glyph* RasterGlyph(Font& font, uint32_t character)
 {
-    const uint64_t key = uint64_t(character) | (uint64_t(uint32_t(advance)) << 32);
+    const uint64_t key = character;
     if (auto it = font.glyphs.find(key); it != font.glyphs.end()) return &it->second;
     if (font.glyphs.size() >= 1024) font.glyphs.clear();
     if (character > 0xFFFF) return nullptr;
@@ -111,11 +131,6 @@ const Glyph* RasterGlyph(Font& font, uint32_t character, int advance)
     MAT2 transform{};
     transform.eM11.value = transform.eM22.value = 1;
     GLYPHMETRICS metrics{};
-    if (GetGlyphOutlineW(font.dc, character, GGO_METRICS, &metrics, 0, nullptr, &transform) == GDI_ERROR) return nullptr;
-    if (advance > 0 && metrics.gmCellIncX > 0) {
-        const LONG fixed = LONG(std::clamp(double(advance) / metrics.gmCellIncX, 0.25, 4.0) * 65536);
-        transform.eM11.value = SHORT(fixed >> 16); transform.eM11.fract = WORD(fixed);
-    }
     const DWORD bytes = GetGlyphOutlineW(font.dc, character, GGO_GRAY8_BITMAP, &metrics, 0, nullptr, &transform);
     if (bytes == GDI_ERROR || bytes > 1024 * 1024) return nullptr;
     std::vector<uint8_t> pixels(bytes);
@@ -123,7 +138,8 @@ const Glyph* RasterGlyph(Font& font, uint32_t character, int advance)
         return nullptr;
     Glyph glyph;
     glyph.width = int(metrics.gmBlackBoxX); glyph.height = int(metrics.gmBlackBoxY);
-    glyph.x = metrics.gmptGlyphOrigin.x; glyph.y = font.metrics.tmAscent - metrics.gmptGlyphOrigin.y;
+    glyph.x = metrics.gmptGlyphOrigin.x;
+    glyph.y = std::clamp(int(font.metrics.tmAscent - metrics.gmptGlyphOrigin.y), 0, std::max(0, font.cellHeight - glyph.height));
     glyph.coverage.resize(size_t(glyph.width) * glyph.height);
     const size_t stride = (size_t(glyph.width) + 3) & ~size_t(3);
     if (stride * glyph.height > pixels.size()) return nullptr;
@@ -160,9 +176,10 @@ void __fastcall GlyphHook(void* bitmap, void* edx, const IPoint* position, const
     if (!Target(bitmap)) { g_glyph(bitmap, edx, position, glyph, colour); return; }
     const float factor = Info(bitmap).factor;
     const int width = Field<const int16_t>(const_cast<void*>(glyph), 0xE);
-    Font* font = width >= 0 ? g_context.raster : nullptr;
-    const int advance = Field<const int16_t>(const_cast<void*>(glyph), 0x12);
-    const Glyph* raster = font ? RasterGlyph(*font, Field<const uint32_t>(const_cast<void*>(glyph), 8), Pixel(advance * factor)) : nullptr;
+    const uint32_t character = Field<const uint32_t>(const_cast<void*>(glyph), 8);
+    const bool bitmapLetter = g_context.font && !Field<uint8_t>(g_context.font, 0xFFC) && character >= 32 && character <= 255;
+    Font* font = width >= 0 || bitmapLetter ? g_context.raster : nullptr;
+    const Glyph* raster = font ? RasterGlyph(*font, character) : nullptr;
     if (raster) {
         const int left = Pixel(position->x * factor) + raster->x, top = Pixel(position->y * factor) + raster->y;
         for (int y = 0; y < raster->height; ++y) for (int x = 0; x < raster->width; ++x)
@@ -244,13 +261,15 @@ int __fastcall HeightHook(void* bitmap, void*) { return Dimension(bitmap, g_heig
 
 void __fastcall AllocateHook(void* view, void* edx)
 {
-    Scope scope({view, g_enabled ? std::max(1.0f, ScaleForView(view)) : 1, nullptr, true});
+    Scope scope({view, g_enabled ? Density(view) : 1, nullptr, true});
     g_allocate(view, edx);
 }
 void __fastcall RenderTextHook(void* view, void* edx)
 {
+    const int64_t start = device::GameClock();
     Scope scope({view, g_enabled ? Info(Field<void*>(view, 0x248)).factor : 1});
     g_renderText(view, edx);
+    device::GameSectionSince("game: UI font raster", start);
 }
 void __fastcall StringHook(void* view, void* edx, IPoint* position, int height, int start, int end,
                            void* font, uint32_t colour, uint32_t selected, uint32_t underline)
@@ -280,11 +299,20 @@ Rect* __fastcall SourceHook(void* surface, void* edx, Rect* out)
 }
 void __fastcall PreRenderHook(void* view, void* edx, void* viewport, float time, uint32_t colour)
 {
-    if (g_enabled && Info(Field<void*>(view, 0x248)).factor != std::max(1.0f, ScaleForView(view))) {
+    if (!ScalingActive() && g_bitmaps.empty()) { g_preRender(view, edx, viewport, time, colour); return; }
+    const float wanted = Density(view);
+    void* bitmap = Field<void*>(view, 0x248);
+    const auto attempt = bitmap ? g_attempts.end() : g_attempts.find(view);
+    const float density = bitmap ? Info(bitmap).factor : attempt != g_attempts.end() ? attempt->second : 1;
+    if (g_enabled && density != wanted) {
         Field<uint8_t>(view, 0x288) = 1;
         Field<uint8_t>(view, 0x28A) = 1;
     }
     g_preRender(view, edx, viewport, time, colour);
+    if (!Field<void*>(view, 0x248)) {
+        if (g_attempts.size() >= 8192) g_attempts.clear();
+        g_attempts[view] = wanted;
+    } else g_attempts.erase(view);
 }
 
 struct Entry { const char* name; uint32_t rva; const char* bytes; size_t count; void* target; void** original; };

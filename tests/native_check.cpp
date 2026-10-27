@@ -1642,6 +1642,10 @@ void CheckInterfaceBoundary()
 
 int main(int argc, char** argv)
 {
+    if (argc > 2 && std::strcmp(argv[1], "--gui-scaling-off-check") == 0)
+        return CheckGuiClient(argv[2], true);
+    if (argc > 2 && std::strcmp(argv[1], "--gui-bench") == 0)
+        return CheckGuiClient(argv[2], false, true);
     if (argc > 2 && std::strcmp(argv[1], "--gui-client-check") == 0)
         return CheckGuiClient(argv[2]);
     if (argc > 1 && std::strcmp(argv[1], "--gui-check") == 0) {

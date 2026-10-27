@@ -7,6 +7,7 @@
 #include "native/gui.h"
 #include "native/gui_font.h"
 #include "native/vc10.h"
+#include "native/native.h"
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
@@ -78,6 +79,9 @@ inline void* __cdecl GuiCheckTooltip(void* view, rnative::gui::Point point, rnat
 }
 inline void* __cdecl GuiCheckDisplay() { static uint8_t dummy[16]{}; return dummy; }
 inline void __fastcall GuiCheckUpdateArea(void*, void*, const void*) {}
+inline int g_guiAllocations;
+inline void __fastcall GuiCheckAllocate(void*, void*) { ++g_guiAllocations; }
+inline void __fastcall GuiCheckRender(void*, void*, void*, float, uint32_t) {}
 
 struct GuiCheckImport {
     void** slot;
@@ -102,7 +106,7 @@ inline LONG WINAPI GuiCheckException(EXCEPTION_POINTERS* exception)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-inline int CheckGuiClient(const char* client)
+inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmark = false)
 {
     using namespace rnative::gui;
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -172,8 +176,47 @@ inline int CheckGuiClient(const char* client)
     int failures = 0;
     auto check = [&](bool ok, const char* what) { if (!ok) { ++failures; std::printf("GUI.dll: %s\n", what); } };
     auto equal = [](Point a, Point b) { return a.x == b.x && a.y == b.y; };
+    auto bench = [&](const char* label, bool mapping) {
+        constexpr int count = 20000;
+        LARGE_INTEGER frequency, start, end; QueryPerformanceFrequency(&frequency);
+        Point input{3, 4}, result, inverse;
+        QueryPerformanceCounter(&start);
+        for (int i = 0; i < count; ++i) { to(child.bytes, &result, &input, 1); from(child.bytes, &inverse, &result, 1); }
+        QueryPerformanceCounter(&end);
+        std::printf("GUI bench: %s coordinate pair %.3f us\n", label, double(end.QuadPart - start.QuadPart) * 1e6 / frequency.QuadPart / count);
+        if (mapping) {
+            QueryPerformanceCounter(&start);
+            for (int i = 0; i < count; ++i) BeginScaleFrame(controller.bytes);
+            QueryPerformanceCounter(&end);
+            std::printf("GUI bench: %s scale frame %.3f us (two synthetic windows)\n", label, double(end.QuadPart - start.QuadPart) * 1e6 / frequency.QuadPart / count);
+        }
+    };
+    if (benchmark) bench("unhooked", false);
+    if (bypass) {
+        char directory[MAX_PATH], ini[MAX_PATH];
+        GetTempPathA(MAX_PATH, directory); GetTempFileNameA(directory, "gui", 0, ini);
+        WritePrivateProfileStringA("Native", "UiScaling", "off", ini);
+        rnative::SetIniPath(ini);
+        const std::vector<uint8_t> code(bytes, bytes + pe->OptionalHeader.SizeOfImage);
+        InstallScaling(module);
+        check(!FontScalingReady(), "bypass leaves font hooks uninstalled");
+        check(std::memcmp(code.data(), bytes, code.size()) == 0, "bypass leaves GUI code, call sites and imports untouched");
+        SetScale(150, 150);
+        check(!BeginScaleFrame(nullptr) && !ScalingActive(), "bypass never reads the window hierarchy");
+        DeleteFileA(ini); rnative::SetIniPath(""); *instance = saved;
+        std::printf("GUI bypass: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
+        return failures ? 1 : 0;
+    }
     InstallScaling(module);
     std::printf("GUI.dll: scaling installed\n");
+    if (benchmark) {
+        for (int scale : {100, 150, 200}) {
+            SetScale(float(scale), float(scale)); BeginScaleFrame(controller.bytes);
+            const std::string label = std::to_string(scale);
+            bench(label.c_str(), true);
+        }
+        *instance = saved; return 0;
+    }
     SetScale(200, 150);
     Point pending;
     screen(&pending);
@@ -227,7 +270,23 @@ inline int CheckGuiClient(const char* client)
     put(rootData, 0x20, Rect{0, 0, 199, 99});
     put(hudData, 0x20, Rect{0, 0, 199, 99});
     put(childData, 0x20, Rect{120, 60, 199, 99});
+    // Login and character selection keep their native, fixed-screen geometry.
     SetScale(100, 100); BeginScaleFrame(controller.bytes);
+    Point nativeLogin;
+    to(child.bytes, &nativeLogin, &input, 1);
+    for (size_t table : {size_t(0x1A9CBC), size_t(0x1A9C24), size_t(0x1A9B44)}) {
+        put(owner, 0, static_cast<const void*>(bytes + table));
+        SetScale(150, 150); BeginScaleFrame(controller.bytes);
+        Point original{3, 4};
+        to(child.bytes, &output, &original, 1);
+        check(equal(output, nativeLogin), "pregame windows retain native screen coordinates at saved 150%");
+    }
+    put(owner, 0, static_cast<void*>(nullptr));
+    SetScale(100, 100); BeginScaleFrame(controller.bytes);
+    check(!ScalingActive(), "100% disables hierarchy mapping");
+    put(topData, 0, reinterpret_cast<void*>(1));
+    BeginScaleFrame(controller.bytes);
+    pointer(topData, 0, root);
     const Rect clip100{150, 60, 199, 109};
     vertices(area.bytes, child.bytes, &clip100);
     float reference[8], positions[8];
@@ -242,15 +301,12 @@ inline int CheckGuiClient(const char* client)
         vertices(area.bytes, child.bytes, &clip);
         bool sameUv = true, correctPositions = true;
         for (int i = 0; i < 4; ++i) for (int c = 0; c < 2; ++c) {
-            const Rect centres = AtlasCentres({10, 20, 109, 69}, {}, {256, 256});
-            Point expectedUv{reference[i * 2], reference[i * 2 + 1]};
-            if (factor != 1.0f) GuardAtlas(expectedUv, centres);
-            sameUv = sameUv && (c ? expectedUv.y : expectedUv.x) == uv(i, c);
+            sameUv = sameUv && reference[i * 2 + c] == uv(i, c);
             float position;
             std::memcpy(&position, area.bytes + i * 28 + c * 4, 4);
             correctPositions = correctPositions && position == (positions[i * 2 + c] + 0.5f) * factor - 0.5f;
         }
-        check(sameUv, "clipped atlas sampling stays inside its own texels when scaled");
+        check(sameUv, "clipped atlas mapping is unchanged by UI scaling");
         check(correctPositions, "clipped vertices scale with their half-pixel convention intact");
     }
     // Slider changes leave the native frames used by preferences untouched.
@@ -578,7 +634,118 @@ inline int CheckGuiClient(const char* client)
         std::free(prefix);
         rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
     }
-    content.release(); fontDtor(fontInfo);
+    fontDtor(fontInfo);
+    std::printf("GUI.dll: checking small-font strokes and descenders\n");
+    for (int size : {9, 12, 16}) {
+        std::memset(fontInfo, 0, sizeof(fontInfo)); fontCtor(fontInfo);
+        description.lfHeight = -size;
+        HFONT original = CreateFontIndirectA(&description);
+        HDC reference = CreateCompatibleDC(nullptr);
+        HGDIOBJ previous = SelectObject(reference, original);
+        GetTextMetricsA(reference, &metrics);
+        rawPut(fontInfo, 0x1018, original); rawPut(fontInfo, 0xFFC, uint8_t(1)); rawPut(fontInfo, 0xFF0, int(metrics.tmHeight));
+        for (float factor : {1.5f, 1.76f, 2.0f}) {
+            LOGFONTA scaled = description;
+            scaled.lfHeight = int(std::lround(scaled.lfHeight * factor)); scaled.lfQuality = ANTIALIASED_QUALITY;
+            HFONT outline = CreateFontIndirectA(&scaled); SelectObject(reference, outline);
+            for (char character : std::string("ilWMgjpy")) {
+                content.assign(&character, 1); put(text, 0x14C, content);
+                alignas(16) uint8_t bitmap[0x44]{};
+                CreateTextBitmap(bitmap, 64, metrics.tmHeight * 2, factor);
+                void* cache = bitmap; put(text, 0x248, cache);
+                IPoint pen{2, 0};
+                renderString(text.bytes, &pen, metrics.tmHeight, 0, 1, fontInfo, 0xFFFFFF, 0, 0);
+                IPoint secondLine{2, int(metrics.tmHeight)};
+                renderString(text.bytes, &secondLine, metrics.tmHeight, 0, 1, fontInfo, 0xFFFFFF, 0, 0);
+                MAT2 identity{}; identity.eM11.value = identity.eM22.value = 1;
+                GLYPHMETRICS glyph{};
+                const DWORD count = GetGlyphOutlineW(reference, WCHAR(character), GGO_GRAY8_BITMAP, &glyph, 0, nullptr, &identity);
+                check(count != GDI_ERROR, "reference font supplies a natural-size glyph");
+                std::vector<uint8_t> expected(count == GDI_ERROR ? 0 : count);
+                if (count && count != GDI_ERROR) GetGlyphOutlineW(reference, WCHAR(character), GGO_GRAY8_BITMAP, &glyph, count, expected.data(), &identity);
+                uint64_t expectedInk = 0, actualInk = 0;
+                const size_t stride = (glyph.gmBlackBoxX + 3) & ~size_t(3);
+                for (DWORD y = 0; y < glyph.gmBlackBoxY && count != GDI_ERROR; ++y)
+                    for (DWORD x = 0; x < glyph.gmBlackBoxX; ++x) expectedInk += std::min(255u, unsigned(expected[y * stride + x]) * 255 / 64);
+                uint8_t* data; int width, height, pitch;
+                std::memcpy(&data, bitmap, 4); std::memcpy(&width, bitmap + 0xC, 4);
+                std::memcpy(&height, bitmap + 8, 4); std::memcpy(&pitch, bitmap + 0x20, 4);
+                for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x)
+                    actualInk += reinterpret_cast<uint32_t*>(data + size_t(y) * pitch)[x] >> 24;
+                if (actualInk != expectedInk * 2) std::printf("GUI font: %dpx %c %.2f ink %llu expected %llu\n", size, character, factor, actualInk, expectedInk * 2);
+                check(actualInk == expectedInk * 2, "small glyphs retain natural strokes and complete descenders on tight consecutive lines");
+                rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
+            }
+            SelectObject(reference, original); DeleteObject(outline);
+        }
+        SelectObject(reference, previous); DeleteDC(reference); fontDtor(fontInfo);
+    }
+    // Bitmap-font letters use outlines; inline TrueType icons keep their source pixels.
+    using AddBitmap = void(__thiscall*)(void*, int, void*);
+    auto addBitmap = reinterpret_cast<AddBitmap>(symbol("?AddBitmap@FontInfo_t@@QAEXHPAVSpriteInfo_t@@@Z"));
+    for (bool trueType : {false, true}) {
+        std::memset(fontInfo, 0, sizeof(fontInfo)); fontCtor(fontInfo);
+        rawPut(fontInfo, 0xFF0, 12); rawPut(fontInfo, 0xFFC, uint8_t(trueType));
+        if (trueType) rawPut(fontInfo, 0x1018, CreateFontIndirectA(&description));
+        alignas(16) uint8_t source[0x44]{}, bitmap[0x44]{};
+        CreateTextBitmap(source, 8, 12, 1);
+        uint8_t* sourceData; int sourcePitch;
+        std::memcpy(&sourceData, source, 4); std::memcpy(&sourcePitch, source + 0x20, 4);
+        for (int y = 0; y < 12; ++y) for (int x = 0; x < 8; ++x)
+            reinterpret_cast<uint16_t*>(sourceData + y * sourcePitch)[x] = 0xFFFF;
+        addBitmap(fontInfo, 'M', source);
+        content.assign("M", 1); put(text, 0x14C, content);
+        CreateTextBitmap(bitmap, 64, 24, 2);
+        void* cache = bitmap; put(text, 0x248, cache);
+        IPoint pen{2, 0}; renderString(text.bytes, &pen, 12, 0, 1, fontInfo, 0xFFFFFF, 0, 0);
+        uint8_t* data; int width, height, pitch;
+        std::memcpy(&data, bitmap, 4); std::memcpy(&width, bitmap + 0xC, 4);
+        std::memcpy(&height, bitmap + 8, 4); std::memcpy(&pitch, bitmap + 0x20, 4);
+        int visible = 0, antialias = 0;
+        for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+            const uint32_t alpha = reinterpret_cast<uint32_t*>(data + size_t(y) * pitch)[x] >> 24;
+            if (alpha) ++visible;
+            if (alpha && alpha < 255) ++antialias;
+        }
+        check(visible > 0, "bitmap-font and inline-icon fixtures draw");
+        check(trueType ? antialias == 0 : antialias > 0, "bitmap letters rerasterize while inline icons retain their pixels");
+        fontDtor(fontInfo);
+        rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
+        rnative::vc10::FreeArray(sourceData); ForgetTextBitmap(source);
+    }
+    {
+        using PreRender = void(__thiscall*)(void*, void*, float, uint32_t);
+        auto preRender = reinterpret_cast<PreRender>(symbol("?PreRender@TextRenderer_c@@UAEXPAVRViewPort_t@@MI@Z"));
+        GuiCheckPatch allocatePatch(reinterpret_cast<void*>(symbol("?_AllocateBitmap@TextRenderer_c@@AAEXXZ")), reinterpret_cast<void*>(&GuiCheckAllocate));
+        GuiCheckPatch renderPatch(reinterpret_cast<void*>(symbol("?Render@View@@UAEXPAVRViewPort_t@@MI@Z")), reinterpret_cast<void*>(&GuiCheckRender));
+        pointer(textData, 0x10, root);
+        SetScale(150, 150); BeginScaleFrame(controller.bytes);
+        put(text, 0x240, static_cast<void*>(nullptr)); put(text, 0x248, static_cast<void*>(nullptr));
+        put(text, 0x28C, 1.0f); put(text, 0x290, 1.0f);
+        put(text, 0x288, uint8_t(0)); g_guiAllocations = 0;
+        preRender(text.bytes, nullptr, 0, 0); preRender(text.bytes, nullptr, 0, 0);
+        check(g_guiAllocations == 1, "empty text attempts a density allocation once rather than every frame");
+        Object empty[5];
+        std::memcpy(empty[0].bytes, text.bytes, sizeof(text.bytes));
+        std::memcpy(empty[4].bytes, text.bytes, sizeof(text.bytes));
+        g_guiAllocations = 0;
+        for (int i = 0; i < 2; ++i) {
+            preRender(empty[0].bytes, nullptr, 0, 0); preRender(empty[4].bytes, nullptr, 0, 0);
+        }
+        check(g_guiAllocations == 2, "empty text retry tracking handles colliding view addresses independently");
+        for (auto [native, density] : {std::pair{1.5f, 1.5f}, std::pair{1.5f, 2.25f}, std::pair{0.5f, 1.5f}}) {
+            put(text, 0x28C, native); put(text, 0x290, native);
+            alignas(16) uint8_t bitmap[0x44]{};
+            CreateTextBitmap(bitmap, 64, 24, density);
+            void* cache = bitmap; put(text, 0x248, cache);
+            put(text, 0x288, uint8_t(0)); g_guiAllocations = 0;
+            preRender(text.bytes, nullptr, 0, 0);
+            check(g_guiAllocations == (native > 1 && density == 1.5f ? 1 : 0), "text density includes native enlargement and keeps small text antialiased");
+            void* data; std::memcpy(&data, bitmap, 4);
+            rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
+        }
+    }
+    content.release();
     *instance = saved;
     std::printf("GUI.dll: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
     return failures ? 1 : 0;

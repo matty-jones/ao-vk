@@ -1072,9 +1072,9 @@ void ThreadedDevice::OverlayBegin()
     Enqueue([this](const uint8_t*) { m_device.OverlayBegin(); });
 }
 
-void ThreadedDevice::InterfaceBegin(bool redraw)
+void ThreadedDevice::InterfaceBegin(bool redraw, bool guardAtlas)
 {
-    Enqueue([this, redraw](const uint8_t*) { m_device.InterfaceBegin(redraw); });
+    Enqueue([this, redraw, guardAtlas](const uint8_t*) { m_device.InterfaceBegin(redraw, guardAtlas); });
 }
 
 void ThreadedDevice::InterfaceEnd()

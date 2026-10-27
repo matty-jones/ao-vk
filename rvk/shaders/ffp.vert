@@ -521,4 +521,8 @@ void main()
         vSet0 = vec2(leafThin, 2.0);                 // the canopy's core: how much it is thinned out
 #endif
     vTex1 = TexCoord(1u, fvf, posV, normalV);
+    if (fvf == UI_ATLAS_FVF) {
+        vSet0 = inTex1.xy;
+        vTex1 = vec4(inTex1.zw, 0.0, 1.0);
+    }
 }

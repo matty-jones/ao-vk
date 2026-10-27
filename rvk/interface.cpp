@@ -38,8 +38,9 @@ void Device::OverlayBegin()
         OverlayLabelsBegin();
 }
 
-void Device::InterfaceBegin(bool redraw)
+void Device::InterfaceBegin(bool redraw, bool guardAtlas)
 {
+    m_uiAtlasGuard = guardAtlas;
     if (!m_inFrame || !m_main)
         return;
     InterfaceSceneEnd();
@@ -76,6 +77,7 @@ void Device::InterfaceBegin(bool redraw)
 
 void Device::InterfaceEnd()
 {
+    m_uiAtlasGuard = false;
     if (!m_inFrame || !m_uiLayerOpen)
         return;
     m_uiLayerOpen = false;

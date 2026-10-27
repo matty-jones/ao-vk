@@ -922,7 +922,7 @@ public:
     // frame, so it needn't be redrawn every frame (the game skips GUI.dll's drawing in between). Around the
     // interface's drawing: Begin(true) draws it into the layer (cleared first), Begin(false) means it isn't drawn
     // this frame; End shows the layer over the main target.
-    void InterfaceBegin(bool redraw);
+    void InterfaceBegin(bool redraw, bool guardAtlas = false);
     void InterfaceEnd();
     // The world's floating text (damage, XP, names over heads) next: the scene ends here - its effects (smoke, fog,
     // the tone mapping, bloom, grading) applied - and the text is drawn over the finished picture, still hidden by
@@ -3290,6 +3290,7 @@ private:
     bool m_uiLayerActive = false;                // the interface's draws go into the layer
     bool m_alienMap = true;                      // RVK_AlienMap
     bool m_uiLayerOpen = false;                  // between InterfaceBegin and InterfaceEnd
+    bool m_uiAtlasGuard = false;
     std::atomic<bool> m_uiLayerReady{false};
     VkPipeline m_uiCompositePipeline = VK_NULL_HANDLE;
     VkPipeline m_uiOverlayPipeline = VK_NULL_HANDLE;   // the same, its coverage kept (frame generation's overlay)

@@ -647,7 +647,7 @@ bool DirectInterfaceBegin()
     if (redraw)
         g_uiLastRedraw = now.QuadPart;
     g_uiOpen = true;
-    dev->InterfaceBegin(redraw);
+    dev->InterfaceBegin(redraw, rnative::gui::ScalingActive());
     return redraw;
 }
 

@@ -93,6 +93,15 @@ during the drag without moving Preferences or changing its input mapping. HUD sc
 
 ## Remaining acceptance
 
+The next 4K report confirmed better icons and release-to-apply Preferences scaling, but found narrow glyphs,
+clipped descenders, inconsistent chat/HUD raster quality and displaced login controls. The former atlas-edge
+fix changed UV endpoints, squeezing each image; fragment clamping now protects atlas allocations while leaving
+their mapping intact. Font outlines also retain their natural widths, account for native text enlargement and
+fit the native line cell. Bitmap-font letters use outline fallbacks; inline icons remain bitmaps. Fixed-screen
+login and character-selection windows keep their native geometry. These corrections need local confirmation.
+The accompanying [performance audit](ui-scaling-performance-audit.md) separates measured world CPU costs from
+the still-unmeasured installed-hook overhead and documents a controlled comparison.
+
 The user subsequently confirmed that `4b11319` restores usable icons and compass geometry. The layout correction
 now leaves native view rectangles untouched, using reversible display placement and anchored HUD subtrees.
 Native regressions cover scale round trips, clamping, nested full-width HUD containers, input mapping, and
