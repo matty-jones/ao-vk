@@ -17,7 +17,7 @@ Instantiate`), `re/ds_ground_decode.c`, `re/ds_ground_decode2.c` (`Patch_t::Deco
 | `rdb_1000009` | playfield id | the ground: heights, tiles, building map, a small baked picture per patch (436 playfields) |
 | `rdb_1000007` | playfield id | its baked lighting: six 4-bit maps, one texel a cell, through the day (320 playfields) |
 | `rdb_1010006` | tile texture id | the tiles' textures, 256 x 256 (24-byte name block + JPEG); `rdb_1010021` / `1010022` the lower qualities |
-| `rdb_1000001` | playfield id | the playfield's name and more (e.g. "Stret West Bank") |
+| `rdb_1000001` | playfield id | the playfield's name and more (e.g. "Stret West Bank"); at its end, its water bodies (below) |
 | `rdb_1000003` | playfield id | its placed objects (statels; ao-assets `statels.py`) |
 
 `rdb_1000008` and `rdb_1000039` start with the playfield's size too (not decoded; `1000008` is mostly zero bytes).
@@ -98,6 +98,20 @@ paletted texture. **Not yet known:** what draws with it (a mask under buildings?
 
 **Per-patch textures** (key 20): a small picture of each patch (`GroundTextureCreator_t`); probably the 16 x 16
 textures the game draws its farthest ground with.
+
+**Padding.** The grid past the playfield's size (the header's cells) repeats the edge samples: it isn't terrain.
+
+**Where it lies.** `cd_image/textures/PlanetMap/MapCoordinates.xml` gives each playfield's world x, z on the planet
+(to a few tens of units); neighbours' grounds overlap and mostly hold the same terrain there, sometimes levelled
+differently. `tools/planet-layout.py` solves the places from the overlaps (docs/horizon-plan.md, phase 0).
+
+## rdb_1000001: water
+
+The playfield's water bodies (Gamecode `PlayfieldAnarchy_t::GetWaters`, `n3WaterData_t`; DisplaySystem's
+`VisualWater_t` builds the drawn mesh from them and the ground): u32 count, then per body u32 kind (0 flat, 1 a fall;
+2 and 4 also seen), u32 vertices, the vertices (f32 x y z, world), u32 triangles, the triangles (3 x u16). Each body
+is a small polygon at its own level (Borealis: 10, 40, 55, 65, 90 and a fall from 40 to 9.9); there is no sea level.
+Found by a scan near the resource's end (in 142 playfields): what points to the block isn't known yet.
 
 ## rdb_1000007: the baked lighting
 
