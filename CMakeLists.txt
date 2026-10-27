@@ -13,6 +13,7 @@ add_library(randy_native STATIC proxy/native/stb_image.cpp proxy/native/hook.cpp
 target_include_directories(randy_native PUBLIC proxy third_party)
 target_link_libraries(randy_native PUBLIC rvk)
 target_compile_definitions(randy_native PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(randy_native PRIVATE /EHsc)
 
 # Drop-in randy31.dll. Exports not implemented here forward to the original, renamed randy31_orig.dll.
 add_library(randy31 SHARED proxy/dllmain.cpp proxy/trace.cpp proxy/ddraw/com_trace.cpp proxy/ddraw/com_trace_detail.cpp
