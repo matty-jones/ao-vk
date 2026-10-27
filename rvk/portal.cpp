@@ -5,7 +5,9 @@
 // room, those behind the doorway's plane (the building's own insides) showed in it - or at the scene's end (EndScene),
 // each such doorway near enough and on the screen (the nearest three a frame) gets its room drawn behind it:
 //   1. the scene's depth is copied, and where the doorway's rectangle is the surface seen (nothing in front of its
-//      plane: not the door, the recess's walls or a character) the depth is pushed to the far plane (portal_open.frag);
+//      plane: not the door, the recess's walls or a character) the depth is pushed to the far plane (portal_open.frag),
+//      the rest of its box shut (at the near plane, given back once the room is drawn): a room is wider and deeper than
+//      the building round its doorway, and its walls showed over the street;
 //   2. the room's capture (portal_capture.cpp) is replayed through the draw path - each piece as the game drew it, moved
 //      so the room's entrance stands on the doorway's sill facing in, lit by its own lights only (no sun, frame lights
 //      or shadows), kept to the doorway's box on the screen; the scene's depth does the rest;
@@ -210,7 +212,7 @@ bool Device::PortalCopyDepth(VkCommandBuffer cmd)
     return true;
 }
 
-// The opening (portal_open.frag): the scene's depth copied (once a frame), then pushed to the far plane where the
+// The opening (portal_open.frag): the scene's depth copied (unless `copied`), then pushed to the far plane where the
 // rectangle in `push` is the surface seen, inside `box`. The scene's rendering is ended and begun again.
 bool Device::PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied)
 {
@@ -359,22 +361,31 @@ void Device::DrawPortals()
         const BlackQuad* quad;
         uint32_t interior;
         float distance;
-        float out[3];                            // its outward facing (horizontal, towards the camera's side)
+        float out[3];                            // its outward facing (horizontal: PortalOutward)
         d3d::Vector origin, edgeU, edgeV;        // its rectangle: bottom-left corner, bottom and left edges
         VkRect2D box;                            // ... on the scene
     };
-    // The doorway's rectangle and its box on the scene; false when none of it is on the screen (behind the camera -
-    // zoomed out, the player's own doorway behind it took the frame's rooms - or outside the view).
-    auto onScreen = [&](Candidate& c) {
+    // The doorway's rectangle and its box on the scene; false when the camera is behind it (on the room's side: the
+    // building's insides - the room drawn on the camera's side stood in the street) or none of it is on the screen
+    // (behind the camera - zoomed out, the player's own doorway behind it took the frame's rooms - or outside the view).
+    auto onScreen = [&](Candidate& c, const PortalLink& link) {
         const BlackQuad& q = *c.quad;
-        float out[3] = {q.normal[0], 0.0f, q.normal[2]};
-        const float ol = std::sqrt(out[0] * out[0] + out[2] * out[2]);
-        if (ol < 1e-4f) return false;
-        out[0] /= ol;
-        out[2] /= ol;
-        if (out[0] * (eye[0] - q.centre[0]) + out[2] * (eye[2] - q.centre[2]) < 0.0f) {
-            out[0] = -out[0];
-            out[2] = -out[2];
+        float out[3];
+        if (PortalOutward(q, link, out)) {
+            if (out[0] * (eye[0] - q.centre[0]) + out[2] * (eye[2] - q.centre[2]) < 0.0f)
+                return false;
+        } else {                                 // (not known yet: towards the camera's side)
+            out[0] = q.normal[0];
+            out[1] = 0.0f;
+            out[2] = q.normal[2];
+            const float ol = std::sqrt(out[0] * out[0] + out[2] * out[2]);
+            if (ol < 1e-4f) return false;
+            out[0] /= ol;
+            out[2] /= ol;
+            if (out[0] * (eye[0] - q.centre[0]) + out[2] * (eye[2] - q.centre[2]) < 0.0f) {
+                out[0] = -out[0];
+                out[2] = -out[2];
+            }
         }
         std::memcpy(c.out, out, sizeof(out));
         const float across[3] = {-out[2], 0.0f, out[0]};
@@ -419,7 +430,7 @@ void Device::DrawPortals()
             const float dx = q.centre[0] - eye[0], dy = q.centre[1] - eye[1], dz = q.centre[2] - eye[2];
             const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
             Candidate c{&q, link->interior, d, {}, {}, {}, {}, {}};
-            if (d <= m_portalDist && onScreen(c)) {
+            if (d <= m_portalDist && onScreen(c, *link)) {
                 candidates.push_back(c);
                 // (The reverse's phase 0: what this doorway sees of the street, if walked through - portal_diag.cpp.)
                 if (d < 30.0f && link->outdoor == m_skyPlayfield && std::fabs(link->centre[0] - q.centre[0]) < 1.0f &&
@@ -467,7 +478,9 @@ void Device::DrawPortals()
         const float rest[16] = {origin.x, origin.y, origin.z, 0.0f, edgeU.x, edgeU.y, edgeU.z, 0.0f,
                                 edgeV.x, edgeV.y, edgeV.z, 0.0f, sw, sh, m_aoProj.m[2][2], m_aoProj.m[3][2]};
         std::memcpy(push + 16, rest, sizeof(rest));
-        // 1. The opening.
+        // 1. The opening, the rest of its box shut (portal_open.frag mode 1): the room shows in the opening only.
+        push[19] = 1.0f;
+        copied = false;                          // (the scene's depth as it is now: the rooms drawn before it in)
         if (!PortalOpenPass(cmd, push, box, copied))
             return;
         // 2. The room, as the game drew it, moved into the doorway.
@@ -524,9 +537,11 @@ void Device::DrawPortals()
             Draw(d3d::TriangleStrip, d3d::FVF_XYZ | d3d::FVF_DIFFUSE, quad, 4, nullptr, 0);
         }
         m_drawingPortal = false;
-        // 4. The opening's pixels marked lit by the room's own lamps in the local-light target (portal_mark.frag): the
+        // 4. The rest of the box given its depth back (mode 2), then the opening's pixels marked lit by the room's own lamps in the local-light target (portal_mark.frag): the
         // passes after the scene leave them be - not the street's sun shadows, ambient occlusion or reflections (the
         // traced occlusion darkened a patch of the floor: the room's own draws' mark didn't hold there).
+        push[19] = 2.0f;
+        PortalOpenPass(cmd, push, box, copied);
         PortalMarkPass(cmd, push, box);
         m_rs = rs;
         m_tss = tss;

@@ -3401,6 +3401,7 @@ private:
     // doorway leads to which room's playfield.
     struct BlackQuad {
         float centre[3] = {}, normal[3] = {}, modelCentre[3] = {};
+        float modelNormal[3] = {};               // (normal on the mesh, before its world matrix)
         float sill = 0, width = 0, height = 0;
         char mesh[48] = {};
         uint16_t piece = 0;
@@ -3426,6 +3427,9 @@ private:
         uint16_t piece = 0;
         float modelCentre[3] = {}, centre[3] = {}, normal[3] = {};   // (normal: outward)
         float sill = 0, width = 0, height = 0;
+        // Outward on the mesh (0 0 0: not known yet - a link saved before it was kept, learned when its doorway is
+        // next drawn): the same building's doorway elsewhere faces out the same way.
+        mutable float modelOutward[3] = {};
     };
     std::vector<PortalLink> m_portalLinks;
     bool m_portalLinksLoaded = false;
@@ -3433,6 +3437,7 @@ private:
     void PortalNoteBlack(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
                          const uint16_t* indices, uint32_t indexCount);
     const PortalLink* PortalLinkFor(const BlackQuad& quad, uint32_t playfield);
+    bool PortalOutward(const BlackQuad& quad, const PortalLink& link, float out[3]);
     void PortalLinkTeleport();                   // (ZoneSignal)
     void PortalLinkFrame();                      // (PortalCaptureFrame)
     void PortalLoadLinks();

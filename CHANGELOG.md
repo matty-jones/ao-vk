@@ -117,6 +117,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- A shop's room no longer shows from behind its doorway, floating in the street as a pale window with its lamp beams
+  (Newland City's midtech shop, from the arcade beside it). The room also no longer sticks out round the doorway:
+  through a wide doorway its walls showed past the frame, and with the camera in the doorway the screen filled with
+  broken triangles.
 - Zoning no longer fills the graphics card's memory: textures the game let go of when leaving a zone (small interface
   and ground pieces, thousands of them after a few zone changes) stayed on the card for the rest of the session.
 - Long sessions and many zone changes no longer run the game out of memory and crash it. The game keeps every zone's
