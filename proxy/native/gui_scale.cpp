@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace rnative::gui {
 namespace {
@@ -42,6 +43,11 @@ float g_wantedWindow = 1.0f, g_wantedHud = 1.0f;
 bool g_installed, g_redraw;
 bool g_active;
 int g_coordinates;
+const Transform* g_mapDrawing;
+using MapRenderFn = void(__fastcall*)(void*, void*, void*, float, uint32_t);
+MapRenderFn g_mapRender, g_mapGroundRender;
+using PrimitiveFn = void(__fastcall*)(void*, void*, uint32_t, void*, uint32_t, uint32_t);
+PrimitiveFn g_fan, g_lines, g_strip;
 float g_placementScale;
 using PlacementFn = void(__fastcall*)(void*, void*, uint32_t);
 PlacementFn g_placement;
@@ -94,6 +100,59 @@ Transform For(void* view)
     }
     return {};
 }
+
+void DrawMap(MapRenderFn original, void* view, void* edx, void* viewport, float time, uint32_t flags)
+{
+    const Transform scale = For(view);
+    if (scale.Identity() && !g_mapDrawing) { original(view, edx, viewport, time, flags); return; }
+    // Map zoom, tile clipping and marker placement share native units until submission.
+    struct Restore {
+        const Transform* saved = g_mapDrawing;
+        ~Restore() { g_mapDrawing = saved; }
+    } restore;
+    g_mapDrawing = scale.Identity() ? nullptr : &scale;
+    original(view, edx, viewport, time, flags);
+}
+
+void __fastcall MapRenderHook(void* view, void* edx, void* viewport, float time, uint32_t flags)
+{
+    DrawMap(g_mapRender, view, edx, viewport, time, flags);
+}
+
+void __fastcall MapGroundRenderHook(void* view, void* edx, void* viewport, float time, uint32_t flags)
+{
+    DrawMap(g_mapGroundRender, view, edx, viewport, time, flags);
+}
+
+void MapPrimitive(PrimitiveFn original, void* renderer, void* edx, uint32_t fvf, void* vertices,
+                  uint32_t count, uint32_t flags)
+{
+    if (!g_mapDrawing || (fvf != 0x44 && fvf != 0x144)) {
+        original(renderer, edx, fvf, vertices, count, flags);
+        return;
+    }
+    const size_t stride = fvf == 0x144 ? 7 : 5;
+    uint32_t local[64 * 7];
+    std::vector<uint32_t> large;
+    if (count > 64) large.resize(size_t(count) * stride);
+    uint32_t* copy = count > 64 ? large.data() : local;
+    std::memcpy(copy, vertices, size_t(count) * stride * 4);
+    for (uint32_t i = 0; i < count; ++i) {
+        Point point;
+        std::memcpy(&point, copy + size_t(i) * stride, sizeof(point));
+        g_mapDrawing->ToScreen(point);
+        std::memcpy(copy + size_t(i) * stride, &point, sizeof(point));
+    }
+    original(renderer, edx, fvf, copy, count, flags);
+}
+
+#define MAP_PRIMITIVE(Name, Original) \
+    void __fastcall Name(void* renderer, void* edx, uint32_t fvf, void* vertices, uint32_t count, uint32_t flags) \
+    { MapPrimitive(Original, renderer, edx, fvf, vertices, count, flags); }
+MAP_PRIMITIVE(MapFanHook, g_fan)
+MAP_PRIMITIVE(MapLinesHook, g_lines)
+MAP_PRIMITIVE(MapStripHook, g_strip)
+#undef MAP_PRIMITIVE
 
 template <class T> void ParentSpace(void* view, T& coordinates, bool outward);
 
@@ -194,6 +253,7 @@ Transform DrawingScale(void* view)
 
 void __fastcall VerticesHook(void* area, void* edx, void* view, const Rect* clip)
 {
+    if (g_mapDrawing) { Coordinates scope; g_vertices(area, edx, view, clip); return; }
     const Transform scale = For(view);
     if (scale.Identity()) {
         g_vertices(area, edx, view, clip);
@@ -231,7 +291,7 @@ void ClipBounds(void* view, const Rect& input, Rect& output)
     Tag##PointerFn g_to##Tag##Pointer, g_from##Tag##Pointer; \
     Type* __fastcall To##Tag##Value(void* view, void* edx, Type* out, const Type* in, uint32_t scaled) \
     { \
-        if (!g_active || g_coordinates) return g_to##Tag##Value(view, edx, out, in, scaled); \
+        if (!g_active || g_coordinates || g_mapDrawing) return g_to##Tag##Value(view, edx, out, in, scaled); \
         Coordinates scope; \
         const Type original = *in; \
         g_to##Tag##Value(view, edx, out, in, scaled); \
@@ -240,7 +300,7 @@ void ClipBounds(void* view, const Rect& input, Rect& output)
     } \
     void __fastcall To##Tag##Pointer(void* view, void* edx, Type* in, uint32_t scaled) \
     { \
-        if (!g_active || g_coordinates) { g_to##Tag##Pointer(view, edx, in, scaled); return; } \
+        if (!g_active || g_coordinates || g_mapDrawing) { g_to##Tag##Pointer(view, edx, in, scaled); return; } \
         Coordinates scope; \
         const Type original = *in; \
         g_to##Tag##Pointer(view, edx, in, scaled); \
@@ -322,6 +382,10 @@ struct Hook {
 };
 
 Hook g_hooks[] = {
+    {"PFMapRenderer_c::Render", 0xE9F73, "", 10,
+      reinterpret_cast<void*>(&MapRenderHook), reinterpret_cast<void**>(&g_mapRender)},
+    {"PFMapGroundRenderer_c::Render", 0x478ED, "", 10,
+      reinterpret_cast<void*>(&MapGroundRenderHook), reinterpret_cast<void**>(&g_mapGroundRender)},
     {"?DoSetFrame@WndBorder@@AAEXABVRect@@@Z", 0x159888, "", 10,
       reinterpret_cast<void*>(&BorderFrameHook), reinterpret_cast<void**>(&g_borderFrame)},
     {"?MouseDown@WndBorder@@UAEXABVPoint@@HH@Z", 0x1595F7, "\x55\x8B\xEC\x83\xEC\x20", 6,
@@ -358,6 +422,16 @@ Hook g_hooks[] = {
       reinterpret_cast<void*>(&ParentRectPointer), reinterpret_cast<void**>(&g_parentRectPointer)},
     {"?GetMousePosition@Window@@QBE?AVPoint@@XZ", 0x1542FB, "", 10,
       reinterpret_cast<void*>(&WindowMouseHook), reinterpret_cast<void**>(&g_windowMouse)},
+};
+
+struct Import { const char* name; uint32_t rva; void* target; void** original; };
+Import g_imports[] = {
+    {"?RenderTriangleFan@render_t@@QAEXKPAXKK@Z", 0x1A8618,
+      reinterpret_cast<void*>(&MapFanHook), reinterpret_cast<void**>(&g_fan)},
+    {"?RenderLineList@render_t@@QAEXKPAXKK@Z", 0x1A861C,
+      reinterpret_cast<void*>(&MapLinesHook), reinterpret_cast<void**>(&g_lines)},
+    {"?RenderTriangleStrip@render_t@@QAEXKPAXKK@Z", 0x1A8680,
+      reinterpret_cast<void*>(&MapStripHook), reinterpret_cast<void**>(&g_strip)},
 };
 
 }  // namespace
@@ -410,6 +484,11 @@ void InstallScaling(HMODULE gui)
         return;
     }
     auto* base = reinterpret_cast<uint8_t*>(gui);
+    if (*reinterpret_cast<const void* const*>(base + 0x1C0724 + 13 * 4) != base + 0xE9F73 ||
+        *reinterpret_cast<const void* const*>(base + 0x1B0A8C + 13 * 4) != base + 0x478ED) {
+        Log("interface scaling: map render entries changed, left at 100%%");
+        return;
+    }
     for (uint32_t rva : kScreenFrameCalls) {
         int32_t relative;
         std::memcpy(&relative, base + rva + 1, 4);
@@ -420,7 +499,9 @@ void InstallScaling(HMODULE gui)
     }
     // Check the entire group before patching; a partial group never enables scaling.
     for (const Hook& h : g_hooks) {
-        auto* at = reinterpret_cast<uint8_t*>(address(h.name));
+        const bool map = h.original == reinterpret_cast<void**>(&g_mapRender) ||
+                         h.original == reinterpret_cast<void**>(&g_mapGroundRender);
+        auto* at = map ? base + h.rva : reinterpret_cast<uint8_t*>(address(h.name));
         if (!at || at != reinterpret_cast<uint8_t*>(gui) + h.rva) {
             Log("interface scaling: %s unavailable, left at 100%%", h.name);
             return;
@@ -439,6 +520,15 @@ void InstallScaling(HMODULE gui)
             }
         }
     }
+    HMODULE renderer = GetModuleHandleA("randy31.dll");
+    for (const Import& entry : g_imports) {
+        void* original = renderer ? reinterpret_cast<void*>(GetProcAddress(renderer, entry.name)) : nullptr;
+        if (!original || *reinterpret_cast<void**>(base + entry.rva) != original) {
+            Log("interface scaling: map drawing import changed, left at 100%%");
+            return;
+        }
+        *entry.original = original;
+    }
     auto* screenEntry = reinterpret_cast<uint8_t*>(address("?GetScreenSize@Window@@SA?AVPoint@@XZ"));
     if (screenEntry != reinterpret_cast<uint8_t*>(gui) + 0x154850 ||
         std::memcmp(screenEntry, "\x55\x8b\xec\xe8", 4) != 0) {
@@ -455,6 +545,12 @@ void InstallScaling(HMODULE gui)
     g_windowScreen = reinterpret_cast<ScreenFn>(HookAt(screenEntry, 8, &screenRel, 1,
                                                      reinterpret_cast<void*>(&WindowScreenHook), "Window::GetScreenSize"));
     if (!g_windowScreen) return;
+    for (const Import& entry : g_imports) {
+        DWORD protect;
+        if (!VirtualProtect(base + entry.rva, sizeof(void*), PAGE_READWRITE, &protect)) return;
+        *reinterpret_cast<void**>(base + entry.rva) = entry.target;
+        VirtualProtect(base + entry.rva, sizeof(void*), protect, &protect);
+    }
     // Only cursor hit tests need displayed frames. Native layout queries always keep their original units.
     for (uint32_t rva : kScreenFrameCalls) {
         DWORD protect;
@@ -507,7 +603,8 @@ bool BeginScaleFrame(void* controller)
         Rect frame;
         g_frame(view, nullptr, &frame);
         const float width = frame.right - frame.left + 1, height = frame.bottom - frame.top + 1;
-        const bool scaffold = split && (width >= screen.x * 0.9f || height >= screen.y * 0.9f);
+        const bool rollup = !std::strcmp(TypeOf(view), ".?AVRollupController_c@@");
+        const bool scaffold = split && !rollup && (width >= screen.x * 0.9f || height >= screen.y * 0.9f);
         Rect bounds, global;
         g_bounds(view, nullptr, &bounds);
         {
@@ -521,6 +618,8 @@ bool BeginScaleFrame(void* controller)
                 previous->second.transform.value == g_hudScale) map = previous->second.transform;
             else {
                 map = Place(global, screen, g_hudScale, true);
+                // A full-height rollup starts at the top; its reserved empty space is not a centre anchor.
+                if (rollup && height >= screen.y * 0.9f) map.offset.y = 0;
             }
             current.emplace(view, Window{owner, map, false});
         }

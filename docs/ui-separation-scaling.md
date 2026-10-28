@@ -33,6 +33,14 @@ canonical screen coordinates after input dispatch has inverted the display trans
 retains the window position. Mouse-relative window placement resets any old display-clamp offset. Dragged item
 images inherit the source window/HUD scale around the physical cursor, retaining their native hotspot.
 
+The sidebar's native rollup is one HUD widget group, including when it occupies the full screen height. Its panels
+share one display transform and retain native stacking, expansion and scroll coordinates. Individual panels are
+never independently anchored or clamped to the screen. A full-height rollup keeps its top anchor when shrinking.
+The PF map's custom renderer keeps tile clipping, zoom and marker calculations in native units, then transforms
+its submitted vertices once. Tiles, outlines and markers therefore match the surrounding frame. Mouse conversion
+still uses the inverse display transform. Custom map drawing changes neither texture coordinates nor depth, and
+normal GUI/world drawing resumes after the map render call.
+
 Login and character-selection windows retain native scale and placement; saved gameplay percentages remain intact.
 At 100%/100%, hierarchy mapping is skipped. `[Native] UiScaling=off` leaves coordinate and font hooks uninstalled
 after a restart, retaining interface capture and overlay separation.
@@ -48,6 +56,7 @@ cursor, and developer console/performance readout do not use either scale.
 The scaling hook group recognises GUI.dll timestamp `0x5CD32BEA`, image size `0x2B0000`, and checks exported
 addresses and entry instructions before patching. Unknown builds remain at 100% and log the reason. No client
 object layout or allocation size changes. The earlier [source audit](ui-rendering-audit.md) is preserved separately.
+The map's private render entries also require their checked native vtable slots and renderer imports.
 
 GUI text above 100% uses a larger RGBA bitmap and new outline glyphs at the requested scale, including any native
 text zoom. One physical font cell fits the scaled logical line height, with a common baseline for every glyph.
@@ -82,6 +91,11 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
   and deferred activation at frame boundaries/mouse release. Scale round trips preserve native rectangles, and the actual
   native preference writer is checked under non-default scales. Full-width HUD container checks cover
   enlarged child clipping and nested input mapping.
+- Sidebar regressions use the client's actual rollup type and a 4K view tree, with independent window/HUD factors.
+  They check panel close/reopen, expansion, top/right anchors, inverse input dispatch and unchanged native frames
+  at 75/100/150/176/200%. Custom map checks invoke its real ground-render entry and tile/outline drawing helpers,
+  substituting engine tile data and capturing renderer submissions. Tile, outline and marker geometry scales once;
+  depth, colour, UVs and native source arrays remain unchanged. Subsequent drawing uses the normal conversion path.
 - The same native check exercises border mouse-down/move, client resizing, mouse-relative placement, tooltip
   hit detection/timer text outside rendering, and dragged item movement from both windows and HUD. Synthetic
   fixtures isolate native cursor capture, layout callbacks, tooltip content and display invalidation.
@@ -108,10 +122,11 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
 - The full native comparison against the client's original renderer passed with zero failures. Generated settings
   documentation and whitespace checks passed.
 
-The latest interaction and texture-edge changes still need local gameplay confirmation: the cloud client exits
-during startup before a rendered GUI frame. Native checks cannot establish the complete behaviour of every skin,
-tab, tooltip and item action. Maps/browser interaction and persistent layout after restart also need a playable
-client session. The fixed world-look check timed out even with an extended limit; its baseline was
+The latest local report confirms clean text, stable performance, working terrain toggles and the requested ground
+detail radius. Sidebar stacking and PF map scaling are a subsequent correction and still need local gameplay
+confirmation. The cloud client exits during startup before a rendered GUI frame; native checks cannot establish
+the complete behaviour of every skin, tab, tooltip or item action. Browser interaction and persistent layout after
+restart also need a playable client session. The fixed world-look check timed out even with an extended limit; its baseline was
 not changed. Software Vulkan exposes only one queue, so hardware frame generation remains untested. It also
 reports the existing external-memory extension dependency validation error
 `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`. QEMU/Wine helper teardown can report a signal after

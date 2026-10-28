@@ -1,9 +1,9 @@
 # UI stabilization and DLSS 5 roadmap
 
-2026-10-28. Source reviewed at `54b9dc9` on `ui-separation-scaling`, with the latest 4K gameplay report.
-Stages 1 (terrain quality) and 2 (font metrics) are implemented for local review. Stage 3 (processing inputs)
-is paused until that review. The source findings below explain the corrections; their gameplay acceptance is
-not established by synthetic/native fixture checks alone.
+2026-10-28. Stages 1 (terrain quality, `93592f6`) and 2 (font metrics, `6fe876c`) have local gameplay confirmation:
+clean unclipped text, stable performance, ground toggles without frame drops and the requested terrain detail
+radius. The follow-up sidebar stacking/PF map correction remains under review. Stage 3 (processing inputs) stays
+paused until that review; no processing-input or NVIDIA integration work is included in the sidebar fix.
 
 ## What has landed
 
@@ -12,8 +12,9 @@ not established by synthetic/native fixture checks alone.
 | UI capture independent of refresh rate and Native Direct | `d710252`; zero refresh means redraw every frame. Native and renderer checks cover the boundary and fallback modes. |
 | Overlays separated from world processing | `cf37f87`; labels, floating text, windows/HUD, console and cursor have ordered layers, independent of frame generation. World-only screenshots, composed readback and threaded tests exist. Complete gameplay coverage is still required. |
 | Independent window and HUD scaling | `abf8b5c`, followed by clipping, layout, font and interaction corrections. Gameplay confirms usable scaling, retained positions across round trips, stable release-to-apply Preferences and restored icon quality. |
-| Higher-resolution GUI text | The font-metrics follow-up uses a common baseline, fitted line height and font-wide pitch. Extended native checks pass; gameplay review of the reported controls is pending. |
-| Native terrain fallback | `54b9dc9` preserves original draws for unrecognised or undrawable replacement passes, and adds bounded diagnostics. Gameplay confirms terrain is visible again. The quality follow-up retains original F10/range/far-texture settings, including on fallback. Gameplay review is pending. |
+| Higher-resolution GUI text | `6fe876c` uses a common baseline, fitted line height and font-wide pitch. Extended native checks pass; gameplay confirms clean text without clipping. |
+| Native terrain fallback | `54b9dc9` preserves original draws for unrecognised or undrawable replacement passes, with bounded diagnostics. `93592f6` retains requested F10/range/far-texture quality on fallback. Gameplay confirms the requested radius and smooth on/off transitions. |
+| Sidebar and PF map scaling | A subsequent correction keeps the native rollup under one display transform and scales custom map submissions once. Native GUI regressions cover panel toggles and map geometry; gameplay review is pending. |
 | Existing temporal rendering | TAA, FSR 2.2, FSR 3.1, motion/depth inputs and AMD frame generation were already present before these contributions. They are useful infrastructure, not new NVIDIA integration. |
 | DLSS 5 | No runtime integration, cross-process bridge or NVIDIA hardware validation has landed. |
 
@@ -100,11 +101,12 @@ remain real, but availability and a working integration path need current eviden
 
 ## Proposed milestones and exit criteria
 
-1. **Restore terrain quality — implemented, review pending.** Verify F10 detail changes, native on/off/fallback,
+1. **Restore terrain quality — locally confirmed.** Retain regression coverage for F10 detail changes, native on/off/fallback,
    stationary changes, zoning and moving CPU/memory cost in Old Athen. The game's original detail must be available
    whenever native replacement does not take a pass.
-2. **Finish font metrics — implemented, review pending.** Verify settings `p`/`y`, Friends, chat, NCU and shortcut
-   digits with the custom skin at 4K. Repeat hover, title-bar/item anchors, Perk tabs, login, maps/browser views and
+2. **Finish font metrics — locally confirmed; sidebar follow-up under review.** Text is reported clean and unclipped.
+   Verify sidebar panel stacking and PF map content at the saved scales, including close/reopen and expansion.
+   Repeat hover, title-bar/item anchors, Perk tabs, login, maps/browser views and
    restart persistence. Positions must remain reversible, glyphs complete, icons clean and excluded sizes unchanged.
 3. **Prove the processing input — paused for review.** Capture world-only and composed frames at 4K across world scales 100/75/50,
    UI refresh 0/60 and cached/redrawn frames. Visualize motion for camera movement, skinning, foliage, water and

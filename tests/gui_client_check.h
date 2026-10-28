@@ -107,6 +107,8 @@ inline LONG WINAPI GuiCheckException(EXCEPTION_POINTERS* exception)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+#include "gui_sidebar_check.h"
+
 inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmark = false)
 {
     using namespace rnative::gui;
@@ -392,6 +394,8 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
     SetScale(100, 100); BeginScaleFrame(controller.bytes);
     to(icon.bytes, &output, &input, 1);
     check(equal(output, {3703, 2004}), "nested HUD layout round trip restores original positions");
+    failures += CheckGuiSidebar(module);
+    BeginScaleFrame(controller.bytes);
     std::printf("GUI.dll: checking native border input\n");
     // Run native border input through dispatch's inverse, isolating only cursor capture and frame application.
     {

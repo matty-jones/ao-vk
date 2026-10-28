@@ -21,6 +21,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Pinned sidebar panels scale as one column, so opening, closing or expanding panels preserves their stacking
+  without overlap. The PF map's tiles, markers and outlines now scale with its frame and controls.
 - Enlarged text uses a shared baseline and fits the available line height, preserving descenders in tight HUD
   controls. Font-wide spacing follows the original font without shifting or squeezing individual letters.
 - F10 ground detail and `RVK_GroundRange` keep controlling the original terrain when native ground falls back or is
