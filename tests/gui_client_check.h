@@ -109,6 +109,7 @@ inline LONG WINAPI GuiCheckException(EXCEPTION_POINTERS* exception)
 
 #include "gui_sidebar_check.h"
 #include "gui_popup_check.h"
+#include "gui_chat_check.h"
 
 inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmark = false)
 {
@@ -546,6 +547,7 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
         put(controller, 0x48, Point{246, 128});
     }
     SetScale(100, 100); BeginScaleFrame(controller.bytes);
+    failures += CheckGuiChat(module, controller.bytes, root.bytes);
     check(FontScalingReady(), "native text-cache hooks installed");
     using FontCtor = void*(__thiscall*)(void*);
     using FontDtor = void(__thiscall*)(void*);

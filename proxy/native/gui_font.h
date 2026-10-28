@@ -6,6 +6,7 @@ namespace rnative::gui {
 
 void InstallFontScaling(HMODULE gui);
 bool FontScalingReady();
+bool DumpFontCaches(const char* path);
 void* CreateTextBitmap(void* storage, int width, int height, float factor);
 void ForgetTextBitmap(void* bitmap);
 

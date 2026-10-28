@@ -11,6 +11,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   retain their sizes. Text is rendered at the requested size, and changes refresh cached UI immediately.
 
 ### Diagnostics
+- `dump` also saves a bounded `rvk-frame-*-ui.tar` archive of enlarged text caches and their layout, without
+  refreshing text or changing scale settings.
 - The renderer log records the first 16 scaled font-cache creations, including face, cell height, baseline metrics
   and spacing, to help identify differences between UI fonts.
 - Ground frame dumps report pass classification, native patch submissions and frustum rejections, including why the

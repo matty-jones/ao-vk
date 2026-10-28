@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
+#include <sstream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -20,7 +22,7 @@ namespace {
 template <class T> T& Field(void* p, size_t offset) { return *reinterpret_cast<T*>(static_cast<uint8_t*>(p) + offset); }
 struct IPoint { int x, y; };
 struct IRect { int left, top, right, bottom; };
-struct Bitmap { float factor; int width, height; };
+struct Bitmap { float factor; int width, height; void* owner; };
 std::unordered_map<void*, Bitmap> g_bitmaps;
 pixfmt::Format g_argb, g_argb1555;
 bool g_enabled;
@@ -57,7 +59,7 @@ struct Scope {
 Bitmap Info(void* bitmap)
 {
     auto it = g_bitmaps.find(bitmap);
-    return it == g_bitmaps.end() ? Bitmap{1, 0, 0} : it->second;
+    return it == g_bitmaps.end() ? Bitmap{1, 0, 0, nullptr} : it->second;
 }
 bool Target(void* bitmap) { return g_enabled && g_context.factor > 1 && g_context.view && bitmap == Field<void*>(g_context.view, 0x248); }
 int Pixel(float coordinate) { return int(std::lround(coordinate)); }
@@ -408,9 +410,120 @@ void* CreateTextBitmap(void* storage, int width, int height, float factor)
     Field<int>(storage, 0x20) = physicalWidth * bytesPerPixel; Field<int>(storage, 0x24) = bytesPerPixel;
     Field<int>(storage, 0x38) = factor > 1 ? 2 : 8; Field<int>(storage, 0x3C) = factor > 1 ? 5 : 2;
     Field<void*>(storage, 0x40) = factor > 1 ? &g_argb : &g_argb1555;
-    g_bitmaps[storage] = {factor, width, height};
+    g_bitmaps[storage] = {factor, width, height, g_context.allocating ? g_context.view : nullptr};
     return storage;
 }
+bool DumpFontCaches(const char* path)
+{
+    std::FILE* file = std::fopen(path, "wb");
+    if (!file) { Log("interface text capture: cannot write %s", path); return false; }
+    bool ok = true;
+    auto entry = [&](const char* name, const void* data, size_t size) {
+        char header[512]{};
+        std::snprintf(header, 100, "%s", name);
+        std::snprintf(header + 100, 8, "%07o", 0644);
+        std::snprintf(header + 108, 8, "%07o", 0);
+        std::snprintf(header + 116, 8, "%07o", 0);
+        std::snprintf(header + 124, 12, "%011llo", static_cast<unsigned long long>(size));
+        std::snprintf(header + 136, 12, "%011o", 0);
+        std::memset(header + 148, ' ', 8); header[156] = '0';
+        std::memcpy(header + 257, "ustar", 6); std::memcpy(header + 263, "00", 2);
+        unsigned checksum = 0; for (unsigned char byte : header) checksum += byte;
+        std::snprintf(header + 148, 7, "%06o", checksum); header[155] = ' ';
+        const char padding[512]{};
+        ok &= std::fwrite(header, 1, sizeof(header), file) == sizeof(header);
+        ok &= std::fwrite(data, 1, size, file) == size;
+        const size_t tail = (512 - size % 512) % 512;
+        ok &= std::fwrite(padding, 1, tail, file) == tail;
+    };
+    std::ostringstream notes;
+    notes << "UI text caches before frame capture; no redraw or scale change requested.\n"
+             "BMPs retain source alpha. Coordinates and line descriptors use native logical units.\n";
+    using Parent = void*(__thiscall*)(void*);
+    using Convert = Rect*(__thiscall*)(void*, Rect*, const Rect*, uint32_t);
+    using Visible = bool(__thiscall*)(void*, uint32_t);
+    HMODULE gui = GetModuleHandleA("GUI.dll");
+    const auto parent = reinterpret_cast<Parent>(GetProcAddress(gui, "?GetParent@View@@QBEPAV1@XZ"));
+    const auto bounds = reinterpret_cast<RectFn>(GetProcAddress(gui, "?GetBounds@View@@QBE?AVRect@@XZ"));
+    const auto toScreen = reinterpret_cast<Convert>(GetProcAddress(gui, "?ConvertToScreen@View@@QBE?AVRect@@ABV2@_N@Z"));
+    const auto visible = reinterpret_cast<Visible>(GetProcAddress(gui, "?IsVisible@View@@QBE_N_N@Z"));
+    struct Cache { void* bitmap; Bitmap info; Rect clip; bool visible; };
+    std::vector<Cache> caches;
+    for (const auto& pair : g_bitmaps) {
+        if (!pair.second.owner) continue;
+        Rect clip{-1e9f, -1e9f, 1e9f, 1e9f};
+        if (parent && bounds && toScreen) for (void* view = pair.second.owner; view; view = parent(view)) {
+            Rect local, screen; bounds(view, nullptr, &local); toScreen(view, &screen, &local, 1);
+            clip.left = std::max(clip.left, screen.left); clip.top = std::max(clip.top, screen.top);
+            clip.right = std::min(clip.right, screen.right); clip.bottom = std::min(clip.bottom, screen.bottom);
+        }
+        caches.push_back({pair.first, pair.second, clip,
+            (!visible || visible(pair.second.owner, 1)) && clip.right >= clip.left && clip.bottom >= clip.top});
+    }
+    std::stable_sort(caches.begin(), caches.end(), [](const Cache& a, const Cache& b) { return a.visible > b.visible; });
+    size_t bytes = 0;
+    unsigned count = 0;
+    for (const Cache& cache : caches) {
+        if (std::streamoff(notes.tellp()) > 3 * 1024 * 1024) { notes << "layout capture limit reached\n"; break; }
+        void* bitmap = cache.bitmap;
+        const Bitmap& info = cache.info;
+        const int width = Field<int>(bitmap, 0xC), height = Field<int>(bitmap, 8);
+        const size_t size = size_t(width) * height * 4;
+        if (width <= 0 || height <= 0 || width > 8192 || height > 8192 || count >= 128 || size + sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) > 24 * 1024 * 1024 - bytes) {
+            notes << "skipped cache " << info.owner << " (capture limit)\n";
+            continue;
+        }
+        char name[32]; std::snprintf(name, sizeof(name), "text-%03u.bmp", count++);
+        BITMAPFILEHEADER header{}; header.bfType = 0x4D42;
+        header.bfOffBits = sizeof(header) + sizeof(BITMAPINFOHEADER); header.bfSize = DWORD(header.bfOffBits + size);
+        BITMAPINFOHEADER image{}; image.biSize = sizeof(image); image.biWidth = width; image.biHeight = -height;
+        image.biPlanes = 1; image.biBitCount = 32; image.biCompression = BI_RGB;
+        std::vector<uint8_t> output(header.bfSize);
+        std::memcpy(output.data(), &header, sizeof(header)); std::memcpy(output.data() + sizeof(header), &image, sizeof(image));
+        for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+            const uint32_t pixel = ReadPixel(bitmap, x, y);
+            std::memcpy(output.data() + header.bfOffBits + (size_t(y) * width + x) * 4, &pixel, 4);
+        }
+        entry(name, output.data(), output.size()); bytes += output.size();
+        void* view = info.owner;
+        notes << name << " view " << view << " logical " << info.width << 'x' << info.height
+              << " physical " << width << 'x' << height << " density " << info.factor
+              << " zoom " << Field<float>(view, 0x28C) << ',' << Field<float>(view, 0x290)
+              << " dirty " << unsigned(Field<uint8_t>(view, 0x288)) << ',' << unsigned(Field<uint8_t>(view, 0x289))
+              << ',' << unsigned(Field<uint8_t>(view, 0x28A)) << '\n';
+        auto rectangle = [&](const char* label, const Rect& r) {
+            notes << "  " << label << ' ' << r.left << ',' << r.top << ',' << r.right << ',' << r.bottom << '\n';
+        };
+        notes << "  visible " << cache.visible << '\n'; rectangle("screen clip", cache.clip);
+        rectangle("frame", Field<Rect>(Field<void*>(view, 0xAC), 0x20));
+        if (void* surface = Field<void*>(view, 0x240)) {
+            rectangle("source", Field<Rect>(surface, 0x14)); rectangle("destination", Field<Rect>(surface, 0x24));
+            const auto& areas = Field<vc10::Vector<void*>>(surface, 0x58);
+            for (size_t i = 0; i < std::min(areas.size(), size_t(128)); ++i) {
+                notes << "  area " << i << '\n';
+                void* area = areas.first[i];
+                rectangle("source", Field<Rect>(area, 0x80)); rectangle("destination", Field<Rect>(area, 0x90));
+                notes << "  enabled " << unsigned(Field<uint8_t>(area, 0x7C)) << '\n';
+                for (size_t vertex = 0; vertex < 4; ++vertex) {
+                    notes << "  xyuv " << Field<float>(area, vertex * 28) << ' ' << Field<float>(area, vertex * 28 + 4)
+                          << ' ' << Field<float>(area, vertex * 28 + 20) << ' ' << Field<float>(area, vertex * 28 + 24) << '\n';
+                }
+            }
+        }
+        const auto& lines = Field<vc10::Vector<int32_t[5]>>(view, 0x260);
+        for (size_t i = 0; i < std::min(lines.size(), size_t(256)); ++i) {
+            notes << "  line " << i;
+            for (int value : lines.first[i]) notes << ' ' << value;
+            notes << '\n';
+        }
+    }
+    const std::string metadata = notes.str(); entry("caches.txt", metadata.data(), metadata.size());
+    const char end[1024]{}; ok &= std::fwrite(end, 1, sizeof(end), file) == sizeof(end);
+    if (std::fclose(file) != 0) ok = false;
+    Log("interface text capture: %s (%u caches, %s)", path, count, ok ? "saved" : "write failed");
+    return ok;
+}
+
 void ForgetTextBitmap(void* bitmap) { g_bitmaps.erase(bitmap); }
 bool FontScalingReady() { return g_enabled; }
 
