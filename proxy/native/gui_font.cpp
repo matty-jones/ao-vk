@@ -32,6 +32,7 @@ using VoidFn = void(__fastcall*)(void*, void*);
 using StringFn = void(__fastcall*)(void*, void*, IPoint*, int, int, int, void*, uint32_t, uint32_t, uint32_t);
 using RectFn = Rect*(__fastcall*)(void*, void*, Rect*);
 using CtorFn = void*(__fastcall*)(void*, void*, int, int, int);
+using SurfaceFn = void*(__fastcall*)(void*, void*, void*, uint32_t);
 using ClearFn = void(__fastcall*)(void*, void*, const IRect*, uint32_t, uint32_t);
 using GlyphFn = void(__fastcall*)(void*, void*, const IPoint*, const void*, uint32_t);
 using CopyFn = void(__fastcall*)(void*, void*, const IRect*, const IPoint*, void*, uint32_t);
@@ -41,6 +42,7 @@ VoidFn g_allocate, g_renderText, g_layout, g_destroy;
 StringFn g_string;
 RectFn g_source;
 CtorFn g_ctor;
+SurfaceFn g_surface;
 ClearFn g_clear;
 GlyphFn g_glyph;
 CopyFn g_copy;
@@ -296,6 +298,12 @@ void* __fastcall CtorHook(void* bitmap, void* edx, int width, int height, int fo
     }
     return g_ctor(bitmap, edx, width, height, format);
 }
+void* __fastcall SurfaceHook(void* surface, void* edx, void* bitmap, uint32_t flags)
+{
+    // Scaled antialiasing needs an RGBA texture, independent of the legacy 16-bit atlas pool.
+    if (g_enabled && g_context.allocating && Target(bitmap)) flags |= 0x40;
+    return g_surface(surface, edx, bitmap, flags);
+}
 void __fastcall DestroyHook(void* bitmap, void* edx) { ForgetTextBitmap(bitmap); g_destroy(bitmap, edx); }
 int Dimension(void* bitmap, IntFn original)
 {
@@ -375,6 +383,7 @@ void __fastcall FontDestroyHook(void* font, void* edx)
 
 struct Entry { const char* name; uint32_t rva; const char* bytes; size_t count; void* target; void** original; };
 Entry g_entries[] = {
+    {"??0ViewSurface_c@@QAE@PAVSpriteInfo_t@@I@Z", 0x1521E5, "", 10, reinterpret_cast<void*>(&SurfaceHook), reinterpret_cast<void**>(&g_surface)},
     {"??1FontInfo_t@@QAE@XZ", 0x12EB82, "", 10, reinterpret_cast<void*>(&FontDestroyHook), reinterpret_cast<void**>(&g_fontDestroy)},
     {"?PreRender@TextRenderer_c@@UAEXPAVRViewPort_t@@MI@Z", 0x163320, "\x55\x8B\xEC\x53\x56", 5, reinterpret_cast<void*>(&PreRenderHook), reinterpret_cast<void**>(&g_preRender)},
     {"?_AllocateBitmap@TextRenderer_c@@AAEXXZ", 0x16095B, "", 10, reinterpret_cast<void*>(&AllocateHook), reinterpret_cast<void**>(&g_allocate)},

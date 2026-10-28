@@ -6,18 +6,51 @@ inline void* g_guiChatFont;
 inline void* __cdecl GuiChatFontSystem() { return g_guiChatFont; }
 inline void* __fastcall GuiChatGetFont(void*, void*, int) { return g_guiChatFont; }
 
+inline void* __fastcall GuiChatMaterial(void* material, void*, int width, int height, void*, int format, char*)
+{
+    std::memset(material, 0, 0x14);
+    std::memcpy(static_cast<uint8_t*>(material) + 8, &width, 4);
+    std::memcpy(static_cast<uint8_t*>(material) + 12, &height, 4);
+    std::memcpy(static_cast<uint8_t*>(material) + 16, &format, 4);
+    return material;
+}
+inline void __fastcall GuiChatMaterialDestroy(void*, void*) {}
+inline int CheckGuiTextAtlas(HMODULE module)
+{
+    auto* bytes = reinterpret_cast<uint8_t*>(module);
+    GuiCheckImport material(reinterpret_cast<void**>(bytes + 0x1A7364), reinterpret_cast<void*>(&GuiChatMaterial));
+    GuiCheckImport destroy(reinterpret_cast<void**>(bytes + 0x1A7380), reinterpret_cast<void*>(&GuiChatMaterialDestroy));
+    using Alloc = void*(__cdecl*)(int, int, uint32_t, int);
+    using Release = void(__thiscall*)(void*);
+    const auto allocate = reinterpret_cast<Alloc>(bytes + 0x153E94);
+    const auto release = reinterpret_cast<Release>(bytes + 0x153E50);
+    void* legacy = allocate(16, 16, 0, 8);
+    void* shared = allocate(16, 16, 0, 2);
+    void* independent = allocate(16, 16, 1, 2);
+    auto pool = [](void* node) { void* p; std::memcpy(&p, static_cast<uint8_t*>(node) + 0xC, 4); return p; };
+    auto format = [&](void* node) {
+        void* texture; std::memcpy(&texture, pool(node), 4);
+        int value; std::memcpy(&value, static_cast<uint8_t*>(texture) + 16, 4); return value;
+    };
+    const bool reproduced = pool(legacy) == pool(shared) && format(shared) == 8 && format(independent) == 2;
+    release(independent); release(shared); release(legacy);
+    std::printf("GUI text atlas: %s\n", reproduced ? "legacy format reuse reproduced; dedicated RGBA retained" : "FAILED");
+    return reproduced ? 0 : 1;
+}
+
 struct GuiChatTexture {
     uint8_t node[0x28]{};
     void* material = this;
     int width, height;
+    bool dedicated; int format;
     std::vector<uint32_t> pixels;
-    GuiChatTexture(int w, int h) : width(w), height(h), pixels(size_t(w) * h) {
+    GuiChatTexture(int w, int h, bool own, int f) : width(w), height(h), dedicated(own), format(f), pixels(size_t(w) * h) {
         void* slot = &material; std::memcpy(node + 0xC, &slot, 4);
     }
 };
 inline std::vector<std::unique_ptr<GuiChatTexture>> g_guiChatTextures;
-inline void* __cdecl GuiChatTextureAlloc(int w, int h, uint32_t, int) {
-    auto texture = std::make_unique<GuiChatTexture>(w, h);
+inline void* __cdecl GuiChatTextureAlloc(int w, int h, uint32_t own, int format) {
+    auto texture = std::make_unique<GuiChatTexture>(w, h, own != 0, format);
     void* node = texture->node; g_guiChatTextures.push_back(std::move(texture)); return node;
 }
 inline void __fastcall GuiChatTextureRef(void*, void*) {}
@@ -48,6 +81,7 @@ inline int CheckGuiChat(HMODULE module, void* controller, void* parent)
     const auto render = reinterpret_cast<Void>(bytes + 0x16142C);
     GuiCheckPatch instance(bytes + 0x26B9, reinterpret_cast<void*>(&GuiChatFontSystem));
     GuiCheckPatch lookup(bytes + 0x12E13F, reinterpret_cast<void*>(&GuiChatGetFont));
+    int failures = CheckGuiTextAtlas(module);
     GuiCheckPatch allocation(bytes + 0x153E94, reinterpret_cast<void*>(&GuiChatTextureAlloc));
     GuiCheckPatch release(bytes + 0x153E50, reinterpret_cast<void*>(&GuiChatTextureRef));
     GuiCheckPatch reference(bytes + 0x153BA8, reinterpret_cast<void*>(&GuiChatTextureRef));
@@ -62,7 +96,6 @@ inline int CheckGuiChat(HMODULE module, void* controller, void* parent)
     using Frame = void(__thiscall*)(void*, const Rect*, uint32_t);
     const auto preRender = reinterpret_cast<PreRender>(bytes + 0x163320);
     const auto setFrame = reinterpret_cast<Frame>(GetProcAddress(module, "?SetFrame@View@@UAEXABVRect@@_N@Z"));
-    int failures = 0;
     std::printf("GUI.dll: checking native chat line bounds\n");
     for (int size : {9, 12, 13, 14, 16}) {
         alignas(16) uint8_t font[0x1418]{};
@@ -134,6 +167,10 @@ inline int CheckGuiChat(HMODULE module, void* controller, void* parent)
             preRender(text, nullptr, 0, 0xFFFFFFFF);
             void* bitmap; std::memcpy(&bitmap, text + 0x248, 4);
             int rows = 0; if (bitmap) std::memcpy(&rows, static_cast<uint8_t*>(bitmap) + 8, 4);
+            void* surface; std::memcpy(&surface, text + 0x240, 4);
+            const auto& areas = *reinterpret_cast<rnative::vc10::Vector<void*>*>(static_cast<uint8_t*>(surface) + 0x58);
+            if (areas.size() != 1) ++failures;
+            for (const auto& texture : g_guiChatTextures) if (texture->format != 2 || !texture->dedicated) ++failures;
             if (rows < int(std::ceil(height * factor))) ++failures;
             for (int width : {300, 220, 511}) {
                 const Rect resized{0, 0, float(width), preferred.y};

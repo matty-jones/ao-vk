@@ -53,3 +53,11 @@ the software-Vulkan validation run retains the known device-extension dependency
 Local 4K gameplay review confirmed clean text without clipping after this correction. Native and renderer
 fixtures do not establish the result of every skin/control combination. Browser-rendered text and other
 external images continue to use their own rasterizers.
+
+## Texture storage follow-up
+
+A later NPC capture showed the complete clipped sentence in its CPU bitmap. The native shared atlas can reuse a
+one-bit-alpha pool for an RGBA request, discarding antialiased coverage after rasterization. Enlarged text now uses
+an independent RGBA surface, retaining its alpha and avoiding internal tile seams. Font metrics, character
+placement and 100% rendering are unchanged. Native allocator and cache/upload checks, together with a GPU
+alpha-row probe, cover the format boundary.
