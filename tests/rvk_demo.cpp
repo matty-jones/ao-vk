@@ -4823,13 +4823,15 @@ int RunUiAtlasTest(D& dev, const std::string& shot)
                 {left - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, low, high},
                 {left + size - .5f, top + size - .5f, 0, 1, 0xFFFFFFFF, high, high}};
             dev.SetTexture(0, row == 2 ? reference : atlas);
+            VtxRhwDiffuseTex nativeQuad[4];
+            for (int i = 0; i < 4; ++i) { nativeQuad[i] = quad[i]; nativeQuad[i].rhw = column % 2 ? 100.0f : 1.0f; }
             if (row == 1) {
-                if (column % 3 == 0) dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, quad, 4);
+                if (column % 3 == 0) dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, nativeQuad, 4);
                 else if (column % 3 == 1) {
                     const uint16_t indices[]{0, 1, 2, 2, 1, 3};
-                    dev.DrawIndexedPrimitive(TriangleList, kFvfRhwDiffuseTex, quad, 4, indices, 6);
+                    dev.DrawIndexedPrimitive(TriangleList, kFvfRhwDiffuseTex, nativeQuad, 4, indices, 6);
                 } else {
-                    const VtxRhwDiffuseTex triangles[]{quad[0], quad[1], quad[2], quad[2], quad[1], quad[3]};
+                    const VtxRhwDiffuseTex triangles[]{nativeQuad[0], nativeQuad[1], nativeQuad[2], nativeQuad[2], nativeQuad[1], nativeQuad[3]};
                     dev.DrawPrimitive(TriangleList, kFvfRhwDiffuseTex, triangles, 6);
                 }
             } else {

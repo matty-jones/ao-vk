@@ -17,6 +17,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Scaled icons no longer bypass the texture-edge fix on the client's native drawing path.
 - Small scaled letters retain their natural stroke widths and descenders; bitmap-font letters use fresh outlines.
   Login and character-selection windows keep their native screen layout regardless of saved gameplay UI scales.
 - At 100%/100%, scaling skips its per-frame window hierarchy rebuild. Empty text no longer repeatedly requests

@@ -57,6 +57,53 @@ New CPU labels are `game: UI scaling`, `game: UI drawing`, `game: UI cached` and
 Font raster time is nested inside UI drawing; do not add both. Drawing includes native controller work and
 renderer submission, not just our hooks. Averages include frames where a named section does no work.
 
+## Local follow-up: enabled scaling and startup bypass
+
+The supplied `ui-scaling-on.log` and `ui-scaling-off.log` contain one completed UI sweep each. The off file
+includes the on file as an exact prefix, plus the later disabled session; the repeated historical measurements
+were excluded. Startup markers confirm coordinate/font hooks installed for the enabled sweep and explicitly
+uninstalled for the disabled sweep. Both have saved scales 150/150, UI refresh 30 Hz and frame generation off.
+All 329 logged Renderer settings match between these sessions.
+
+| Actual mode | FPS | UI mapping CPU (ms/frame) | UI drawing CPU (ms/frame) | Broad interface CPU (ms/frame) | Interface GPU (ms/frame) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Enabled, 100/100 | 81.3 | 0.00 | 0.44 | 0.46 | 0.13 |
+| Enabled, 150/150 | 80.7 | 0.10 | 0.59 | 0.71 | 0.19 |
+| Enabled, 200/200 | 78.9 | 0.11 | 0.77 | 0.90 | 0.26 |
+| Hooks disabled, native size (step labelled 100/100) | 93.8 | 0.00 | 0.33 | 0.36 | 0.12 |
+
+These are warm averages over 299 frames, including cached frames at the 30 Hz interface rate. A printed 0.00
+means below the log's precision, not zero cost. No `game: UI font raster` interval appears in these sweep
+summaries: they do not measure cold font generation or the initial scale-change spike.
+
+Within the enabled session, moving from 100% to 150% increases the broad UI CPU interval by 0.25 ms/frame;
+200% increases it by 0.44 ms/frame. Mapping itself accounts for about 0.10–0.11 ms/frame at enlarged sizes.
+The measured GPU interface interval rises by 0.06/0.13 ms respectively. These CPU/GPU intervals overlap and
+must not be added. There is also drift: the same saved 150% baseline changes from 80.9 to 78.8 FPS, so the
+small FPS differences between scale steps cannot be attributed entirely to scaling.
+
+The raw 81.3-versus-93.8 FPS comparison does not isolate installed-hook overhead. At the matching labelled
+100% step, the enabled session submits 2,911 draws/frame versus 1,403 disabled, with 2,650 versus 1,194 draws
+from shared buffers and 22 versus 13 skinned draws. Game scene-list work is 7.03 versus 3.26 ms/frame; point
+scan is 0.88 versus 0.46 ms/frame. World workload had already fallen to roughly 1,460 draws/frame later in the
+enabled log, before hooks were disabled. The logs establish different captured workloads, not the reason for
+that difference. The 0.10 ms broad UI difference at native size is an observation, not an isolated hook-cost estimate.
+
+These sweeps show modest steady-state enlargement cost in their captured scene and do not reproduce the
+original 35–40 FPS slowdown. They do not prove zero overhead, establish an exact hook-only FPS penalty, or
+isolate overlay-separation cost. Further performance sign-off needs matched world workload; visual sign-off
+also remains open after the reported icon regression.
+These measurements describe the build before the native-depth atlas correction below. That correction activates
+vertex conversion and fragment bounds for previously rejected draws; its additional cost is not measured by these logs.
+
+The icon report exposed a concrete coverage gap: `UiAtlasVertices` required reciprocal depth exactly 1, while
+actual GUI.dll `_UpdateVertices` output uses 100. That rejected real GUI quads before fragment edge clamping.
+The helper now accepts any finite positive depth shared by the quad, preserving all original vertex values,
+and still rejects varying reciprocal depth. Native checks feed actual generated vertices into that helper;
+Vulkan tests exercise reciprocal depths 1 and 100 across indexed lists, non-indexed lists and strips. Both
+passed, with the protected pattern matching the isolated reference. The client's final icon appearance still
+needs a gameplay check after rebuilding; `profileui` itself does not persist its temporary scale changes.
+
 ## Controlled local comparison
 
 1. Build the branch, keep resolution, camera, zone, open windows, skin, graphics settings and `RVK_UiRate` fixed.

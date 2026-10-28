@@ -97,6 +97,8 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
   foreign edge pixels; guarded UI quads must match an isolated patterned texture, including bottom rows and thin
   strokes. A draw outside the interface checks that normal mip
   sampling is restored. Immediate and threaded rendering exercise the sampler cache boundary.
+- Atlas protection is checked directly against vertices produced by the client's native `_UpdateVertices` function.
+  Those vertices use reciprocal depth 100; the renderer test covers both 1 and 100 without changing their UV mapping.
 - The full native comparison against the client's original renderer passed with zero failures. Generated settings
   documentation and whitespace checks passed.
 

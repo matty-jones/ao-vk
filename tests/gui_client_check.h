@@ -8,6 +8,7 @@
 #include "native/gui_font.h"
 #include "native/vc10.h"
 #include "native/native.h"
+#include "../rvk/ui_atlas.h"
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
@@ -308,6 +309,20 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
         }
         check(sameUv, "clipped atlas mapping is unchanged by UI scaling");
         check(correctPositions, "clipped vertices scale with their half-pixel convention intact");
+        std::vector<rvk::detail::UiAtlasVertex> guarded;
+        check(rvk::detail::UiAtlasVertices(area.bytes, 4, 4, 256, 256, guarded),
+              "atlas protection accepts actual native GUI vertices, including reciprocal depth 100");
+        if (guarded.size() == 4) {
+            const auto* original = reinterpret_cast<const rvk::detail::UiSourceVertex*>(area.bytes);
+            check(original[0].rhw == 100.0f, "native GUI fixture uses its actual reciprocal depth");
+            for (int i = 0; i < 4; ++i)
+                check(guarded[i].rhw == original[i].rhw && guarded[i].u == original[i].u && guarded[i].v == original[i].v,
+                      "native atlas protection preserves depth and UV mapping");
+            rvk::detail::UiSourceVertex perspective[4];
+            std::memcpy(perspective, original, sizeof(perspective)); perspective[1].rhw *= 0.5f;
+            check(!rvk::detail::UiAtlasVertices(perspective, 4, 4, 256, 256, guarded),
+                  "atlas protection rejects quads whose reciprocal depth varies");
+        }
     }
     // Slider changes leave the native frames used by preferences untouched.
     const Rect edge{3500, 1900, 3799, 2099};

@@ -20,11 +20,13 @@ inline bool UiAtlasVertices(const void* input, uint32_t count, uint32_t corners,
     const auto* source = static_cast<const UiSourceVertex*>(input);
     output.resize(count);
     for (uint32_t first = 0; first < count; first += corners) {
+        const float rhw = source[first].rhw;
+        if (!std::isfinite(rhw) || rhw <= 0) return false;
         float left = source[first].x, right = left, top = source[first].y, bottom = top;
         float u0 = source[first].u, u1 = u0, v0 = source[first].v, v1 = v0;
         for (uint32_t i = first; i < first + corners; ++i) {
             const auto& v = source[i];
-            if (v.rhw != 1 || !std::isfinite(v.x + v.y + v.u + v.v)) return false;
+            if (v.rhw != rhw || !std::isfinite(v.x + v.y + v.u + v.v)) return false;
             left = std::min(left, v.x); right = std::max(right, v.x);
             top = std::min(top, v.y); bottom = std::max(bottom, v.y);
             u0 = std::min(u0, v.u); u1 = std::max(u1, v.u);
