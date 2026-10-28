@@ -127,3 +127,11 @@ not changed. Software Vulkan exposes only one queue, so hardware frame generatio
 reports the existing external-memory extension dependency validation error
 `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`. QEMU/Wine helper teardown can report a signal after
 successful native checks. Actual DLSS integration remains future work.
+
+## Input follow-up
+
+At 150%/150%, the Programs panel could draw outside its sidebar host but fail the native window search's final
+parent-bounds check. That input call site now includes the displayed descendants. Layout still reads native bounds.
+Popup menus take physical cursor positions, while their placement and screen clamp use logical units. Their
+separate global mouse-down check now compares the displayed frame, preventing cancellation before item activation.
+Native checks exercise the actual window search and popup placement, dismissal, mouse-down and mouse-up methods.

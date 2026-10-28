@@ -20,6 +20,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Scaled sidebar panels accept clicks throughout their displayed area. Item context menus open at the cursor
+  and accept selections inside their scaled frame.
 - Pinned sidebar panels scale as one column, so opening, closing or expanding panels preserves their stacking
   without overlap. The PF map's tiles, markers and outlines now scale with its frame and controls.
 - Enlarged text uses a shared baseline and fits the available line height, preserving descenders in tight HUD
