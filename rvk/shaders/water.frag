@@ -87,12 +87,14 @@ float SunShadow(vec3 posW)
 }
 
 // The ripples' slope (dh/dx, dh/dz) at a world point: two layers of the detail texture drifting across each other.
-vec2 Ripples(vec2 xz, float t)
+// (Drifting by W.drift - the wind's direction x its clock added up a frame at a time - and the same turned left: as
+// direction x clock, the wind turning jumped them by whole tiles at once.)
+vec2 Ripples(vec2 xz)
 {
-    vec2 wd = W.wind.xy, wp = vec2(-wd.y, wd.x);
-    vec2 a = texture(detail, xz * 0.11 + wd * (t * 0.021)).rg * 2.0 - 1.0;
-    vec2 b = texture(detail, xz * 0.037 - wp * (t * 0.011) + vec2(0.37, 0.71)).rg * 2.0 - 1.0;
-    vec2 c = texture(detail, xz * 0.29 + (wd + wp) * (t * 0.035) + vec2(0.13, 0.53)).rg * 2.0 - 1.0;
+    vec2 d = W.drift.xy, dp = vec2(-d.y, d.x);
+    vec2 a = texture(detail, xz * 0.11 + d * 0.021).rg * 2.0 - 1.0;
+    vec2 b = texture(detail, xz * 0.037 - dp * 0.011 + vec2(0.37, 0.71)).rg * 2.0 - 1.0;
+    vec2 c = texture(detail, xz * 0.29 + (d + dp) * 0.035 + vec2(0.13, 0.53)).rg * 2.0 - 1.0;
     return a * 0.55 + b * 0.75 + c * 0.3;
 }
 
@@ -296,7 +298,7 @@ void main()
     // patches racing across the water ahead of the wind.
     float gustHere = W.storm.x > 0.0 ? Gust(WindAxes(vPos.xz, W.wind.xy, W.storm.zw), W.time.x) : 0.0;
     float rough = 1.0 + W.storm.x * (0.4 + 2.2 * gustHere * min(W.storm.y, 2.0) / 2.0);
-    vec2 slope = mesh || rippleFade <= 0.0 ? vec2(0.0) : Ripples(vPos.xz, t) * (W.look2.z * 0.22 * rippleFade * rough);
+    vec2 slope = mesh || rippleFade <= 0.0 ? vec2(0.0) : Ripples(vPos.xz) * (W.look2.z * 0.22 * rippleFade * rough);
     // Characters in the water disturb the surface around them (the simulated field: wakes, bow waves, their rings).
     vec3 disturb = vec3(0.0);
     if (!mesh && W.ripple.x > 0.5 && rippleFade > 0.0)

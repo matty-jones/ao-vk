@@ -2750,6 +2750,13 @@ private:
     float m_rainWet = 1.0f;                      // RVK_RainWet: the wet ground and the puddles, x
     // The shared wind (wind.cpp UpdateWind, read through Wind()): every swaying, falling and drifting thing's.
     float m_windDir[2] = {0.848f, 0.530f};       // where it blows (world x, z, unit)
+    // The water's swell: the wind's direction eased over a minute (in a storm the game's wind swings tens of degrees
+    // every few seconds; the waves turned with it, sliding about). Its frame as the wind's (SwellFrame).
+    float m_swellDir[2] = {0.848f, 0.530f};
+    double m_swellOffset[2] = {0.0, 0.0};
+    // The water's ripples' drift: the wind's direction x its clock, added up a frame at a time (as direction x clock,
+    // a turn of the wind jumped them by whole tiles of the pattern).
+    double m_rippleDrift[2] = {0.0, 0.0};
     float m_windStrength = 1.0f;                 // x the sway: 1 calm .. ~3 in a full storm
     float m_windGusts = 1.0f;                    // x RVK_GrassGusts: stronger gust fronts in storms
     float m_storm = 0.0f;                        // 0 .. 1: how stormy (the rain, eased)
@@ -3280,6 +3287,8 @@ private:
     void WindFrame(float out[4]) const;
     // (along, across) of a world x, z in it (as WindAxes).
     void WindAxes(float x, float z, float out[2]) const;
+    // The swell's direction (xy) and its frame (zw, as WindFrame's xy), and the ripples' drift (xy, wrapped).
+    void SwellFrame(float out[4]) const;
     double m_windPivot[2] = {0.0, 0.0}, m_windOffset[2] = {0.0, 0.0};
     bool m_windPivotSet = false;
     double m_windTime = 0.0, m_windTimePrev = 0.0;   // this frame's and last frame's (set at the frame's start)

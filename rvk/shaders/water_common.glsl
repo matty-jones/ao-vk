@@ -41,6 +41,8 @@ layout(set = 0, binding = 0) uniform WaterFrame {
     vec4 surface;       // the surface from the game's triangles (W.time.z 2, water_surface.*): x the waves' height before
                         // each body's size (RVK_WaterWaves, the storm); y, z an edge's segment length near and per unit
                         // of distance (RVK_WaterQual); w the most segments an edge is split into
+    vec4 swell;         // the waves' direction (xy: the wind's, eased over a minute) and frame (zw, as FL.windFrame)
+    vec4 drift;         // xy: the ripples' drift (the wind's direction x its clock, added up; wrapped at 1000)
 } W;
 
 // A fall's foot (rvk/water.cpp m_waterFoot): a segment of where it meets the pool - a: x0 y0 z0 x1; b: y1 z1, the way
@@ -138,10 +140,12 @@ vec3 Waves(vec2 xz, float t, float spacing, float scale, float wavelength, out v
     vec3 offset = vec3(0.0);
     vec3 sum = vec3(0.0);                       // -dX, dY (for the normal's y), -dZ
     float steep = 0.0;
-    vec2 wd = W.wind.xy;
-    // The place in the wind's frame (wind.glsl WindAxes; turned about a pivot near the camera, not the world's origin -
+    // (Along the swell, not the wind itself: in a storm the game's wind swings tens of degrees every few seconds, and
+    // the waves turning with it slid about.)
+    vec2 wd = W.swell.xy;
+    // The place in the swell's frame (wind.glsl WindAxes; turned about a pivot near the camera, not the world's origin -
     // a swing of the wind's direction raced the waves about): dot(d, xz) = cos(angle) along + sin(angle) across.
-    vec2 aa = vec2(dot(xz, wd), dot(xz, vec2(-wd.y, wd.x))) + FL.windFrame.xy;
+    vec2 aa = vec2(dot(xz, wd), dot(xz, vec2(-wd.y, wd.x))) + W.swell.zw;
     for (int i = 0; i < kWaves; ++i) {
         float L = lambda[i] * wavelength;
         float fade = 1.0 - smoothstep(L * 0.18, L * 0.4, spacing);

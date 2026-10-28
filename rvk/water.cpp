@@ -122,6 +122,8 @@ struct WaterFrame {
     float surface[4];                            // the surface from the game's triangles: x the waves' height before
                                                  // each body's size; y, z an edge's segment length near and per unit of
                                                  // distance; w the most segments an edge is split into
+    float swell[4];                              // the waves' direction (xy) and frame (zw): wind.cpp SwellFrame
+    float drift[4];                              // xy: the ripples' drift (wind.cpp m_rippleDrift)
 };
 
 // A fall's foot as the grid's foam and the spray read it (binding 2; water_common.glsl FootSegment): a segment of where
@@ -1783,6 +1785,9 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
         wf.storm[2] = frame[0];
         wf.storm[3] = frame[1];
     }
+    SwellFrame(wf.swell);
+    wf.drift[0] = float(m_rippleDrift[0]);
+    wf.drift[1] = float(m_rippleDrift[1]);
     wf.wind[3] = 0.35f + 0.65f * body;
     // The surface's waves: each body's size scales them (its vertices carry it); its edges split to about the grid's
     // spacing at that distance (2 pi / its segments), a fifth of a unit up close, 64 segments at most.

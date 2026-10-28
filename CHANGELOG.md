@@ -114,6 +114,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- In storms, water no longer jerks about: the waves follow a slow swell instead of every swing of the storm's wind,
+  and the small ripples no longer jump when the wind veers.
 - Forests next to water no longer cost far more than other forests: the trees drawn after a pond or river were
   shaded once for every layer of leaves (about 46 fps under a Newland tree, where a forest without water stays fast).
   `RVK_PrepassMore` (ini only) switches the fix off for comparison.
