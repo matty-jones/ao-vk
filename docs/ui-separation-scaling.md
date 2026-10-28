@@ -1,7 +1,8 @@
 # Interface separation and scaling
 
-Local gameplay testing confirmed usable compass/icon scaling and retained positions across scale round trips.
-The next text, login and performance corrections still need a gameplay check. See the
+Local gameplay testing confirmed usable compass/icon scaling, retained positions across scale round trips and
+stable release-to-apply Preferences. Text baselines, bottom clipping and spacing remain open. See the
+[current stocktake and neural-rendering roadmap](neural-rendering-roadmap.md), the
 [investigation](ui-scaling-investigation.md) and [performance audit](ui-scaling-performance-audit.md) for evidence
 and the controlled local comparison.
 

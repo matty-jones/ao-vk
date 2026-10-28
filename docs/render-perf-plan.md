@@ -1,5 +1,8 @@
 # Frame rate plan: upscaling, deferred point lights, and what else is left
 
+The technique verdicts below record the earlier performance investigation. For the 2026-10-28 DLSS 5 status,
+32-bit integration constraints and current next steps, see the [neural-rendering roadmap](neural-rendering-roadmap.md).
+
 Status: Phase 0 done. Phase 1 (upscaling) built 2026-10-20 on main: `RVK_RenderScale` (default 100) staged as
 `randy31-renderscale1.dll` for the in-game check; 1a-1c and the mip bias are in, 1d's demo checks done (results under
 Phase 1). In game at night 75% gives 101 -> ~125 fps and makes
