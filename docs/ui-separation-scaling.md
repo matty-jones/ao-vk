@@ -1,7 +1,8 @@
 # Interface separation and scaling
 
 Local gameplay testing confirmed usable compass/icon scaling, retained positions across scale round trips and
-stable release-to-apply Preferences. Text baselines, bottom clipping and spacing remain open. See the
+stable release-to-apply Preferences. The font baseline, line-height and spacing correction now passes extended
+native client checks and awaits gameplay review. See the [font correction](ui-font-metrics.md), the
 [current stocktake and neural-rendering roadmap](neural-rendering-roadmap.md), the
 [investigation](ui-scaling-investigation.md) and [performance audit](ui-scaling-performance-audit.md) for evidence
 and the controlled local comparison.
@@ -49,16 +50,20 @@ addresses and entry instructions before patching. Unknown builds remain at 100% 
 object layout or allocation size changes. The earlier [source audit](ui-rendering-audit.md) is preserved separately.
 
 GUI text above 100% uses a larger RGBA bitmap and new outline glyphs at the requested scale, including any native
-text zoom. Glyphs retain natural outline widths rather than squeezing each character into its native advance.
+text zoom. One physical font cell fits the scaled logical line height, with a common baseline for every glyph.
+A single font-wide horizontal transform follows the original font's average cell width, preserving explicit
+bitmap-glyph spacing rather than enlarging it into the letter shapes. No glyph is moved or squeezed individually.
 The text renderer's
-native font metrics and line layout stay unchanged; only its private raster cache changes resolution. Texture
+native logical font metrics and line layout stay unchanged; only its private raster cache changes resolution. Texture
 sampling sees the complete larger image, while layout sees the original logical dimensions. Selection,
 underlines, inline bitmaps and shadows use the same cache mapping. Returning to 100% rebuilds the native cache.
 TrueType faces and styles are cloned from the original GUI font; legacy bitmap fonts use Verdana as an outline
 fallback, retaining their logical advances. Glyphs with no scalable outline retain their source bitmap. The
 separate world-label, floating-text, cursor and console/readout paths do not enter this cache.
 
-The font entry group and GUI import slots are checked before activation. The log reports
+Scaled font caches are also released when the owning native font is destroyed, so a reused font address cannot
+inherit another face's metrics. Empty outline glyphs retain their native advances without allocating temporary
+bitmap fallbacks. The font entry group and GUI import slots are checked before activation. The log reports
 `interface fonts: display-resolution text cache hooked` on success. Font/glyph caches are bounded and released
 with their owning resources. Embedded browser text and other externally rendered images keep their own raster
 paths; this correction covers native GUI text.

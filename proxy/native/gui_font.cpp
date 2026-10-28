@@ -43,6 +43,7 @@ ClearFn g_clear;
 GlyphFn g_glyph;
 CopyFn g_copy;
 IntFn g_width, g_height;
+VoidFn g_fontDestroy;
 
 struct Font;
 struct Context { void* view = nullptr; float factor = 1; void* font = nullptr; bool allocating = false, source = false, created = false; Font* raster = nullptr; };
@@ -74,14 +75,37 @@ struct Font {
     HDC dc = nullptr;
     HGDIOBJ previous = nullptr;
     TEXTMETRICA metrics{};
-    int cellHeight = 0;
+    int baseline = 0;
+    MAT2 transform{};
+    void* owner = nullptr;
     uint64_t used = 0;
     std::unordered_map<uint64_t, Glyph> glyphs;
     ~Font() { if (dc) { if (previous) SelectObject(dc, previous); DeleteDC(dc); } if (handle) DeleteObject(handle); }
 };
 std::unordered_map<std::string, std::unique_ptr<Font>> g_fonts;
 uint64_t g_fontUse;
+uint32_t g_fontNotes;
 std::unordered_map<void*, float> g_attempts;
+
+int BitmapCellWidth(void* info, uint32_t character)
+{
+    void* map = Field<void*>(info, 0x1004);
+    if (!map) return 0;
+    void* head = Field<void*>(map, 4);
+    if (!head) return 0;
+    // Read the existing VC10 glyph tree without generating missing glyphs.
+    for (void* node = Field<void*>(head, 4); node && node != head;) {
+        const uint32_t key = Field<uint32_t>(node, 0xC);
+        if (key != character) { node = Field<void*>(node, character < key ? 0 : 8); continue; }
+        void* glyph = Field<void*>(node, 0x10);
+        if (!glyph) return 0;
+        const int width = Field<int16_t>(glyph, 0xE);
+        if (width >= 0) return std::min(width, int(Field<int16_t>(glyph, 0x12)));
+        void* image = Field<void*>(glyph, 0x14);
+        return image ? Field<int>(image, 0xC) : 0;
+    }
+    return 0;
+}
 
 Font* RasterFont(void* info, float factor)
 {
@@ -92,14 +116,14 @@ Font* RasterFont(void* info, float factor)
         description.lfWeight = FW_NORMAL;
         std::strcpy(description.lfFaceName, "Verdana");
     }
-    if (!description.lfHeight) description.lfHeight = std::max(1, Field<int>(info, 0xFF0));
-    description.lfHeight = Pixel(description.lfHeight * factor);
+    description.lfHeight = std::max(1, int(std::floor(Field<int>(info, 0xFF0) * factor)));
     description.lfWidth = Pixel(description.lfWidth * factor);
     description.lfQuality = ANTIALIASED_QUALITY;
     std::string key(reinterpret_cast<const char*>(&description), sizeof(description));
     key.append(reinterpret_cast<const char*>(&factor), sizeof(factor));
-    const int cellHeight = std::max(1, int(std::ceil(Field<int>(info, 0xFF0) * factor)));
-    key.append(reinterpret_cast<const char*>(&cellHeight), sizeof(cellHeight));
+    key.append(reinterpret_cast<const char*>(&info), sizeof(info));
+    const int overhang = Field<int>(info, 0x1014);
+    key.append(reinterpret_cast<const char*>(&overhang), sizeof(overhang));
     if (auto it = g_fonts.find(key); it != g_fonts.end()) { it->second->used = ++g_fontUse; return it->second.get(); }
     if (g_fonts.size() >= 64) {
         auto oldest = std::min_element(g_fonts.begin(), g_fonts.end(), [](const auto& a, const auto& b) { return a.second->used < b.second->used; });
@@ -112,7 +136,32 @@ Font* RasterFont(void* info, float factor)
     if (!font->dc) return nullptr;
     font->previous = SelectObject(font->dc, font->handle);
     if (!GetTextMetricsA(font->dc, &font->metrics)) return nullptr;
-    font->cellHeight = cellHeight; font->used = ++g_fontUse;
+    int nativeWidth = 0, outlineWidth = 0, count = 0;
+    HDC nativeDc = original ? CreateCompatibleDC(nullptr) : nullptr;
+    HGDIOBJ previous = nativeDc ? SelectObject(nativeDc, original) : nullptr;
+    for (WCHAR c : std::wstring(L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")) {
+        SIZE native{}, extent{};
+        int width = nativeDc && GetTextExtentPoint32W(nativeDc, &c, 1, &native) ?
+                    std::max(0, std::min(int(native.cx), 32) - overhang) : 0;
+        if (!original) width = BitmapCellWidth(info, c);
+        if (width > 0 && GetTextExtentPoint32W(font->dc, &c, 1, &extent) && extent.cx > 0) {
+            nativeWidth += width; outlineWidth += extent.cx; ++count;
+        }
+    }
+    if (nativeDc) { SelectObject(nativeDc, previous); DeleteDC(nativeDc); }
+    // Fit the font as a whole to native advances; never squeeze individual letters.
+    const float horizontal = count >= 8 ? float(nativeWidth) * factor / float(outlineWidth) : 1;
+    const int fixed = Pixel(horizontal * 65536);
+    font->transform.eM11.value = SHORT(fixed >> 16); font->transform.eM11.fract = WORD(fixed);
+    font->transform.eM22.value = 1;
+    font->baseline = font->metrics.tmAscent;
+    font->owner = info; font->used = ++g_fontUse;
+    if (g_fontNotes++ < 16) {
+        char face[LF_FACESIZE]{}; GetTextFaceA(font->dc, LF_FACESIZE, face);
+        Log("interface font: %s, %s cell %d at %.2fx, raster %ld/%ld/%ld (height/ascent/descent), pitch %.3f", face,
+            original ? "TrueType" : "bitmap fallback", Field<int>(info, 0xFF0), factor,
+            font->metrics.tmHeight, font->metrics.tmAscent, font->metrics.tmDescent, horizontal);
+    }
     Font* result = font.get();
     g_fonts.emplace(key, std::move(font));
     return result;
@@ -128,18 +177,17 @@ const Glyph* RasterGlyph(Font& font, uint32_t character)
     WORD glyphIndex = 0xFFFF;
     if (GetGlyphIndicesW(font.dc, &code, 1, &glyphIndex, GGI_MARK_NONEXISTING_GLYPHS) == GDI_ERROR || glyphIndex == 0xFFFF)
         return nullptr;
-    MAT2 transform{};
-    transform.eM11.value = transform.eM22.value = 1;
     GLYPHMETRICS metrics{};
-    const DWORD bytes = GetGlyphOutlineW(font.dc, character, GGO_GRAY8_BITMAP, &metrics, 0, nullptr, &transform);
+    const DWORD bytes = GetGlyphOutlineW(font.dc, character, GGO_GRAY8_BITMAP, &metrics, 0, nullptr, &font.transform);
     if (bytes == GDI_ERROR || bytes > 1024 * 1024) return nullptr;
+    if (!bytes) return &font.glyphs.emplace(key, Glyph{}).first->second;
     std::vector<uint8_t> pixels(bytes);
-    if (bytes && GetGlyphOutlineW(font.dc, character, GGO_GRAY8_BITMAP, &metrics, bytes, pixels.data(), &transform) == GDI_ERROR)
+    if (bytes && GetGlyphOutlineW(font.dc, character, GGO_GRAY8_BITMAP, &metrics, bytes, pixels.data(), &font.transform) == GDI_ERROR)
         return nullptr;
     Glyph glyph;
     glyph.width = int(metrics.gmBlackBoxX); glyph.height = int(metrics.gmBlackBoxY);
     glyph.x = metrics.gmptGlyphOrigin.x;
-    glyph.y = std::clamp(int(font.metrics.tmAscent - metrics.gmptGlyphOrigin.y), 0, std::max(0, font.cellHeight - glyph.height));
+    glyph.y = font.baseline - metrics.gmptGlyphOrigin.y;
     glyph.coverage.resize(size_t(glyph.width) * glyph.height);
     const size_t stride = (size_t(glyph.width) + 3) & ~size_t(3);
     if (stride * glyph.height > pixels.size()) return nullptr;
@@ -315,8 +363,17 @@ void __fastcall PreRenderHook(void* view, void* edx, void* viewport, float time,
     } else g_attempts.erase(view);
 }
 
+void __fastcall FontDestroyHook(void* font, void* edx)
+{
+    for (auto it = g_fonts.begin(); it != g_fonts.end();) {
+        if (it->second->owner == font) it = g_fonts.erase(it); else ++it;
+    }
+    g_fontDestroy(font, edx);
+}
+
 struct Entry { const char* name; uint32_t rva; const char* bytes; size_t count; void* target; void** original; };
 Entry g_entries[] = {
+    {"??1FontInfo_t@@QAE@XZ", 0x12EB82, "", 10, reinterpret_cast<void*>(&FontDestroyHook), reinterpret_cast<void**>(&g_fontDestroy)},
     {"?PreRender@TextRenderer_c@@UAEXPAVRViewPort_t@@MI@Z", 0x163320, "\x55\x8B\xEC\x53\x56", 5, reinterpret_cast<void*>(&PreRenderHook), reinterpret_cast<void**>(&g_preRender)},
     {"?_AllocateBitmap@TextRenderer_c@@AAEXXZ", 0x16095B, "", 10, reinterpret_cast<void*>(&AllocateHook), reinterpret_cast<void**>(&g_allocate)},
     {"?_RenderText@TextRenderer_c@@AAEXXZ", 0x16142C, "", 10, reinterpret_cast<void*>(&RenderTextHook), reinterpret_cast<void**>(&g_renderText)},

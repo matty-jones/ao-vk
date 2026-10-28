@@ -12,6 +12,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   Font and layout corrections have native regression coverage; broader gameplay validation is pending.
 
 ### Diagnostics
+- The renderer log records the first 16 scaled font-cache creations, including face, cell height, baseline metrics
+  and spacing, to help identify differences between UI fonts.
 - Ground frame dumps report pass classification, native patch submissions and frustum rejections, including why the
   original terrain was preserved. The log records each reason once per playfield.
 - `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
@@ -19,6 +21,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Enlarged text uses a shared baseline and fits the available line height, preserving descenders in tight HUD
+  controls. Font-wide spacing follows the original font without shifting or squeezing individual letters.
 - F10 ground detail and `RVK_GroundRange` keep controlling the original terrain when native ground falls back or is
   switched off. Native ground no longer leaves a tiny detail ring or low-resolution far textures behind.
 - Terrain no longer disappears when native ground cannot replace a pass. Unrecognised passes, missing textures

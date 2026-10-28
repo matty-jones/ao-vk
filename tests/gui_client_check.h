@@ -651,19 +651,27 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
     }
     fontDtor(fontInfo);
     std::printf("GUI.dll: checking small-font strokes and descenders\n");
-    for (int size : {9, 12, 16}) {
+    for (int size : {6, 8, 9, 12, 16}) for (int style = 0; style < 4; ++style) {
         std::memset(fontInfo, 0, sizeof(fontInfo)); fontCtor(fontInfo);
-        description.lfHeight = -size;
+        description.lfHeight = style == 0 ? -size : size;
+        description.lfWeight = style == 2 ? FW_BOLD : FW_NORMAL; description.lfItalic = style == 3;
         HFONT original = CreateFontIndirectA(&description);
         HDC reference = CreateCompatibleDC(nullptr);
         HGDIOBJ previous = SelectObject(reference, original);
         GetTextMetricsA(reference, &metrics);
-        rawPut(fontInfo, 0x1018, original); rawPut(fontInfo, 0xFFC, uint8_t(1)); rawPut(fontInfo, 0xFF0, int(metrics.tmHeight));
-        for (float factor : {1.5f, 1.76f, 2.0f}) {
-            LOGFONTA scaled = description;
-            scaled.lfHeight = int(std::lround(scaled.lfHeight * factor)); scaled.lfQuality = ANTIALIASED_QUALITY;
-            HFONT outline = CreateFontIndirectA(&scaled); SelectObject(reference, outline);
-            for (char character : std::string("ilWMgjpy")) {
+        rawPut(fontInfo, 0x1018, original); rawPut(fontInfo, 0xFFC, uint8_t(1)); rawPut(fontInfo, 0xFF0, int(metrics.tmHeight)); rawPut(fontInfo, 0x1014, int(metrics.tmOverhang));
+        for (float factor : {1.25f, 1.5f, 1.76f, 2.0f}) {
+            LOGFONTA outlineDescription = description;
+            outlineDescription.lfHeight = int(std::floor(metrics.tmHeight * factor)); outlineDescription.lfQuality = ANTIALIASED_QUALITY;
+            HFONT outline = CreateFontIndirectA(&outlineDescription);
+            int nativeAdvance = 0, scaledAdvance = 0;
+            for (WCHAR c : std::wstring(L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")) {
+                SIZE extent{};
+                SelectObject(reference, original); GetTextExtentPoint32W(reference, &c, 1, &extent); nativeAdvance += std::max(0, std::min(int(extent.cx), 32) - int(metrics.tmOverhang));
+                SelectObject(reference, outline); GetTextExtentPoint32W(reference, &c, 1, &extent); scaledAdvance += extent.cx;
+            }
+            TEXTMETRICA outlineMetrics{}; GetTextMetricsA(reference, &outlineMetrics);
+            for (char character : std::string("ilWMgjpqyNCU0123456789")) {
                 content.assign(&character, 1); put(text, 0x14C, content);
                 alignas(16) uint8_t bitmap[0x44]{};
                 CreateTextBitmap(bitmap, 64, metrics.tmHeight * 2, factor);
@@ -672,7 +680,10 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
                 renderString(text.bytes, &pen, metrics.tmHeight, 0, 1, fontInfo, 0xFFFFFF, 0, 0);
                 IPoint secondLine{2, int(metrics.tmHeight)};
                 renderString(text.bytes, &secondLine, metrics.tmHeight, 0, 1, fontInfo, 0xFFFFFF, 0, 0);
-                MAT2 identity{}; identity.eM11.value = identity.eM22.value = 1;
+                MAT2 identity{};
+                const int fixed = int(std::lround(float(nativeAdvance) * factor / scaledAdvance * 65536));
+                identity.eM11.value = SHORT(fixed >> 16); identity.eM11.fract = WORD(fixed);
+                identity.eM22.value = 1;
                 GLYPHMETRICS glyph{};
                 const DWORD count = GetGlyphOutlineW(reference, WCHAR(character), GGO_GRAY8_BITMAP, &glyph, 0, nullptr, &identity);
                 check(count != GDI_ERROR, "reference font supplies a natural-size glyph");
@@ -685,19 +696,128 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
                 uint8_t* data; int width, height, pitch;
                 std::memcpy(&data, bitmap, 4); std::memcpy(&width, bitmap + 0xC, 4);
                 std::memcpy(&height, bitmap + 8, 4); std::memcpy(&pitch, bitmap + 0x20, 4);
-                for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x)
-                    actualInk += reinterpret_cast<uint32_t*>(data + size_t(y) * pitch)[x] >> 24;
+                std::vector<uint32_t> expectedPixels(size_t(width) * height);
+                const int left = int(std::lround(2 * factor)) + glyph.gmptGlyphOrigin.x;
+                const int baseline = outlineMetrics.tmAscent;
+                for (int line = 0; line < 2; ++line) {
+                    const int top = int(std::lround(line * metrics.tmHeight * factor)) + baseline - glyph.gmptGlyphOrigin.y;
+                    for (DWORD y = 0; y < glyph.gmBlackBoxY; ++y) for (DWORD x = 0; x < glyph.gmBlackBoxX; ++x) {
+                        if (top + int(y) >= 0 && top + int(y) < height && left + int(x) >= 0 && left + int(x) < width)
+                            expectedPixels[size_t(top + y) * width + left + x] = std::min(255u, unsigned(expected[y * stride + x]) * 255 / 64);
+                    }
+                }
+                bool placed = true;
+                for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+                    const uint32_t alpha = reinterpret_cast<uint32_t*>(data + size_t(y) * pitch)[x] >> 24;
+                    actualInk += alpha;
+                    if (alpha != expectedPixels[size_t(y) * width + x]) placed = false;
+                }
+                check(placed, "glyph bearings and shared baseline match the font-wide outline transform");
                 if (actualInk != expectedInk * 2) std::printf("GUI font: %dpx %c %.2f ink %llu expected %llu\n", size, character, factor, actualInk, expectedInk * 2);
                 check(actualInk == expectedInk * 2, "small glyphs retain natural strokes and complete descenders on tight consecutive lines");
                 rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
             }
+            content.assign("NCU 0123456789 AV To Wa gjpqy", 29); put(text, 0x14C, content);
+            alignas(16) uint8_t run[0x44]{};
+            CreateTextBitmap(run, 320, metrics.tmHeight, factor);
+            void* runCache = run; put(text, 0x248, runCache);
+            IPoint runPen{2, 0}; renderString(text.bytes, &runPen, metrics.tmHeight, 0, int(content.size), fontInfo, 0xFFFFFF, 0, 0);
+            uint8_t* runData; int runWidth, runHeight, runPitch;
+            std::memcpy(&runData, run, 4); std::memcpy(&runWidth, run + 0xC, 4);
+            std::memcpy(&runHeight, run + 8, 4); std::memcpy(&runPitch, run + 0x20, 4);
+            std::vector<uint32_t> expectedRun(size_t(runWidth) * runHeight);
+            int advance = 2;
+            MAT2 matrix{}; matrix.eM22.value = 1;
+            const int fixed = int(std::lround(float(nativeAdvance) * factor / scaledAdvance * 65536));
+            matrix.eM11.value = SHORT(fixed >> 16); matrix.eM11.fract = WORD(fixed);
+            for (char c : std::string(content.c_str(), content.size)) {
+                GLYPHMETRICS gm{};
+                const DWORD length = GetGlyphOutlineW(reference, WCHAR(c), GGO_GRAY8_BITMAP, &gm, 0, nullptr, &matrix);
+                std::vector<uint8_t> coverage(length == GDI_ERROR ? 0 : length);
+                if (length && length != GDI_ERROR) GetGlyphOutlineW(reference, WCHAR(c), GGO_GRAY8_BITMAP, &gm, length, coverage.data(), &matrix);
+                const size_t stride = (gm.gmBlackBoxX + 3) & ~size_t(3);
+                const int left = int(std::lround(advance * factor)) + gm.gmptGlyphOrigin.x;
+                const int top = outlineMetrics.tmAscent - gm.gmptGlyphOrigin.y;
+                for (DWORD y = 0; y < gm.gmBlackBoxY && length && length != GDI_ERROR; ++y) for (DWORD x = 0; x < gm.gmBlackBoxX; ++x) {
+                    const uint32_t alpha = std::min(255u, unsigned(coverage[size_t(y) * stride + x]) * 255 / 64);
+                    check(!alpha || (top + int(y) >= 0 && top + int(y) < runHeight && left + int(x) >= 0 && left + int(x) < runWidth),
+                          "complete run fits the tight line cache without losing glyph coverage");
+                    if (top + int(y) >= 0 && top + int(y) < runHeight && left + int(x) >= 0 && left + int(x) < runWidth) {
+                        auto& dst = expectedRun[size_t(top + y) * runWidth + left + x];
+                        dst = alpha + (dst * (255 - alpha) + 127) / 255;
+                    }
+                }
+                SIZE extent{}; const WCHAR code = WCHAR(c);
+                SelectObject(reference, original); GetTextExtentPoint32W(reference, &code, 1, &extent); SelectObject(reference, outline);
+                advance += std::max(0, std::min(int(extent.cx), 32) - int(metrics.tmOverhang));
+            }
+            bool sameRun = runPen.x == advance;
+            for (int y = 0; y < runHeight; ++y) for (int x = 0; x < runWidth; ++x)
+                sameRun &= (reinterpret_cast<const uint32_t*>(runData + size_t(y) * runPitch)[x] >> 24) == expectedRun[size_t(y) * runWidth + x];
+            check(sameRun, "whole-string spacing and baseline match the font-wide reference without changing native advances");
+            rnative::vc10::FreeArray(runData); ForgetTextBitmap(run);
             SelectObject(reference, original); DeleteObject(outline);
         }
         SelectObject(reference, previous); DeleteDC(reference); fontDtor(fontInfo);
     }
+    description.lfHeight = -16; description.lfWeight = FW_NORMAL; description.lfItalic = 0;
     // Bitmap-font letters use outlines; inline TrueType icons keep their source pixels.
     using AddBitmap = void(__thiscall*)(void*, int, void*);
     auto addBitmap = reinterpret_cast<AddBitmap>(symbol("?AddBitmap@FontInfo_t@@QAEXHPAVSpriteInfo_t@@@Z"));
+    {
+        std::memset(fontInfo, 0, sizeof(fontInfo)); fontCtor(fontInfo); rawPut(fontInfo, 0xFF0, 9);
+        LOGFONTA logical{}; logical.lfHeight = 9; std::memcpy(logical.lfFaceName, "Verdana", 8);
+        HFONT logicalFont = CreateFontIndirectA(&logical);
+        HDC reference = CreateCompatibleDC(nullptr); HGDIOBJ previous = SelectObject(reference, logicalFont);
+        const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        struct Source { alignas(16) uint8_t bytes[0x44]{}; };
+        std::vector<Source> sources(alphabet.size());
+        int nativeAdvance = 0;
+        for (size_t i = 0; i < alphabet.size(); ++i) {
+            const WCHAR c = WCHAR(alphabet[i]); SIZE size{}; GetTextExtentPoint32W(reference, &c, 1, &size);
+            CreateTextBitmap(sources[i].bytes, std::max(1, int(size.cx)), 9, 1);
+            addBitmap(fontInfo, alphabet[i], sources[i].bytes); nativeAdvance += std::max(1, int(size.cx));
+        }
+        for (float factor : {1.25f, 1.5f, 1.76f, 2.0f}) {
+            LOGFONTA physical = logical; physical.lfHeight = int(std::floor(9 * factor)); physical.lfQuality = ANTIALIASED_QUALITY;
+            HFONT outline = CreateFontIndirectA(&physical); SelectObject(reference, outline);
+            TEXTMETRICA tm{}; GetTextMetricsA(reference, &tm);
+            int physicalAdvance = 0;
+            for (char c : alphabet) { const WCHAR code = WCHAR(c); SIZE size{}; GetTextExtentPoint32W(reference, &code, 1, &size); physicalAdvance += size.cx; }
+            const int fixed = int(std::lround(float(nativeAdvance) * factor / physicalAdvance * 65536));
+            MAT2 matrix{}; matrix.eM11.value = SHORT(fixed >> 16); matrix.eM11.fract = WORD(fixed); matrix.eM22.value = 1;
+            for (char c : std::string("NCU01gjpqy")) {
+                content.assign(&c, 1); put(text, 0x14C, content);
+                alignas(16) uint8_t bitmap[0x44]{}; CreateTextBitmap(bitmap, 32, 9, factor);
+                void* cache = bitmap; put(text, 0x248, cache);
+                IPoint pen{2, 0}; renderString(text.bytes, &pen, 9, 0, 1, fontInfo, 0xFFFFFF, 0, 0);
+                GLYPHMETRICS gm{};
+                const DWORD length = GetGlyphOutlineW(reference, WCHAR(c), GGO_GRAY8_BITMAP, &gm, 0, nullptr, &matrix);
+                std::vector<uint8_t> coverage(length == GDI_ERROR ? 0 : length);
+                if (length && length != GDI_ERROR) GetGlyphOutlineW(reference, WCHAR(c), GGO_GRAY8_BITMAP, &gm, length, coverage.data(), &matrix);
+                uint8_t* data; int width, height, pitch;
+                std::memcpy(&data, bitmap, 4); std::memcpy(&width, bitmap + 0xC, 4);
+                std::memcpy(&height, bitmap + 8, 4); std::memcpy(&pitch, bitmap + 0x20, 4);
+                const int left = int(std::lround(2 * factor)) + gm.gmptGlyphOrigin.x, top = tm.tmAscent - gm.gmptGlyphOrigin.y;
+                std::vector<uint32_t> expected(size_t(width) * height);
+                const size_t stride = (gm.gmBlackBoxX + 3) & ~size_t(3);
+                bool same = length != GDI_ERROR;
+                for (DWORD y = 0; y < gm.gmBlackBoxY && length && length != GDI_ERROR; ++y) for (DWORD x = 0; x < gm.gmBlackBoxX; ++x) {
+                    const uint32_t alpha = std::min(255u, unsigned(coverage[size_t(y) * stride + x]) * 255 / 64);
+                    const bool fits = top + int(y) >= 0 && top + int(y) < height && left + int(x) >= 0 && left + int(x) < width;
+                    same &= !alpha || fits;
+                    if (fits) expected[size_t(top + y) * width + left + x] = alpha;
+                }
+                for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x)
+                    same &= (reinterpret_cast<uint32_t*>(data + size_t(y) * pitch)[x] >> 24) == expected[size_t(y) * width + x];
+                check(same, "bitmap-font fallback retains a common baseline and font-wide pitch in tight HUD cells");
+                rnative::vc10::FreeArray(data); ForgetTextBitmap(bitmap);
+            }
+            SelectObject(reference, logicalFont); DeleteObject(outline);
+        }
+        SelectObject(reference, previous); DeleteDC(reference); DeleteObject(logicalFont); fontDtor(fontInfo);
+        for (auto& source : sources) { void* data; std::memcpy(&data, source.bytes, 4); rnative::vc10::FreeArray(data); ForgetTextBitmap(source.bytes); }
+    }
     for (bool trueType : {false, true}) {
         std::memset(fontInfo, 0, sizeof(fontInfo)); fontCtor(fontInfo);
         rawPut(fontInfo, 0xFF0, 12); rawPut(fontInfo, 0xFFC, uint8_t(trueType));
