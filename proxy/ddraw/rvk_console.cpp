@@ -765,12 +765,16 @@ void Execute(const std::string& text)
         Print(C(cText) + "effects read again from randy-vk\\fx" + C(cDim) + "   (randy-vk.log: what loaded)");
     } else if (cmd == "fx") {
         const int id = w.size() >= 2 ? std::atoi(w[1].c_str()) : 0;
-        const bool cast = w.size() >= 3 && Lower(w[2]) == "cast";
+        bool cast = false, capture = false;
+        for (size_t i = 2; i < w.size(); ++i) {
+            cast |= Lower(w[i]) == "cast";
+            capture |= Lower(w[i]) == "capture";
+        }
         if (id <= 0) {
-            Print(C(cError) + "fx <template id>" + C(cDim) + "   fx 47119 (Lesser Controlled Rage)");
+            Print(C(cError) + "fx <template id> [cast] [capture]" + C(cDim) + "   fx 47119 (Lesser Controlled Rage)");
             return;
         }
-        FxPlay(id, cast);
+        FxPlay(id, cast, capture);
         Print(C(cText) + "effect " + C(cValue) + std::to_string(id) + C(cText) + " played on your character" + C(cDim) +
               "   (RVK_FxLog: what the game makes, in randy-vk.log)");
     } else if (const Command* c = FindCommand(cmd); c && c->arg == aAction) {

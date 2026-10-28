@@ -244,6 +244,9 @@ bool ReadEmitter(const Value& v, Emitter& e, std::string* error)
         }
     }
     std::sort(e.size, e.size + e.sizeKeys, [](const SizeKey& a, const SizeKey& b) { return a.t < b.t; });
+    // Size scale: the whole curve times this (the editor's one knob for how big the particles are).
+    const float scale = std::max(Num(v.Get("scale"), 1.0f), 0.0f);
+    for (uint32_t i = 0; i < e.sizeKeys; ++i) e.size[i].size *= scale;
     std::sort(e.colour, e.colour + e.colourKeys, [](const ColourKey& a, const ColourKey& b) { return a.t < b.t; });
     e.intensity = std::max(Num(v.Get("intensity"), e.intensity), 0.0f);
     e.sprite = Choice(v.Get("sprite"), {"dot", "spark", "ring", "star", "smoke", "flare"}, e.sprite);

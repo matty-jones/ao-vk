@@ -123,19 +123,32 @@ uint32_t __fastcall DiaBillRender(void* self, void* /*edx*/, void* viewport)
             g_overlayText.emplace_back(self, viewport);
         return 0;                                 // (the game's Render returns nothing)
     }
-    auto it = g_chosen.find(self);
-    if (it == g_chosen.end() || it->second + 30 < g_frame || !device || !device->GetParticleParams().enable ||
-        At<uint32_t>(self, kDiaBillHidden) != 0)
-        return g_render(self, viewport);
-
+    // The effect editor's capture of a game effect: this batch's sprites, and (the tap) the texture and blending its
+    // draws use (rvk_fx.cpp).
+    DrawTap* tap = nullptr;
     auto* sprites = At<GameSprite*>(self, kDiaBillSprites);
-    uint32_t count = std::min<uint32_t>(std::max(At<int32_t>(self, kDiaBillCount), 0), rvk::Device::kParticleSlots);
-    if (!sprites || !count)
-        return g_render(self, viewport);
-    const float* m = g_worldMatrix(self);           // row vectors: p' = p * M
     bool atlas = At<const void*>(self, kDiaBillMaterial) != nullptr;
     bool packed = At<uint8_t>(self, kDiaBillPackedUv) != 0;
     int32_t columns = std::max(At<int32_t>(self, kDiaBillColumns), 1), rows = std::max(At<int32_t>(self, kDiaBillRows), 1);
+    if (sprites && At<uint32_t>(self, kDiaBillHidden) == 0)
+        tap = FxCaptureBatch(self, sprites, uint32_t(std::max(At<int32_t>(self, kDiaBillCount), 0)), g_worldMatrix(self),
+                             columns, rows, atlas, packed);
+    auto render = [&] {
+        g_drawTap = tap;
+        const uint32_t r = g_render(self, viewport);
+        g_drawTap = nullptr;
+        return r;
+    };
+
+    auto it = g_chosen.find(self);
+    if (it == g_chosen.end() || it->second + 30 < g_frame || !device || !device->GetParticleParams().enable ||
+        At<uint32_t>(self, kDiaBillHidden) != 0)
+        return render();
+
+    uint32_t count = std::min<uint32_t>(std::max(At<int32_t>(self, kDiaBillCount), 0), rvk::Device::kParticleSlots);
+    if (!sprites || !count)
+        return render();
+    const float* m = g_worldMatrix(self);           // row vectors: p' = p * M
 
     rvk::Device::ParticleSprite out[rvk::Device::kParticleSlots];
     float center[3] = {0, 0, 0};
@@ -189,7 +202,7 @@ uint32_t __fastcall DiaBillRender(void* self, void* /*edx*/, void* viewport)
         static const unsigned index = ComIndex("IDirect3DDevice7::DrawIndexedPrimitive");
         ComScope scope(index);
         device->ParticleEmitter(uint64_t(uintptr_t(self)), center, m + 12, out, count);   // origin: the matrix's translation
-        r = g_render(self, viewport);
+        r = render();
         device->EndParticleEmitter();
     }
     for (uint32_t i = 0; i < count; ++i)

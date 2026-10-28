@@ -13,8 +13,10 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   `rage_bolt.rvkfx` does the same in fire for Lesser Controlled Rage's cast (and four other nanos').
   `nano_recharge.rvkfx` replaces a nano recharger's burst: violet and cyan energy swirling in round you.
   ao-assets' workbench has an effect editor for them (Effects): every change shows in the running game within a
-  second, and *Play in game* plays the effect on your character without casting. The console's `fx <template> cast`
-  plays a cast at yourself.
+  second, and *Play in game* plays the effect on your character without casting. *Record the game's* has the game
+  play its own effect on you and record it, and the editor's preview then shows the game's beside yours, in a split
+  view or both in one scene (Compare). Each emitter's *Size scale* makes all its particles bigger or smaller at once.
+  The console's `fx <template> cast` plays a cast at yourself (`capture` records it).
   Edited files show at once; the console's `fx reload` reads them again. `RVK_Fx` (Particles) switches them off.
 - Shops' insides can be seen through their open doors from the street, in 3D, instead of a black doorway. A shop
   shows once you have been in one of its kind: going in records the room, and walking through a door remembers where

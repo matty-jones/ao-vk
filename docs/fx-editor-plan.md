@@ -12,7 +12,9 @@ the preview.
 3. **Edit**: emitters as tabs (mute, duplicate, reorder), their fields as forms built from a schema (aoassets/fx.py
    `EMITTER_FIELDS`), size and colour over life as a curve and a gradient.
 4. **See it in the game**: every change saved into the client's `randy-vk/fx`, which the game reads again each second;
-   **Play in game** asks the game to play the template on the player (`_play.txt`).
+   **Play in game** asks the game to play the template on the player (`_play.txt`). **Record the game's** has it play
+   its own and record it (`capture`); the preview's **Compare** shows that beside ours: the view split in two through
+   the same camera, both in one scene, or the game's alone.
 5. **Keep it**: the workspace's git history (**Save version**); later, packs.
 
 ## The pieces
@@ -21,6 +23,13 @@ the preview.
   the desktop app's View > Effects editor.
 - randy-vk proxy `rvk_fx.cpp`: `_play.txt` (`<serial> <template> cast|on`, read every 15 frames; a serial seen at start
   is not played), `_recent.txt` (the last 48 effects made, rewritten at most twice a second).
+- The game's own effect, recorded (`<serial> <template> cast|on capture`): the template plays with none of ours in
+  its place, and every GfxVisualDiaBill sprite batch that starts drawing after the request within 30 m of it is
+  written to `_capture_<template>.txt` - per frame the effect's points (a Spell1's hand, target and bolt head, a Stars'
+  locator; else its first sprites' middle) and each live sprite in the world (size, D3DCOLOR, atlas cell), per batch the
+  RDB texture and blending its draws used (RDevice::TapDraw). It ends 45 frames after its batches stop drawing (15 s at
+  most). fx.py `capture` makes the sprites relative to the point of their phase; the preview puts them on its caster.
+  A cast is recorded at yourself, so its flight is short: its charge and impact are the useful parts.
 
 ## Next
 

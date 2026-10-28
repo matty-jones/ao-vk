@@ -775,8 +775,21 @@ HRESULT RDevice::DoDrawIndexedPrimitive(D3DPRIMITIVETYPE type, DWORD fvf, LPVOID
     if (!dev || !verts || !idx) return DDERR_INVALIDPARAMS;
     g_rvk.Frame();
     NoteVisual(dev);
+    if (g_drawTap) TapDraw(*g_drawTap);
     dev->DrawIndexedPrimitive(type, fvf, verts, vcount, idx, icount);
     return D3D_OK;
+}
+
+void RDevice::TapDraw(DrawTap& tap) const
+{
+    const RSurface* s = m_textures[0];
+    const RSurface* top = s ? (s->top ? s->top : s) : nullptr;
+    tap.rdbType = top ? top->rdbType : 0;
+    tap.rdbId = top ? top->rdbId : 0;
+    tap.srcBlend = m_rs[D3DRENDERSTATE_SRCBLEND];
+    tap.destBlend = m_rs[D3DRENDERSTATE_DESTBLEND];
+    tap.alphaBlend = m_rs[D3DRENDERSTATE_ALPHABLENDENABLE];
+    tap.seen = true;
 }
 
 namespace {
@@ -969,6 +982,7 @@ HRESULT RDevice::DoDrawIndexedPrimitiveVB(D3DPRIMITIVETYPE type, LPDIRECT3DVERTE
         return D3D_OK;
     g_rvk.Frame();
     NoteVisual(dev);
+    if (g_drawTap) TapDraw(*g_drawTap);
     ProcessedDraw processedDraw(dev, vb, start, vcount);
     if (vb->skin)
         dev->DrawIndexedPrimitiveSkinned(type, vb->desc.dwFVF, vb->skin, start, vcount, idx, icount);
