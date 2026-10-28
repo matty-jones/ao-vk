@@ -83,9 +83,10 @@ hill-shaded, with a seam map.
   heights. In 35, the same shapes are levelled differently. Often that is exactly the ratio of their headers' height
   steps: Central Artery Valley (step 0.3) is 1.500x Upper Stret East Bank (0.2), and Deep Artery Valley (0.2) is
   0.668x Varmint Woods (0.3). But some 0.3-step zones match 0.2-step neighbours at 1.0 (Newland Desert / Newland), so
-  the step alone doesn't decide it. **Open:** the scale the game really draws each zone with. `randy31-horizon1.dll`
-  logs it per playfield (`native ground: heights - a byte step of ...`). The far field must use the game's scale, and
-  where neighbours still differ at a border, blend their heights across the overlap.
+  the step alone doesn't decide it. **Answered in game (2026-10-28):** the game draws every zone at its header's step
+  (logged as `native ground: heights - a byte step of ...` from the live ground: Newland City 566 0.2, Newland 567 0.2,
+  Newland Desert 565 0.3, 655 0.3, 800 0.4, five of five). So the far field uses the header's step, and pairs like
+  Newland Desert / Newland that match at 1.0 really differ there: blend their heights across the overlap.
 - **Versions of one place:** Coast of Peace / Tranquility (100% the same heights), the Nascenses (95-98%), and Adonis
   City / Abyss (82%) share a place. The Penumbras are about 40 units apart, so they aren't grouped. The far field
   draws the version last visited.
@@ -102,8 +103,16 @@ hill-shaded, with a seam map.
   shared locks beside the game's (DatabaseController.dll has SQLite built in). The game also exports
   `ResourceDatabase_t::GetRawStream(Identity_t)`, but that runs on the game thread and in its heap. Our own read-only
   handle on a worker is the plan for phase 6.
-- **Still to do in game:** the height scale per zone (above); a look at a zone border at `RVK_ViewRange` 1.5 and 3
-  (screenshots for before and after).
+- **A border in game (2026-10-28, frame dumps at the Newland / Newland Desert line, facing each other).** The land runs
+  on across the zone wall with no visible edge: Newland lies inside Newland Desert, whose ground covers it. The dunes
+  close most views: from Newland into the desert the nearest dune ends the view at about 250 units (the same at
+  `RVK_ViewRange` 1.5 and 3); from the desert towards Newland most of the skyline is hills within 1 km, and only a
+  narrow gap reaches past them - cut at the back plane (1.5 km) at 1.5, ruins and rocks 2.5 to 3 km off at 3. The far
+  field matters most in such gaps and in open and high views.
+- **Still to do in game:** a border between side-by-side zones (not nested), looking across open ground at
+  `RVK_ViewRange` 3, to see how a zone's ground ends a few hundred units past its wall.
+- **Lost:** `tools/planet-layout.py` was never committed and went with the horizon worktree (2026-10-26). Its results
+  are above; its refined offsets must be computed again before phase 1.
 
 ## How it works
 
