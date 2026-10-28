@@ -4274,6 +4274,29 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
             VtxRhwDiffuse window[4] = {{300, 200, 0, 1, 0xE0304060}, {700, 200, 0, 1, 0xE0304060},
                                        {300, 450, 0, 1, 0xE0304060}, {700, 450, 0, 1, 0xE0304060}};
             dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, window, 4);
+            // Textured pieces, as the game's windows have (the lean shader's A/B, RVK_LiteShader): a grille alpha-tested
+            // through its texture's holes, and a panel blended with its texture tinted by the vertex colour.
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+            dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+            dev.SetTexture(0, fence);
+            dev.SetRenderState(RS_ALPHATESTENABLE, 1);
+            dev.SetRenderState(RS_ALPHAREF, 0x80);
+            dev.SetRenderState(RS_ALPHAFUNC, CMP_GREATEREQUAL);
+            VtxRhwDiffuseTex grille[4] = {{320, 220, 0, 1, 0xFFFFE0A0, 0, 0}, {460, 220, 0, 1, 0xFFFFE0A0, 2, 0},
+                                          {320, 360, 0, 1, 0xFFFFE0A0, 0, 2}, {460, 360, 0, 1, 0xFFFFE0A0, 2, 2}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, grille, 4);
+            dev.SetRenderState(RS_ALPHATESTENABLE, 0);
+            dev.SetTexture(0, ground);
+            VtxRhwDiffuseTex panel[4] = {{540, 230, 0, 1, 0xC060A0FF, 0, 0}, {680, 230, 0, 1, 0xC0FF8040, 1, 0},
+                                         {540, 420, 0, 1, 0x8040FF80, 0, 1}, {680, 420, 0, 1, 0x80FFFFFF, 1, 1}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, panel, 4);
+            dev.SetTexture(0, nullptr);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
             dev.InterfaceEnd();
             VtxRhwDiffuse pointer[4] = {{480, 300, 0, 1, 0xFFFF2020}, {520, 300, 0, 1, 0xFFFF2020},
                                         {480, 340, 0, 1, 0xFFFF2020}, {520, 340, 0, 1, 0xFFFF2020}};

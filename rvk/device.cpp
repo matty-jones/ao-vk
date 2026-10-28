@@ -90,6 +90,13 @@ const uint32_t kFragNoCutNfSpirv[] = {
 const uint32_t kFragGlowNoCutNfSpirv[] = {
 #include "ffp_glow_nocut_nf.frag.inc"
 };
+// The 8-bit targets' 2D draws (the interface): the lean main() alone (RVK_LITE, RVK_LiteShader), as cut-out and not.
+const uint32_t kFragLiteSpirv[] = {
+#include "ffp_lite.frag.inc"
+};
+const uint32_t kFragLiteNoCutSpirv[] = {
+#include "ffp_lite_nocut.frag.inc"
+};
 
 // Access/stage masks to go with an image layout, for barriers.
 void LayoutUse(VkImageLayout layout, VkPipelineStageFlags2* stage, VkAccessFlags2* access)
@@ -269,7 +276,8 @@ Device::~Device()
     for (VkPipeline p : m_tessPipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_tessPipelinesNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline* set : {m_groundPipelines, m_groundPipelinesHdr, m_groundPipelinesNoCut, m_groundPipelinesHdrNoCut,
-                            m_noFramePipelines, m_noFramePipelinesHdr, m_noFramePipelinesNoCut, m_noFramePipelinesHdrNoCut})
+                            m_noFramePipelines, m_noFramePipelinesHdr, m_noFramePipelinesNoCut, m_noFramePipelinesHdrNoCut,
+                            m_pipelinesLite, m_pipelinesLiteNoCut})
         for (int c = 0; c < 3; ++c) if (set[c]) vkDestroyPipeline(m_device, set[c], nullptr);
     for (VkPipeline* set : {m_groundTessPipelines, m_groundTessPipelinesNoCut, m_noFrameTessPipelines, m_noFrameTessPipelinesNoCut})
         for (int k = 0; k < 2; ++k) if (set[k]) vkDestroyPipeline(m_device, set[k], nullptr);
@@ -1261,6 +1269,40 @@ bool Device::CreatePipelines(std::string* error)
         if (ok && stats)
             ShaderRegisterReport(*dst, kBuildName[g], set ? "HDR" : "8-bit", nc ? "no cut" : "cut-out");
     }
+    // The interface's lean shader (RVK_LiteShader, m_drawLite): the 8-bit targets' set again with ffp_lite.frag.
+    VkShaderModule lite[2] = {};
+    ok = ok && module(kFragLiteSpirv, sizeof(kFragLiteSpirv), &lite[0]) &&
+         module(kFragLiteNoCutSpirv, sizeof(kFragLiteNoCutSpirv), &lite[1]);
+    colorFormats[0] = kColorFormat;
+    rendering.colorAttachmentCount = cb.attachmentCount = 1;
+    for (int nc = 0; nc < 2 && ok; ++nc)
+    for (int c = 0; c < 3 && ok; ++c) {
+        rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+        stages[1].module = lite[nc];
+        VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        ia.topology = kClassTopology[c];
+        VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        ci.flags = m_sceneRateFlag;
+        ci.pNext = &rendering;
+        ci.stageCount = 2;
+        ci.pStages = stages;
+        ci.pInputAssemblyState = &ia;
+        ci.pViewportState = &vp;
+        ci.pRasterizationState = &rs;
+        ci.pMultisampleState = &ms;
+        ci.pDepthStencilState = &dss;
+        ci.pColorBlendState = &cb;
+        ci.pDynamicState = &ds;
+        ci.layout = m_pipelineLayout;
+        const bool stats = m_shaderStats && c == 2;
+        if (stats) ci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+        VkPipeline* dst = nc ? &m_pipelinesLiteNoCut[c] : &m_pipelinesLite[c];
+        ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst), "lean pipeline", error);
+        if (ok && stats) ShaderRegisterReport(*dst, "interface (lean)", "8-bit", nc ? "no cut" : "cut-out");
+    }
+    for (VkShaderModule m : lite)
+        if (m) vkDestroyShaderModule(m_device, m, nullptr);
+    stages[1].module = frags[0][0][0];
     // Characters' Phong tessellation: triangles as 3-point patches, through ffp.tesc / ffp.tese (both targets).
     VkShaderModule tesc = VK_NULL_HANDLE, tese = VK_NULL_HANDLE;
     if (ok && m_tessSupported && module(kTescSpirv, sizeof(kTescSpirv), &tesc) && module(kTeseSpirv, sizeof(kTeseSpirv), &tese)) {

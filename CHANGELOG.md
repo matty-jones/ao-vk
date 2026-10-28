@@ -95,6 +95,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   too. Needs the matching AOReloaded.
 
 ### Changed
+- Open windows (inventory, chat, the map) cost far less of the graphics card: the interface is drawn with a lean
+  shader of its own instead of the full scene shader, the same picture (about 1.5 ms less a frame with a few
+  windows open on an RX 6600 XT). `RVK_LiteShader` (randy-vk.ini, on) switches it off. Contributed by gorg (#21).
 - Day and night share one light (`RVK_LightRig`, on; off brings back the old night lighting). At sunset buildings and
   rocks no longer light up and then drop to a third of their light as the moon rises; ground in a hill's shade no
   longer brightens in the last minutes of daylight, the difference between sun and shade fading out as the sun goes

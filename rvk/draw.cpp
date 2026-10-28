@@ -2112,14 +2112,19 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     bool hdrTarget = m_target->m_format == Format::RGBA16F;
     // Pipeline classes: 0-2 points / lines / triangles, 3-5 the same for the float target, 6 / 7 tessellated; +12
     // for the no-discard variant (a draw that never cuts out keeps early-Z); +24 for the ground's (the shader's build
-    // with the ground's code: m_drawGround), +48 for the draws no frame light reaches (the build without their loop).
+    // with the ground's code: m_drawGround), +48 for the draws no frame light reaches (the build without their loop);
+    // 72-74 (+12) the interface's lean shader (m_drawLite: 8-bit targets only).
     const uint32_t build = m_drawGround ? 1u : m_drawNoFrameLights ? 2u : 0u;
+    const bool lite = m_drawLite && !m_drawTess && !hdrTarget;
     uint32_t colorClass = m_drawTess ? 6u + (hdrTarget ? 1u : 0u) : topoClass + (hdrTarget ? 3u : 0u);
-    uint32_t pipelineClass = colorClass + (m_drawMayDiscard ? 0u : 12u) + 24u * build;
+    uint32_t pipelineClass = lite ? 72u + topoClass + (m_drawMayDiscard ? 0u : 12u)
+                                  : colorClass + (m_drawMayDiscard ? 0u : 12u) + 24u * build;
     if (c.topologyClass != pipelineClass) {
         VkPipeline pipeline;
         const uint32_t h = hdrTarget ? 1u : 0u, nc = m_drawMayDiscard ? 0u : 1u;
-        if (m_drawTess) {
+        if (lite) {
+            pipeline = nc ? m_pipelinesLiteNoCut[topoClass] : m_pipelinesLite[topoClass];
+        } else if (m_drawTess) {
             VkPipeline* const tess[3][2] = {{m_tessPipelines, m_tessPipelinesNoCut},
                                             {m_groundTessPipelines, m_groundTessPipelinesNoCut},
                                             {m_noFrameTessPipelines, m_noFrameTessPipelinesNoCut}};
@@ -2482,8 +2487,9 @@ void Device::FlushEdges()
     const d3d::Viewport savedViewport = m_viewport;
     const bool mayDiscard = m_drawMayDiscard, tess = m_drawTess, label = m_drawIsLabel, prepassed = m_drawPrepassed,
                backdrop = m_drawBackdrop, overbright = m_drawOverbright2x, terrainBase = m_drawTerrainBase,
-               terrainLight = m_drawTerrainLight;
+               terrainLight = m_drawTerrainLight, lite = m_drawLite;
     m_drawMayDiscard = true;
+    m_drawLite = false;                          // (3D foliage: the full shader)
     m_drawTess = m_drawIsLabel = m_drawBackdrop = m_drawOverbright2x = m_drawTerrainBase = m_drawTerrainLight = false;
     m_drawGround = m_drawNoFrameLights = false;
     // Depth compared strictly (LESS, whatever the draw had): where the plant's own core wrote its depth the edge has
@@ -2522,6 +2528,7 @@ void Device::FlushEdges()
     m_drawOverbright2x = overbright;
     m_drawTerrainBase = terrainBase;
     m_drawTerrainLight = terrainLight;
+    m_drawLite = lite;
 }
 
 // A fingerprint of everything an instanced batch must share (geometry, format, textures, state); 0 = not mergeable.
@@ -3625,6 +3632,15 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_drawIsCharacter) flags |= F_CHARACTER;
     if (m_drawTerrainLight) flags |= F_NOALBEDO;   // its albedo write is masked (the base pass wrote it)
     c.flags[0] = flags;
+    // The lean shader (RVK_LiteShader, ffp_lite.frag): a pre-transformed 2D draw on an 8-bit target - the interface -
+    // unlit, unfogged, unshadowed, with no material maps. All the full shader does for such a draw is in its lean
+    // main(); anything that would take the full one elsewhere keeps it.
+    m_drawLite = m_liteShader && !hdrTarget && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW &&
+                 (flags & (F_LIGHTING | F_PERPIXEL | F_FOG | F_SHADOW | F_SHADOWCOMP | F_SHADOWTEX | F_GLOW |
+                           F_GLOWALPHA | F_OVERBRIGHT2X | F_FOLIAGE | F_NOALBEDO | F_EMISSIVE | F_BUMP | F_BUMPBASE |
+                           F_NORMALMAP | F_VERTEXSUN | F_CHARACTER)) == 0u &&
+                 !m_drawOrm && !m_drawEmissive && !m_drawIsCloudPuff && !m_drawLeaves && !m_drawTerrainBase &&
+                 !m_drawTerrainLight;   // (two-pass foliage, its dither and the ground are 3D: decided below, never 2D)
     c.flags[1] = m_rs[d3d::RS_FOGVERTEXMODE];
     c.flags[2] = m_rs[d3d::RS_FOGTABLEMODE];
     // The sky's scenery (mesh ids: the ships over the cities, kilometres out): hazed as the far sky - exponentially, in

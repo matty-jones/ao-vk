@@ -17,11 +17,11 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-357 settings, 179 of them in the settings window.
+358 settings, 179 of them in the settings window.
 
 ## Sections
 
-- [General](#general) (16)
+- [General](#general) (17)
 - [Lighting](#lighting) (21)
 - [Materials](#materials) (15)
 - [Debug](#debug) (8)
@@ -45,6 +45,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | --- | --- | --- | --- | --- | --- |
 | `RVK_Enhance` | All enhancements (Ctrl+Shift+E) | on / off | on | GPU: all of the below (off: the cheapest) | window |
 | `RVK_Prepass` | Depth pre-pass | on / off | on |  | ini only; knob |
+| `RVK_LiteShader` | The interface drawn with a lean shader of its own (the same picture, far less GPU time) | on / off | on |  | ini only; knob |
 | `RVK_PrepassEq` | Depth pre-pass: what it covers shaded only where it is seen | on / off | on |  | ini only; switch `RVK_Prepass`; knob |
 | `RVK_PrepassMore` | Depth pre-pass: a second stretch after the water's copy of the scene | on / off | on |  | ini only; switch `RVK_Prepass`; knob |
 | `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 (every frame) / 30 / 60 / 90 / 120 | 60 | saves GPU and CPU: 30 or 60 cheaper than every frame | window |

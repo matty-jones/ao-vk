@@ -305,6 +305,7 @@ struct DeviceInfo {
     X(PortalDim, m_portalDim, 0)                      /* ... their brightness by day (0..1 of their own) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
+    X(LiteShader, m_liteShader, 0)                    /* the interface's draws through the lean shader */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
     X(PrepassMore, m_prepassMore, 0)                  /* a second pre-pass segment after the water's copy */ \
     X(FolEdges, m_foliageEdges, 0)                    /* plants' soft edges in a second pass */ \
@@ -2104,6 +2105,10 @@ private:
                m_noFramePipelinesHdrNoCut[3] = {}, m_noFrameTessPipelines[2] = {}, m_noFrameTessPipelinesNoCut[2] = {};
     bool m_drawGround = false;                   // the current draw takes the ground's path (its record's terrainAt.w)
     bool m_drawNoFrameLights = false;            // ... no frame light reaches it (m_noFrame*Pipelines)
+    // The interface's lean shader (RVK_LiteShader, ffp_lite.frag): the 8-bit targets' 2D draws take it (m_drawLite).
+    bool m_liteShader = true;
+    bool m_drawLite = false;
+    VkPipeline m_pipelinesLite[3] = {}, m_pipelinesLiteNoCut[3] = {};
     // The scene shader's variants as the driver compiled them (VK_KHR_pipeline_executable_properties): each stage's
     // statistics - registers, spills, instructions, waves - one line each in the log at startup. Registers decide how
     // many pixels the GPU shades at once: a variant's worst path sets them for every draw that takes it.
