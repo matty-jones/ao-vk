@@ -4853,6 +4853,13 @@ int RunUiAtlasTest(D& dev, const std::string& shot)
     if (g_width < 400 || g_height < 220) return 1;
     Texture* atlas = dev.CreateTexture(64, 64, Format::A8R8G8B8, 3);
     Texture* reference = dev.CreateTexture(16, 16, Format::A8R8G8B8, 1);
+    Texture* alphaText = dev.CreateTexture(16, 16, Format::A8R8G8B8, 1);
+    Texture* legacyText = dev.CreateTexture(16, 16, Format::A1R5G5B5, 1);
+    std::vector<uint32_t> rgba(16 * 16, 0xFFFFFFFF);
+    std::vector<uint16_t> binary(16 * 16, 0xFFFF);
+    for (int x = 0; x < 16; ++x) { rgba[15 * 16 + x] = 0x60FFFFFF; binary[15 * 16 + x] = 0x7FFF; }
+    dev.UpdateTexture(alphaText, 0, 0, 0, 16, 16, rgba.data(), 16 * 4);
+    dev.UpdateTexture(legacyText, 0, 0, 0, 16, 16, binary.data(), 16 * 2);
     std::vector<uint32_t> texels(64 * 64, 0xFFFF0000), tile(16 * 16);
     for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
         const uint32_t colour = (x % 3 == 1 || y == 15) ? 0xFFFFFFFF : 0xFF00FF00;
@@ -4917,7 +4924,18 @@ int RunUiAtlasTest(D& dev, const std::string& shot)
         }
         ++column;
     }
+    dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+    dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA); dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+    for (int i = 0; i < 2; ++i) {
+        const float left = 150.0f + i * 60;
+        const VtxRhwDiffuseTex text[] = {
+            {left - .5f, 194.5f, 0, 1, 0xFFFFFFFF, 0, 0}, {left + 23.5f, 194.5f, 0, 1, 0xFFFFFFFF, 1, 0},
+            {left - .5f, 218.5f, 0, 1, 0xFFFFFFFF, 0, 1}, {left + 23.5f, 218.5f, 0, 1, 0xFFFFFFFF, 1, 1}};
+        dev.SetTexture(0, i ? legacyText : alphaText);
+        dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, text, 4);
+    }
     dev.InterfaceEnd();
+    dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
     dev.SetTexture(0, atlas);
     const VtxRhwDiffuseTex outside[] = {
         {19.5f, 199.5f, 0, 1, 0xFFFFFFFF, .25f, .25f}, {27.5f, 199.5f, 0, 1, 0xFFFFFFFF, .5f, .25f},
@@ -4957,6 +4975,10 @@ int RunUiAtlasTest(D& dev, const std::string& shot)
     if ((pixels[size_t(204) * g_width + 84] & 0xFF00) != 0xFF00) {
         std::printf("UI atlas: a caller's valid two-texture FVF was reinterpreted\n"); ++failures;
     }
+    if ((pixels[size_t(218) * g_width + 160] & 255) <= (pixels[size_t(218) * g_width + 220] & 255) + 8) {
+        std::printf("UI text: RGBA did not retain the low-alpha bottom row lost in the legacy texture\n"); ++failures;
+    }
+    dev.DestroyTexture(alphaText); dev.DestroyTexture(legacyText);
     dev.DestroyTexture(reference);
     dev.DestroyTexture(atlas);
     std::printf("UI atlas: %s (%d failures; %d unguarded contaminated pixels)\n", failures ? "FAILED" : "passed", failures, reproduced);

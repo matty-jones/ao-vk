@@ -2,6 +2,7 @@
 #include "rvk_backend.h"
 #include "rvk_settings.h"
 #include "native/gui.h"
+#include "native/gui_font.h"
 #include "native/ground.h"
 #include "native/native.h"
 #include "native/rings.h"
@@ -254,7 +255,8 @@ static void RequestFrameDump(rvk::ThreadedDevice* device, bool burst)
     device->RequestFrameDump(std::string(base) + ".txt", burst ? 60 : 1);
     rnative::scene::NoteDumpRequested();          // (the visuals' frames to the log, matched by the draws' @address)
     device->RequestScreenshot(std::string(base) + ".bmp");
-    RvkLog("frame dump: %s.txt / .bmp", base);
+    rnative::gui::DumpFontCaches((std::string(base) + "-ui.tar").c_str());
+    RvkLog("frame dump: %s.txt / .bmp / -ui.tar", base);
 }
 
 bool RunAction(const char* name)

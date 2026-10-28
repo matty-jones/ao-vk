@@ -483,7 +483,7 @@ it or Esc closes it. While it is open the game gets no keyboard input (the mouse
 | ] / [ | relief stronger / weaker | Home / End | bloom stronger / weaker |
 | Insert / Delete | effect glow stronger / weaker | PgUp / PgDn | local light headroom up / down |
 | L | reload the colour look-up tables | F11 | lighting debug view |
-| F9 | frame dump (draw list + screenshot next to the log) | O | profiling sweep (below) |
+| F9 | frame dump (draw list, screenshot and text caches next to the log) | O | profiling sweep (below) |
 | H | hide the game's interface (screenshots) | | |
 
 **Profiling sweep (Ctrl+Shift+O, or `profile` in the console):** stand still for about six minutes; ao-vk switches

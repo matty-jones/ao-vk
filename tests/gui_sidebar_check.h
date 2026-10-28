@@ -51,12 +51,13 @@ inline int CheckGuiSidebar(HMODULE module)
     auto* bytes = reinterpret_cast<uint8_t*>(module);
     struct Object { alignas(16) uint8_t bytes[0x800]{}; };
     Object controller, top, topData, root, rootData, owner, ownerData;
-    Object dock, dockData, first, firstData, second, secondData, third, thirdData, map, mapData, terrain;
+    Object host, hostData, dock, dockData, first, firstData, second, secondData, third, thirdData, map, mapData, terrain;
     auto put = [](Object& o, size_t offset, const auto& value) { std::memcpy(o.bytes + offset, &value, sizeof(value)); };
     auto link = [&](Object& o, size_t offset, Object& target) { void* p = target.bytes; put(o, offset, p); };
     auto view = [&](Object& object, Object& data, Object& parent, Rect frame) {
         link(object, 0xAC, data); link(object, 0x40, owner); link(data, 0x10, parent);
         put(data, 0x20, frame); put(data, 0x100, Point{1, 1});
+        put(object, 0, static_cast<void*>(bytes + 0x1C82A4));
     };
     rnative::vc10::String name; name.init();
     void* text = &name; put(owner, 0x60, text);
@@ -64,13 +65,15 @@ inline int CheckGuiSidebar(HMODULE module)
     link(owner, 0x70, ownerData); link(ownerData, 0x80, root);
     link(top, 0xAC, topData); put(topData, 0x100, Point{1, 1});
     view(root, rootData, top, {0, 0, 3839, 2159});
-    view(dock, dockData, root, {3640, 0, 3839, 2159});
+    view(host, hostData, root, {3640, 0, 3839, 2159});
+    view(dock, dockData, host, {0, 0, 199, 2159});
     put(dock, 0, static_cast<void*>(bytes + 0x1B0DD4));
     view(first, firstData, dock, {0, 0, 199, 299});
     view(second, secondData, dock, {0, 300, 199, 599});
     view(third, thirdData, dock, {0, 600, 199, 899});
     view(map, mapData, first, {10, 30, 189, 249});
-    link(topData, 0, root); link(rootData, 0, dock); link(root, 0x1B8, dock);
+    link(topData, 0, root); link(rootData, 0, host); link(root, 0x1B8, host);
+    link(hostData, 0, dock); link(host, 0x1B8, dock);
     link(dockData, 0, first); link(dock, 0x1B8, first);
     link(firstData, 8, second); link(secondData, 8, third);
     link(firstData, 0, map); link(first, 0x1B8, map);
@@ -84,6 +87,8 @@ inline int CheckGuiSidebar(HMODULE module)
     int failures = 0;
     auto check = [&](bool ok, const char* what) { if (!ok) { ++failures; std::printf("GUI sidebar: %s\n", what); } };
     const Rect bounds{0, 0, 199, 299};
+    using Find = void*(__thiscall*)(void*, void*, const Point*);
+    const auto find = reinterpret_cast<Find>(GetProcAddress(module, "?_FindView@Window@@ABEPAVView@@PAV2@ABVPoint@@@Z"));
     for (float percent : {150.0f, 200.0f, 75.0f, 176.0f, 100.0f}) {
         SetScale(125, percent); BeginScaleFrame(controller.bytes);
         Rect a, b, c;
@@ -112,12 +117,19 @@ inline int CheckGuiSidebar(HMODULE module)
               "panel input inverts the shared transform after toggling");
         using Parent = Point*(__thiscall*)(void*, Point*, const Point*);
         const auto parent = reinterpret_cast<Parent>(GetProcAddress(module, "?ConvertFromParent@View@@QBE?AVPoint@@ABV2@@Z"));
-        Point dockHit, panelHit;
-        parent(dock.bytes, &dockHit, &hit); parent(third.bytes, &panelHit, &dockHit);
+        Point hostHit, dockHit, panelHit;
+        parent(host.bytes, &hostHit, &hit); parent(dock.bytes, &dockHit, &hostHit);
+        parent(third.bytes, &panelHit, &dockHit);
         check(std::fabs(panelHit.x - input.x) < 0.001f && std::fabs(panelHit.y - input.y) < 0.001f,
               "native input dispatch crosses the rollup boundary exactly once");
+        check(find(owner.bytes, root.bytes, &hit) == third.bytes,
+              "native window search reaches scaled panels outside the sidebar's original bounds");
+        Point icon{5, 5}, iconHit;
+        g_guiMapTo(map.bytes, &iconHit, &icon, 1);
+        check(find(owner.bytes, root.bytes, &iconHit) == map.bytes,
+              "native window search reaches the top-left scaled sidebar icon");
         Rect model; std::memcpy(&model, dockData.bytes + 0x20, sizeof(model));
-        check(model.left == 3640 && model.bottom == 2159, "sidebar scaling leaves its saved native frame untouched");
+        check(model.left == 0 && model.bottom == 2159, "sidebar scaling leaves its saved native frame untouched");
     }
     std::printf("GUI.dll: checking custom PF map drawing\n");
     g_guiMapTile = reinterpret_cast<GuiMapTile>(bytes + 0x46871);

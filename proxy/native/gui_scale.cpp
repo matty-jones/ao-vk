@@ -25,6 +25,8 @@ NameFn g_name;
 SizeFn g_screen;
 Point g_screenSize{};
 FrameFn g_frame, g_bounds, g_borders;
+using WindowFrameFn = Rect*(__fastcall*)(void*, void*, Rect*, uint32_t);
+WindowFrameFn g_windowFrame;
 SizeFn g_windowMouse;
 using ScreenFn = Point*(__cdecl*)(Point*);
 ScreenFn g_windowScreen;
@@ -47,18 +49,36 @@ using MapRenderFn = void(__fastcall*)(void*, void*, void*, float, uint32_t);
 MapRenderFn g_mapRender, g_mapGroundRender;
 using PrimitiveFn = void(__fastcall*)(void*, void*, uint32_t, void*, uint32_t, uint32_t);
 PrimitiveFn g_fan, g_lines, g_strip;
-float g_placementScale;
+float g_placementScale, g_popupPlacementScale;
 using PlacementFn = void(__fastcall*)(void*, void*, uint32_t);
 PlacementFn g_placement;
+using PopupGoFn = void(__fastcall*)(void*, void*, void*, const Point*, const vc10::String*);
+using PopupMoveFn = void(__fastcall*)(void*, void*, const Point*);
+PopupGoFn g_popupGo;
+PopupMoveFn g_popupMove;
 using VerticesFn = void(__fastcall*)(void*, void*, void*, const Rect*);
 VerticesFn g_vertices;
 using MouseDownFn = void(__fastcall*)(void*, void*, const Point*, int, int);
 using MouseMoveFn = void(__fastcall*)(void*, void*, const Point*, uint32_t, uint32_t, void*);
 MouseDownFn g_borderDown;
 MouseMoveFn g_borderMove;
+using MouseUpFn = void(__fastcall*)(void*, void*, const Point*, int, void*);
+MouseUpFn g_borderUp;
+void* g_draggedBorder;
+Rect g_draggedFrame;
+struct IPoint { int x, y; };
+struct TimerWindow { IPoint position; Point scale; };
+std::unordered_map<void*, TimerWindow> g_timers;
+using TimerCtorFn = void*(__fastcall*)(void*, void*, int, int, const void*, const char*, uint32_t);
+using TimerMoveFn = void(__fastcall*)(void*, void*, const IPoint*);
+using SpriteScaleFn = void(__fastcall*)(void*, void*, const float*, const float*);
+using SpriteDestroyFn = void(__fastcall*)(void*, void*);
+TimerCtorFn g_timerCtor;
+TimerMoveFn g_timerMove, g_spriteMove;
+SpriteScaleFn g_spriteScale;
+SpriteDestroyFn g_spriteDestroy;
 using SetFrameFn = void(__fastcall*)(void*, void*, const Rect*);
 SetFrameFn g_borderFrame;
-constexpr uint32_t kScreenFrameCalls[] = {0x15731B, 0x1578F0};
 
 struct Coordinates {
     bool outer = g_coordinates++ == 0;
@@ -69,7 +89,9 @@ void __fastcall BorderDownHook(void* view, void* edx, const Point* point, int bu
 {
     if (!g_active) { g_borderDown(view, edx, point, button, clicks); return; }
     Coordinates scope;
+    g_frame(view, nullptr, &g_draggedFrame);
     g_borderDown(view, edx, point, button, clicks);
+    g_draggedBorder = view;
 }
 
 void __fastcall BorderMoveHook(void* view, void* edx, const Point* point, uint32_t transition, uint32_t buttons, void* message)
@@ -80,11 +102,82 @@ void __fastcall BorderMoveHook(void* view, void* edx, const Point* point, uint32
     g_borderMove(view, edx, point, transition, buttons, message);
 }
 
+void __fastcall BorderUpHook(void* view, void* edx, const Point* point, int button, void* message)
+{
+    g_borderUp(view, edx, point, button, message);
+    if (g_draggedBorder != view) return;
+    g_draggedBorder = nullptr;
+    auto window = g_windows.find(view);
+    if (!g_active || window == g_windows.end()) return;
+    Transform map = window->second.transform;
+    if (map.offset == Point{}) return;
+    Rect frame; g_frame(view, nullptr, &frame);
+    if (std::fabs(frame.left - g_draggedFrame.left) < 0.001f && std::fabs(frame.top - g_draggedFrame.top) < 0.001f &&
+        std::fabs(frame.right - g_draggedFrame.right) < 0.001f && std::fabs(frame.bottom - g_draggedFrame.bottom) < 0.001f) return;
+    // Save user movement independently of the initial display-only edge clamp.
+    const Point origin{frame.left + map.offset.x / map.value, frame.top + map.offset.y / map.value};
+    using Move = void(__thiscall*)(void*, const Point*);
+    const auto move = reinterpret_cast<Move>((*static_cast<void***>(view))[0xC8 / 4]);
+    map.offset = {};
+    window->second.transform = map;
+    g_views.insert_or_assign(view, map);
+    {
+        Coordinates scope;
+        move(view, &origin);
+    }
+    g_redraw = true;
+}
+
 void __fastcall BorderFrameHook(void* view, void* edx, const Rect* frame)
 {
     if (!g_active) { g_borderFrame(view, edx, frame); return; }
     Coordinates scope;
     g_borderFrame(view, edx, frame);
+}
+
+void ApplyTimer(void* window, const TimerWindow& logical)
+{
+    const Point scale{logical.scale.x * g_hudScale, logical.scale.y * g_hudScale};
+    const IPoint position{int(std::lround(logical.position.x * g_hudScale)), int(std::lround(logical.position.y * g_hudScale))};
+    g_spriteScale(window, nullptr, &scale.x, &scale.y);
+    g_spriteMove(window, nullptr, &position);
+}
+
+void* __fastcall TimerCtorHook(void* timer, void* edx, int kind, int slot, const void* identity, const char* label, uint32_t colour)
+{
+    void* result = g_timerCtor(timer, edx, kind, slot, identity, label, colour);
+    void* window = *reinterpret_cast<void**>(static_cast<uint8_t*>(timer) + 4);
+    if (window) {
+        TimerWindow logical;
+        std::memcpy(&logical.position, static_cast<uint8_t*>(window) + 0x2C, sizeof(logical.position));
+        std::memcpy(&logical.scale, static_cast<uint8_t*>(window) + 0x3C, sizeof(logical.scale));
+        g_timers.insert_or_assign(window, logical);
+        ApplyTimer(window, logical);
+    }
+    return result;
+}
+
+void __fastcall TimerMoveHook(void* timer, void* edx, const IPoint* point)
+{
+    void* window = *reinterpret_cast<void**>(static_cast<uint8_t*>(timer) + 4);
+    auto found = g_timers.find(window);
+    if (found == g_timers.end()) { g_timerMove(timer, edx, point); return; }
+    found->second.position = *point;
+    ApplyTimer(window, found->second);
+}
+
+void __fastcall SpriteScaleHook(void* window, void* edx, const float* x, const float* y)
+{
+    auto found = g_timers.find(window);
+    if (found == g_timers.end()) { g_spriteScale(window, edx, x, y); return; }
+    found->second.scale = {*x, *y};
+    ApplyTimer(window, found->second);
+}
+
+void __fastcall SpriteDestroyHook(void* window, void* edx)
+{
+    g_timers.erase(window);
+    g_spriteDestroy(window, edx);
 }
 
 bool Hud(void* window);
@@ -167,7 +260,8 @@ bool NativeScreen(void* window)
     const char* type = TypeOf(window);
     return !std::strcmp(type, ".?AVLoginWindow_c@@") || !std::strcmp(type, ".?AVLoginBrowserWindow_c@@") ||
            !std::strcmp(type, ".?AVCharSelectWindow_c@@") || !std::strcmp(type, ".?AVLimboWindow_c@@") ||
-           !std::strcmp(type, ".?AVCharDeleteWindow_c@@") || !std::strcmp(type, ".?AVCharActivateWindow_c@@");
+           !std::strcmp(type, ".?AVCharDeleteWindow_c@@") || !std::strcmp(type, ".?AVCharActivateWindow_c@@") ||
+           !std::strcmp(type, ".?AVProgressWindow_c@@");
 }
 
 bool Hud(void* window)
@@ -175,7 +269,9 @@ bool Hud(void* window)
     const char* type = TypeOf(window);
     if (!std::strcmp(type, ".?AVCharBarWindow_c@@") || !std::strcmp(type, ".?AVCompassWindow_c@@") ||
         !std::strcmp(type, ".?AVShortcutBarContainer@@") || !std::strcmp(type, ".?AVShortcutBarWindow_c@@") ||
-        !std::strcmp(type, ".?AVControlCenterWindow_c@@") || !std::strcmp(type, ".?AVNotificationWindow_c@@"))
+        !std::strcmp(type, ".?AVControlCenterWindow_c@@") || !std::strcmp(type, ".?AVNotificationWindow_c@@") ||
+        !std::strcmp(type, ".?AVMailIconWindow_c@@") || !std::strcmp(type, ".?AVHelpButtonWindow_c@@") ||
+        !std::strcmp(type, ".?AVTipButtonWindow_c@@") || !std::strcmp(type, ".?AVRaidBarWindow_c@@"))
         return true;
     vc10::String text{};
     g_name(window, &text);
@@ -202,7 +298,8 @@ Rect* __fastcall ScreenFrameHook(void* view, void* edx, Rect* out)
 Point* __cdecl WindowScreenHook(Point* out)
 {
     g_windowScreen(out);
-    if (g_installed && g_placementScale > 0.0f) Scale{g_placementScale}.FromScreen(*out);
+    const float factor = g_placementScale > 0.0f ? g_placementScale : g_popupPlacementScale;
+    if (g_installed && factor > 0.0f) Scale{factor}.FromScreen(*out);
     return out;
 }
 
@@ -221,23 +318,59 @@ Point* __fastcall WindowMouseHook(void* window, void*, Point* out)
     return out;
 }
 
+void PlacedWindow(void* window, float factor)
+{
+    void* root = g_parent(g_windowClient(window));
+    Rect frame;
+    Point screen;
+    g_frame(root, nullptr, &frame); g_windowScreen(&screen);
+    const Transform map = Place(frame, screen, factor, false);
+    g_windows.insert_or_assign(root, Window{window, map});
+    g_views.insert_or_assign(root, map);
+    g_redraw = true;
+}
+
 void __fastcall PlacementHook(void* window, void* edx, uint32_t centered)
 {
     if (!g_active || NativeScreen(window)) { g_placement(window, edx, centered); return; }
     const float saved = g_placementScale;
     g_placementScale = g_installed ? (Hud(window) ? g_hudScale : g_windowScale) : 1.0f;
     g_placement(window, edx, centered);
-    if (g_installed) {
-        void* root = g_parent(g_windowClient(window));
-        Rect frame;
-        Point screen;
-        g_frame(root, nullptr, &frame); g_windowScreen(&screen);
-        const Transform map = Place(frame, screen, g_placementScale, false);
-        g_windows.insert_or_assign(root, Window{window, map});
-        g_views.insert_or_assign(root, map);
-        g_redraw = true;
-    }
+    if (g_installed) PlacedWindow(window, g_placementScale);
     g_placementScale = saved;
+}
+
+void __fastcall PopupGoHook(void* menu, void* edx, void* parent, const Point* point, const vc10::String* title)
+{
+    if (!g_active) { g_popupGo(menu, edx, parent, point, title); return; }
+    const float saved = g_popupPlacementScale;
+    g_popupPlacementScale = g_windowScale;
+    Point logical = *point;
+    Scale{g_windowScale}.FromScreen(logical);
+    g_popupGo(menu, edx, parent, &logical, title);
+    void* window = *reinterpret_cast<void**>(static_cast<uint8_t*>(menu) + 0x158);
+    if (window) PlacedWindow(window, g_windowScale);
+    g_popupPlacementScale = saved;
+}
+
+void __fastcall PopupMoveHook(void* menu, void* edx, const Point* point)
+{
+    if (!g_active) { g_popupMove(menu, edx, point); return; }
+    const float saved = g_popupPlacementScale;
+    g_popupPlacementScale = g_windowScale;
+    Point logical = *point;
+    Scale{g_windowScale}.FromScreen(logical);
+    g_popupMove(menu, edx, &logical);
+    void* window = *reinterpret_cast<void**>(static_cast<uint8_t*>(menu) + 0x158);
+    if (window) PlacedWindow(window, g_windowScale);
+    g_popupPlacementScale = saved;
+}
+
+Rect* __fastcall PopupFrameHook(void* window, void* edx, Rect* out, uint32_t client)
+{
+    g_windowFrame(window, edx, out, client);
+    if (g_active && !g_coordinates) For(g_windowClient(window)).ToScreen(*out);
+    return out;
 }
 
 Transform DrawingScale(void* view)
@@ -324,6 +457,21 @@ SCREEN_HOOKS(Point, Point)
 SCREEN_HOOKS(Rect, Rect)
 #undef SCREEN_HOOKS
 
+Rect* __fastcall InputBoundsHook(void* view, void* edx, Rect* out)
+{
+    g_bounds(view, edx, out);
+    if (g_active && !g_coordinates) {
+        auto clip = g_clips.find(view);
+        if (clip != g_clips.end()) {
+            Rect logical = clip->second.screen;
+            For(view).FromScreen(logical);
+            Coordinates scope;
+            g_fromRectValue(view, edx, out, &logical, 1);
+        }
+    }
+    return out;
+}
+
 template <class T> void Translate(T& coordinates, Point delta);
 template <> void Translate(Point& p, Point delta) { p.x += delta.x; p.y += delta.y; }
 template <> void Translate(Rect& r, Point delta)
@@ -381,6 +529,18 @@ struct Hook {
 };
 
 Hook g_hooks[] = {
+    {"TimerBarBase_c::TimerBarBase_c", 0x512AE, "", 10,
+      reinterpret_cast<void*>(&TimerCtorHook), reinterpret_cast<void**>(&g_timerCtor)},
+    {"TimerBarBase_c::Reposition", 0x5128A, "\x55\x8B\xEC\x8B\x49\x04", 6,
+      reinterpret_cast<void*>(&TimerMoveHook), reinterpret_cast<void**>(&g_timerMove)},
+    {"?SetScale@RenderWindow_t@@QAEXABM0@Z", 0x20B0C, "\x55\x8B\xEC\x51\x8B\x45\x08", 7,
+      reinterpret_cast<void*>(&SpriteScaleHook), reinterpret_cast<void**>(&g_spriteScale)},
+    {"??1RenderWindow_t@@QAE@XZ", 0x21241, "\x56\x8B\xF1\x80\x7E\x4C\x00", 7,
+      reinterpret_cast<void*>(&SpriteDestroyHook), reinterpret_cast<void**>(&g_spriteDestroy)},
+    {"?Go@PopupMenu_c@@QAEXPAVWindow@@ABVPoint@@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z", 0x13BF93, "", 10,
+      reinterpret_cast<void*>(&PopupGoHook), reinterpret_cast<void**>(&g_popupGo)},
+    {"?Reposition@PopupMenu_c@@QAEXABVPoint@@@Z", 0x13B61E, "\x55\x8B\xEC\x56\x8B\xF1", 6,
+      reinterpret_cast<void*>(&PopupMoveHook), reinterpret_cast<void**>(&g_popupMove)},
     {"PFMapRenderer_c::Render", 0xE9F73, "", 10,
       reinterpret_cast<void*>(&MapRenderHook), reinterpret_cast<void**>(&g_mapRender)},
     {"PFMapGroundRenderer_c::Render", 0x478ED, "", 10,
@@ -389,6 +549,8 @@ Hook g_hooks[] = {
       reinterpret_cast<void*>(&BorderFrameHook), reinterpret_cast<void**>(&g_borderFrame)},
     {"?MouseDown@WndBorder@@UAEXABVPoint@@HH@Z", 0x1595F7, "\x55\x8B\xEC\x83\xEC\x20", 6,
       reinterpret_cast<void*>(&BorderDownHook), reinterpret_cast<void**>(&g_borderDown)},
+    {"?MouseUp@WndBorder@@UAEXABVPoint@@HPAVMessage@@@Z", 0x1596A7, "\x8B\x01\x83\xA1\xD4\x01\x00\x00\x00", 9,
+      reinterpret_cast<void*>(&BorderUpHook), reinterpret_cast<void**>(&g_borderUp)},
     {"?MouseMove@WndBorder@@UAEXABVPoint@@W4MouseTransition_e@@IPAVMessage@@@Z", 0x159C27, "", 10,
       reinterpret_cast<void*>(&BorderMoveHook), reinterpret_cast<void**>(&g_borderMove)},
     {"?_UpdateVertices@ViewArea_c@@AAEXPAVView@@ABVRect@@@Z", 0x151898, "", 10,
@@ -473,12 +635,14 @@ void InstallScaling(HMODULE gui)
     g_frame = reinterpret_cast<FrameFn>(address("?GetFrame@View@@QBE?AVRect@@XZ"));
     g_bounds = reinterpret_cast<FrameFn>(address("?GetBounds@View@@QBE?AVRect@@XZ"));
     g_borders = reinterpret_cast<FrameFn>(address("?GetBorderSizes@TabView@@QBE?AVRect@@XZ"));
+    g_windowFrame = reinterpret_cast<WindowFrameFn>(address("?GetFrame@Window@@QBE?AVRect@@_N@Z"));
     g_screen = reinterpret_cast<SizeFn>(address("?GetScreenSize@WindowController_c@@QBE?AVPoint@@XZ"));
+    g_spriteMove = reinterpret_cast<TimerMoveFn>(address("?Reposition@RenderWindow_t@@QAEXABVIPoint@@@Z"));
     HMODULE utils = GetModuleHandleA("Utils.dll");
     g_looper = utils ? reinterpret_cast<ViewFn>(GetProcAddress(utils, "?GetLooper@Handler@@QBEPAVLooper@@XZ")) : nullptr;
     g_name = utils ? reinterpret_cast<NameFn>(GetProcAddress(utils, "?GetName@Looper@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ")) : nullptr;
     if (!g_top || !g_parent || !g_child || !g_sibling || !g_windowClient || !g_dragObject || !g_dragSource || !g_frame ||
-        !g_bounds || !g_borders || !g_screen || !g_looper || !g_name) {
+        !g_bounds || !g_borders || !g_windowFrame || !g_screen || !g_looper || !g_name || !g_spriteMove) {
         Log("interface scaling: required GUI exports unavailable, left at 100%%");
         return;
     }
@@ -488,19 +652,25 @@ void InstallScaling(HMODULE gui)
         Log("interface scaling: map render entries changed, left at 100%%");
         return;
     }
-    for (uint32_t rva : kScreenFrameCalls) {
+    struct Query { uint32_t rva; void* original; void* replacement; };
+    const Query queries[] = {
+        {0x15731B, reinterpret_cast<void*>(g_frame), reinterpret_cast<void*>(&ScreenFrameHook)},
+        {0x1578F0, reinterpret_cast<void*>(g_frame), reinterpret_cast<void*>(&ScreenFrameHook)},
+        {0x154798, reinterpret_cast<void*>(g_bounds), reinterpret_cast<void*>(&InputBoundsHook)},
+        {0x13C990, reinterpret_cast<void*>(g_windowFrame), reinterpret_cast<void*>(&PopupFrameHook)},
+    };
+    for (const Query& query : queries) {
         int32_t relative;
-        std::memcpy(&relative, base + rva + 1, 4);
-        if (base[rva] != 0xE8 || base + rva + 5 + relative != reinterpret_cast<uint8_t*>(g_frame)) {
+        std::memcpy(&relative, base + query.rva + 1, 4);
+        if (base[query.rva] != 0xE8 || base + query.rva + 5 + relative != query.original) {
             Log("interface scaling: screen hit-test query changed, left at 100%%");
             return;
         }
     }
     // Check the entire group before patching; a partial group never enables scaling.
     for (const Hook& h : g_hooks) {
-        const bool map = h.original == reinterpret_cast<void**>(&g_mapRender) ||
-                         h.original == reinterpret_cast<void**>(&g_mapGroundRender);
-        auto* at = map ? base + h.rva : reinterpret_cast<uint8_t*>(address(h.name));
+        const bool internal = h.name[0] != '?';
+        auto* at = internal ? base + h.rva : reinterpret_cast<uint8_t*>(address(h.name));
         if (!at || at != reinterpret_cast<uint8_t*>(gui) + h.rva) {
             Log("interface scaling: %s unavailable, left at 100%%", h.name);
             return;
@@ -550,14 +720,14 @@ void InstallScaling(HMODULE gui)
         *reinterpret_cast<void**>(base + entry.rva) = entry.target;
         VirtualProtect(base + entry.rva, sizeof(void*), protect, &protect);
     }
-    // Only cursor hit tests need displayed frames. Native layout queries always keep their original units.
-    for (uint32_t rva : kScreenFrameCalls) {
+    // Input queries include scaled descendants; native layout queries retain their original units.
+    for (const Query& query : queries) {
         DWORD protect;
-        if (!VirtualProtect(base + rva, 5, PAGE_EXECUTE_READWRITE, &protect)) return;
-        const int32_t relative = int32_t(reinterpret_cast<uintptr_t>(&ScreenFrameHook) - reinterpret_cast<uintptr_t>(base + rva + 5));
-        std::memcpy(base + rva + 1, &relative, 4);
-        VirtualProtect(base + rva, 5, protect, &protect);
-        FlushInstructionCache(GetCurrentProcess(), base + rva, 5);
+        if (!VirtualProtect(base + query.rva, 5, PAGE_EXECUTE_READWRITE, &protect)) return;
+        const int32_t relative = int32_t(reinterpret_cast<uintptr_t>(query.replacement) - reinterpret_cast<uintptr_t>(base + query.rva + 5));
+        std::memcpy(base + query.rva + 1, &relative, 4);
+        VirtualProtect(base + query.rva, 5, protect, &protect);
+        FlushInstructionCache(GetCurrentProcess(), base + query.rva, 5);
     }
     g_installed = true;
     Log("interface scaling: window and HUD coordinates hooked");
@@ -574,8 +744,11 @@ bool BeginScaleFrame(void* controller)
         g_windowScale = g_wantedWindow;
         g_redraw = true;
     }
-    if (g_hudScale != g_wantedHud) g_redraw = true;
-    g_hudScale = g_wantedHud;
+    if (g_hudScale != g_wantedHud) {
+        g_hudScale = g_wantedHud;
+        for (const auto& timer : g_timers) ApplyTimer(timer.first, timer.second);
+        g_redraw = true;
+    }
     const bool active = g_windowScale != 1.0f || g_hudScale != 1.0f;
     if (!active) {
         if (g_active) {

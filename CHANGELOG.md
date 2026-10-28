@@ -11,6 +11,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   retain their sizes. Text is rendered at the requested size, and changes refresh cached UI immediately.
 
 ### Diagnostics
+- `dump` also saves a bounded `rvk-frame-*-ui.tar` archive of enlarged text caches and their layout, without
+  refreshing text or changing scale settings.
 - The renderer log records the first 16 scaled font-cache creations, including face, cell height, baseline metrics
   and spacing, to help identify differences between UI fonts.
 - Ground frame dumps report pass classification, native patch submissions and frustum rejections, including why the
@@ -20,6 +22,13 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Enlarged chat and NPC text retain antialiased coverage in their own RGBA texture instead of sharing a legacy
+  one-bit-alpha atlas.
+- Moved or resized floating windows retain their placement after relogging, including Inventory and Missions.
+- Combat/casting timer bars, mail indicators, help/tip buttons and raid bars follow HUD size, with matching mouse regions.
+- Login progress and loading windows keep their native size and centered screen position.
+- Scaled sidebar panels accept clicks throughout their displayed area. Item context menus open at the cursor
+  and accept selections inside their scaled frame.
 - Pinned sidebar panels scale as one column, so opening, closing or expanding panels preserves their stacking
   without overlap. The PF map's tiles, markers and outlines now scale with its frame and controls.
 - Enlarged text uses a shared baseline and fits the available line height, preserving descenders in tight HUD

@@ -119,7 +119,7 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
 - The full native comparison against the client's original renderer passed with zero failures. Generated settings
   documentation and whitespace checks passed.
 
-Local 4K gameplay review confirmed clean text, stable performance, working terrain toggles, the requested ground
+Earlier local 4K gameplay review confirmed clean text, stable performance, working terrain toggles, the requested ground
 detail radius, sidebar stacking and PF map scaling. Native checks do not establish the complete behaviour of
 every skin, tab, tooltip or item action. The cloud client exits before a rendered GUI frame, so broader browser
 and restart-persistence checks require a playable client. The fixed world-look check timed out; its baseline was
@@ -127,3 +127,23 @@ not changed. Software Vulkan exposes only one queue, so hardware frame generatio
 reports the existing external-memory extension dependency validation error
 `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`. QEMU/Wine helper teardown can report a signal after
 successful native checks. Actual DLSS integration remains future work.
+
+## Input follow-up and remaining chat clipping
+
+At 150%/150%, the Programs panel could draw outside its sidebar host but fail the native window search's final
+parent-bounds check. That input call site now includes the displayed descendants. Layout still reads native bounds.
+Popup menus take physical cursor positions, while their placement and screen clamp use logical units. Their
+separate global mouse-down check now compares the displayed frame, preventing cancellation before item activation.
+Native checks exercise the actual window search and popup placement, dismissal, mouse-down and mouse-up methods.
+
+The follow-up NPC capture contains the complete reported line in its bitmap. Native allocator checks reproduced
+RGBA text entering a one-bit-alpha atlas pool; enlarged text now uses an independent RGBA surface. The rasterizer
+and logical font metrics are unchanged. [Scaling coverage](ui-scaling-coverage.md) records this correction, timer-bar
+and login-progress coverage, window-position persistence, and the remaining gameplay review.
+
+When a line is clipped, use console `dump` or Ctrl+Shift+F9 before changing scale. Alongside the frame screenshot
+and draw list, `rvk-frame-HHMMSS-ui.tar` contains enlarged native text-cache BMPs and `caches.txt` with density,
+logical/physical dimensions, line descriptors, surface rectangles, cached quad vertices and clipping. It records existing caches without
+rendering, invalidating them or changing settings. Visible caches have priority; limits are 128 images and 24 MiB
+of image data and approximately 3 MiB of layout records. At 100%, the original bitmap path may leave no enlarged caches to save.
+The archive contains the displayed text, including any chat represented by those caches.
