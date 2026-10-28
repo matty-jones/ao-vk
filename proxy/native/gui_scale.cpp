@@ -62,6 +62,10 @@ using MouseDownFn = void(__fastcall*)(void*, void*, const Point*, int, int);
 using MouseMoveFn = void(__fastcall*)(void*, void*, const Point*, uint32_t, uint32_t, void*);
 MouseDownFn g_borderDown;
 MouseMoveFn g_borderMove;
+using MouseUpFn = void(__fastcall*)(void*, void*, const Point*, int, void*);
+MouseUpFn g_borderUp;
+void* g_draggedBorder;
+Rect g_draggedFrame;
 using SetFrameFn = void(__fastcall*)(void*, void*, const Rect*);
 SetFrameFn g_borderFrame;
 
@@ -74,7 +78,9 @@ void __fastcall BorderDownHook(void* view, void* edx, const Point* point, int bu
 {
     if (!g_active) { g_borderDown(view, edx, point, button, clicks); return; }
     Coordinates scope;
+    g_frame(view, nullptr, &g_draggedFrame);
     g_borderDown(view, edx, point, button, clicks);
+    g_draggedBorder = view;
 }
 
 void __fastcall BorderMoveHook(void* view, void* edx, const Point* point, uint32_t transition, uint32_t buttons, void* message)
@@ -83,6 +89,31 @@ void __fastcall BorderMoveHook(void* view, void* edx, const Point* point, uint32
     // Dispatch already supplied logical coordinates; native dragging also needs a logical screen and frame.
     Coordinates scope;
     g_borderMove(view, edx, point, transition, buttons, message);
+}
+
+void __fastcall BorderUpHook(void* view, void* edx, const Point* point, int button, void* message)
+{
+    g_borderUp(view, edx, point, button, message);
+    if (g_draggedBorder != view) return;
+    g_draggedBorder = nullptr;
+    auto window = g_windows.find(view);
+    if (!g_active || window == g_windows.end()) return;
+    Transform map = window->second.transform;
+    if (map.offset == Point{}) return;
+    Rect frame; g_frame(view, nullptr, &frame);
+    if (std::memcmp(&frame, &g_draggedFrame, sizeof(frame)) == 0) return;
+    // Save user movement independently of the initial display-only edge clamp.
+    const Point origin{frame.left + map.offset.x / map.value, frame.top + map.offset.y / map.value};
+    using Move = void(__thiscall*)(void*, const Point*);
+    const auto move = reinterpret_cast<Move>((*static_cast<void***>(view))[0xC8 / 4]);
+    map.offset = {};
+    window->second.transform = map;
+    g_views.insert_or_assign(view, map);
+    {
+        Coordinates scope;
+        move(view, &origin);
+    }
+    g_redraw = true;
 }
 
 void __fastcall BorderFrameHook(void* view, void* edx, const Rect* frame)
@@ -450,6 +481,8 @@ Hook g_hooks[] = {
       reinterpret_cast<void*>(&BorderFrameHook), reinterpret_cast<void**>(&g_borderFrame)},
     {"?MouseDown@WndBorder@@UAEXABVPoint@@HH@Z", 0x1595F7, "\x55\x8B\xEC\x83\xEC\x20", 6,
       reinterpret_cast<void*>(&BorderDownHook), reinterpret_cast<void**>(&g_borderDown)},
+    {"?MouseUp@WndBorder@@UAEXABVPoint@@HPAVMessage@@@Z", 0x1596A7, "\x8B\x01\x83\xA1\xD4\x01\x00\x00\x00", 9,
+      reinterpret_cast<void*>(&BorderUpHook), reinterpret_cast<void**>(&g_borderUp)},
     {"?MouseMove@WndBorder@@UAEXABVPoint@@W4MouseTransition_e@@IPAVMessage@@@Z", 0x159C27, "", 10,
       reinterpret_cast<void*>(&BorderMoveHook), reinterpret_cast<void**>(&g_borderMove)},
     {"?_UpdateVertices@ViewArea_c@@AAEXPAVView@@ABVRect@@@Z", 0x151898, "", 10,

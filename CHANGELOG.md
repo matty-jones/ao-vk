@@ -24,6 +24,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### Fixed
 - Enlarged chat and NPC text retain antialiased coverage in their own RGBA texture instead of sharing a legacy
   one-bit-alpha atlas.
+- Moved or resized floating windows retain their placement after relogging, including Inventory and Missions.
 - Scaled sidebar panels accept clicks throughout their displayed area. Item context menus open at the cursor
   and accept selections inside their scaled frame.
 - Pinned sidebar panels scale as one column, so opening, closing or expanding panels preserves their stacking
