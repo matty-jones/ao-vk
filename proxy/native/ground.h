@@ -26,8 +26,5 @@ uint32_t GroundFrames();
 void ForgetGround();
 // A tile's texture as the game makes it (FUN_10036594: loaded once, kept by the data): an RTexture_t, or null.
 void* TileTexture(void* data, uint32_t tile);
-// While rvk draws the ground itself: the game's own (unseen) at its least work - the smallest full-quality radius,
-// its far patches baked at 2 texels a cell.
-void SetNative(bool active);
 
 }  // namespace rnative::ground

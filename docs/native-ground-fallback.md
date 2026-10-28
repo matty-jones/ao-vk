@@ -1,5 +1,29 @@
 # Old Athen native ground audit
 
+## Quality restoration follow-up
+
+The visibility correction exposed the original terrain, but the game-side optimizer was still forcing radius 8
+and baking far textures at two texels per cell after decoding. Successful decoding does not guarantee native
+ownership of every later pass. That reduction has been removed; native patch replacement remains enabled.
+The game always keeps its requested F10 radius, multiplied by `RVK_GroundRange`, and its requested `RVK_GroundFar`
+quality. Switching `groundon` cannot lower either one. This retains extra original tessellation and texture memory;
+it avoids a render-thread feedback delay leaving the first fallback frame with reduced-quality geometry.
+
+Requested radius is tracked per ground rather than globally. Range changes are applied on the game's update
+thread even when the player has not crossed a terrain cell, and schedule the original tessellator at that ground's
+current cell. Zoning clears the saved requests. The log reports requested and effective radius when they change.
+No new client object fields or layouts are introduced.
+
+`native_check --ground-client-check <client-directory>` invokes the supported client's actual `SetHQRadius` and
+`Tesselate` exports. It checks F10 values 8/16/44/150, the original split thresholds, reversible range changes,
+independent grounds, reused ground state and far-bake settings 8/16/32. The previous low-resolution bake override
+is absent from the corrected build, so restarting with it discards the old process's reduced-quality cached textures.
+The stationary case bypasses N3's engine-dependent update body while exercising the installed frame hook and
+the actual DisplaySystem tessellator. It also verifies that a repeated unchanged F10 request does not restart work.
+Full Old Athen movement, F10 interaction and CPU/memory measurements remain part of local gameplay review.
+
+## Initial visibility investigation
+
 2026-10-28, `ui-separation-scaling`.
 
 With `groundon 1`, Old Athen pavement disappeared; `groundon 0` restored it, and `groundone 0` did not help.

@@ -51,8 +51,9 @@ only after native submissions succeed. Secondary targets, other views and unreco
 - Its tile textures: the game's own loader (`FUN_10036594(data, tile)`: an `RTexture_t`, cached in the data), a few
   a frame, each `RTexture_t` -> `surface_t` (`+0x30`) -> our surface -> its rvk texture.
 - The hour's lightmap: `SetShadowMap` hooked (the data, its size, the shade).
-- While native: the game's full-quality radius at its smallest and its far patches baked at the fewest texels (its
-  own work and memory, unseen).
+- The original ground retains the requested F10 radius, `RVK_GroundRange` multiplier and `RVK_GroundFar` texture
+  quality, including while native patches draw. A later pass may need original geometry, so decoded data alone
+  cannot authorize reducing its quality.
 
 ## Since the first version
 

@@ -98,8 +98,8 @@
   black, terrain.glsl's native mode reads each pixel's cell's tile (turned, the continuous coordinates' derivatives,
   the game's clamped sampler; `D.terrain.y` the tile-code texture); the lighting pass's texture is the playfield's
   lightmap through the game's palette. So cliff faces and rock (tinted by each cell's tile's smallest mip level), sun
-  shadows, hill shade, mist, wet ground and fog apply as on the game's ground. While it draws, the game's own ground
-  does the least (`rnative::ground::SetNative`: radius 8, far patches baked at 2 texels a cell). A ground the game
+  shadows, hill shade, mist, wet ground and fog apply as on the game's ground. The game's own ground retains its
+  requested detail radius and far-texture quality so fallback draws remain usable. A ground the game
   stops updating for 10 presented frames (a loading screen, indoors) is dropped and the next read anew. The tiles' side-loaded
   albedo maps (in the tile-code texture) and normal maps (a second per-cell texture, `D.terrain.z`: the lighting pass
   reads each cell's tile's own, turned) come with them, made again when a tile's maps or the settings change

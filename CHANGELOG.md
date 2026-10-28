@@ -19,6 +19,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- F10 ground detail and `RVK_GroundRange` keep controlling the original terrain when native ground falls back or is
+  switched off. Native ground no longer leaves a tiny detail ring or low-resolution far textures behind.
 - Terrain no longer disappears when native ground cannot replace a pass. Unrecognised passes, missing textures
   and fully culled patches preserve the game's terrain; native ground stays enabled.
 - Scaled icons no longer bypass the texture-edge fix on the client's native drawing path.

@@ -4,6 +4,7 @@
 //   native_check.exe <path to randy31_orig.dll>
 #include "gui_scale_checks.h"
 #include "gui_client_check.h"
+#include "ground_client_check.h"
 #include "native/device.h"
 #include "native/cat_anim.h"
 #include "native/cat_query.h"
@@ -1642,6 +1643,8 @@ void CheckInterfaceBoundary()
 
 int main(int argc, char** argv)
 {
+    if (argc > 2 && std::strcmp(argv[1], "--ground-client-check") == 0)
+        return CheckGroundClient(argv[2]);
     if (argc > 2 && std::strcmp(argv[1], "--gui-scaling-off-check") == 0)
         return CheckGuiClient(argv[2], true);
     if (argc > 2 && std::strcmp(argv[1], "--gui-bench") == 0)

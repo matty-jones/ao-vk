@@ -143,7 +143,6 @@ std::shared_ptr<NativeGround> ReadGround(const uint8_t* ground, const uint8_t* d
 void OnNewGround(void* ground, void* data)
 {
     if (g_rvk.device) g_rvk.device->SetNativeGround(nullptr);     // (the last playfield's: its textures go)
-    rnative::ground::SetNative(false);
     g_sent = false;
     g_haveLightmap = false;
     g_reading = Reading{};
@@ -288,7 +287,6 @@ void OnGroundFrame(void* ground, void* data)
     }
     g_rvk.device->SetNativeGround(g_reading.ground);
     if (!g_haveLightmap) LightmapFromGround(static_cast<const uint8_t*>(ground), *g_reading.ground);
-    rnative::ground::SetNative(g_setting);
 }
 
 }  // namespace
@@ -314,7 +312,6 @@ void GroundFrame()
     lastCount = count;
     if (still == 10 && (g_reading.active || g_sent)) {
         if (g_rvk.device) g_rvk.device->SetNativeGround(nullptr);
-        rnative::ground::SetNative(false);
         rnative::ground::ForgetGround();
         g_reading = Reading{};
         g_sent = false;
@@ -327,7 +324,6 @@ void SetNativeGroundSetting(bool on)
 {
     g_setting = on;
     if (g_rvk.device) g_rvk.device->SetNativeGroundOn(on);
-    rnative::ground::SetNative(on && g_sent && g_reading.ground);
 }
 
 }  // namespace rvkproxy

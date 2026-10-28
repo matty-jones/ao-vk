@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <unordered_map>
 
 namespace rnative::ground {
 
@@ -38,8 +39,8 @@ using TesselateFn = void(__fastcall*)(void* ground, void* edx, int x, int z);
 SetRadiusFn g_setRadius;
 TesselateFn g_tesselate;
 std::atomic<float> g_scale{1.0f};
-std::atomic<int> g_gameRadius{-1};   // the game's own value, last set (-1: not yet)
-int g_loggedRadius = -1;
+struct Quality { void* data = nullptr; int requested = -1, logged = -1; bool dirty = false; };
+std::unordered_map<void*, Quality> g_quality;
 
 constexpr uint32_t kSetRadiusRva = 0x3255B, kTesselateRva = 0x35348;   // DisplaySystem.dll (image base 0x10000000)
 constexpr uint32_t kBakeShiftRva = 0x37BDF;                               // CreateHiTexture: shl ecx, <this>
@@ -57,30 +58,56 @@ std::atomic<uint32_t> g_groundFrames{0};
 constexpr uint32_t kRunFunctionRva = 0x832E, kRendererGround = 0xB4;
 using RunFunctionFn = void(__fastcall*)(void* renderer, void* edx);
 RunFunctionFn g_runFunction;
-std::atomic<bool> g_native{false};
 constexpr uint32_t kRadius = 0x1A8;                                      // AnarchyGround_t: the full-quality radius
 
 int Scaled(int radius)
 {
-    if (g_native.load(std::memory_order_relaxed)) return 8;   // (rvk draws the ground: the game's at its least)
     return std::clamp(int(std::lround(radius * g_scale.load(std::memory_order_relaxed))), 1, 1000);
 }
 
-void Note(int game, int used)
+Quality& QualityFor(uint8_t* ground)
 {
-    if (used == g_loggedRadius) return;
-    g_loggedRadius = used;
-    Log("ground: full-quality radius %d (the game's %d, RVK_GroundRange x%.2f)", used, game,
-        g_scale.load(std::memory_order_relaxed));
+    void* data;
+    std::memcpy(&data, ground + kGroundData, sizeof(data));
+    auto& quality = g_quality[ground];
+    if (quality.data != data) { quality.data = data; quality.logged = -1; }
+    return quality;
+}
+
+void Note(Quality& quality, int used)
+{
+    if (used == quality.logged) return;
+    quality.logged = used;
+    Log("ground: full-quality radius %d (F10 %d, RVK_GroundRange x%.2f); original quality retained for native fallback", used,
+        quality.requested, g_scale.load(std::memory_order_relaxed));
+}
+
+bool ApplyQuality(uint8_t* ground)
+{
+    if (!g_setRadius) return false;
+    auto& quality = QualityFor(ground);
+    int current;
+    std::memcpy(&current, ground + kRadius, sizeof(current));
+    if (quality.requested < 0) quality.requested = current;
+    if (quality.requested <= 0) return false;
+    const int used = Scaled(quality.requested);
+    Note(quality, used);
+    if (current == used) return false;
+    g_setRadius(ground, nullptr, used);
+    quality.dirty = true;
+    return true;
 }
 
 // AnarchyGround_t::SetHQRadius(int) (thiscall: the ground in ecx).
 void __fastcall SetRadiusHook(uint8_t* ground, void* edx, int radius)
 {
-    g_gameRadius.store(radius, std::memory_order_relaxed);
+    auto& quality = QualityFor(ground);
+    quality.requested = radius;
     const int used = Scaled(radius);
-    Note(radius, used);
+    int current; std::memcpy(&current, ground + kRadius, sizeof(current));
+    Note(quality, used);
     g_setRadius(ground, edx, used);
+    quality.dirty = quality.dirty || current != used;
 }
 
 // n3GroundRenderer_t::RunFunction (N3.dll; thiscall, the renderer in ecx): each frame of a ground - the game's, then
@@ -94,6 +121,14 @@ void __fastcall RunFunctionHook(uint8_t* renderer, void* edx)
     void* data;
     std::memcpy(&data, ground + kGroundData, 4);
     if (!data) return;
+    if (g_setRadius) ApplyQuality(ground);
+    if (g_tesselate && QualityFor(ground).dirty) {
+        int x, z;
+        std::memcpy(&x, ground + 0xA10, sizeof(x));
+        std::memcpy(&z, ground + 0xA14, sizeof(z));
+        g_tesselate(ground, nullptr, x, z);
+        QualityFor(ground).dirty = false;
+    }
     if (data != g_lastData) {
         g_lastData = data;
         if (g_onNewGround) g_onNewGround(ground, data);
@@ -112,21 +147,9 @@ void __fastcall TesselateHook(uint8_t* ground, void* edx, int x, int z)
         g_lastData = data;
         if (g_onNewGround && data) g_onNewGround(ground, data);
     }
-    int current;
-    std::memcpy(&current, ground + kRadius, 4);
-    int game = g_gameRadius.load(std::memory_order_relaxed);
-    if (game < 0 && current > 0) {                  // (hooked after the ground was made: its radius is the game's)
-        game = current;
-        g_gameRadius.store(game, std::memory_order_relaxed);
-    }
-    if (game > 0) {
-        const int used = Scaled(game);
-        if (current != used) {
-            Note(game, used);
-            g_setRadius(ground, nullptr, used);
-        }
-    }
+    ApplyQuality(ground);
     g_tesselate(ground, edx, x, z);
+    QualityFor(ground).dirty = false;
 }
 
 // The bake's shift for texels a cell (8, 16, 32 -> 3, 4, 5), written into CreateHiTexture.
@@ -134,7 +157,7 @@ void ApplyFar()
 {
     if (!g_bakeShift) return;
     const int texels = g_farTexels.load(std::memory_order_relaxed);
-    const uint8_t shift = g_native.load(std::memory_order_relaxed) ? 1 : texels >= 32 ? 5 : texels >= 16 ? 4 : 3;
+    const uint8_t shift = texels >= 32 ? 5 : texels >= 16 ? 4 : 3;
     if (*g_bakeShift == shift) return;
     DWORD protect;
     if (!VirtualProtect(g_bakeShift, 1, PAGE_EXECUTE_READWRITE, &protect)) return;
@@ -164,18 +187,12 @@ uint32_t GroundFrames()
 void ForgetGround()
 {
     g_lastData = nullptr;
+    g_quality.clear();
 }
 
 void* TileTexture(void* data, uint32_t tile)
 {
     return g_tileTexture && data ? g_tileTexture(data, nullptr, tile) : nullptr;
-}
-
-void SetNative(bool active)
-{
-    if (g_native.exchange(active) == active) return;
-    ApplyFar();
-    Log("ground: %s", active ? "drawn by rvk (the game's own at its least work)" : "the game's own");
 }
 
 void SetFar(int texelsPerCell)
