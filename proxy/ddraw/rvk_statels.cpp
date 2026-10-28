@@ -67,6 +67,10 @@ void StatelFrame()
     g_lastPlayfield = pf;
     g_lastId = id;
     g_lastDevice = dev;
+    // At each zone change: a load needs a large free block (crash reports of long sessions ended in one).
+    const rvk::AddressSpace space = rvk::QueryAddressSpace();
+    RvkLog("playfield %u: address space %u MB free, largest free block %u MB", id, unsigned(space.free >> 20),
+           unsigned(space.largest >> 20));
     dev->SetSkyPlayfield(id);                    // (its climate leans the sky: rvk sky.cpp)
     if (!pf || !ground) {
         if (pf)

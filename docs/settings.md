@@ -17,14 +17,14 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-354 settings, 178 of them in the settings window.
+355 settings, 178 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (16)
 - [Lighting](#lighting) (21)
 - [Materials](#materials) (15)
-- [Debug](#debug) (7)
+- [Debug](#debug) (8)
 - [Terrain](#terrain) (22)
 - [Plants](#plants) (38)
 - [Water](#water) (23)
@@ -55,7 +55,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PortalDim` | Shops' insides through their doors: their brightness by day (1 = as inside) | 0 .. 1 | 0.7 | no cost | window; switch `RVK_Portals`; knob |
 | `RVK_StreetView` | The street seen from inside a shop through its open door (once you have stood at that door outside) | on / off | on | GPU: low, with a shop's open door in view | window; switch `RVK_Portals`; game value off; knob |
 | `RVK_StreetNow` | The street seen from inside a shop: lit for the hour it is now (off: as when it was recorded) | on / off | on | no cost | ini only; switch `RVK_StreetView`; knob |
-| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's | on / off | off | no cost | window |
+| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's, client memory and VRAM | on / off | off | no cost | window |
 | `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | no cost | window; knob |
 | `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | CPU and GPU: more with the value | window |
 | `RVK_ViewRange` | How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws) | 1 .. 3 | 1.5 | CPU and GPU: more with the value | window; game value 1 |
@@ -116,6 +116,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_Occlusion` | The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws) | on / off | on |  | ini only |
 | `RVK_TimeOfDay` | Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h) | -1 .. 27 | -1 |  | ini only |
 | `RVK_TimeSpeed` | Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own) | 0 .. 500 | 1 |  | ini only |
+| `RVK_TexKeepCpu` | Keep a CPU copy of every texture (off: given up once on the graphics card, read back if the game locks it again - saves the game's 32-bit address space) | on / off | off |  | ini only |
 | `RVK_HeapCheck` | Testing: the heap checked for corruption at points, the first broken one logged (0 off, 1 round the grass and each frame, 2 also round every object's grass cover - slow) | 0 .. 2 | 0 |  | ini only |
 
 ## Terrain

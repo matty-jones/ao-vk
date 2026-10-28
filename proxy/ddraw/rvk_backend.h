@@ -24,6 +24,10 @@ const char* LogPath();
 // Texture writes through Lock on the game's thread since the last call (the 600-frame log line), then reset.
 struct TextureWrites { uint32_t locks, partial; uint64_t bytes; double ms; };
 int GameTexturesAlive();                          // the game's texture surfaces with a GPU texture now (rvk_surface.cpp)
+// What those are (the 600-frame log): made and freed since the last call, how many share an RDB texture, the sizes
+// of the unidentified ones, and their CPU copies' bytes - whether a count that only grows is the game keeping
+// textures (each a different one) or surfaces nobody frees (the same texture again and again). Then reset.
+std::string GameTextureReport();
 TextureWrites TakeTextureWrites();
 void RvkLog(const char* fmt, ...);
 void ParticleFrame();
@@ -78,6 +82,7 @@ class RSurface;
 void AttachMaterialMaps(RSurface* top);           // after the surface's rvk texture is (re)created
 void PollMaterialMaps();                          // each present: uploads maps decoded in the background
 void ForgetMaterialMaps(RSurface* top);           // the surface is going: it no longer waits for maps
+std::string RdbTextureName(uint32_t type, uint32_t id);   // the name the game gave an RDB texture (empty: not seen)
 // What an rvk texture is, for texture picking: "RDB texture T:ID 'name', WxH; maps: _n.png ..." (reference: "T:ID").
 std::string DescribeTexture(const rvk::Texture* texture, std::string* reference = nullptr);
 // What a picked visual was made from: "RDB mesh 1010001:3545" (reference: "T:ID"), see rvk_materials.cpp.
@@ -235,6 +240,10 @@ public:
     RSurface* top = nullptr;                       // level 0 (this for level 0)
     RSurface* nextLevel = nullptr;                 // owned by level 0
     std::vector<uint8_t> shadow;                   // CPU copy of this level (textures, plain surfaces)
+    bool shadowGone = false;                       // textures: given up once the GPU had the level whole (read back
+                                                   // from it when wanted again: EnsureShadow)
+    bool keepShadow = false;                       // level 0: the texture keeps its copies (it was locked again)
+    uint32_t touched = 0;                          // the frame its copy was last used (written, locked, uploaded)
     bool dirty = false;                            // shadow newer than the GPU copy
     bool anyDirty = false;                         // level 0 only: some level of the chain is dirty
     bool gpuWhole = false;                         // this level went to the GPU whole since the texture was made
@@ -251,6 +260,7 @@ public:
     void UploadRows(uint32_t y0, uint32_t y1);     // only rows [y0, y1) changed (a Lock's rectangle): just them
     uint32_t Pitch() const;
     void EnsureShadow();
+    static void DropIdleCopies();                  // each frame (Present): idle textures' CPU copies given up
 
 protected:
     void* Cast(REFIID iid) override { return iid == IID_IDirectDrawSurface7 || iid == IID_RvkSurface ? this : nullptr; }

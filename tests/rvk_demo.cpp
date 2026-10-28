@@ -718,6 +718,54 @@ double Benchmark(D& dev, int frames)
     return total * 1000.0 / std::max(frames - 10, 1);
 }
 
+bool g_readbackTest = false;    // --readback-test: RunReadbackTest
+
+// --readback-test: texture levels read back from the GPU exactly as they were uploaded (ReadTextureLevel - a game
+// texture whose CPU copy was given up is read back so when the game locks it again): every format the game uses,
+// compressed too, every mip level; uploaded between frames and inside one, read back both ways.
+template <typename D>
+bool RunReadbackTest(D& dev)
+{
+    const Format formats[] = {Format::A8R8G8B8, Format::R5G6B5, Format::A4R4G4B4, Format::A1R5G5B5, Format::L8,
+                              Format::A8L8, Format::DXT1, Format::DXT3, Format::DXT5};
+    const uint32_t w = 64, h = 32, levels = 7;
+    uint32_t seed = 12345, failed = 0, checked = 0;
+    auto bytesOf = [&](Format f, uint32_t l) {
+        return size_t(FormatRowBytes(f, std::max(1u, w >> l))) * FormatRows(f, std::max(1u, h >> l));
+    };
+    for (int pass = 0; pass < 2; ++pass)          // 0: uploaded between frames, 1: inside a frame
+        for (Format f : formats) {
+            Texture* t = dev.CreateTexture(w, h, f, levels);
+            std::vector<std::vector<uint8_t>> data(levels);
+            if (pass) dev.BeginFrame();
+            for (uint32_t l = 0; l < levels; ++l) {
+                data[l].resize(bytesOf(f, l));
+                for (uint8_t& b : data[l]) b = uint8_t((seed = seed * 1103515245u + 12345u) >> 16);
+                dev.UpdateTexture(t, l, 0, 0, std::max(1u, w >> l), std::max(1u, h >> l), data[l].data(),
+                                  FormatRowBytes(f, std::max(1u, w >> l)));
+            }
+            for (int inFrame = 0; inFrame < 2; ++inFrame) {   // read back: as it is (between or in), then the other
+                if (inFrame && !pass) dev.BeginFrame();
+                if (!inFrame && pass) dev.EndFrame();
+                for (uint32_t l = 0; l < levels; ++l) {
+                    std::vector<uint8_t> back(data[l].size(), 0xEE);
+                    const bool read = dev.ReadTextureLevel(t, l, back.data(), back.size());
+                    ++checked;
+                    if (!read || back != data[l]) {
+                        ++failed;
+                        std::printf("readback: FAIL format %u level %u (%s, uploaded %s, read %s)\n", unsigned(f), l,
+                                    read ? "differs" : "not read", pass ? "in a frame" : "between frames",
+                                    (inFrame == 0) == (pass == 0) ? "the same way" : "the other way");
+                    }
+                }
+            }
+            if (!pass) dev.EndFrame();
+            dev.DestroyTexture(t);
+        }
+    std::printf("readback: %u of %u levels read back exactly\n", checked - failed, checked);
+    return failed == 0;
+}
+
 template <typename D>
 void RunDemo(D& dev, bool windowed, bool stress, int frames, const std::string& shot)
 {
@@ -774,6 +822,14 @@ void RunDemo(D& dev, bool windowed, bool stress, int frames, const std::string& 
             VtxRhwDiffuseTex q[3] = {{0, 0, 0, 1, 0x01FFFFFF, 0, 0}, {1, 0, 0, 1, 0x01FFFFFF, 1, 0}, {0, 1, 0, 1, 0x01FFFFFF, 0, 1}};
             dev.DrawPrimitive(TriangleList, kFvfRhwDiffuseTex, q, 3);
             dev.SetTexture(0, nullptr);
+            // 12000 draws, each its own material: more distinct constants a frame than the arenas start with (a busy
+            // zone's), so they grow - and must stay inside the ring (a player's 71 MB of them in 64 MB wrote past it).
+            VtxRhwDiffuse dot[3] = {{0, 0, 0, 1, 0x00FFFFFF}, {1, 0, 0, 1, 0x00FFFFFF}, {0, 1, 0, 1, 0x00FFFFFF}};
+            for (int i = 0; i < 12000; ++i) {
+                Material m{{float(i % 97) / 97.0f, float(i % 89) / 89.0f, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 1};
+                dev.SetMaterial(m);
+                dev.DrawPrimitive(TriangleList, kFvfRhwDiffuse, dot, 3);
+            }
         }
         dev.EndFrame();
         if (shortLived)
@@ -5038,6 +5094,10 @@ float g_leafCamOrbit = 0.0f;       // --leaf-cam-orbit R: ... going round the ro
 int g_leafFilm = 0;                // --leaf-film N: ~60 frames a second, a screenshot every N frames (film_NNN.bmp)
 int g_frameGenToggle = 0;          // --frame-gen-toggle N: frame generation off at frame N, on again at 2N (the leaf
                                    // scenes; the swapchain made again each time)
+int g_fgBlankFrom = 0, g_fgHudAt = 0, g_fgHudEnd = 0;   // --fg-loading A H E: from frame A no 3D (a loading screen),
+                                        // frames H to E the perf readout's image, redrawn every 15 frames (the leaf
+                                        // scenes, with --window --frame-gen: the readout switched on at a loading screen
+                                        // hung FSR 3's swapchain)
 bool g_leafPond = false;           // --leaf-pond: a pond in front of the trees, drawn before them (as the game draws a
                                    // pond's water before most of a forest: the depth pre-pass's second segment)
 int g_leafForest = 0;              // --leaf-forest N: an N x N grid of the trees (12 units apart), seen from eye height
@@ -5187,6 +5247,17 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
         dev.BeginFrame();
         dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
         dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF8AB0D8, 1.0f);
+        if (g_fgHudEnd > 0 && frame == g_fgHudEnd)
+            dev.SetConsoleImage(0, 0, nullptr);
+        else if (g_fgHudAt > 0 && frame >= g_fgHudAt && (frame < g_fgHudEnd || !g_fgHudEnd) && (frame - g_fgHudAt) % 15 == 0) {
+            std::vector<uint32_t> hud(size_t(g_width) * 120, (frame / 15) % 2 ? 0xB0101820u : 0xB0201008u);
+            dev.SetConsoleImage(g_width, 120, hud.data());
+        }
+        if (g_fgBlankFrom > 0 && frame >= g_fgBlankFrom) {
+            dev.EndFrame();
+            if (frame % 30 == 0) std::printf("fg-loading: frame %d\n", frame);
+            continue;
+        }
         const float yaw = g_leafCamYaw + g_leafCamOrbit * std::sin(float(frame) * kPi / 60.0f);
         const float ex = mid + dist * std::sin(yaw), ez = -dist * std::cos(yaw);
         const float lookY = g_leafForest > 0 ? camY + 3.0f : tallest * 0.45f;
@@ -5616,6 +5687,7 @@ int main(int argc, char** argv)
         else if (a == "--grass-late" && i + 1 < argc) g_grassLate = std::atoi(argv[++i]);
         else if (a == "--grass-field") { g_grassFieldOn = true; hdr = true; }
         else if (a == "--grass-bench") { g_grassFieldOn = g_grassBench = true; hdr = true; }
+        else if (a == "--readback-test") g_readbackTest = true;
         else if (a == "--terrain-test") g_terrainTest = true;
         else if (a == "--native-ground-test") g_nativeGroundTest = true;
         else if (a == "--native-on") g_nativeOn = true;
@@ -5886,6 +5958,11 @@ int main(int argc, char** argv)
         else if (a == "--ui-window") g_uiWindow = true;
         else if (a == "--shine-pass" && i + 1 < argc) g_shinePass = std::atoi(argv[++i]);
         else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
+        else if (a == "--fg-loading" && i + 3 < argc) {
+            g_fgBlankFrom = std::atoi(argv[++i]);
+            g_fgHudAt = std::atoi(argv[++i]);
+            g_fgHudEnd = std::atoi(argv[++i]);
+        }
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
             saturation = float(std::atof(argv[++i])); contrast = float(std::atof(argv[++i]));
             warmth = float(std::atof(argv[++i])); nightTint = float(std::atof(argv[++i])); vignette = float(std::atof(argv[++i]));
@@ -6168,9 +6245,12 @@ int main(int argc, char** argv)
         tdev.SetLightOverride(lightOverride);
         tdev.SetShadows(shadows);
         if (!dump.empty() && !shadowTest && g_statelPack.empty()) tdev.RequestFrameDump(dump);
-        if (!g_statelPack.empty()) RunStatelTest(tdev, frames, shot, dump);
+        if (g_readbackTest) RunReadbackTest(tdev);
+        else if (!g_statelPack.empty()) RunStatelTest(tdev, frames, shot, dump);
         else if (shadowTest) RunShadowTest(tdev, frames, shot, cacheTest, frameMs, dump);
         else RunDemo(tdev, windowed, stress, frames, shot);
+    } else if (g_readbackTest) {
+        RunReadbackTest(dev);
     } else if (!g_statelPack.empty()) {
         RunStatelTest(dev, frames, shot, dump);
     } else if (g_handoverTest) {

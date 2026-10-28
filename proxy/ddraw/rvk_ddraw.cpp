@@ -3,6 +3,7 @@
 #include "rvk_settings.h"
 #include "native/gui.h"
 #include "native/ground.h"
+#include "native/native.h"
 #include "native/rings.h"
 #include "native/scene.h"
 #include "native/zone.h"
@@ -149,6 +150,7 @@ void RvkState::SetWindow(HWND hwnd)
     if (!hwnd)
         return;
     window = hwnd;
+    rnative::SetHangWindow(hwnd);
     if (device && device->Window() != hwnd) {
         if (device->InFrame())
             device->EndFrame();
@@ -287,6 +289,7 @@ void RvkState::Present()
     rnative::zone::Install();      // the teleport and loading screen, logged (docs/zone-handover-plan.md)
     Frame();                  // a present without any rendering still shows a frame
     device->EndFrame();
+    RSurface::DropIdleCopies();    // (once a second: idle textures' CPU copies, the game's address space)
     rnative::zone::Frame(device->FramesWithout3D());
     if (const uint32_t zone = rnative::zone::TakeSignals())
         device->ZoneSignal((zone & rnative::zone::kTeleport ? rvk::kZoneTeleport : 0u) |
@@ -539,6 +542,7 @@ void RvkState::Present()
         RvkLog("texture writes: %.1f a frame (%.1f only the rows locked), %.0f KB and %.3f ms on the game's thread a "
                "frame; the game's textures alive: %d", w.locks / 600.0, w.partial / 600.0,
                double(w.bytes) / 1024.0 / 600.0, w.ms / 600.0, GameTexturesAlive());
+        RvkLog("%s", GameTextureReport().c_str());
         g_drawCalls = 0;
         lastTick = now;
         slowest = 0;

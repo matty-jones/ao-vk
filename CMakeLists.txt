@@ -205,6 +205,7 @@ target_link_libraries(native_check PRIVATE randy_native)
 # Crash and hang reports in the cases that matter (run with tools/crash-check.sh).
 add_executable(crash_check tests/crash_check.cpp)
 target_link_libraries(crash_check PRIVATE randy_native)
+target_link_options(crash_check PRIVATE /LARGEADDRESSAWARE)   # (4 GB, as the game: --addr measures its address space)
 
 # Boots the real randy31 renderer outside the game (run with tools/randy-harness.sh).
 add_executable(randy_harness tests/randy_harness.cpp)
