@@ -186,6 +186,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   keeps a second sheet of water hidden under the land, and the river was put at its height, under the ground.
 
 ### Diagnostics
+- randy-vk.log lists, at startup, how the graphics driver compiled each version of ao-vk's main shader: the
+  registers each needs and what spills to memory (`shader stats:` lines). They show how much of the GPU each kind
+  of draw can use at once; please include them when reporting performance on a GPU of your own.
 - `RVK_FxLog 1` (randy-vk.ini) writes every effect the game starts to randy-vk.log: its template number and kind,
   what it is attached to (a spot, a character, a pair for a projectile) and when it ends. The console's
   `fx <template>` plays one of the game's effects on your character. The groundwork for ao-vk's own effects.

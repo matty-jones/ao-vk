@@ -583,9 +583,14 @@ bool Device::CreateLogicalDevice(std::string* error)
     VkPhysicalDeviceRobustness2FeaturesEXT rob2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
     VkPhysicalDeviceTimelineSemaphoreFeatures timeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
     VkPhysicalDeviceShaderFloat16Int8Features half{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
+    // The driver's statistics of a compiled pipeline (registers, spills, instructions: ShaderRegisterReport).
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR exec{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
+    const bool execExt = has(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     features.pNext = &half;
-    half.pNext = &v13;
+    half.pNext = execExt ? static_cast<void*>(&exec) : static_cast<void*>(&v13);
+    exec.pNext = &v13;
     v13.pNext = &descIdx;
     descIdx.pNext = &rob2;
     rob2.pNext = &eds3;
@@ -702,6 +707,16 @@ bool Device::CreateLogicalDevice(std::string* error)
     VkPhysicalDeviceShaderFloat16Int8Features enHalf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
     enHalf.shaderFloat16 = half.shaderFloat16;
     enHalf.pNext = &enDescIdx;
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR enExec{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
+    m_shaderStats = execExt && exec.pipelineExecutableInfo;
+    if (m_shaderStats) {
+        enExec.pipelineExecutableInfo = VK_TRUE;
+        enExec.pNext = enHalf.pNext;
+        enHalf.pNext = &enExec;
+        extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+    }
+    Log("shader statistics (registers per variant): %s", m_shaderStats ? "yes" : "no (the driver doesn't report them)");
     VkPhysicalDeviceVulkan13Features enV13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     enV13.pNext = &enHalf;
     enV13.dynamicRendering = VK_TRUE;
@@ -1210,6 +1225,7 @@ bool Device::CreatePipelines(std::string* error)
     // One set for the 8-bit targets, one for the HDR scene (float); each also as a no-discard variant (early-Z for
     // draws that never cut out); each without the ground's code (g 0), with it (g 1: the ground's draws), and without
     // the frame lights' loop (g 2: the draws none reaches).
+    static const char* const kBuildName[3] = {"general", "ground", "no lamps"};
     for (int g = 0; g < 3 && ok; ++g)
     for (int set = 0; set < 2 && ok; ++set)
     for (int nc = 0; nc < 2 && ok; ++nc)
@@ -1238,8 +1254,12 @@ bool Device::CreatePipelines(std::string* error)
             {{&m_groundPipelines[c], &m_groundPipelinesNoCut[c]}, {&m_groundPipelinesHdr[c], &m_groundPipelinesHdrNoCut[c]}},
             {{&m_noFramePipelines[c], &m_noFramePipelinesNoCut[c]}, {&m_noFramePipelinesHdr[c], &m_noFramePipelinesHdrNoCut[c]}}};
         VkPipeline* dst = byBuild[g][set][nc];
+        const bool stats = m_shaderStats && c == 2;   // (the points' and lines' builds share the triangles' shaders)
+        if (stats) ci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
         ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                    "vkCreateGraphicsPipelines", error);
+        if (ok && stats)
+            ShaderRegisterReport(*dst, kBuildName[g], set ? "HDR" : "8-bit", nc ? "no cut" : "cut-out");
     }
     // Characters' Phong tessellation: triangles as 3-point patches, through ffp.tesc / ffp.tese (both targets).
     VkShaderModule tesc = VK_NULL_HANDLE, tese = VK_NULL_HANDLE;
@@ -1284,8 +1304,12 @@ bool Device::CreatePipelines(std::string* error)
                                                {&m_groundTessPipelines[set], &m_groundTessPipelinesNoCut[set]},
                                                {&m_noFrameTessPipelines[set], &m_noFrameTessPipelinesNoCut[set]}};
             VkPipeline* dst = byBuild[g][nc];
+            if (m_shaderStats) ci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
             ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                        "tessellation pipeline", error);
+            if (ok && m_shaderStats)
+                ShaderRegisterReport(*dst, kBuildName[g], set ? "HDR, tessellated" : "8-bit, tessellated",
+                                     nc ? "no cut" : "cut-out");
         }
     }
     if (tesc) vkDestroyShaderModule(m_device, tesc, nullptr);

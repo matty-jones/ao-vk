@@ -150,7 +150,10 @@
     X(vkCmdCopyBuffer) \
     X(vkCmdCopyImageToBuffer) \
     X(vkCmdCopyImage) \
-    X(vkCmdBlitImage)
+    X(vkCmdBlitImage) \
+    /* pipelines' compiled statistics (diag.cpp ShaderRegisterReport; null where the driver has none) */ \
+    X(vkGetPipelineExecutablePropertiesKHR) \
+    X(vkGetPipelineExecutableStatisticsKHR)
 
 namespace rvk::vk {
 

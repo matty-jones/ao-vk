@@ -13,6 +13,50 @@ namespace rvk {
 using namespace vk;
 using namespace detail;
 
+// One of the scene shader's builds as the driver compiled it (CreatePipelines, with the capture flag): each stage's
+// statistics on one line, named as the driver names them (RADV: VGPRs, SGPRs, spills, instructions, subgroups per
+// SIMD; NVIDIA its own) - the registers a variant needs decide how many of its pixels run at once.
+void Device::ShaderRegisterReport(VkPipeline pipeline, const char* build, const char* target, const char* cut)
+{
+    if (!vkGetPipelineExecutablePropertiesKHR || !vkGetPipelineExecutableStatisticsKHR || !pipeline)
+        return;
+    VkPipelineInfoKHR info{VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR};
+    info.pipeline = pipeline;
+    uint32_t count = 0;
+    if (vkGetPipelineExecutablePropertiesKHR(m_device, &info, &count, nullptr) != VK_SUCCESS || !count)
+        return;
+    std::vector<VkPipelineExecutablePropertiesKHR> props(count, {VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR});
+    if (vkGetPipelineExecutablePropertiesKHR(m_device, &info, &count, props.data()) != VK_SUCCESS)
+        return;
+    for (uint32_t i = 0; i < count; ++i) {
+        VkPipelineExecutableInfoKHR exe{VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR};
+        exe.pipeline = pipeline;
+        exe.executableIndex = i;
+        uint32_t n = 0;
+        if (vkGetPipelineExecutableStatisticsKHR(m_device, &exe, &n, nullptr) != VK_SUCCESS)
+            continue;
+        std::vector<VkPipelineExecutableStatisticKHR> stats(n, {VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR});
+        if (n && vkGetPipelineExecutableStatisticsKHR(m_device, &exe, &n, stats.data()) != VK_SUCCESS)
+            continue;
+        std::string line;
+        for (const VkPipelineExecutableStatisticKHR& s : stats) {
+            char value[48];
+            switch (s.format) {
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR: std::snprintf(value, sizeof(value), "%s", s.value.b32 ? "yes" : "no"); break;
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR: std::snprintf(value, sizeof(value), "%lld", (long long)s.value.i64); break;
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR: std::snprintf(value, sizeof(value), "%llu", (unsigned long long)s.value.u64); break;
+            default: std::snprintf(value, sizeof(value), "%.2f", s.value.f64); break;
+            }
+            line += line.empty() ? "" : " | ";
+            line += s.name;
+            line += ' ';
+            line += value;
+        }
+        Log("shader stats: %s, %s, %s - %s (subgroup %u): %s", build, target, cut, props[i].name, props[i].subgroupSize,
+            line.empty() ? "(none reported)" : line.c_str());
+    }
+}
+
 void Device::RequestFrameDump(const std::string& path, int frames)
 {
     m_dumpPath = path;

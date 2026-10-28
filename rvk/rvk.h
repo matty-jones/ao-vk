@@ -2104,6 +2104,11 @@ private:
                m_noFramePipelinesHdrNoCut[3] = {}, m_noFrameTessPipelines[2] = {}, m_noFrameTessPipelinesNoCut[2] = {};
     bool m_drawGround = false;                   // the current draw takes the ground's path (its record's terrainAt.w)
     bool m_drawNoFrameLights = false;            // ... no frame light reaches it (m_noFrame*Pipelines)
+    // The scene shader's variants as the driver compiled them (VK_KHR_pipeline_executable_properties): each stage's
+    // statistics - registers, spills, instructions, waves - one line each in the log at startup. Registers decide how
+    // many pixels the GPU shades at once: a variant's worst path sets them for every draw that takes it.
+    bool m_shaderStats = false;
+    void ShaderRegisterReport(VkPipeline pipeline, const char* build, const char* target, const char* cut);
     bool m_constLightOverride = false;           // the current constant block has F_LIGHTOVERRIDE (Draw, as it writes it)
     bool m_tessSupported = false;
     // Phong tessellation of characters near the camera (draw.cpp TessellateDraw): RVK_Tess*.
