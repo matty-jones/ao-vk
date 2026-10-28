@@ -93,9 +93,6 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   instead of numbers (ours / AMD CACAO / ray traced, FSR 2.2 / FSR 3.1, off / 16x, ...), and AMD's tuning moved from
   randy-vk.ini into the Advanced tab: `RVK_SssrThick`, `RVK_GiSky` and `RVK_VrsCutoff`. The console shows the cost
   too. Needs the matching AOReloaded.
-- The performance readout (`RVK_PerfHud`) shows client memory and VRAM. Client memory is how much of the game's 4 GB it
-  has taken, with the MB still free; it turns orange under 512 MB, where long sessions start to fail on zone changes
-  (the game is a 32-bit program). VRAM is the graphics card's memory in use against what the driver allows the game.
 
 ### Changed
 - Day and night share one light (`RVK_LightRig`, on; off brings back the old night lighting). At sunset buildings and
@@ -140,15 +137,6 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - A shop's room seen through its doorway is no longer turned at an angle to the building (30 degrees at Newland City's
   midtech shop, whose doorway is a pointed recess rather than a flat panel), and no longer shows over the walls just
   inside the doorway: it shows only where the doorway's black is.
-- Zoning no longer fills the graphics card's memory: textures the game let go of when leaving a zone (small interface
-  and ground pieces, thousands of them after a few zone changes) stayed on the card for the rest of the session.
-- Long sessions and many zone changes no longer run the game out of memory and crash it. The game keeps every zone's
-  textures, and ao-vk kept a second copy of each in the game's memory as well (over half a gigabyte after a few
-  zones, nearly two in a long session; the game is a 32-bit program and has four at most). A texture's copy is now
-  dropped once it is on the graphics card. `RVK_TexKeepCpu` (randy-vk.ini) keeps them as before.
-- With frame generation on (`RVK_FrameGen`), the game could freeze for good on a loading screen when anything drawn
-  over the picture appeared or went away there: switching on the performance readout during a zone change or at
-  character select did it every time, and the interface coming or going during a load could too.
 - Forests next to water no longer cost far more than other forests: the trees drawn after a pond or river were
   shaded once for every layer of leaves (about 46 fps under a Newland tree, where a forest without water stays fast).
   `RVK_PrepassMore` (ini only) switches the fix off for comparison.
@@ -194,9 +182,6 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   leaves now keep the holes in their shadows every frame.
 - Rivers missing in Borealis: the canyons under the bridges showed dry sand where the game has water. The playfield
   keeps a second sheet of water hidden under the land, and the river was put at its height, under the ground.
-- A crash in busy zones with many different objects in view: once the renderer's per-frame buffer was outgrown, every
-  frame wrote past its end until the game went down (randy-vk.log filled with "bytes do not fit in the ring buffer").
-  The buffer now grows for the next frames, and nothing is ever written beyond it.
 
 ### Diagnostics
 - `RVK_FxLog 1` (randy-vk.ini) writes every effect the game starts to randy-vk.log: its template number and kind,
@@ -208,14 +193,37 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   (`-surface.bmp`: normals, characters' marked twice as bright); `-gi.bmp` stays ours.
 - `RVK_RtDebug 1` (randy-vk.ini) shows what ray tracing sees on GPUs that have it: each building, rock and patch of
   ground in its own colour (red: a surface seen from behind). The ray-traced effects are built on it.
+
+## 0.7.1 - 2026-10-26
+
+### Fixed
+- Long sessions and many zone changes no longer run the game out of memory and crash it. The game keeps every zone's
+  textures, and ao-vk kept a second copy of each in the game's memory as well (over half a gigabyte after a few
+  zones, nearly two in a long session; the game is a 32-bit program and has four at most). A texture's copy is now
+  dropped once it is on the graphics card. `RVK_TexKeepCpu` (randy-vk.ini) keeps them as before.
+- Zoning no longer fills the graphics card's memory: textures the game let go of when leaving a zone (small interface
+  and ground pieces, thousands of them after a few zone changes) stayed on the card for the rest of the session.
+- A crash in busy zones with many different objects in view: once the renderer's per-frame buffer was outgrown, every
+  frame wrote past its end until the game went down (randy-vk.log filled with "bytes do not fit in the ring buffer").
+  The buffer now grows for the next frames, and nothing is ever written beyond it.
+- With frame generation on (`RVK_FrameGen`), the game could freeze for good on a loading screen when anything drawn
+  over the picture appeared or went away there: switching on the performance readout during a zone change or at
+  character select did it every time, and the interface coming or going during a load could too.
+
+### New
+- The performance readout (`RVK_PerfHud`) shows client memory and VRAM. Client memory is how much of the game's 4 GB it
+  has taken, with the MB still free; it turns orange under 512 MB, where long sessions start to fail on zone changes
+  (the game is a 32-bit program). VRAM is the graphics card's memory in use against what the driver allows the game.
+
+### Diagnostics
 - Crashes that used to leave randy-vk.log simply ending now leave a report: errors thrown in code (out of memory
   during a zone load), crashes nothing caught, and the renderer's own fatal errors. A normal quit ends the log with
   "the game exits", so a log without it was ended from outside the game.
-- randy-vk.log notes the free memory at each zone change and in every crash report, with the largest free block: the
-  game is a 32-bit program, and a load needs one large block.
 - When the game stops responding (Windows greys its window and offers to close it), randy-vk.log now gets a hang report
   after about ten seconds, even if the picture still updates. Before, only a picture frozen for 20 s got one, and a game
   closed from that Windows prompt left nothing in the log.
+- randy-vk.log notes the free memory at each zone change and in every crash report, with the largest free block, and
+  every 600 frames what the game's textures are: how many are alive, made and freed, and whether any are held twice.
 
 ## 0.7.0 - 2026-10-20
 
