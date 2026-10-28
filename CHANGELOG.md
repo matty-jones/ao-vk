@@ -12,11 +12,15 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   Font and layout corrections have native regression coverage; broader gameplay validation is pending.
 
 ### Diagnostics
+- Ground frame dumps report pass classification, native patch submissions and frustum rejections, including why the
+  original terrain was preserved. The log records each reason once per playfield.
 - `RANDYVK_WORLD_SHOT=1` saves the world without overlays when taking a renderer screenshot.
 - Console `profileui` compares interface scales in the current scene. `[Native] UiScaling=off` skips scaling and
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Terrain no longer disappears when native ground cannot replace a pass. Unrecognised passes, missing textures
+  and fully culled patches preserve the game's terrain; native ground stays enabled.
 - Scaled icons no longer bypass the texture-edge fix on the client's native drawing path.
 - Small scaled letters retain their natural stroke widths and descenders; bitmap-font letters use fresh outlines.
   Login and character-selection windows keep their native screen layout regardless of saved gameplay UI scales.

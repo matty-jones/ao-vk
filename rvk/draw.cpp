@@ -3836,6 +3836,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // GPU-driven M2: this draw's record, and the frame's two arrays (bindings 0 = constants, 12 = records) pushed
     // once per frame's command buffer. The record index travels in firstInstance (gl_InstanceIndex).
     uint32_t recordIndex = AppendRecord(constIndex, dt);
+    if (m_native.drawing && !m_native.clutter && !m_native.pebbleDraw &&
+        fvf == (d3d::FVF_XYZ | d3d::FVF_NORMAL | (2u << 8))) ++m_native.submitted;
     // A tree's own canopy (leaves.cpp): its sprigs drawn with the type's atlas - their own record, the canopy's but for
     // the textures (its material maps are laid on the game's cards, not on the atlas).
     uint32_t leafRecord = recordIndex;

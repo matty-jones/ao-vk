@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+namespace rvk::detail { int BoxInClip(const float mn[3], const float mx[3], const d3d::Matrix&, bool); }
+
 using namespace rvk;
 using namespace rvk::d3d;
 
@@ -4890,6 +4892,138 @@ int RunUiAtlasTest(D& dev, const std::string& shot)
     return failures ? 1 : 0;
 }
 
+template <typename D>
+int RunGroundFallbackTest(D& dev, const std::string& shot)
+{
+    constexpr uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2u << 8);
+    struct GroundVertex { float x,y,z,nx,ny,nz,u0,v0,u1,v1; };
+    const uint32_t blue = 0xFF2040F0, green = 0xFF10E040;
+    Texture* nativeTile = dev.CreateTexture(1, 1, Format::A8R8G8B8, 1);
+    Texture* originalTile = dev.CreateTexture(1, 1, Format::A8R8G8B8, 1);
+    dev.UpdateTexture(nativeTile, 0, 0, 0, 1, 1, &blue, 4);
+    dev.UpdateTexture(originalTile, 0, 0, 0, 1, 1, &green, 4);
+    auto ground = [&](bool missing) {
+        auto g = std::make_shared<NativeGround>();
+        g->id = 540; g->cellsX = g->cellsZ = 4; g->patch = 2; g->cellX = g->cellZ = 1;
+        g->heights.assign(25, 0); g->codes.assign(16, 0); g->tiles = {missing ? nullptr : nativeTile};
+        return g;
+    };
+    dev.SetHdr(false); dev.SetPixelLighting(false); dev.SetShadows(false);
+    dev.SetNativeGroundAo(0); dev.SetNativeGroundRocks(0); dev.SetNativeGroundPebbles(0);
+    int failures = 0;
+    const Matrix city = Mul(LookAtLH({461.92f,19.39f,404.28f}, {461.92f,16,414.28f}, {0,1,0}),
+                            PerspectiveLH(kPi/3, float(g_width)/g_height, .1f, 851));
+    int visible = 0;
+    for (int z = 0; z < 7; ++z) for (int x = 0; x < 7; ++x) {
+        const float lo[]{x*128.0f-1,14,z*128.0f-1}, hi[]{(x+1)*128.0f+1,16,(z+1)*128.0f+1};
+        visible += rvk::detail::BoxInClip(lo, hi, city, true) >= 0;
+    }
+    if (!visible) { ++failures; std::printf("ground fallback: all 49 patches rejected at captured Old Athen eye\n"); }
+    for (int mode = 0; mode < 9; ++mode) {
+        dev.SetNativeGround(ground(mode == 4)); dev.SetNativeGroundOn(mode != 0);
+        const std::string path = shot + "." + std::to_string(mode) + ".txt";
+        dev.RequestFrameDump(path);
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0, 1});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF202020, 1);
+        auto camera = [&](bool distant) {
+            const float x = distant ? 461.92f : 2.0f, z = distant ? 404.28f : -4.0f;
+            dev.SetTransform(View, LookAtLH({x, distant ? 19.39f : 4.0f, z}, {x, 0, z + 6}, {0, 1, 0}));
+            dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, .1f, 100));
+            dev.SetTransform(World, Identity());
+        };
+        auto draw = [&](bool distant) {
+            camera(distant);
+            const float x = distant ? 461.92f : 2, z = distant ? 410.28f : 2;
+            const GroundVertex v[] = {
+                {x-8,0,z-8,0,1,0,0,0,0,0}, {x+8,0,z-8,0,1,0,1,0,1,0},
+                {x-8,0,z+8,0,1,0,0,1,0,1}, {x+8,0,z+8,0,1,0,1,1,1,1}};
+            const uint16_t indices[]{0,2,1,1,2,3};
+            if (mode == 6) {
+                auto vb = std::make_shared<std::vector<uint8_t>>(sizeof(v));
+                auto ib = std::make_shared<std::vector<uint8_t>>(sizeof(indices));
+                std::memcpy(vb->data(), v, sizeof(v)); std::memcpy(ib->data(), indices, sizeof(indices));
+                dev.RegisterMesh(1, TriangleList, kFvfTerrain, vb, 0, 4, ib, 6);
+                dev.DrawMesh(1); dev.DrawMesh(1);
+            } else dev.DrawIndexedPrimitive(TriangleList, kFvfTerrain, v, 4, indices, 6);
+        };
+        dev.SetRenderState(RS_ZENABLE, 1); dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL); dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_FOGENABLE, 0); dev.SetRenderState(RS_ALPHATESTENABLE, 0);
+        dev.SetRenderState(RS_LIGHTING, mode == 2);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, mode == 1);
+        dev.SetRenderState(RS_SRCBLEND, BLEND_ONE); dev.SetRenderState(RS_DESTBLEND, BLEND_ZERO);
+        dev.SetTexture(0, originalTile); dev.SetTexture(1, nullptr);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+        dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        dev.SetTextureStageState(1, TSS_COLOROP, TOP_DISABLE);
+        dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
+        Texture* offscreen = mode == 6 ? dev.CreateRenderTarget(g_width, g_height) : nullptr;
+        if (offscreen) { dev.SetRenderTarget(offscreen); draw(false); dev.SetRenderTarget(nullptr); }
+        if (mode == 7 || mode == 8) { draw(false); dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF202020, 1); }
+        if (mode == 8) dev.SetViewport({g_width/4, g_height/4, g_width/2, g_height/2, 0, 1});
+        draw(mode == 3 || mode == 7);
+        dev.SetDrawVisual(0, nullptr);
+        dev.RequestScreenshot(shot + "." + std::to_string(mode) + ".bmp"); dev.EndFrame();
+        std::vector<uint32_t> pixels(size_t(g_width) * g_height);
+        const bool read = dev.ReadPixels(nullptr, pixels.data());
+        const uint32_t pixel = read ? pixels[size_t(g_height / 2) * g_width + g_width / 2] : 0;
+        const int g = (pixel >> 8) & 255, b = pixel & 255;
+        const bool native = mode == 5 || mode == 6;
+        if (!read || (native ? b <= g + 40 : g <= b + 40)) {
+            ++failures; std::printf("ground fallback: mode %d expected %s, got %08x\n", mode, native ? "native blue" : "original green", pixel);
+        }
+        if (offscreen) { dev.DestroyTexture(offscreen); dev.ReleaseMesh(1); }
+    }
+    dev.SetNativeGround(ground(false)); dev.SetNativeGroundOn(true);
+    dev.SetHdr(true); dev.SetPixelLighting(true); dev.SetKnob(Knob::GroundOne, 1);
+    Texture* secondary = dev.CreateRenderTarget(g_width, g_height);
+    for (int frame = 0; frame < 3; ++frame) {
+        dev.RequestFrameDump(shot + ".deferred-" + std::to_string(frame) + ".txt");
+        dev.BeginFrame(); dev.SetViewport({0, 0, g_width, g_height, 0, 1});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF202020, 1);
+        dev.SetTransform(View, LookAtLH({2,4,-4}, {2,0,2}, {0,1,0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi/3, float(g_width)/g_height, .1f, 100));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_LIGHTING, 0); dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.SetRenderState(RS_ZENABLE, 1); dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL); dev.SetRenderState(RS_AMBIENT, 0xFFFFFFFF);
+        dev.SetTexture(0, originalTile); dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
+        const GroundVertex v[] = {{-6,0,-6,0,1,0,0,0,0,0}, {10,0,-6,0,1,0,1,0,1,0},
+                                {-6,0,10,0,1,0,0,1,0,1}, {10,0,10,0,1,0,1,1,1,1}};
+        const uint16_t indices[]{0,2,1,1,2,3};
+        dev.DrawIndexedPrimitive(TriangleList, kFvfTerrain, v, 4, indices, 6);
+        if (frame < 2) {
+            dev.SetRenderState(RS_LIGHTING, 1); dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO); dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
+            dev.SetRenderState(RS_ZWRITEENABLE, 0); dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD); dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfTerrain, v, 4, indices, 6);
+        } else {
+            dev.SetRenderTarget(secondary); dev.SetDrawVisual(0, nullptr);
+            struct PointVertex { float x,y,z; uint32_t colour; } triangle[]{{0,0,0,0xFFFF0000},{1,0,0,0xFFFF0000},{0,1,0,0xFFFF0000}};
+            dev.DrawPrimitive(TriangleList, FVF_XYZ | FVF_DIFFUSE, triangle, 3);
+            dev.SetRenderTarget(nullptr);
+        }
+        dev.SetDrawVisual(0, nullptr); dev.EndFrame();
+        std::vector<uint32_t> pixels(size_t(g_width) * g_height);
+        const bool read = dev.ReadPixels(nullptr, pixels.data());
+        const uint32_t pixel = read ? pixels[size_t(g_height/2)*g_width+g_width/2] : 0;
+        if (!read || int(pixel & 255) <= int((pixel >> 8) & 255) + 30) {
+            ++failures; std::printf("ground fallback: deferred frame %d missing native base (%08x)\n", frame, pixel);
+        }
+    }
+    dev.DestroyTexture(secondary);
+    dev.SetNativeGround(nullptr); dev.DestroyTexture(nativeTile); dev.DestroyTexture(originalTile);
+    std::printf("ground fallback: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv)
 {
     SetUnhandledExceptionFilter(&Crashed);
@@ -4912,6 +5046,7 @@ int main(int argc, char** argv)
     int renderScale = 100;                       // --render-scale N: RVK_RenderScale (needs --hdr --taa)
     int upscaler = 0;                            // --upscaler N: RVK_Upscaler (1: FSR 2, 2: FSR 3)
     bool frameGen = false;                       // --frame-gen: RVK_FrameGen (needs --window)
+    bool groundFallbackTest = false;
     bool normalMapTest = false, pbrTest = false, glowOccludeTest = false, interfaceTest = false, uiAtlasTest = false;
     uint32_t anisotropy = 1;
     float motionBlur = 0.0f, dof = 0.0f, dofFocus = 0.0f;
@@ -5249,6 +5384,7 @@ int main(int argc, char** argv)
         else if (a == "--ui-window") g_uiWindow = true;
         else if (a == "--interface-test") interfaceTest = true;
         else if (a == "--ui-atlas-test") uiAtlasTest = true;
+        else if (a == "--ground-fallback-test") groundFallbackTest = true;
         else if (a == "--shine-pass" && i + 1 < argc) g_shinePass = std::atoi(argv[++i]);
         else if (a == "--frame-gen-toggle" && i + 1 < argc) g_frameGenToggle = std::atoi(argv[++i]);
         else if (a == "--grade" && i + 5 < argc) {   // saturation contrast warmth night-tint vignette
@@ -5434,6 +5570,7 @@ int main(int argc, char** argv)
     dev.SetMotionBlurMode(motionMode);
     dev.SetDof(dof > 0.0f, dofBokeh, true, dof, 16.0f, dofFocus, 0.2f, dofFar, 3.0f);
     dev.SetPointShadowFadeIn(fadeIn);    // frames here are milliseconds apart: no fade-in unless asked
+    if (groundFallbackTest) return RunGroundFallbackTest(dev, shot);
     if (interfaceTest || uiAtlasTest) {
         if (!threaded) return uiAtlasTest ? RunUiAtlasTest(dev, shot) : RunInterfaceTest(dev, shot);
         ThreadedDevice queued;

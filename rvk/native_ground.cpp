@@ -5,8 +5,8 @@
 // over by the proxy, rvk_ground.cpp) become static patches once, drawn in the game's own two passes - the base pass
 // (each cell's own tile: terrain.glsl's native mode, through a tile-code texture) and the lighting pass (the hour's
 // baked lightmap) - with the game's render state for each: the first ground draw of a pass in a frame draws all the
-// patches in view for it, and every ground draw of the game's is skipped. Everything that reads the ground's draws
-// (cliff faces, shadows, hill shade, mist, wet ground, fog) reads these the same way.
+// patches in view for it. Only a recognised pass with drawable patches replaces the game's ground. Everything that
+// reads the ground's draws (cliff faces, shadows, hill shade, mist, wet ground, fog) reads these the same way.
 #include "internal.h"
 
 #include <algorithm>
@@ -91,6 +91,11 @@ void Device::PollNativeSky()
 
 void Device::DestroyNativeGround()
 {
+    if (m_native.basePending && m_inFrame) DrawPendingGroundBase();
+    m_native.basePending = false;
+    m_native.visible.clear();
+    m_native.visibilityFrame = m_native.fallbackFrame = ~0ull;
+    m_native.diagnostics = {}; m_native.diagnosticReasons = 0;
     if (m_native.skyPending.valid()) m_native.skyPending.wait();
     if (m_native.ground && m_native.framesDrawn)
         Log("native ground: playfield %u - %.1f patches drawn a frame over %u frames, %u rocks made", m_native.ground->id,
@@ -113,7 +118,9 @@ void Device::DestroyNativeGround()
 void Device::SetNativeGround(std::shared_ptr<const NativeGround> ground)
 {
     DestroyNativeGround();
-    if (!ground || !ground->cellsX || !ground->cellsZ || !ground->patch ||
+    if (!ground || !ground->cellsX || !ground->cellsZ || !ground->patch || ground->patch > 255 ||
+        !std::isfinite(ground->cellX) || !std::isfinite(ground->cellZ) || ground->cellX <= 0 || ground->cellZ <= 0 ||
+        std::any_of(ground->heights.begin(), ground->heights.end(), [](float value) { return !std::isfinite(value); }) ||
         ground->heights.size() != size_t(ground->cellsX + 1) * (ground->cellsZ + 1) ||
         ground->codes.size() != size_t(ground->cellsX) * ground->cellsZ) {
         if (ground) Log("native ground: playfield %u's data doesn't add up - the game's ground", ground->id);
@@ -455,47 +462,154 @@ bool Device::NativeLightRgb(float u, float v, uint8_t rgb[3]) const
     return true;
 }
 
-// A draw of the game's: is it its ground, replaced (drawn by this first, for its pass, once a frame)? Skipped then.
+namespace {
+enum GroundReason : uint32_t { NativeDisabled, UnsupportedFormat, UnknownPass, SecondaryTarget, Unavailable, InvalidCamera, AllCulled, NoNativeBase,
+                               NativeSubmitted, AlreadySubmitted, DeferredReady, NoSubmission };
+constexpr const char* kGroundReason[] = {"disabled", "format", "unrecognised-pass", "secondary-view-or-target", "resources",
+    "invalid-camera", "all-frustum-rejected", "no-native-base", "submitted", "already-submitted", "deferred-ready", "no-submission"};
+}
+
+bool Device::NativeGroundDecision(uint32_t fvf, uint32_t reason, bool replaced)
+{
+    auto& d = m_native.diagnostics;
+    if (replaced) ++d.replaced; else ++d.originals;
+    const uint32_t bit = 1u << reason;
+    const bool first = !(m_native.diagnosticReasons & bit);
+    const bool dump = m_dumpFile && d.samples++ < 8;
+    if (first || dump) {
+        uint32_t ready = 0;
+        for (Texture* t : m_native.ground->tiles) ready += t && t->m_image;
+        char message[640];
+        std::snprintf(message, sizeof(message), "native ground: pf %u frame %llu %s; original %s; fvf 0x%x lit %u blend %u %u/%u z %u/%u/%u st0 %u/%u/%u tc %u; tiles %u/%zu codes %u; patches %zu visible %zu tested %u culled %u submitted %u",
+            m_native.ground->id, static_cast<unsigned long long>(m_frameNumber), kGroundReason[reason], replaced ? "suppressed" : "preserved",
+            fvf, m_rs[d3d::RS_LIGHTING], m_rs[d3d::RS_ALPHABLENDENABLE], m_rs[d3d::RS_SRCBLEND], m_rs[d3d::RS_DESTBLEND],
+            m_rs[d3d::RS_ZENABLE], m_rs[d3d::RS_ZWRITEENABLE], m_rs[d3d::RS_ZFUNC],
+            m_tss[0][d3d::TSS_COLOROP], m_tss[0][d3d::TSS_COLORARG1], m_tss[0][d3d::TSS_COLORARG2], m_tss[0][d3d::TSS_TEXCOORDINDEX],
+            ready, m_native.ground->tiles.size(), uint32_t(m_native.codes && m_native.codes->m_image), m_native.patches.size(),
+            m_native.visibilityFrame == m_frameNumber ? m_native.visible.size() : 0, d.tested, d.culled, d.submitted);
+        if (first) { Log("%s", message); m_native.diagnosticReasons |= bit; }
+        if (dump) std::fprintf(m_dumpFile, "# %s\n", message);
+        if ((first || dump) && (reason == AllCulled || reason == InvalidCamera)) {
+            const auto& g = *m_native.ground;
+            if (first) Log("native ground: grid %u x %u, cell %.3f/%.3f, patch %u", g.cellsX, g.cellsZ, g.cellX, g.cellZ, g.patch);
+            if (dump) std::fprintf(m_dumpFile, "# ground grid %u x %u cell %.3f/%.3f patch %u\n", g.cellsX, g.cellsZ, g.cellX, g.cellZ, g.patch);
+            const auto vp = MulMatrix(m_view, m_proj);
+            for (int row = 0; row < 4; ++row) {
+                if (first) Log("native ground: clip row %d: %.6g %.6g %.6g %.6g", row, vp.m[row][0], vp.m[row][1], vp.m[row][2], vp.m[row][3]);
+                if (dump) std::fprintf(m_dumpFile, "# ground clip row %d: %.6g %.6g %.6g %.6g\n", row, vp.m[row][0], vp.m[row][1], vp.m[row][2], vp.m[row][3]);
+            }
+        }
+    }
+    return replaced;
+}
+
+void Device::DumpNativeGround()
+{
+    if (!m_dumpFile || !m_native.ground) return;
+    const auto& d = m_native.diagnostics;
+    std::fprintf(m_dumpFile, "# native ground: pf %u decoded patches %zu tiles %zu; candidates %u base %u light %u unknown %u; originals %u replaced %u; tested %u frustum-rejected %u native-submissions %u\n",
+        m_native.ground->id, m_native.patches.size(), m_native.ground->tiles.size(),
+        d.frame == m_frameNumber ? d.candidates : 0, d.frame == m_frameNumber ? d.base : 0,
+        d.frame == m_frameNumber ? d.light : 0, d.frame == m_frameNumber ? d.unknown : 0,
+        d.frame == m_frameNumber ? d.originals : 0, d.frame == m_frameNumber ? d.replaced : 0,
+        d.frame == m_frameNumber ? d.tested : 0, d.frame == m_frameNumber ? d.culled : 0,
+        d.frame == m_frameNumber ? d.submitted : 0);
+}
+
+bool Device::PrepareNativeGround()
+{
+    m_native.prepareFailure = Unavailable;
+    if (!m_native.codes || !m_native.codes->m_image || !m_blackTexture || !m_blackTexture->m_image ||
+        !m_native.lightmapGrey || !m_native.lightmapGrey->m_image || m_native.patches.empty() ||
+        !m_native.vertices || !m_native.indexCount || m_native.ground->tiles.empty()) return false;
+    for (Texture* tile : m_native.ground->tiles) if (!tile || !tile->m_image) return false;
+    const auto vp = MulMatrix(m_view, m_proj);
+    for (const auto& row : vp.m) for (float value : row)
+        if (!std::isfinite(value)) { m_native.prepareFailure = InvalidCamera; return false; }
+    if (m_native.visibilityFrame == m_frameNumber && std::memcmp(&vp, &m_native.visibilityVp, sizeof(vp)) == 0) {
+        if (m_native.visible.empty()) m_native.prepareFailure = AllCulled;
+        return !m_native.visible.empty();
+    }
+    m_native.visibilityFrame = m_frameNumber;
+    m_native.visibilityVp = vp;
+    m_native.visible.clear();
+    for (uint32_t i = 0; i < m_native.patches.size(); ++i) {
+        const auto& p = m_native.patches[i];
+        if (!p.vertices || !p.indices || p.vertices->size() < size_t(m_native.vertices) * sizeof(Vertex) ||
+            p.indices->size() < size_t(m_native.indexCount) * sizeof(uint16_t)) { m_native.visible.clear(); return false; }
+        float lo[3], hi[3];
+        for (int j = 0; j < 3; ++j) {
+            if (!std::isfinite(p.lo[j]) || !std::isfinite(p.hi[j]) || p.lo[j] > p.hi[j]) { m_native.visible.clear(); return false; }
+            lo[j] = p.lo[j] - 1; hi[j] = p.hi[j] + 1;
+        }
+        ++m_native.diagnostics.tested;
+        if (BoxInClip(lo, hi, vp, true) < 0) ++m_native.diagnostics.culled;
+        else m_native.visible.push_back(i);
+    }
+    if (m_native.visible.empty()) m_native.prepareFailure = AllCulled;
+    return !m_native.visible.empty();
+}
+
+// Only a recognised, drawable primary-world pass can take ownership of the game's ground.
 bool Device::NativeGroundReplaces(uint32_t fvf)
 {
-    if (!m_native.on || !m_native.ground || !m_native.codes || m_native.drawing)
-        return false;
-    if (m_drawVisualKind != uint32_t(VisualKind::Terrain) || !IsTerrain(fvf))
-        return false;
+    if (!m_native.ground || m_native.drawing || m_drawVisualKind != uint32_t(VisualKind::Terrain)) return false;
+    auto& d = m_native.diagnostics;
+    if (d.frame != m_frameNumber) { d = {}; d.frame = m_frameNumber; }
+    ++d.candidates;
     const bool base = !m_rs[d3d::RS_LIGHTING] && !m_rs[d3d::RS_ALPHABLENDENABLE];
     const bool light = m_rs[d3d::RS_LIGHTING] && IsMultiplyPass();
-    if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber)
-        EnsurePebbleTable();                     // (which cells are sand: the means' texture, made again once it is)
-    if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber &&
-        NativeMapsSignature() != m_native.mapsSignature)
-        MakeNativeCodes();                       // (the tiles' maps or the settings changed: once a frame at most)
-    if ((base || light) && m_native.drawnBase != m_frameNumber && m_native.drawnLight != m_frameNumber)
-        PollNativeSky();
-    if (base && m_native.drawnBase != m_frameNumber) {
-        m_native.drawnBase = m_frameNumber;
-        // One pass (RVK_GroundOne): deferred to the lighting pass, which draws the ground once, its texture and its
-        // light together - while the ground had a lighting pass last frame (this one's is then all but sure to come
-        // right after), per-pixel lit into the HDR scene. The scene's fog and ambient noted now, from this pass.
+    if (base) ++d.base; else if (light) ++d.light; else ++d.unknown;
+    if (m_native.basePending && ((!base && !light) || m_target != m_native.baseTarget ||
+        std::memcmp(&m_view, &m_native.baseView, sizeof(m_view)) || std::memcmp(&m_proj, &m_native.baseProj, sizeof(m_proj)) ||
+        std::memcmp(&m_viewport, &m_native.baseViewport, sizeof(m_viewport))))
+        DrawPendingGroundBase();
+    if (!m_native.on) return NativeGroundDecision(fvf, NativeDisabled, false);
+    if (!IsTerrain(fvf)) return NativeGroundDecision(fvf, UnsupportedFormat, false);
+    if (!base && !light) return NativeGroundDecision(fvf, UnknownPass, false);
+    if (m_target != m_main && m_target != m_scene) return NativeGroundDecision(fvf, SecondaryTarget, false);
+    const auto vp = MulMatrix(m_view, m_proj);
+    if ((m_native.drawnBase == m_frameNumber || m_native.drawnLight == m_frameNumber) &&
+        (std::memcmp(&vp, &m_native.visibilityVp, sizeof(vp)) || std::memcmp(&m_viewport, &m_native.baseViewport, sizeof(m_viewport))))
+        return NativeGroundDecision(fvf, SecondaryTarget, false);
+    if (m_native.fallbackFrame == m_frameNumber) return NativeGroundDecision(fvf, NoSubmission, false);
+    if (base && m_native.basePending) return NativeGroundDecision(fvf, DeferredReady, true);
+    if ((base && m_native.drawnBase == m_frameNumber) || (light && m_native.drawnLight == m_frameNumber))
+        return NativeGroundDecision(fvf, AlreadySubmitted, true);
+    if (light && m_native.drawnBase != m_frameNumber && !m_native.basePending)
+        return NativeGroundDecision(fvf, NoNativeBase, false);
+    EnsurePebbleTable();
+    if (NativeMapsSignature() != m_native.mapsSignature) MakeNativeCodes();
+    PollNativeSky();
+    if (!PrepareNativeGround()) {
+        m_native.fallbackFrame = m_frameNumber;
+        return NativeGroundDecision(fvf, m_native.prepareFailure, false);
+    }
+    if (base) {
+        m_native.baseViewport = m_viewport;
         if (m_groundOnePass && m_pixelLighting && m_target == m_scene && m_scene && m_target->m_format == Format::RGBA16F &&
             m_native.drawnLight + 1 == m_frameNumber) {
             m_native.basePending = true;
-            m_native.baseRs = m_rs;
-            m_native.baseTss = m_tss;
-            m_native.baseTex1 = m_textures[1];
-            m_native.baseWorld = m_world;
-            m_native.baseView = m_view;
-            m_native.baseProj = m_proj;
+            m_native.baseRs = m_rs; m_native.baseTss = m_tss; m_native.baseTex1 = m_textures[1];
+            m_native.baseWorld = m_world; m_native.baseView = m_view; m_native.baseProj = m_proj;
+            m_native.baseTarget = m_target; m_native.baseViewport = m_viewport;
             m_native.baseSampler = StageSamplerSlot(0);
             if (m_scenePhase && !m_external) NoteSceneFog();
-        } else {
-            DrawNativeGround(false);
+            return NativeGroundDecision(fvf, DeferredReady, true);
         }
-    } else if (light && m_native.drawnLight != m_frameNumber) {
-        m_native.drawnLight = m_frameNumber;
-        if (m_native.basePending) DrawNativeGroundOne();
-        else DrawNativeGround(true);
+        if (DrawNativeGround(false)) { m_native.drawnBase = m_frameNumber; return NativeGroundDecision(fvf, NativeSubmitted, true); }
+    } else {
+        const bool pending = m_native.basePending;
+        const uint32_t drawn = pending ? DrawNativeGroundOne() : DrawNativeGround(true);
+        if (drawn) {
+            if (pending) m_native.drawnBase = m_frameNumber;
+            m_native.drawnLight = m_frameNumber;
+            return NativeGroundDecision(fvf, NativeSubmitted, true);
+        }
+        if (pending) DrawPendingGroundBase();
     }
-    return true;
+    m_native.fallbackFrame = m_frameNumber;
+    return NativeGroundDecision(fvf, NoSubmission, false);
 }
 
 // The ground in one pass (RVK_GroundOne): its lighting pass's state - lights, lightmap, fog - drawn as its base pass
@@ -503,7 +617,7 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
 // the draw records' spare words: ffp_main lays the base's colour in the same pixel and multiplies it in, where two
 // passes laid the ground's tiles twice and blended the second over the first (~1.5-2 ms of 4.4 at 2560 x 1440 over
 // Stret West Bank - rvk_demo, 2026-10-20).
-void Device::DrawNativeGroundOne()
+uint32_t Device::DrawNativeGroundOne()
 {
     m_native.basePending = false;
     const auto rs = m_rs;
@@ -525,11 +639,12 @@ void Device::DrawNativeGroundOne()
     m_recordExtra[1] = m_native.baseSampler;
     m_recordExtra[2] = fogBits;
     m_constantsDirty = true;
-    DrawNativeGround(true);
+    const uint32_t drawn = DrawNativeGround(true);
     m_recordExtra[0] = m_recordExtra[1] = m_recordExtra[2] = 0;
     m_groundOne = false;
     m_rs = rs;
     m_constantsDirty = true;
+    return drawn;
 }
 
 // The deferred base pass after all (RVK_GroundOne): something other than the ground's lighting pass came next - drawn
@@ -539,54 +654,46 @@ void Device::DrawPendingGroundBase()
     m_native.basePending = false;
     const auto rs = m_rs;
     const auto tss = m_tss;
-    Texture* tex1 = m_textures[1];
+    const auto textures = m_textures;
     const d3d::Matrix world = m_world, view = m_view, proj = m_proj;
+    Texture* target = m_target; const auto viewport = m_viewport;
+    SetRenderTarget(m_native.baseTarget); SetViewport(m_native.baseViewport);
     m_rs = m_native.baseRs;
     m_tss = m_native.baseTss;
     m_textures[1] = m_native.baseTex1;
-    m_world = m_native.baseWorld;
-    m_view = m_native.baseView;
-    m_proj = m_native.baseProj;
+    SetTransform(d3d::World, m_native.baseWorld);
+    SetTransform(d3d::View, m_native.baseView);
+    SetTransform(d3d::Projection, m_native.baseProj);
     m_constantsDirty = true;
-    DrawNativeGround(false);
+    if (DrawNativeGround(false)) m_native.drawnBase = m_frameNumber;
     m_rs = rs;
     m_tss = tss;
-    m_textures[1] = tex1;
-    m_world = world;
-    m_view = view;
-    m_proj = proj;
+    SetTransform(d3d::World, world);
+    SetTransform(d3d::View, view);
+    SetTransform(d3d::Projection, proj);
+    SetRenderTarget(target); SetViewport(viewport);
+    m_textures = textures;
     m_constantsDirty = true;
 }
 
 // The patches in view for one pass, with the game's state for it: the base pass's stage 0 texture a stand-in (the
 // shader reads each cell's tile), the lighting pass's the playfield's lightmap.
-void Device::DrawNativeGround(bool lightPass)
+uint32_t Device::DrawNativeGround(bool lightPass)
 {
+    if (!PrepareNativeGround()) return 0;
+    auto* slot = m_drawSlot;
+    const auto vb = m_drawStaticBuffer, ib = m_drawStaticIndexBuffer;
+    const auto vo = m_drawStaticOffset, io = m_drawStaticIndexOffset;
+    const auto serial = m_drawStaticSerial;
+    m_drawSlot = nullptr;
     Texture* saved = m_textures[0];
     m_textures[0] = lightPass ? (m_native.lightmap ? m_native.lightmap : m_native.lightmapGrey) : m_blackTexture;
     m_native.drawing = true;
     UpdateFrameEye();
-    // In view: a patch's box against the camera's clip planes (all eight corners outside one: left out).
-    const d3d::Matrix vp = MulMatrix(m_view, m_proj);
+    const d3d::Matrix vp = m_native.visibilityVp;
     uint32_t drawn = 0;
-    for (const NativePatch& p : m_native.patches) {
-        bool outside[6] = {true, true, true, true, true, true};
-        for (int k = 0; k < 8; ++k) {
-            // (A unit round it: the tessellation's shape and rock move the ground that far at most.)
-            const float w[3] = {(k & 1) ? p.hi[0] + 1.0f : p.lo[0] - 1.0f, (k & 2) ? p.hi[1] + 1.0f : p.lo[1] - 1.0f,
-                                (k & 4) ? p.hi[2] + 1.0f : p.lo[2] - 1.0f};
-            float c[4];
-            for (int j = 0; j < 4; ++j)
-                c[j] = w[0] * vp.m[0][j] + w[1] * vp.m[1][j] + w[2] * vp.m[2][j] + vp.m[3][j];
-            outside[0] = outside[0] && c[0] < -c[3];
-            outside[1] = outside[1] && c[0] > c[3];
-            outside[2] = outside[2] && c[1] < -c[3];
-            outside[3] = outside[3] && c[1] > c[3];
-            outside[4] = outside[4] && c[2] < 0.0f;
-            outside[5] = outside[5] && c[2] > c[3];
-        }
-        if (outside[0] || outside[1] || outside[2] || outside[3] || outside[4] || outside[5])
-            continue;
+    for (uint32_t index : m_native.visible) {
+        const NativePatch& p = m_native.patches[index];
         // Tessellated only within kNativeTessDistance (its box): beyond it ffp.tesc splits nothing and ffp.tese moves
         // nothing, the very same triangles - but through the tessellation stages every one of the ground's triangles
         // to the horizon cost the base pass ~2.5 ms at 2560 x 1440 (rvk_demo, Newland Desert). Both passes choose alike.
@@ -596,17 +703,22 @@ void Device::DrawNativeGround(bool lightPass)
             d2 += d * d;
         }
         m_native.tessPatch = d2 < kNativeTessDistance * kNativeTessDistance;
+        const uint64_t before = m_native.submitted;
         DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, p.indices, m_native.indexCount);
-        ++drawn;
+        drawn += m_native.submitted != before;
     }
-    DrawNativeClutter(vp);
-    DrawNativePebbles(vp);
+    if (drawn) { DrawNativeClutter(vp); DrawNativePebbles(vp); }
     m_native.drawing = false;
     m_textures[0] = saved;
+    m_drawSlot = slot;
+    m_drawStaticBuffer = vb; m_drawStaticIndexBuffer = ib;
+    m_drawStaticOffset = vo; m_drawStaticIndexOffset = io; m_drawStaticSerial = serial;
+    m_native.diagnostics.submitted += drawn;
     if (!lightPass) {
         m_native.patchesDrawn += drawn;
         ++m_native.framesDrawn;
     }
+    return drawn;
 }
 
 }  // namespace rvk

@@ -183,6 +183,7 @@ void Device::DumpLightmaps(const std::string& path)
 void Device::EndFrameDump()
 {
     if (!m_dumpFile) return;
+    DumpNativeGround();
     {
         const size_t dot = m_dumpOpenPath.rfind('.');
         const std::string base = dot != std::string::npos ? m_dumpOpenPath.substr(0, dot) : m_dumpOpenPath;

@@ -15,13 +15,17 @@ same tiles, turns and light) and on Stret West Bank's real data (its heights, ti
 Setting `RVK_GroundOn` (Terrain; on). Off, or on a playfield it can't read (the `GNDA` format, ground data not as
 expected), the game's ground draws as before.
 
+The [Old Athen fallback audit](native-ground-fallback.md) covers pass ownership, readiness, frustum checks and
+bounded diagnostics. Unrecognised passes and passes without drawable native patches keep the game's terrain.
+
 ## Approach: the same two passes, from our data
 
 rvk's enhancements key on the game's ground draws: the format (XYZ | NORMAL | TEX2, identity world: `IsTerrain`), a
 base pass (unlit, the tile) and a lighting pass (lit, the lightmap, multiplying it). Cliff texturing, shadows, hill
 shade, mist, wet ground, fog, the sand and rain maps all read them. So the native ground draws the same two passes,
 through the same `Draw` path, with the game's own render state for each: when the game's first ground draw of a pass
-comes in a frame, rvk draws its patches for that pass instead, and skips every game ground draw.
+comes in a frame, rvk draws its patches for that pass instead, and skips the remaining matching game ground draws
+only after native submissions succeed. Secondary targets, other views and unrecognised passes keep their original draws.
 
 - **Geometry** (`rvk/native_ground.cpp`): per 64-cell patch, a static vertex buffer of (P+1)^2 vertices - world x,
   height, z, the normal from the heights, set 0 = (x, z) / cell size (cell coordinates: the cliff fit reads it as a

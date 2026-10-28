@@ -1180,6 +1180,16 @@ private:
         bool on = true, drawing = false;
         uint64_t drawnBase = ~0ull, drawnLight = ~0ull;   // the frames each pass was last drawn
         uint32_t patchesDrawn = 0, framesDrawn = 0;
+        uint64_t submitted = 0, fallbackFrame = ~0ull, visibilityFrame = ~0ull;
+        d3d::Matrix visibilityVp{};
+        std::vector<uint32_t> visible;
+        struct Diagnostics {
+            uint64_t frame = ~0ull;
+            uint32_t candidates = 0, base = 0, light = 0, unknown = 0, originals = 0, replaced = 0;
+            uint32_t tested = 0, culled = 0, submitted = 0, samples = 0;
+        } diagnostics;
+        uint32_t diagnosticReasons = 0;
+        uint32_t prepareFailure = 0;
         // One pass (RVK_GroundOne): the base pass deferred to the lighting pass, which draws the ground once - its
         // texture and its light together (DrawNativeGroundOne). The base pass's state, kept for that and for the base
         // pass drawn late, should something other than the lighting pass come next (DrawPendingGroundBase).
@@ -1189,8 +1199,10 @@ private:
         std::array<std::array<uint32_t, d3d::TSS_COUNT>, 2> baseTss{};
         Texture* baseTex1 = nullptr;
         d3d::Matrix baseWorld{}, baseView{}, baseProj{};
+        Texture* baseTarget = nullptr;
+        d3d::Viewport baseViewport{};
     } m_native;
-    void DrawNativeGroundOne();
+    uint32_t DrawNativeGroundOne();
     void DrawPendingGroundBase();
     void NoteSceneFog();
     bool m_groundOnePass = true;                 // RVK_GroundOne
@@ -1208,7 +1220,10 @@ private:
     void FitNativeLight();
     void FillNativeLights(detail::FrameLights* fl);
     void MakeNativeCodes();
-    void DrawNativeGround(bool lightPass);
+    uint32_t DrawNativeGround(bool lightPass);
+    bool PrepareNativeGround();
+    bool NativeGroundDecision(uint32_t fvf, uint32_t reason, bool replaced);
+    void DumpNativeGround();
     static ClutterBuild BuildNativeClutter(std::shared_ptr<const NativeGround> ground, uint32_t patch, float density,
                                            std::vector<uint8_t> grassy);
     std::vector<uint8_t> GrassyTiles() const;
