@@ -136,9 +136,10 @@ Popup menus take physical cursor positions, while their placement and screen cla
 separate global mouse-down check now compares the displayed frame, preventing cancellation before item activation.
 Native checks exercise the actual window search and popup placement, dismissal, mouse-down and mouse-up methods.
 
-An intermittent clipped chat/NPC line remains under investigation. Moving its window preserves the damage;
-changing scale clears it. Native checks cover multiline wrapping, glyph extents, surface uploads and cache resizing,
-but do not yet reproduce this gameplay case. The font rasterizer is unchanged by this follow-up.
+The follow-up NPC capture contains the complete reported line in its bitmap. Native allocator checks reproduced
+RGBA text entering a one-bit-alpha atlas pool; enlarged text now uses an independent RGBA surface. The rasterizer
+and logical font metrics are unchanged. [Scaling coverage](ui-scaling-coverage.md) records this correction, timer-bar
+and login-progress coverage, window-position persistence, and the remaining gameplay review.
 
 When a line is clipped, use console `dump` or Ctrl+Shift+F9 before changing scale. Alongside the frame screenshot
 and draw list, `rvk-frame-HHMMSS-ui.tar` contains enlarged native text-cache BMPs and `caches.txt` with density,

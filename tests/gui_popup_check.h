@@ -85,6 +85,15 @@ inline int CheckGuiPopups(HMODULE module)
         check(std::fabs(actual.x - moved.x) < 0.001f && std::fabs(actual.y - moved.y) < 0.001f,
               "repositioned popup menus retain physical anchors");
     }
+    put(window, 0, static_cast<const void*>(bytes + 0x1AA07C));
+    using Centre = void(__thiscall*)(void*);
+    reinterpret_cast<Centre>(bytes + 0x154986)(window.bytes);
+    BeginScaleFrame(controller.bytes);
+    const Point middle{49.5f, 29.5f}; Point centred;
+    to(menu.bytes, &centred, &middle, 1);
+    check(std::fabs(centred.x - 1920) <= 1 && std::fabs(centred.y - 1080) <= 1,
+          "native login progress centering stays in physical screen coordinates");
+    put(window, 0, static_cast<void*>(nullptr));
     SetScale(100, 100); BeginScaleFrame(controller.bytes);
     *instance = saved;
     std::printf("GUI popup: %s (%d failures)\n", failures ? "FAILED" : "passed", failures);

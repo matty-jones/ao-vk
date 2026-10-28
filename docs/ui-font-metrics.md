@@ -59,5 +59,5 @@ external images continue to use their own rasterizers.
 A later NPC capture showed the complete clipped sentence in its CPU bitmap. The native shared atlas can reuse a
 one-bit-alpha pool for an RGBA request, discarding antialiased coverage after rasterization. Enlarged text now uses
 an independent RGBA surface, retaining its alpha and avoiding internal tile seams. Font metrics, character
-placement and 100% rendering are unchanged. Native allocator and cache/upload checks, together with a GPU
-alpha-row probe, cover the format boundary.
+placement and 100% rendering are unchanged. The native allocator reproducer, cache/upload checks and GPU alpha-row
+probe are described in the [scaling coverage audit](ui-scaling-coverage.md).

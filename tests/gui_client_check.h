@@ -19,6 +19,7 @@
 namespace rnative::gui {
 void InstallScaling(HMODULE gui);
 bool BeginScaleFrame(void* controller);
+float ScaleForView(void* view);
 }
 
 inline int __fastcall CaptureGuiWindowRect(void* message, void*, const char*, const rnative::gui::Rect* frame)
@@ -110,6 +111,7 @@ inline LONG WINAPI GuiCheckException(EXCEPTION_POINTERS* exception)
 #include "gui_sidebar_check.h"
 #include "gui_popup_check.h"
 #include "gui_chat_check.h"
+#include "gui_timer_check.h"
 
 inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmark = false)
 {
@@ -279,12 +281,23 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
     SetScale(100, 100); BeginScaleFrame(controller.bytes);
     Point nativeLogin;
     to(child.bytes, &nativeLogin, &input, 1);
-    for (size_t table : {size_t(0x1A9CBC), size_t(0x1A9C24), size_t(0x1A9B44)}) {
+    for (size_t table : {size_t(0x1A9CBC), size_t(0x1A9C24), size_t(0x1A9B44), size_t(0x1AA07C)}) {
         put(owner, 0, static_cast<const void*>(bytes + table));
         SetScale(150, 150); BeginScaleFrame(controller.bytes);
         Point original{3, 4};
         to(child.bytes, &output, &original, 1);
         check(equal(output, nativeLogin), "pregame windows retain native screen coordinates at saved 150%");
+    }
+    for (size_t table : {size_t(0x1B4664), size_t(0x1B45DC), size_t(0x1BF0D4), size_t(0x1A963C),
+                         size_t(0x1C258C), size_t(0x1B5784), size_t(0x1B1BA4), size_t(0x1C21EC)}) {
+        put(owner, 0, static_cast<const void*>(bytes + table));
+        SetScale(100, 150); BeginScaleFrame(controller.bytes);
+        check(ScaleForView(child.bytes) == 1.5f, "HUD window classes follow HUD scale independently of window scale");
+    }
+    for (size_t table : {size_t(0x1AFEFC), size_t(0x1B3D64), size_t(0x1C16AC), size_t(0x1C1F2C), size_t(0x1C240C)}) {
+        put(owner, 0, static_cast<const void*>(bytes + table));
+        SetScale(125, 200); BeginScaleFrame(controller.bytes);
+        check(ScaleForView(child.bytes) == 1.25f, "ordinary window classes follow window scale independently of HUD scale");
     }
     put(owner, 0, static_cast<void*>(nullptr));
     SetScale(100, 100); BeginScaleFrame(controller.bytes);
@@ -398,6 +411,7 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
     check(equal(output, {3703, 2004}), "nested HUD layout round trip restores original positions");
     failures += CheckGuiSidebar(module);
     failures += CheckGuiPopups(module);
+    failures += CheckGuiTimers(module, controller.bytes);
     BeginScaleFrame(controller.bytes);
     std::printf("GUI.dll: checking native border input\n");
     // Run native border input through dispatch's inverse, isolating only cursor capture and frame application.
@@ -432,6 +446,11 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
             std::memcpy(&dragFrame, rootData.bytes + 0x20, sizeof(dragFrame));
             check(std::fabs(dragFrame.left - edge.left) < 0.001f && std::fabs(dragFrame.top - edge.top) < 0.001f,
                   "pressing a scaled title bar does not move the window");
+            up(root.bytes, &local, 1, nullptr);
+            std::memcpy(&dragFrame, rootData.bytes + 0x20, sizeof(dragFrame));
+            check(std::fabs(dragFrame.left - edge.left) < 0.001f && std::fabs(dragFrame.top - edge.top) < 0.001f,
+                  "releasing a stationary title-bar click preserves the canonical frame");
+            down(root.bytes, &local, 1, 1);
             cursor.x -= 60; cursor.y -= 30;
             from(root.bytes, &local, &cursor, 1);
             move(root.bytes, &local, 0, 1, nullptr);

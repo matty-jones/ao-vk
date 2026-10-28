@@ -66,6 +66,17 @@ using MouseUpFn = void(__fastcall*)(void*, void*, const Point*, int, void*);
 MouseUpFn g_borderUp;
 void* g_draggedBorder;
 Rect g_draggedFrame;
+struct IPoint { int x, y; };
+struct TimerWindow { IPoint position; Point scale; };
+std::unordered_map<void*, TimerWindow> g_timers;
+using TimerCtorFn = void*(__fastcall*)(void*, void*, int, int, const void*, const char*, uint32_t);
+using TimerMoveFn = void(__fastcall*)(void*, void*, const IPoint*);
+using SpriteScaleFn = void(__fastcall*)(void*, void*, const float*, const float*);
+using SpriteDestroyFn = void(__fastcall*)(void*, void*);
+TimerCtorFn g_timerCtor;
+TimerMoveFn g_timerMove, g_spriteMove;
+SpriteScaleFn g_spriteScale;
+SpriteDestroyFn g_spriteDestroy;
 using SetFrameFn = void(__fastcall*)(void*, void*, const Rect*);
 SetFrameFn g_borderFrame;
 
@@ -101,7 +112,8 @@ void __fastcall BorderUpHook(void* view, void* edx, const Point* point, int butt
     Transform map = window->second.transform;
     if (map.offset == Point{}) return;
     Rect frame; g_frame(view, nullptr, &frame);
-    if (std::memcmp(&frame, &g_draggedFrame, sizeof(frame)) == 0) return;
+    if (std::fabs(frame.left - g_draggedFrame.left) < 0.001f && std::fabs(frame.top - g_draggedFrame.top) < 0.001f &&
+        std::fabs(frame.right - g_draggedFrame.right) < 0.001f && std::fabs(frame.bottom - g_draggedFrame.bottom) < 0.001f) return;
     // Save user movement independently of the initial display-only edge clamp.
     const Point origin{frame.left + map.offset.x / map.value, frame.top + map.offset.y / map.value};
     using Move = void(__thiscall*)(void*, const Point*);
@@ -121,6 +133,51 @@ void __fastcall BorderFrameHook(void* view, void* edx, const Rect* frame)
     if (!g_active) { g_borderFrame(view, edx, frame); return; }
     Coordinates scope;
     g_borderFrame(view, edx, frame);
+}
+
+void ApplyTimer(void* window, const TimerWindow& logical)
+{
+    const Point scale{logical.scale.x * g_hudScale, logical.scale.y * g_hudScale};
+    const IPoint position{int(std::lround(logical.position.x * g_hudScale)), int(std::lround(logical.position.y * g_hudScale))};
+    g_spriteScale(window, nullptr, &scale.x, &scale.y);
+    g_spriteMove(window, nullptr, &position);
+}
+
+void* __fastcall TimerCtorHook(void* timer, void* edx, int kind, int slot, const void* identity, const char* label, uint32_t colour)
+{
+    void* result = g_timerCtor(timer, edx, kind, slot, identity, label, colour);
+    void* window = *reinterpret_cast<void**>(static_cast<uint8_t*>(timer) + 4);
+    if (window) {
+        TimerWindow logical;
+        std::memcpy(&logical.position, static_cast<uint8_t*>(window) + 0x2C, sizeof(logical.position));
+        std::memcpy(&logical.scale, static_cast<uint8_t*>(window) + 0x3C, sizeof(logical.scale));
+        g_timers.insert_or_assign(window, logical);
+        ApplyTimer(window, logical);
+    }
+    return result;
+}
+
+void __fastcall TimerMoveHook(void* timer, void* edx, const IPoint* point)
+{
+    void* window = *reinterpret_cast<void**>(static_cast<uint8_t*>(timer) + 4);
+    auto found = g_timers.find(window);
+    if (found == g_timers.end()) { g_timerMove(timer, edx, point); return; }
+    found->second.position = *point;
+    ApplyTimer(window, found->second);
+}
+
+void __fastcall SpriteScaleHook(void* window, void* edx, const float* x, const float* y)
+{
+    auto found = g_timers.find(window);
+    if (found == g_timers.end()) { g_spriteScale(window, edx, x, y); return; }
+    found->second.scale = {*x, *y};
+    ApplyTimer(window, found->second);
+}
+
+void __fastcall SpriteDestroyHook(void* window, void* edx)
+{
+    g_timers.erase(window);
+    g_spriteDestroy(window, edx);
 }
 
 bool Hud(void* window);
@@ -203,7 +260,8 @@ bool NativeScreen(void* window)
     const char* type = TypeOf(window);
     return !std::strcmp(type, ".?AVLoginWindow_c@@") || !std::strcmp(type, ".?AVLoginBrowserWindow_c@@") ||
            !std::strcmp(type, ".?AVCharSelectWindow_c@@") || !std::strcmp(type, ".?AVLimboWindow_c@@") ||
-           !std::strcmp(type, ".?AVCharDeleteWindow_c@@") || !std::strcmp(type, ".?AVCharActivateWindow_c@@");
+           !std::strcmp(type, ".?AVCharDeleteWindow_c@@") || !std::strcmp(type, ".?AVCharActivateWindow_c@@") ||
+           !std::strcmp(type, ".?AVProgressWindow_c@@");
 }
 
 bool Hud(void* window)
@@ -211,7 +269,9 @@ bool Hud(void* window)
     const char* type = TypeOf(window);
     if (!std::strcmp(type, ".?AVCharBarWindow_c@@") || !std::strcmp(type, ".?AVCompassWindow_c@@") ||
         !std::strcmp(type, ".?AVShortcutBarContainer@@") || !std::strcmp(type, ".?AVShortcutBarWindow_c@@") ||
-        !std::strcmp(type, ".?AVControlCenterWindow_c@@") || !std::strcmp(type, ".?AVNotificationWindow_c@@"))
+        !std::strcmp(type, ".?AVControlCenterWindow_c@@") || !std::strcmp(type, ".?AVNotificationWindow_c@@") ||
+        !std::strcmp(type, ".?AVMailIconWindow_c@@") || !std::strcmp(type, ".?AVHelpButtonWindow_c@@") ||
+        !std::strcmp(type, ".?AVTipButtonWindow_c@@") || !std::strcmp(type, ".?AVRaidBarWindow_c@@"))
         return true;
     vc10::String text{};
     g_name(window, &text);
@@ -469,6 +529,14 @@ struct Hook {
 };
 
 Hook g_hooks[] = {
+    {"TimerBarBase_c::TimerBarBase_c", 0x512AE, "", 10,
+      reinterpret_cast<void*>(&TimerCtorHook), reinterpret_cast<void**>(&g_timerCtor)},
+    {"TimerBarBase_c::Reposition", 0x5128A, "\x55\x8B\xEC\x8B\x49\x04", 6,
+      reinterpret_cast<void*>(&TimerMoveHook), reinterpret_cast<void**>(&g_timerMove)},
+    {"?SetScale@RenderWindow_t@@QAEXABM0@Z", 0x20B0C, "\x55\x8B\xEC\x51\x8B\x45\x08", 7,
+      reinterpret_cast<void*>(&SpriteScaleHook), reinterpret_cast<void**>(&g_spriteScale)},
+    {"??1RenderWindow_t@@QAE@XZ", 0x21241, "\x56\x8B\xF1\x80\x7E\x4C\x00", 7,
+      reinterpret_cast<void*>(&SpriteDestroyHook), reinterpret_cast<void**>(&g_spriteDestroy)},
     {"?Go@PopupMenu_c@@QAEXPAVWindow@@ABVPoint@@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z", 0x13BF93, "", 10,
       reinterpret_cast<void*>(&PopupGoHook), reinterpret_cast<void**>(&g_popupGo)},
     {"?Reposition@PopupMenu_c@@QAEXABVPoint@@@Z", 0x13B61E, "\x55\x8B\xEC\x56\x8B\xF1", 6,
@@ -569,11 +637,12 @@ void InstallScaling(HMODULE gui)
     g_borders = reinterpret_cast<FrameFn>(address("?GetBorderSizes@TabView@@QBE?AVRect@@XZ"));
     g_windowFrame = reinterpret_cast<WindowFrameFn>(address("?GetFrame@Window@@QBE?AVRect@@_N@Z"));
     g_screen = reinterpret_cast<SizeFn>(address("?GetScreenSize@WindowController_c@@QBE?AVPoint@@XZ"));
+    g_spriteMove = reinterpret_cast<TimerMoveFn>(address("?Reposition@RenderWindow_t@@QAEXABVIPoint@@@Z"));
     HMODULE utils = GetModuleHandleA("Utils.dll");
     g_looper = utils ? reinterpret_cast<ViewFn>(GetProcAddress(utils, "?GetLooper@Handler@@QBEPAVLooper@@XZ")) : nullptr;
     g_name = utils ? reinterpret_cast<NameFn>(GetProcAddress(utils, "?GetName@Looper@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ")) : nullptr;
     if (!g_top || !g_parent || !g_child || !g_sibling || !g_windowClient || !g_dragObject || !g_dragSource || !g_frame ||
-        !g_bounds || !g_borders || !g_windowFrame || !g_screen || !g_looper || !g_name) {
+        !g_bounds || !g_borders || !g_windowFrame || !g_screen || !g_looper || !g_name || !g_spriteMove) {
         Log("interface scaling: required GUI exports unavailable, left at 100%%");
         return;
     }
@@ -600,9 +669,8 @@ void InstallScaling(HMODULE gui)
     }
     // Check the entire group before patching; a partial group never enables scaling.
     for (const Hook& h : g_hooks) {
-        const bool map = h.original == reinterpret_cast<void**>(&g_mapRender) ||
-                         h.original == reinterpret_cast<void**>(&g_mapGroundRender);
-        auto* at = map ? base + h.rva : reinterpret_cast<uint8_t*>(address(h.name));
+        const bool internal = h.name[0] != '?';
+        auto* at = internal ? base + h.rva : reinterpret_cast<uint8_t*>(address(h.name));
         if (!at || at != reinterpret_cast<uint8_t*>(gui) + h.rva) {
             Log("interface scaling: %s unavailable, left at 100%%", h.name);
             return;
@@ -676,8 +744,11 @@ bool BeginScaleFrame(void* controller)
         g_windowScale = g_wantedWindow;
         g_redraw = true;
     }
-    if (g_hudScale != g_wantedHud) g_redraw = true;
-    g_hudScale = g_wantedHud;
+    if (g_hudScale != g_wantedHud) {
+        g_hudScale = g_wantedHud;
+        for (const auto& timer : g_timers) ApplyTimer(timer.first, timer.second);
+        g_redraw = true;
+    }
     const bool active = g_windowScale != 1.0f || g_hudScale != 1.0f;
     if (!active) {
         if (g_active) {
