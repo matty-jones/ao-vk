@@ -2786,6 +2786,12 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             EndScene();
         }
     }
+    // RVK_FrameGen: a 2D draw on the frame between the 3D scene and the interface (AOReloaded's cast bars, the text
+    // after zoning) goes into the labels' layer, under the interface - in the frame it was interpolated, smearing.
+    if (m_fgUiLayer && !m_scenePhase && m_target == m_main && !m_fgUnderActive && !m_fgLabelsActive && !m_fgTopActive &&
+        !m_uiLayerActive && !m_uiLayerOpen && !m_external && m_sceneSaw3D && m_interfaceEndFrame != m_frameNumber &&
+        IsInterfaceDraw(fvf))
+        FgUnderBegin();
     // The sky's twilight and glow (sky.cpp): drawn before the sky's second draw - after its dome, before the moons,
     // the suns and the clouds - or, a sky of one draw, at its end.
     if (m_scenePhase && m_target == m_scene && !m_external && (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW) {
@@ -2880,7 +2886,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // The interface hidden (screenshots): its draws - pre-transformed, onto the frame or into the interface layer,
     // not while the 3D scene is still being drawn - and the names over characters.
     if (m_hideInterface && !m_external &&
-        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer || m_target == m_fgTop) &&
+        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer || m_target == m_fgTop ||
+                                                  (m_fgUnderActive && m_target == m_fgLabels)) &&
                            !(m_scenePhase && m_target == m_scene))))
         return;
     // A name label in the scene: held back, drawn after the post passes (DrawHeldLabels).

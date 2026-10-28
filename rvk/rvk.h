@@ -3592,8 +3592,14 @@ private:
     bool m_fgLabelsActive = false;               // the held labels' draws go into m_fgLabels
     uint64_t m_fgLabelsFrame = ~0ull;            // the frame they were drawn in
     Texture* m_fgOverlay = nullptr;
-    bool FgLabelsBegin();
+    bool FgLabelsBegin(bool keep = false);
     void FgLabelsEnd();
+    // What the game draws on the frame between the 3D scene and its interface - AOReloaded's cast bars, the text shown
+    // after zoning - into the labels' layer too (FgUnderBegin from Draw, FgUnderEnd at the interface or the frame's
+    // end): drawn into the frame, it was interpolated and smeared.
+    bool m_fgUnderActive = false;
+    bool FgUnderBegin();
+    void FgUnderEnd();
     // What the game draws on the frame after its interface - the mouse pointer - into a layer of its own, the overlay's
     // top (FgTopBegin from Draw; it lasts to the frame's end): drawn into the frame it came out under the interface.
     Texture* m_fgTop = nullptr;

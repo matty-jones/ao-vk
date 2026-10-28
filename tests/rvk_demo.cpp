@@ -4265,6 +4265,11 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
             dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
             dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
             dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+            // A bar drawn before the interface (AOReloaded's cast bars, the text after zoning): with frame generation
+            // into the labels' layer, under the window.
+            VtxRhwDiffuse bar[4] = {{250, 420, 0, 1, 0xF020C040}, {650, 420, 0, 1, 0xF020C040},
+                                    {250, 440, 0, 1, 0xF020C040}, {650, 440, 0, 1, 0xF020C040}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, bar, 4);
             dev.InterfaceBegin(true);
             VtxRhwDiffuse window[4] = {{300, 200, 0, 1, 0xE0304060}, {700, 200, 0, 1, 0xE0304060},
                                        {300, 450, 0, 1, 0xE0304060}, {700, 450, 0, 1, 0xE0304060}};

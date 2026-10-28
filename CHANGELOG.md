@@ -117,6 +117,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- With frame generation on (`RVK_FrameGen`), AOReloaded's cast and reload bars and the text shown after zoning
+  (the suppression field notice) no longer smear: they were drawn into the picture frame generation fills in.
 - In storms, water no longer jerks about: the waves follow a slow swell instead of every swing of the storm's wind,
   and the small ripples no longer jump when the wind veers.
 - A shop's room no longer shows from behind its doorway, floating in the street as a pale window with its lamp beams

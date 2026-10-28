@@ -225,10 +225,11 @@ void Device::FgPrepare(VkCommandBuffer cmd, const float params[28])
 
 // The name labels (EndScene, after the post passes) into a layer of their own, cleared, for the overlay - drawn as the
 // interface is into its layer (Device::InLayer), still behind what stands in front. False: no layer (drawn over the
-// frame as without frame generation).
-bool Device::FgLabelsBegin()
+// frame as without frame generation). keep: not cleared if this frame's labels are already in it (FgUnderBegin).
+bool Device::FgLabelsBegin(bool keep)
 {
     const uint32_t w = m_ldrMain->m_width, h = m_ldrMain->m_height;
+    keep = keep && m_fgLabels && m_fgLabelsFrame == m_frameNumber && m_fgLabels->m_width == w && m_fgLabels->m_height == h;
     if (!m_fgLabels || m_fgLabels->m_width != w || m_fgLabels->m_height != h) {
         if (m_fgLabels) DestroyTexture(m_fgLabels);
         m_fgLabels = CreateImage(w, h, Format::A8R8G8B8, 1, true);
@@ -241,6 +242,8 @@ bool Device::FgLabelsBegin()
     m_fgLabelsActive = true;
     m_cache = StateCache{};                      // (the layer's blend equations differ)
     BeginRenderingOn(m_fgLabels);
+    if (keep)
+        return true;
     VkClearAttachment clear{VK_IMAGE_ASPECT_COLOR_BIT, 0, {}};
     clear.clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
     VkClearRect rect{{{0, 0}, {w, h}}, 0, 1};
@@ -257,6 +260,24 @@ void Device::FgLabelsEnd()
     m_target = m_ldrMain;
     m_cache = StateCache{};
     BeginRenderingOn(m_ldrMain);
+}
+
+// The game's 2D draws between the 3D scene and the interface (Draw): into the labels' layer, under the interface as on
+// the frame, to the interface's start (InterfaceBegin) or the frame's end. False: none (into the frame).
+bool Device::FgUnderBegin()
+{
+    if (!FgLabelsBegin(true))
+        return false;
+    m_fgUnderActive = true;
+    return true;
+}
+
+void Device::FgUnderEnd()
+{
+    if (!m_fgUnderActive)
+        return;
+    m_fgUnderActive = false;
+    FgLabelsEnd();
 }
 
 // The overlay's top (Draw: the first 2D draw on the frame after the interface), cleared; the draws to the frame go

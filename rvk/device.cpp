@@ -1836,6 +1836,8 @@ void Device::SetRenderTarget(Texture* target)
         target = m_uiLayer;                      // the interface is being drawn into its layer
     else if (m_fgTopActive && target == m_main && m_fgTop)
         target = m_fgTop;                        // (frame generation: the overlay's top, to the frame's end)
+    else if (m_fgUnderActive && target == m_main && m_fgLabels)
+        target = m_fgLabels;                     // (... and under the interface, to its start: FgUnderBegin)
     if (!target->m_renderTarget || !target->m_image) {
         Log("SetRenderTarget: not a (usable) render target\n");
         return;
@@ -2118,6 +2120,7 @@ void Device::EndFrame()
     m_framesWithout3DShared.store(m_framesWithout3D, std::memory_order_relaxed);
     PortalDiagFrame();                           // (shop portals' phase 0: portal_diag.cpp)
     PortalStreetDiagFrame();
+    FgUnderEnd();                                // (no interface drawn after it)
     Frame& f = m_frames[m_frameIndex];
     m_renderEndCause = kEndScene;
     EndRendering();

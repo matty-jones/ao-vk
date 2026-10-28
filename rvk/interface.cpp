@@ -36,6 +36,7 @@ void Device::InterfaceBegin(bool redraw)
     if (!m_inFrame || !m_main)
         return;
     InterfaceSceneEnd();
+    FgUnderEnd();                                // (the 2D draws before it: done, back on the frame)
     // Only over the 8-bit main target (the layer's format; HDR: after the scene's tone mapping). Otherwise - a frame
     // without 3D still in the float scene - the interface is drawn straight into the target, and is redrawn each
     // frame (not ready).
