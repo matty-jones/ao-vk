@@ -6,6 +6,18 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- ao-vk's own effects: an effect file in `randy-vk\fx` (in the client folder) can stand in for one of the game's
+  effects, drawn with ao-vk's particles - glowing, trailing, sparking - in place of the game's sprites. The first one,
+  `nano_bolt.rvkfx`, replaces the bolt most nanos cast (Change Form, the Calia forms and some 700 others): light
+  gathering at your hand, a bright bolt with a trail of motes and sparks, and a burst with a shock ring on the target.
+  `rage_bolt.rvkfx` does the same in fire for Lesser Controlled Rage's cast (and four other nanos').
+  `nano_recharge.rvkfx` replaces a nano recharger's burst: violet and cyan energy swirling in round you.
+  ao-assets' workbench has an effect editor for them (Effects): every change shows in the running game within a
+  second, and *Play in game* plays the effect on your character without casting. *Record the game's* has the game
+  play its own effect on you and record it, and the editor's preview then shows the game's beside yours, in a split
+  view or both in one scene (Compare). Each emitter's *Size scale* makes all its particles bigger or smaller at once.
+  The console's `fx <template> cast` plays a cast at yourself (`capture` records it).
+  Edited files show at once; the console's `fx reload` reads them again. `RVK_Fx` (Particles) switches them off.
 - Shops' insides can be seen through their open doors from the street, in 3D, instead of a black doorway. A shop
   shows once you have been in one of its kind: going in records the room, and walking through a door remembers where
   it leads (every Fair Trade of the same building then shows it too, until its own door says otherwise). By day the
@@ -187,6 +199,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   The buffer now grows for the next frames, and nothing is ever written beyond it.
 
 ### Diagnostics
+- `RVK_FxLog 1` (randy-vk.ini) writes every effect the game starts to randy-vk.log: its template number and kind,
+  what it is attached to (a spot, a character, a pair for a projectile) and when it ends. The console's
+  `fx <template>` plays one of the game's effects on your character. The groundwork for ao-vk's own effects.
 - Inside a shop, when its open door shows black instead of the street, randy-vk.log now says why (no street
   recorded for that door, the room's entrance not known yet, ...).
 - Frame dumps also save AMD's indirect light (`-brixgi.bmp`, with `RVK_GiMode 1`) and the surfaces AMD's effects read

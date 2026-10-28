@@ -17,7 +17,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-355 settings, 178 of them in the settings window.
+357 settings, 179 of them in the settings window.
 
 ## Sections
 
@@ -37,7 +37,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - [Anti-aliasing](#anti-aliasing) (6)
 - [Colour grading](#colour-grading) (10)
 - [Depth of field](#depth-of-field) (9)
-- [Particles](#particles) (18)
+- [Particles](#particles) (20)
 
 ## General
 
@@ -478,3 +478,5 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PartAdapt` | Adapt to each effect's own motion (0 = all alike) | 0 .. 1 | 1 |  | ini only; switch `RVK_Particles` |
 | `RVK_PartFollow` | Young particles follow their sprite | 0 .. 1 | 0.7 |  | ini only; switch `RVK_Particles` |
 | `RVK_PartCore` | Brightness of the game's sprites | 0 .. 1 | 0.1 |  | ini only; switch `RVK_Particles`; game value 1 |
+| `RVK_Fx` | Our own effects in place of the game's (randy-vk\\fx\\*.rvkfx in the client folder) | on / off | on | GPU: low, while an effect plays | window; game value off |
+| `RVK_FxLog` | Log every effect the game makes: template, anchor, who asked (randy-vk.log) | on / off | off | no cost | ini only |

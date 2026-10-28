@@ -36,6 +36,24 @@ void ParticleFrame();
 void FlushOverlayText();                             // each presented frame (rvk_particles.cpp)
 void WeatherFrame();                              // each presented frame (rvk_weather.cpp)
 void SmokeFrame();                                // each presented frame (rvk_smoke.cpp)
+// The game's effects watched (rvk_fx.cpp: RVK_FxLog); FxPlay plays a template on the player at the next FxFrame.
+void FxFrame();                                   // each presented frame
+void FxPlay(int templateId, bool cast = false, bool capture = false);   // cast: from the player at the player
+                                                                      // (a Spell1); capture: the game's own, recorded
+void FxReload();
+// The effect editor's reference: a capture of the game's own effect, its sprites frame by frame (rvk_fx.cpp), for the
+// editor to play beside ours. While a captured sprite batch draws, the game's draws fill in the texture and blending it
+// uses (RDevice::TapDraw).
+struct DrawTap { uint32_t rdbType = 0, rdbId = 0, srcBlend = 0, destBlend = 0, alphaBlend = 0; bool seen = false; };
+extern DrawTap* g_drawTap;
+// Every GfxVisualDiaBill drawn (rvk_particles.cpp's hook), before the game draws it: its sprites (DiaBill_n::Sprite_t,
+// 32 bytes), world matrix (row vectors) and atlas. -> where its draws report to (the tap to set while the game draws
+// it), or null when it isn't being captured.
+DrawTap* FxCaptureBatch(const void* batch, const void* sprites, uint32_t count, const float* world, int32_t columns,
+                        int32_t rows, bool atlas, bool packed);
+// After the game's update of a _GfxControlStars_t (rvk_particles.cpp's hook of it): ours in its place, if one stands for
+// its template. worldMatrix: RRefFrame_t::GetWorldMatrix (its sprites' frame).
+void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const void* frame));                                  // our effects' files read again (console "fx reload")
 void TimeFrame();                                 // each presented frame (rvk_time.cpp: RVK_TimeOfDay)
 void StatelFrame();                               // each presented frame (rvk_statels.cpp: the playfield's pack)
 void GroundFrame();                               // each presented frame (rvk_ground.cpp: the native ground)
@@ -463,6 +481,7 @@ protected:
     HRESULT DoGetInfo(DWORD, LPVOID data, DWORD size) override;
 
 private:
+    void TapDraw(DrawTap& tap) const;                // (an effect capture: this draw's texture and blending)
     RDirect3D* m_d3d;
     RSurface* m_target;
     GUID m_clsid;

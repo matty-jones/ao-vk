@@ -5380,6 +5380,107 @@ float g_spriteScale = 1.0f;              // --sprite-scale X: the effect's sprit
 bool g_particleWater = false;            // --particle-water: water the game's way (ProcessVertices output, FVF 0x1C4) mid-scene
 
 // Particle test (--particle-test): an effect like the game's sparkle auras - a ring of soft additive sprites (FVF 0x142,
+// Our own effects (--fx FILE.rvkfx; rvk fx.cpp): a cast played over and over - charged at the caster's hand for 0.5 s,
+// flying to the target in an arc for 0.8 s, its impact for 0.7 s, then 0.6 s of nothing (its particles living out) -
+// the effect announced every frame as the proxy does for the game's Spell1. Shots of the first cast: -charge (0.3 s),
+// -flight (0.9 s), -impact (1.5 s), and the last frame's as --shot. --fx-still: an effect on a character instead (a
+// sparkle: its one phase, "play", for 2 s at the middle post's top, then 0.6 s of nothing).
+bool g_fxStill = false;
+
+template <typename D>
+void RunFxTest(D& dev, int frames, const std::string& file, const std::string& shot)
+{
+    std::string text;
+    if (FILE* f = std::fopen(file.c_str(), "rb")) {
+        char buf[4096];
+        for (size_t n; (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) text.append(buf, n);
+        std::fclose(f);
+    }
+    auto effect = std::make_shared<rvk::fx::Effect>();
+    std::string error;
+    if (!rvk::fx::Parse(text, *effect, &error)) {
+        std::printf("fx: %s: %s\n", file.c_str(), text.empty() ? "can't read it" : error.c_str());
+        return;
+    }
+    std::printf("fx: %s: \"%s\", %zu emitters\n", file.c_str(), effect->name.c_str(), effect->emitters.size());
+    dev.FxSetEffect(1, effect);
+    struct VtxGround { float x, y, z; uint32_t color; };
+    const float hand[3] = {-3.0f, 1.4f, 0.0f}, chest[3] = {3.0f, 1.1f, 0.0f};
+    auto named = [&](const char* tag) {
+        std::string n = shot;
+        n.insert(n.size() > 4 ? n.size() - 4 : n.size(), tag);
+        return n;
+    };
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == 19) dev.RequestScreenshot(named("-charge"));
+        if (frame == 56) dev.RequestScreenshot(named("-flight"));
+        if (frame == 94) dev.RequestScreenshot(named("-impact"));
+        if (frame == frames - 1) dev.RequestScreenshot(shot);
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF0A0E16, 1.0f);
+        dev.SetTransform(View, LookAtLH({0, 2.6f, -7.5f}, {0, 1.0f, 0}, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.1f, 100.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_LIGHTING, 0);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.SetTexture(0, nullptr);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_DIFFUSE);
+        // The ground, and a post for each of the caster and the target.
+        std::vector<VtxGround> v = {{-8, 0, -4, 0xFF2A2E38}, {8, 0, -4, 0xFF2A2E38}, {-8, 0, 6, 0xFF1C2028}, {8, 0, 6, 0xFF1C2028}};
+        std::vector<uint16_t> idx = {0, 1, 2, 1, 2, 3};
+        for (float x : {hand[0], chest[0], 0.0f}) {
+            if (x == 0.0f && !g_fxStill) continue;
+            const uint16_t b = uint16_t(v.size());
+            v.push_back({x - 0.25f, 0.0f, 0.0f, 0xFF505868});
+            v.push_back({x + 0.25f, 0.0f, 0.0f, 0xFF505868});
+            v.push_back({x - 0.25f, 1.8f, 0.0f, 0xFF606878});
+            v.push_back({x + 0.25f, 1.8f, 0.0f, 0xFF606878});
+            for (uint16_t k : {0, 1, 2, 1, 2, 3}) idx.push_back(uint16_t(b + k));
+        }
+        dev.DrawIndexedPrimitive(TriangleList, FVF_XYZ | FVF_DIFFUSE, v.data(), uint32_t(v.size()), idx.data(),
+                                 uint32_t(idx.size()));
+        // The cast: where its head is, and which phase it is in.
+        const float t = std::fmod(float(frame) * 0.016f, 2.6f);
+        const uint64_t key = uint64_t(float(frame) * 0.016f / 2.6f) + 1;
+        if (t < 2.0f && g_fxStill) {
+            Device::FxAnchors a;
+            const float at[3] = {0.0f, 1.0f, 0.0f};
+            std::memcpy(a.head, at, sizeof(at));
+            std::memcpy(a.source, at, sizeof(at));
+            std::memcpy(a.target, at, sizeof(at));
+            a.phase = rvk::fx::kFlight;
+            dev.FxInstance(key, 1, a);
+        } else if (t < 2.0f) {
+            Device::FxAnchors a;
+            std::memcpy(a.source, hand, sizeof(hand));
+            std::memcpy(a.target, chest, sizeof(chest));
+            if (t < 0.5f) {
+                a.phase = rvk::fx::kCharge;
+                std::memcpy(a.head, hand, sizeof(hand));
+            } else if (t < 1.3f) {
+                a.phase = rvk::fx::kFlight;
+                const float s = (t - 0.5f) / 0.8f;
+                for (int i = 0; i < 3; ++i) a.head[i] = hand[i] + (chest[i] - hand[i]) * s;
+                a.head[1] += std::sin(s * kPi) * 0.6f;
+            } else {
+                a.phase = rvk::fx::kImpact;
+                std::memcpy(a.head, chest, sizeof(chest));
+            }
+            dev.FxInstance(key, 1, a);
+        }
+        dev.EndFrame();
+        Sleep(16);
+    }
+}
+
 // drawn the way GfxVisualDiaBill draws them) that twinkle on and off - announced with ParticleEmitter, so each live
 // sprite sheds GPU particles. --particles-off draws the sprites alone for comparison. --particle-end F: the effect ends
 // at frame F (no longer announced or drawn); its particles must fade out on their own. An interface quad follows the 3D.
@@ -5581,6 +5682,7 @@ int main(int argc, char** argv)
     bool windowed = false, stress = false, threaded = false, pixelLighting = false, lightingDebug = false, lightOverride = false, shadows = false, shadowTest = false, pointShadowTest = false, pointShadowSun = false;
     int cacheTest = 0, frameMs = 0;
     bool particleTest = false, particlesOff = false;
+    std::string fxFile;
     int particleEnd = -1, particleEffects = 1;
     uint32_t pointShadows = 4;
     float headroom = 1.0f;
@@ -5980,6 +6082,8 @@ int main(int argc, char** argv)
         else if (a == "--point-shadows" && i + 1 < argc) pointShadows = uint32_t(std::atoi(argv[++i]));
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--particle-test") particleTest = true;
+        else if (a == "--fx" && i + 1 < argc) { fxFile = argv[++i]; hdr = true; }
+        else if (a == "--fx-still") g_fxStill = true;
         else if (a == "--particles-off") particlesOff = true;
         else if (a == "--particle-end" && i + 1 < argc) particleEnd = std::atoi(argv[++i]);
         else if (a == "--particle-effects" && i + 1 < argc) particleEffects = std::atoi(argv[++i]);
@@ -6172,6 +6276,20 @@ int main(int argc, char** argv)
         dev.SetLightOverride(true);
         dev.SetPointShadows(pointShadows);
         RunPointShadowTest(dev, frames, shot, dump, pointShadowSun);
+        std::printf("rendered; screenshot %s\n", shot.c_str());
+        return 0;
+    }
+    if (!fxFile.empty()) {
+        if (threaded) {
+            ThreadedDevice tdev;
+            if (!tdev.Init(nullptr, g_width, g_height, &error)) { std::printf("init failed: %s\n", error.c_str()); return 1; }
+            tdev.SetHdr(hdr);
+            tdev.SetBloom(bloom, 1.0f);
+            RunFxTest(tdev, frames, fxFile, shot);
+            tdev.Sync();
+        } else {
+            RunFxTest(dev, frames, fxFile, shot);
+        }
         std::printf("rendered; screenshot %s\n", shot.c_str());
         return 0;
     }

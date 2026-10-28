@@ -535,6 +535,7 @@ void Device::EndScene()
         DrawPendingGroundBase();                 // (RVK_GroundOne: no lighting pass came after the ground's base pass)
     if (!m_scenePhase)
         return;
+    DrawFx();                                    // our own effects' particles (fx.cpp)
     DrawPortals();                               // RVK_Portals: shops' rooms through their doors (portal.cpp)
     DrawStreetPortal();                          // RVK_StreetView: the street from inside a shop (portal.cpp)
     m_scenePhase = false;
