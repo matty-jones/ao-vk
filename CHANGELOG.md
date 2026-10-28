@@ -126,6 +126,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- At night near shops, bright slanted sheets and white streaks no longer hang over the street. They were the soft
+  edges of a shop room's glass and light beams, seen through its doorway (`RVK_Portals`), drawn outside the doorway.
 - With frame generation on (`RVK_FrameGen`), AOReloaded's cast and reload bars and the text shown after zoning
   (the suppression field notice) no longer smear: they were drawn into the picture frame generation fills in.
 - In storms, water no longer jerks about: the waves follow a slow swell instead of every swing of the storm's wind,

@@ -525,6 +525,10 @@ void Device::DrawPortals()
         const uint32_t kind = m_drawVisualKind, visual = m_drawVisual, owner = m_drawOwner;
         m_drawVisual = 0;                        // (no game object's: not the last one the game drew)
         m_drawOwner = 0;
+        // Two-pass foliage's queued edges: the street's before the room (not cut to its doorway's box), the room's
+        // before it ends (step 3's end) - drawn later, out of the box, the soft parts of its glass and light beams
+        // showed over the street as bright sheets (user, 2026-10-28).
+        FlushEdges();
         m_drawingPortal = true;
         m_portalScissor = box;
         // Behind the doorway's plane only (the room's entrance, moved out in front of it, cut away: kEntranceShift).
@@ -568,6 +572,7 @@ void Device::DrawPortals()
             std::fill(std::begin(m_portalClip), std::end(m_portalClip), 0.0f);   // (it stands in front of the plane)
             Draw(d3d::TriangleStrip, d3d::FVF_XYZ | d3d::FVF_DIFFUSE, quad, 4, nullptr, 0);
         }
+        FlushEdges();                            // (inside the box, before it gets its depth back)
         m_drawingPortal = false;
         // 4. The box given its depth back where the room left none nearer (mode 2, depth GREATER), then the opening's
         // pixels marked lit by the room's own lamps in the local-light target (portal_mark.frag): the passes after the
@@ -951,6 +956,7 @@ void Device::DrawStreetPortal()
     const uint32_t kind = m_drawVisualKind, visual = m_drawVisual, owner = m_drawOwner;
     m_drawVisual = 0;
     m_drawOwner = 0;
+    FlushEdges();                                // (the room's own queued edges first; the street's below, in its box)
     m_drawingPortal = true;
     m_portalScissor = box;
     // On the street's side of the entrance's plane only, from 5 cm out (the room behind it is the room's; the street's
@@ -966,6 +972,7 @@ void Device::DrawStreetPortal()
                                   : nullptr;
     DrawStreetGround(street, place, now);
     const uint32_t drawn = PortalReplay(street, m_street.lp.textures, place, now);
+    FlushEdges();
     m_drawingPortal = false;
     m_rs = rs;
     m_tss = tss;
