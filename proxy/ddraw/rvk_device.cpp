@@ -684,7 +684,6 @@ void SetInterfaceRate(float hz)
     g_uiPeriodMs = hz > 0.0f ? 1000.0 / double(hz) : 0.0;
 }
 
-
 HRESULT RDevice::DoGetTexture(DWORD stage, LPDIRECTDRAWSURFACE7* out)
 {
     if (!out || stage >= 8) return DDERR_INVALIDPARAMS;

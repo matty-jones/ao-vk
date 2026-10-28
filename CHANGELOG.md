@@ -8,8 +8,7 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### New
 - Experimental `RVK_WinScale` and `RVK_HudScale` (General, 100% by default) resize windows and HUD independently, with matching
   layout, clipping and mouse input. World labels and floating text, the cursor, and the developer console/readout
-  retain their sizes. Applied changes refresh cached UI immediately.
-  Font and layout corrections have native regression coverage; broader gameplay validation is pending.
+  retain their sizes. Text is rendered at the requested size, and changes refresh cached UI immediately.
 
 ### Diagnostics
 - The renderer log records the first 16 scaled font-cache creations, including face, cell height, baseline metrics
@@ -29,21 +28,16 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   switched off. Native ground no longer leaves a tiny detail ring or low-resolution far textures behind.
 - Terrain no longer disappears when native ground cannot replace a pass. Unrecognised passes, missing textures
   and fully culled patches preserve the game's terrain; native ground stays enabled.
-- Scaled icons no longer bypass the texture-edge fix on the client's native drawing path.
-- Small scaled letters retain their natural stroke widths and descenders; bitmap-font letters use fresh outlines.
-  Login and character-selection windows keep their native screen layout regardless of saved gameplay UI scales.
+- Login and character-selection windows keep their native screen layout regardless of saved gameplay UI scales.
 - At 100%/100%, scaling skips its per-frame window hierarchy rebuild. Empty text no longer repeatedly requests
   the same unavailable bitmap solely because scaling is active.
 - Scaled windows stay attached to the point where their title bar was grabbed, and dragged item images follow
   the cursor. Changing tabs or resizing a window no longer moves its saved position; hover tooltips use scaled bounds.
 - The Window size slider applies its final scale after releasing the mouse, so Preferences stays still while dragging it.
 - Scaled icons and text keep their texture samples inside their own image, preventing fragments from adjacent
-  images. World texture filtering stays unchanged.
-- Enlarged GUI text is rendered into a larger antialiased cache instead of magnifying its original pixels.
-  Native wrapping, selection and mouse measurements stay unchanged; 100% keeps the original text renderer.
+  images. Clipping preserves their image mapping; world texture filtering stays unchanged.
 - Window and HUD scale changes leave the saved layout untouched. Returning to 100% restores its original
   positions; edge clamping affects only display placement.
-- Enlarging interface images no longer distorts their texture sampling when clipped at a window edge.
 - Names, floating combat text and the mouse pointer stay separate from world effects and temporal processing,
   whether frame generation is on or off. Screenshots use the same overlay order as the displayed frame.
 - The interface stays in its own layer with `RVK_UiRate` 0 (every frame) and Native Direct or Device off,

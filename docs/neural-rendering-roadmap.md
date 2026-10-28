@@ -1,9 +1,9 @@
 # UI stabilization and DLSS 5 roadmap
 
-2026-10-28. Stages 1 (terrain quality, `93592f6`) and 2 (font metrics, `6fe876c`) have local gameplay confirmation:
-clean unclipped text, stable performance, ground toggles without frame drops and the requested terrain detail
-radius. The follow-up sidebar stacking/PF map correction remains under review. Stage 3 (processing inputs) stays
-paused until that review; no processing-input or NVIDIA integration work is included in the sidebar fix.
+2026-10-28. Stages 1 (terrain quality, `93592f6`) and 2 (font metrics, `6fe876c`), including sidebar/PF map
+scaling (`aa9ee47`), have local gameplay confirmation. Text is clean and unclipped, performance is stable,
+terrain detail follows the requested radius, and scaled sidebar panels stack correctly.
+Stage 3 (processing inputs) remains paused; this branch adds no NVIDIA runtime or processing-input contract.
 
 ## What has landed
 
@@ -14,7 +14,7 @@ paused until that review; no processing-input or NVIDIA integration work is incl
 | Independent window and HUD scaling | `abf8b5c`, followed by clipping, layout, font and interaction corrections. Gameplay confirms usable scaling, retained positions across round trips, stable release-to-apply Preferences and restored icon quality. |
 | Higher-resolution GUI text | `6fe876c` uses a common baseline, fitted line height and font-wide pitch. Extended native checks pass; gameplay confirms clean text without clipping. |
 | Native terrain fallback | `54b9dc9` preserves original draws for unrecognised or undrawable replacement passes, with bounded diagnostics. `93592f6` retains requested F10/range/far-texture quality on fallback. Gameplay confirms the requested radius and smooth on/off transitions. |
-| Sidebar and PF map scaling | A subsequent correction keeps the native rollup under one display transform and scales custom map submissions once. Native GUI regressions cover panel toggles and map geometry; gameplay review is pending. |
+| Sidebar and PF map scaling | `aa9ee47` keeps the native rollup under one display transform and scales custom map submissions once. Native regressions pass; local gameplay confirms the result. |
 | Existing temporal rendering | TAA, FSR 2.2, FSR 3.1, motion/depth inputs and AMD frame generation were already present before these contributions. They are useful infrastructure, not new NVIDIA integration. |
 | DLSS 5 | No runtime integration, cross-process bridge or NVIDIA hardware validation has landed. |
 
@@ -24,54 +24,20 @@ needed for a future world-only neural pass.
 
 ## Stage 1 and 2 corrections
 
-### Terrain quality must follow actual replacement
+The original terrain retains its requested F10 radius, `RVK_GroundRange` and `RVK_GroundFar` quality while
+native replacement is enabled. The earlier optimizer reduced original geometry and texture quality before
+knowing whether native submission would succeed. Removing that reduction keeps the first fallback frame ready.
+Range changes schedule tessellation even while stationary; unchanged requests do not restart it. Client object
+writes remain on the game thread. See the [terrain audit](native-ground-fallback.md).
 
-The initial visibility fix changed renderer ownership in `rvk/native_ground.cpp`, but did not change the game's optimizer
-in `proxy/native/ground.cpp`. The old `Scaled()` forced the original ground radius to 8 while `g_native` was true;
-`ApplyFar()` reduced new far-patch baking to two texels per cell. These were intended to save work while native
-patches replace the whole surface.
+GUI fonts use a fitted physical cell, common baseline and font-wide pitch while preserving native advances,
+wrapping and input geometry. The earlier per-glyph vertical clamp moved descenders independently. Cache ownership
+now follows the native font's lifetime. Native checks cover full text surfaces, consecutive lines, tight cells
+and 125/150/176/200% scaling. See the [font metrics](ui-font-metrics.md).
 
-In the old `proxy/ddraw/rvk_ground.cpp`, `OnGroundFrame()` called `SetNative(g_setting)` after decoded data and texture
-pointers have been handed over. That is not confirmation that the renderer recognised a pass or submitted a
-replacement. Original fallback draws can therefore be visible but artificially low quality. The exported native
-terrain test bypasses these game-side radius and baking hooks, so its successful pavement image cannot validate
-this transition.
-
-The old `groundon` off path called `SetNative(false)`, but did not immediately restore the live radius or rebuild
-previously reduced far textures. The corrected build never enables that reduction, and restarting it discards
-the previous process's cached textures. The transition regression now exercises the real frame hook.
-
-Implemented: keep the original terrain at its requested F10 quality while native patch replacement remains active.
-The early radius and far-bake reductions are removed. Requested radius is tracked per live ground, range changes
-schedule tessellation even while stationary, and unchanged requests do not restart it. This retains original
-terrain work and memory so the first fallback frame is ready, without a render-thread feedback delay. All game
-object writes remain on the game thread. See the [quality follow-up](native-ground-fallback.md).
-
-Acceptance: in Old Athen, test several F10 detail-radius values with native ground off, fallback active and native
-replacement active; repeat on/off/on without restarting, after moving, and after zoning. Confirm correct pavement
-beyond the former tiny ring, distinguish original/native submissions, and measure CPU and address-space cost.
-
-### Text needs consistent font geometry
-
-The prior `proxy/native/gui_font.cpp::RasterGlyph()` clamped each glyph's vertical position to fit a fixed line cell.
-When an outline exceeds that cell, different letters can move by different amounts. That breaks the common
-baseline and is a concrete candidate for the raised `p`/`y` appearance. `Plot()` also clips against the allocated
-bitmap, and the final text surface/view clip can remove pixels later. The exact source of each NCU, shortcut and
-settings artefact still needs measurement.
-
-The replacement draws natural outline widths but retains original font advances and wrapping. Those advances
-may belong to a bitmap font that is being replaced with Verdana, so fresh outlines alone do not guarantee correct
-spacing. Fractional placement, native text zoom and surface cropping must be checked together.
-
-Implemented: one fitted physical font cell, a common baseline and a font-wide pitch transformation retain native
-advances, wrapping and input geometry. Cache ownership follows the native font's lifetime. The
-[font-metrics follow-up](ui-font-metrics.md) records the method and validation.
-
-The former small-glyph regression compared total coverage with a natural GDI outline. That could pass even when a
-complete glyph had moved vertically. The expanded suite now includes
-baseline/bounds checks and complete text-surface rendering: `gjpqy`, `AV To Wa`, `NCU`, digits, consecutive
-lines and tight cells at 125/150/176/200%, plus the existing exact 100% round trip. Local review must still cover
-chat and the custom skin. Native placement, selection, wrapping and scale round trips must remain consistent.
+The sidebar rollup shares one display transform, preserving native panel stacking and input. PF map tiles,
+markers and outlines are transformed once after native zoom and clipping calculations. See the
+[UI implementation](ui-separation-scaling.md) and [performance audit](ui-scaling-performance-audit.md).
 
 ## What DLSS 5 changes in the plan
 
@@ -104,11 +70,10 @@ remain real, but availability and a working integration path need current eviden
 1. **Restore terrain quality — locally confirmed.** Retain regression coverage for F10 detail changes, native on/off/fallback,
    stationary changes, zoning and moving CPU/memory cost in Old Athen. The game's original detail must be available
    whenever native replacement does not take a pass.
-2. **Finish font metrics — locally confirmed; sidebar follow-up under review.** Text is reported clean and unclipped.
-   Verify sidebar panel stacking and PF map content at the saved scales, including close/reopen and expansion.
-   Repeat hover, title-bar/item anchors, Perk tabs, login, maps/browser views and
-   restart persistence. Positions must remain reversible, glyphs complete, icons clean and excluded sizes unchanged.
-3. **Prove the processing input — paused for review.** Capture world-only and composed frames at 4K across world scales 100/75/50,
+2. **Finish font metrics and sidebar scaling — locally confirmed.** Retain regression coverage for text, panel
+   stacking, PF map content, hover, title-bar/item anchors, Perk tabs, login and scale round trips. Broader browser
+   and restart-persistence checks remain part of compatibility testing.
+3. **Prove the processing input — paused.** Capture world-only and composed frames at 4K across world scales 100/75/50,
    UI refresh 0/60 and cached/redrawn frames. Visualize motion for camera movement, skinning, foliage, water and
    particles, and test cuts, zoning and resolution changes. Specify colour space, motion units/sign/jitter,
    dimensions, reset/frame IDs and image ownership. Existing FSR inputs are evidence to build on, not proof of
@@ -132,11 +97,5 @@ remain real, but availability and a working integration path need current eviden
    enhancement has its own compute cost; do not treat it as an automatic FPS improvement. Retain working TAA/FSR
    paths for unsupported configurations.
 
-The current screenshot's roughly 83 FPS is encouraging operational evidence, but cannot be compared directly
-with the earlier 35–40 FPS capture from another workload. The
-[performance audit](ui-scaling-performance-audit.md) records the controlled scale sweep and its limits. Above
-100%, measured mapping was about 0.10–0.11 ms/frame in that session; no isolated hook-cost verdict was obtained
-because the on/off sessions had substantially different world draw counts.
-
-The next action is local review of stages 1 and 2. Processing-input work and NVIDIA feasibility remain pending
-that review; this implementation adds no neural runtime, cross-process worker or new processing-input contract.
+Stages 1 and 2 are accepted locally. Processing-input work and NVIDIA feasibility are the next milestones;
+implementation remains paused until stage 3 is authorized.

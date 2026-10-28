@@ -3,7 +3,7 @@
 ## Evidence and limits
 
 The supplied `ao-vk-profile-analysis.txt` contains 56 enhancement sweep steps, each with GPU and CPU summaries
-averaged over 299 frames. It was treated as measurement data. The same-zone user test also reports roughly
+averaged over 299 frames. The same-zone gameplay test also reported roughly
 35–40 FPS at 100%/100%. That compares enlargement cost, not installed-hook cost: the previous implementation
 still traversed the window hierarchy and rebuilt three maps every frame at 100%.
 
@@ -55,7 +55,7 @@ requires another controlled capture.
 
 New CPU labels are `game: UI scaling`, `game: UI drawing`, `game: UI cached` and `game: UI font raster`.
 Font raster time is nested inside UI drawing; do not add both. Drawing includes native controller work and
-renderer submission, not just our hooks. Averages include frames where a named section does no work.
+renderer submission as well as hook work. Averages include frames where a named section does no work.
 
 ## Local follow-up: enabled scaling and startup bypass
 
@@ -90,9 +90,9 @@ enabled log, before hooks were disabled. The logs establish different captured w
 that difference. The 0.10 ms broad UI difference at native size is an observation, not an isolated hook-cost estimate.
 
 These sweeps show modest steady-state enlargement cost in their captured scene and do not reproduce the
-original 35–40 FPS slowdown. They do not prove zero overhead, establish an exact hook-only FPS penalty, or
-isolate overlay-separation cost. Further performance sign-off needs matched world workload; visual sign-off
-also remains open after the reported icon regression.
+original 35–40 FPS slowdown. They do not establish an exact hook-only FPS penalty or isolate overlay-separation
+cost. That comparison requires matched world workload. Later gameplay reports confirm stable performance and
+corrected icons, without providing a new isolated hook-cost measurement.
 These measurements describe the build before the native-depth atlas correction below. That correction activates
 vertex conversion and fragment bounds for previously rejected draws; its additional cost is not measured by these logs.
 
@@ -101,8 +101,8 @@ actual GUI.dll `_UpdateVertices` output uses 100. That rejected real GUI quads b
 The helper now accepts any finite positive depth shared by the quad, preserving all original vertex values,
 and still rejects varying reciprocal depth. Native checks feed actual generated vertices into that helper;
 Vulkan tests exercise reciprocal depths 1 and 100 across indexed lists, non-indexed lists and strips. Both
-passed, with the protected pattern matching the isolated reference. The client's final icon appearance still
-needs a gameplay check after rebuilding; `profileui` itself does not persist its temporary scale changes.
+passed, with the protected pattern matching the isolated reference. Local gameplay also confirmed the corrected
+icons. `profileui` does not persist its temporary scale changes.
 
 ## Controlled local comparison
 
@@ -114,12 +114,16 @@ needs a gameplay check after rebuilding; `profileui` itself does not persist its
    the existing sweep's 120 settling frames and 300 measured frames per step. Do not change settings during it.
    The log has the new UI CPU labels alongside game/renderer/GPU totals. This compares warm steady-state drawing;
    it intentionally excludes the initial rasterization spike after a scale change.
-3. Exit the game. In `randy-vk.ini`, add `UiScaling=off` under the existing `[Native]` section. Restart, reproduce
+3. Exit the game. Open `randy-vk.ini` in the client folder with a text editor. Set `UiScaling=off` under `[Native]`,
+   creating that section if absent. This is a file setting, not a console command. Restart, reproduce
    the scene, and run `profileui` again. The log must say `interface scaling: disabled ... coordinate and font hooks
    not installed`. All displayed scale steps remain visually native-sized in this run.
 4. Restore `UiScaling=on` (or remove that key) and restart. Repeat the first capture to check scene/time drift.
    Compare bypass against enabled 100% to measure installed scaling/font-hook overhead; compare enabled 100% against
    enabled larger values for enlargement cost. If baseline drift is comparable to the difference, repeat the runs.
+
+Each sweep appends its results to `randy-vk.log` in the client folder, or the path set by `RANDYVK_LOG`.
+Wait for `sweep: done`, exit, and copy that log to a distinct filename for each run before comparing sessions.
 
 The startup switch is deliberately not hot-reloaded: removing installed native hooks during gameplay would not
 be a controlled experiment. It does not overwrite saved window/HUD percentages or layout. Comparing this switch
@@ -147,10 +151,8 @@ Immediate and threaded HDR atlas runs passed, with 91 contaminated pixels reprod
 image differences. Vulkan validation reports the environment's existing external-memory extension dependency
 error (`VUID-vkCreateDevice-ppEnabledExtensionNames-01387`); those runs produced no other validation errors.
 The final serial threaded HDR/TAA tests at 50% world resolution passed both atlas sampling and overlay composition,
-including cached frames, readback, labels and cursor order. Concurrent software-Vulkan runs exceeded the environment's
-memory limit and were discarded. The standard `night0` world-look baseline produced no screenshot within its 600-second
-software-rendering limit, so no full world-appearance baseline comparison is claimed.
+including cached frames, readback, labels and cursor order. The standard `night0` world-look baseline produced
+no screenshot within its 600-second software-rendering limit, so no full world-appearance baseline comparison is claimed.
 
-The environment runs the actual supported GUI.dll on synthetic native objects and the Vulkan renderer through
-software Vulkan. It does not provide a playable authenticated session or the user's exact Verdana/skin pixels.
-Final chat/HUD typography, login placement and local CPU overhead therefore still need the controlled game check.
+Automated checks run the supported GUI.dll on synthetic native objects and the renderer through software Vulkan.
+They do not replace gameplay validation or controlled hardware measurements of CPU overhead.

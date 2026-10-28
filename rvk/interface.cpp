@@ -93,7 +93,7 @@ void Device::InterfaceEnd()
         m_renderEndCause = kEndTarget;
         EndRendering();
     }
-    // The pass pushed set 0 with its own layout and changed the pipeline: the next draw binds again (as EndScene).
+    // Rebind state after returning from the interface target.
     m_cache = StateCache{};
     m_arenaBound = false;
     m_bindlessBound = false;
@@ -113,9 +113,8 @@ void Device::SetConsoleImage(uint32_t width, uint32_t height, const void* pixels
     m_consoleDirty = true;
 }
 
-// The console's image over the top of the main target (EndFrame, which has it in TRANSFER_SRC for presenting and
-// gets it back so), or of `dst` (frame generation's overlay, framegen.cpp). Its upload goes with the frame's others,
-// before its draws. An image made for another size (the window just resized) waits for the console's next one.
+// Draw the console into the composed frame or interpolation overlay. Uploads precede the frame's draws.
+// An image made for another size waits for the console's next update.
 void Device::DrawConsole(VkCommandBuffer cmd, Texture* dst)
 {
     Texture* target = dst ? dst : m_main;
@@ -220,9 +219,8 @@ void Device::ClearImage(VkCommandBuffer cmd, Texture* t)
     vkCmdEndRendering(cmd);
 }
 
-// The world with labels, interface, optional console and cursor, left in TRANSFER_SRC.
-// The world target stays untouched for temporal processing and frame generation. Null: no overlays.
-// (Outside a rendering; the passes change the pipeline, the caller binds again.)
+// Compose overlays without changing the world target; leave the result in TRANSFER_SRC. Null: no overlays.
+// Call outside rendering and rebind pipeline state afterwards.
 Texture* Device::ComposedFrame(VkCommandBuffer cmd, bool console)
 {
     if (!m_main || m_main->m_format != Format::A8R8G8B8 || !m_uiCompositePipeline)

@@ -50,7 +50,6 @@ pure coordinate checks remain separate regressions. `rvk_demo --ui-atlas-test` c
 the software-Vulkan validation run retains the known device-extension dependency error documented in the
 [interface validation notes](ui-separation-scaling.md).
 
-Native and renderer fixtures cannot establish the complete result of every live skin/control combination. Local
-review should repeat the reported settings `p`/`y`, Friends, chat, NCU and shortcut-number cases at 4K, check the
-last visible row, and repeat a 100/150/200/100 scale round trip. Browser-rendered text and other external images
-continue to use their own rasterizers.
+Local 4K gameplay review confirmed clean text without clipping after this correction. Native and renderer
+fixtures do not establish the result of every skin/control combination. Browser-rendered text and other
+external images continue to use their own rasterizers.

@@ -592,7 +592,7 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
             m_native.basePending = true;
             m_native.baseRs = m_rs; m_native.baseTss = m_tss; m_native.baseTex1 = m_textures[1];
             m_native.baseWorld = m_world; m_native.baseView = m_view; m_native.baseProj = m_proj;
-            m_native.baseTarget = m_target; m_native.baseViewport = m_viewport;
+            m_native.baseTarget = m_target;
             m_native.baseSampler = StageSamplerSlot(0);
             if (m_scenePhase && !m_external) NoteSceneFog();
             return NativeGroundDecision(fvf, DeferredReady, true);

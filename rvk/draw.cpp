@@ -2516,7 +2516,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         DrawPendingGroundBase();
     if (m_native.ground && NativeGroundReplaces(fvf))
         return;
-    // RVK_FrameGen: a 2D draw on the frame after the interface (the mouse pointer) goes on top of the overlay.
+    // Late 2D draws, including the cursor, go above the interface and console.
     if (m_target == m_main && !m_overlayTopActive && !m_uiLayerActive && !m_external &&
         m_interfaceEndFrame == m_frameNumber && IsInterfaceDraw(fvf))
         OverlayTopBegin();

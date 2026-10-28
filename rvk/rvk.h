@@ -918,15 +918,11 @@ public:
     void SetSceneLights(const SceneLight* lights, uint32_t count);
     // Null = the main target. Like D3D, resets the viewport to the whole target.
     void SetRenderTarget(Texture* target);
-    // The interface layer (interface.cpp): the game's interface drawn into an image of its own and shown over each
-    // frame, so it needn't be redrawn every frame (the game skips GUI.dll's drawing in between). Around the
-    // interface's drawing: Begin(true) draws it into the layer (cleared first), Begin(false) means it isn't drawn
-    // this frame; End shows the layer over the main target.
+    // Interface capture (interface.cpp): Begin(true) clears and redraws the layer; Begin(false) reuses it.
+    // End closes capture. Presentation and readback compose the layer over the world.
     void InterfaceBegin(bool redraw, bool guardAtlas = false);
     void InterfaceEnd();
-    // The world's floating text (damage, XP, names over heads) next: the scene ends here - its effects (smoke, fog,
-    // the tone mapping, bloom, grading) applied - and the text is drawn over the finished picture, still hidden by
-    // what stands in front of it (the scene's depth). The interface follows.
+    // Finish world processing and capture floating text with world depth for occlusion, below the interface.
     void OverlayBegin();
     // The layer holds an interface drawn at the current size (else the next frame must redraw it). Any thread.
     bool InterfaceLayerReady() const { return m_uiLayerReady.load(std::memory_order_relaxed); }
@@ -3120,21 +3116,18 @@ private:
     bool m_frameGenFailed = false;               // (it couldn't be made: not tried again until the setting changes)
     struct FrameGenState;
     FrameGenState* m_fg = nullptr;
-    // What the swapchain lays over the real and the generated frames, so none of it is interpolated: the name labels
-    // (drawn into a layer of their own, OverlayLabelsBegin/End - EndScene), the interface layer and the console, put
-    // together each frame (FgBeforePresent).
+    // Display-sized overlays, composed after world processing with or without frame generation.
     Texture* m_overlayLabels = nullptr;
-    bool m_overlayLabelsActive = false;               // the held labels' draws go into m_overlayLabels
-    uint64_t m_overlayLabelsFrame = ~0ull;            // the frame they were drawn in
-    Texture* m_fgOverlay = nullptr;
+    bool m_overlayLabelsActive = false;
+    uint64_t m_overlayLabelsFrame = ~0ull;
+    Texture* m_fgOverlay = nullptr;              // combined overlay for the interpolation swapchain
     bool OverlayLabelsBegin();
     void OverlayLabelsEnd();
-    // What the game draws on the frame after its interface - the mouse pointer - into a layer of its own, the overlay's
-    // top (OverlayTopBegin from Draw; it lasts to the frame's end): drawn into the frame it came out under the interface.
+    // Late draws, including the cursor, stay above the interface and console.
     Texture* m_overlayTop = nullptr;
     bool m_overlayTopActive = false;
-    uint64_t m_overlayTopFrame = ~0ull;               // the frame it was drawn in
-    uint64_t m_interfaceEndFrame = ~0ull;        // the frame the interface layer was last ended in (InterfaceEnd)
+    uint64_t m_overlayTopFrame = ~0ull;
+    uint64_t m_interfaceEndFrame = ~0ull;         // last InterfaceEnd frame
     bool OverlayTopBegin();
     void ClearImage(VkCommandBuffer cmd, Texture* t);
     Texture* m_composedFrame = nullptr;

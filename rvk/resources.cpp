@@ -910,7 +910,7 @@ VkSampler Device::SamplerFor(uint32_t stage)
     ci.minFilter = t[d3d::TSS_MINFILTER] == d3d::TFN_POINT ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
     ci.mipmapMode = t[d3d::TSS_MIPFILTER] == d3d::TFP_LINEAR ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
     const bool ui = InterfaceSampler();
-    ci.minLod = ui ? 0.0f : float(t[d3d::TSS_MAXMIPLEVEL]);           // D3D MAXMIPLEVEL = most detailed level used
+    ci.minLod = ui ? 0.0f : float(t[d3d::TSS_MAXMIPLEVEL]);   // D3D MAXMIPLEVEL = most detailed level used
     ci.maxLod = ui || t[d3d::TSS_MIPFILTER] == d3d::TFP_NONE ? ci.minLod : VK_LOD_CLAMP_NONE;
     ci.addressModeU = AddressMode(addrU);
     ci.addressModeV = AddressMode(addrV);

@@ -11,8 +11,8 @@
 // buffer. At x4 (600) that was 100-230 ms frames as the camera moved and ~900 MB less address space in the 32-bit
 // process (user, 2026-10-18): the scale stops at 2.5.
 //
-// SetHQRadius is wrapped to scale the game's value; Tesselate (called on the live ground as the camera moves) is
-// wrapped to take up a changed scale there - no pointer to the ground is kept, it goes with the playfield.
+// SetHQRadius records the requested value; tessellation and frame updates apply range changes on the game thread.
+// ForgetGround clears per-playfield tracking.
 //
 // Past the radius, CreateHiTexture bakes each patch into one texture of n x 8 texels a side (n cells; `mov ecx, eax;
 // shl ecx, 3` - capped at the device's largest texture, 8192 here), each cell's tile shrunk to 8 x 8 (FUN_100374c5;

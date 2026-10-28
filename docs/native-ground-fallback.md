@@ -20,7 +20,8 @@ independent grounds, reused ground state and far-bake settings 8/16/32. The prev
 is absent from the corrected build, so restarting with it discards the old process's reduced-quality cached textures.
 The stationary case bypasses N3's engine-dependent update body while exercising the installed frame hook and
 the actual DisplaySystem tessellator. It also verifies that a repeated unchanged F10 request does not restart work.
-Full Old Athen movement, F10 interaction and CPU/memory measurements remain part of local gameplay review.
+Local gameplay review confirmed the requested detail radius and stable ground toggles. Detailed movement and
+CPU/memory comparisons remain separate performance checks.
 
 ## Initial visibility investigation
 
@@ -109,5 +110,4 @@ two-pass and combined paths. The final combined frame tests 49 patches, rejects 
 textures ready. The file loader labels its test ground 790; the source archive is playfield 540.
 
 The supplied capture cannot be replayed exactly because its camera matrices and suppressed pass state are absent.
-Full Old Athen gameplay confirmation requires a fresh client run; successful renderer checks do not establish
-which suppressed state occurred in the original capture.
+Local gameplay confirmed restored terrain, but does not establish which suppressed state occurred in that capture.

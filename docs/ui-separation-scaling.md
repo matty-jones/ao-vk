@@ -1,11 +1,9 @@
 # Interface separation and scaling
 
-Local gameplay testing confirmed usable compass/icon scaling, retained positions across scale round trips and
-stable release-to-apply Preferences. The font baseline, line-height and spacing correction now passes extended
-native client checks and awaits gameplay review. See the [font correction](ui-font-metrics.md), the
-[current stocktake and neural-rendering roadmap](neural-rendering-roadmap.md), the
-[investigation](ui-scaling-investigation.md) and [performance audit](ui-scaling-performance-audit.md) for evidence
-and the controlled local comparison.
+The interface is captured at display resolution, independently of world rendering and refresh rate. Windows and
+HUD have independent scales, with matching input and fresh text rasterization. See the
+[font metrics](ui-font-metrics.md), [defect investigation](ui-scaling-investigation.md),
+[performance audit](ui-scaling-performance-audit.md) and [neural-rendering roadmap](neural-rendering-roadmap.md).
 
 `RVK_UiRate` controls redraw frequency only. At 0 the interface redraws every frame and still uses its own
 display-sized image. Capture callbacks work with Native Direct and Native Device disabled. GUI controller work
@@ -23,7 +21,6 @@ include the last pixel, so clipping and input use the same bounds as drawing. Na
 workspace; the controller's physical screen and mouse coordinates stay unchanged. HUD changes take effect at the
 next GUI frame. Window changes wait while the primary mouse button is held, keeping the Preferences slider still,
 then apply at the first GUI frame after release. Applied changes force a fresh cached image.
-The client's layout remains in its original coordinates.
 Clamping affects only display placement, so returning to 100% restores the unchanged model. Full-screen HUD
 containers keep their native dimensions; their widget groups scale around the nearest screen edge or centre.
 Their clipping and input bounds include the enlarged children. No scale-driven move/resize calls or separate
@@ -102,8 +99,8 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
 - The same check invokes the actual native string renderer and surface-layout methods at 100%, 110%, 150%,
   176% and 200%. It checks fresh antialiased glyph pixels, unchanged advances, logical surface dimensions,
   selection/underline drawing and exact native raster restoration at 100%. `RANDYVK_GUI_FONT_SHOT=<prefix>`
-  saves the test cache images for inspection. The Wine fixture uses a registered DejaVu Sans substitute for
-  Verdana; these images validate the native hook path, not a full game session or exact Microsoft font pixels.
+  saves the test cache images for inspection. The check logs the resolved font face, since Wine may substitute
+  an unavailable font. These images validate the native hook path rather than a full game session.
 - Small-font checks compare complete ink coverage against natural GDI outlines at 9, 12 and 16 pixels, including
   descenders and narrow strokes. Bitmap letters, inline icons, native text zoom, empty-cache retries, fixed login
   geometry and the 100% hierarchy fast path have native regression checks. `--gui-scaling-off-check` verifies
@@ -122,12 +119,11 @@ QEMU i386, avoiding the available WoW64 loader's startup failure.
 - The full native comparison against the client's original renderer passed with zero failures. Generated settings
   documentation and whitespace checks passed.
 
-The latest local report confirms clean text, stable performance, working terrain toggles and the requested ground
-detail radius. Sidebar stacking and PF map scaling are a subsequent correction and still need local gameplay
-confirmation. The cloud client exits during startup before a rendered GUI frame; native checks cannot establish
-the complete behaviour of every skin, tab, tooltip or item action. Browser interaction and persistent layout after
-restart also need a playable client session. The fixed world-look check timed out even with an extended limit; its baseline was
-not changed. Software Vulkan exposes only one queue, so hardware frame generation remains untested. It also
+Local 4K gameplay review confirmed clean text, stable performance, working terrain toggles, the requested ground
+detail radius, sidebar stacking and PF map scaling. Native checks do not establish the complete behaviour of
+every skin, tab, tooltip or item action. The cloud client exits before a rendered GUI frame, so broader browser
+and restart-persistence checks require a playable client. The fixed world-look check timed out; its baseline was
+not changed. Software Vulkan exposes only one queue, so hardware frame generation remains untested there. It also
 reports the existing external-memory extension dependency validation error
 `VUID-vkCreateDevice-ppEnabledExtensionNames-01387`. QEMU/Wine helper teardown can report a signal after
 successful native checks. Actual DLSS integration remains future work.

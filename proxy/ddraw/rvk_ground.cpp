@@ -34,7 +34,6 @@ using rvk::NativeGround;
 
 namespace {
 
-bool g_setting = true;              // RVK_GroundOn
 bool g_shadowHooked = false;
 int g_shadowAttempts = 0;
 
@@ -322,7 +321,6 @@ void GroundFrame()
 // RVK_GroundOn.
 void SetNativeGroundSetting(bool on)
 {
-    g_setting = on;
     if (g_rvk.device) g_rvk.device->SetNativeGroundOn(on);
 }
 

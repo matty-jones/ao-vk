@@ -1,12 +1,10 @@
 
 # UI separation audit
 
-Historical source audit, recovered from the prior conversation. Tool and client limitations below describe
-that earlier workspace; they are not findings about the prepared implementation environment.
-
-Audited `matty-jones/ao-vk`, `main`, commit `18589675722bfd93b217bb5654c7352360cd0e65` (2026-10-20).
-Source review only. No repository files changed; no build or game tests run. This workspace has no clang-cl,
-MSVC/Windows SDK, Vulkan SDK, Wine, or client binaries/decompiles.
+Historical source audit of `matty-jones/ao-vk`, `main`, commit
+`18589675722bfd93b217bb5654c7352360cd0e65` (2026-10-20). Findings describe that revision.
+The audit was source-only; a build toolchain and client were unavailable. See
+[implementation and validation](ui-separation-scaling.md) for the completed changes.
 
 ## Assessment
 
@@ -128,7 +126,7 @@ World-anchored labels need their screen anchors preserved if their glyph size is
 
 Follow `CLAUDE.md`: explicit CMake source/shader lists, no manual edits to generated files, unchanged binary
 layouts/vtables, the existing settings table and generated settings documentation, and short player-facing
-changelog entries for visible changes. Keep new code attribution to the user, as requested.
+changelog entries for visible changes.
 
 ## Validation before implementation is accepted
 

@@ -620,7 +620,7 @@ void Device::EndScene()
     if (m_inFrame)
         BeginRenderingOn(m_target);
     if (m_inFrame && m_target == m_ldrMain) {
-        // (RVK_FrameGen: into a layer the swapchain lays over the frames - interpolated, they smeared.)
+        // Keep labels outside world processing and frame interpolation.
         if (!m_heldLabels.empty() && OverlayLabelsBegin()) {
             DrawHeldLabels();
             OverlayLabelsEnd();

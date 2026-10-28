@@ -149,7 +149,7 @@ Font* RasterFont(void* info, float factor)
         }
     }
     if (nativeDc) { SelectObject(nativeDc, previous); DeleteDC(nativeDc); }
-    // Fit the font as a whole to native advances; never squeeze individual letters.
+    // Match the outline font's average width to native advances.
     const float horizontal = count >= 8 ? float(nativeWidth) * factor / float(outlineWidth) : 1;
     const int fixed = Pixel(horizontal * 65536);
     font->transform.eM11.value = SHORT(fixed >> 16); font->transform.eM11.fract = WORD(fixed);

@@ -1,22 +1,22 @@
 # Scaling defects found in local gameplay
 
-The initial scaling implementation at `abf8b5c` is not usable. The user's 4K test found blurred enlarged text
-and icons, a stretched compass, and layout changes that did not reverse at 100%/100%. Health/XP bars scaled
-well and world rendering retained its appearance. The client uses Verdana and the Notum Dovvetech Edge skin.
-These findings invalidate the initial scaling acceptance; coordinate conversion tests alone were insufficient.
+Historical defects in the initial scaling implementation (`abf8b5c`) included blurred text and icons,
+a stretched compass and irreversible layout changes. The 4K client used Verdana and the Notum Dovvetech Edge
+skin. The corrections below have native regression coverage and local gameplay confirmation; the
+[implementation notes](ui-separation-scaling.md) describe current behaviour and remaining compatibility checks.
 
 ## Texture sampling
 
 GUI.dll's `ViewArea_c::_UpdateVertices` (RVA `0x151898`) converts its destination to screen space, clips it,
 and derives texture coordinates from the clipped distances. Its texture-to-destination ratio still uses the
-logical destination size. The existing `ConvertToScreen` hook enlarged only the screen rectangle, so those
+logical destination size. The initial `ConvertToScreen` hook enlarged only the screen rectangle, so those
 distances no longer had the units expected by the native calculation.
 
 A regression invokes that actual native function with a synthetic 256x256 atlas and a clipped subrectangle.
 At 100% the horizontal texture range was `0.156250..0.351563`; at 200% it collapsed to
 `0.273438..0.273438`. The test failed on the initial implementation. This defect exists independently of
-the skin and can stretch a strip of an image across its visible quad. It is a plausible contributor to the
-compass report; the compass widget still needs direct visual validation.
+the skin and can stretch a strip of an image across its visible quad. Local gameplay confirmed restored compass
+and icon geometry after the correction.
 
 The correction runs native clipping and texture-coordinate calculation in logical screen coordinates, then
 transforms only the final vertex positions, retaining D3D's half-pixel convention. The new entry is checked
@@ -27,23 +27,23 @@ The corrected native check passed with zero failures; the pre-correction check f
 
 `TextRenderer_c::PreRender` (RVA `0x163320`) allocates a cached bitmap, renders text into it, and uploads that
 bitmap to a view surface. `_RenderString` (`0x15FFDD`) gets glyphs from `FontInfo_t` and draws them into the
-bitmap with `SpriteInfo_t::RenderGlyph`. The scaling implementation changes coordinates but does not request
+bitmap with `SpriteInfo_t::RenderGlyph`. The initial implementation changed coordinates without requesting
 larger fonts or higher-resolution text bitmaps. A display-sized UI target therefore still enlarges the original
-cached pixels. This matches the user's uniformly blurry Verdana text at 4K.
+cached pixels, producing blurry enlarged text.
 
 The client has a native TrueType path (`FontSystem_t::CreateTTFont`, `0x12EC5C`) using GDI font creation and
-glyph rasterization, alongside bitmap fonts. A complete correction needs per-GUI-scale font and text caches
-rendered at the target pixel size, with logical metrics retained for wrapping, selection and hit testing. Shared
+glyph rasterization, alongside bitmap fonts. The correction uses per-GUI-scale font and text caches
+rendered at the target pixel size, retaining logical metrics for wrapping, selection and hit testing. Shared
 world-label fonts, cursor and the separate developer console/readout must remain unchanged. Rebuilding only
 the final UI target, changing filtering, or globally enlarging the game's font is insufficient.
 
 ## Layout drift
 
-`BeginScaleFrame` calls native `Window::MoveTo` and `Window::ResizeTo`. Ordinary windows use the previous
-frame's already-adjusted coordinates, then clamp to the smaller logical workspace. That clamp discards position
-information. No canonical unscaled layout is retained, so returning to 100% cannot restore it.
+The initial `BeginScaleFrame` called native `Window::MoveTo` and `Window::ResizeTo`, using the prior frame's
+already-adjusted coordinates and clamping to a smaller logical workspace. That discarded position information,
+so returning to 100% could not restore it.
 
-For a 3840-pixel-wide workspace and a 300-pixel-wide window starting at x=3500, the current calculation produces:
+For a 3840-pixel-wide workspace and a 300-pixel-wide window starting at x=3500, that calculation produced:
 
 | Scale | Native x | Display x |
 | --- | --- | --- |
@@ -53,17 +53,14 @@ For a 3840-pixel-wide workspace and a 300-pixel-wide window starting at x=3500, 
 | 100% again | 3240 | 3240 |
 
 Full-screen HUD resizing can also trigger the client's own child reflow. Recomputing each scale from the prior
-mutated layout is not an invertible presentation transform. The corrective implementation must preserve a
-canonical layout separately from temporary display placement, distinguish deliberate dragging from scale-driven
-movement, and keep preference saving/restoration stable across restart. It must cover independent window/HUD
-changes, edge clamping, screen resize, and complete round trips without drift.
+mutated layout is not an invertible presentation transform. The correction leaves native frames untouched and uses a reversible
+display transform. Regression checks cover independent factors, edge clamping, input mapping, scale round trips
+and native preference serialization.
 
-## Subsequent gameplay and interaction fixes
+## Input and image edges
 
-The user confirmed that the higher-resolution font cache fixes enlarged text, and that expanding, shrinking and
-expanding again retains window positions. Further gameplay found missing hover tooltips, repeated Perk-tab
-position jumps, a title-bar drag offset, a displaced lockpick drag image, and narrow fragments around pinned
-Friends-list text and shortcut icons.
+Further defects included missing tooltips, Perk-tab position jumps, title-bar and lockpick drag offsets, and
+fragments around Friends-list text and shortcut icons.
 
 Native border movement converts an already logical input point back to screen coordinates. Applying the display
 transform there mixes physical coordinates with the native drag rectangle and grab offset. Border mouse-down,
@@ -85,35 +82,26 @@ Packed UI images share texture storage without gutters. Magnification can blend 
 allocation into an image's edge. Scaled source bounds now stop at their own texel centres, and interface samplers
 use the top mip without forced anisotropy. A Vulkan test with neighbouring green/red allocations reproduced
 317 contaminated pixels in unguarded draws and zero in guarded draws. A following non-interface draw confirms
-that normal mip sampling is restored. This establishes the sampling defect; the specific Friends-list and skin
-artefacts still require gameplay confirmation.
+that normal mip sampling is restored. The final guard also accepts the native GUI
+quad's reciprocal depth of 100; requiring exactly 1 had bypassed protection on actual client draws.
 
 Window-scale activation now waits for the primary mouse button to be released. The slider value can change
 during the drag without moving Preferences or changing its input mapping. HUD scaling continues to preview live.
 
-## Remaining acceptance
+## Font metrics and fixed-screen windows
 
-The next 4K report confirmed better icons and release-to-apply Preferences scaling, but found narrow glyphs,
-clipped descenders, inconsistent chat/HUD raster quality and displaced login controls. The former atlas-edge
-fix changed UV endpoints, squeezing each image; fragment clamping now protects atlas allocations while leaving
-their mapping intact. Font outlines also retain their natural widths, account for native text enlargement and
-fit the native line cell. Bitmap-font letters use outline fallbacks; inline icons remain bitmaps. Fixed-screen
-login and character-selection windows keep their native geometry. These corrections need local confirmation.
-The accompanying [performance audit](ui-scaling-performance-audit.md) separates measured world CPU costs from
-the still-unmeasured installed-hook overhead and documents a controlled comparison.
+Higher-resolution caches alone did not fix raised descenders or inconsistent spacing. One fitted physical font
+cell and a shared baseline now preserve complete glyphs; a font-wide pitch transform follows native advances.
+Bitmap-font letters use outline fallbacks, while inline icons remain bitmaps. See the
+[font metrics correction](ui-font-metrics.md). Login and character-selection windows retain native geometry,
+independent of saved gameplay scales.
 
-The user subsequently confirmed that `4b11319` restores usable icons and compass geometry. The layout correction
-now leaves native view rectangles untouched, using reversible display placement and anchored HUD subtrees.
-Native regressions cover scale round trips, clamping, nested full-width HUD containers, input mapping, and
-the actual native preference writer while controller work is active. Static screen queries retain the original
-workspace, including when preferences are loaded at a non-default scale. The font correction uses higher-resolution
-private GUI bitmaps and fresh outline glyphs with unchanged native metrics. Native string, selection/underline,
-surface-layout and 100% restoration checks cover fractional scales including 176%.
+## Sidebar and PF map
 
-The font quality and scale round trips have local confirmation. Confirm the newer fixes in the same 4K client:
-title-bar attachment, Perk tab changes, hover tooltips, lockpick/image hotspot, pinned Friends-list text, shortcut
-icon edges and stable Preferences slider dragging. Repeat the layout checks after restarting. Native regressions
-and synthetic Vulkan images cannot establish full gameplay acceptance.
+A tall rollup container was misclassified as screen layout, causing its panels to receive independent anchors
+and clamps. The entire rollup now shares a transform. The PF map bypasses ordinary UI surfaces: its tiles,
+markers and outlines now scale at submission after native clipping and zoom calculations.
 
-The new layout path preserves the layout it starts with. It cannot recover positions lost by the previous build;
-restore an existing preferences backup or arrange the UI at 100% before judging further round trips.
+Local gameplay confirmed the corrected text, icons, scale round trips, sidebar stacking and PF map scaling.
+The [performance audit](ui-scaling-performance-audit.md) records measured costs and workload limitations.
+The layout path preserves the layout it starts with; it cannot recover positions lost by an earlier build.

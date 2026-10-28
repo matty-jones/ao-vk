@@ -1584,7 +1584,7 @@ void Device::SetRenderTarget(Texture* target)
     if (m_uiLayerActive && target == m_main && m_uiLayer)
         target = m_uiLayer;                      // the interface is being drawn into its layer
     else if (m_overlayTopActive && target == m_main && m_overlayTop)
-        target = m_overlayTop;                        // (frame generation: the overlay's top, to the frame's end)
+        target = m_overlayTop;                  // late overlays, including the cursor
     if (!target->m_renderTarget || !target->m_image) {
         Log("SetRenderTarget: not a (usable) render target\n");
         return;
@@ -1863,7 +1863,7 @@ void Device::EndFrame()
     Frame& f = m_frames[m_frameIndex];
     m_renderEndCause = kEndScene;
     EndRendering();
-    if (m_overlayTopActive) {                         // (frame generation's top layer: done, for the overlay)
+    if (m_overlayTopActive) {
         m_overlayTopActive = false;
         m_overlayTopFrame = m_frameNumber;
         m_target = m_main;

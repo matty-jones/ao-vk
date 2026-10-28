@@ -32,7 +32,6 @@ ScreenFn g_windowScreen;
 struct Window {
     void* owner;
     Transform transform;
-    bool fullScreen;
 };
 std::unordered_map<void*, Window> g_windows;
 std::unordered_map<void*, Transform> g_views;
@@ -234,7 +233,7 @@ void __fastcall PlacementHook(void* window, void* edx, uint32_t centered)
         Point screen;
         g_frame(root, nullptr, &frame); g_windowScreen(&screen);
         const Transform map = Place(frame, screen, g_placementScale, false);
-        g_windows.insert_or_assign(root, Window{window, map, false});
+        g_windows.insert_or_assign(root, Window{window, map});
         g_views.insert_or_assign(root, map);
         g_redraw = true;
     }
@@ -618,10 +617,10 @@ bool BeginScaleFrame(void* controller)
                 previous->second.transform.value == g_hudScale) map = previous->second.transform;
             else {
                 map = Place(global, screen, g_hudScale, true);
-                // A full-height rollup starts at the top; its reserved empty space is not a centre anchor.
+                // Keep full-height rollups anchored at the top.
                 if (rollup && height >= screen.y * 0.9f) map.offset.y = 0;
             }
-            current.emplace(view, Window{owner, map, false});
+            current.emplace(view, Window{owner, map});
         }
         views.emplace(view, map);
         Rect displayed = global;
@@ -662,7 +661,7 @@ bool BeginScaleFrame(void* controller)
             else map = Place(frame, screen, factor, false);
         }
         if (!known || !(previous->second.transform == map)) g_redraw = true;
-        current.emplace(root, Window{owner, map, full});
+        current.emplace(root, Window{owner, map});
         assign(assign, root, owner, map, full);
     }
     g_windows.swap(current);
