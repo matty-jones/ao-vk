@@ -1245,8 +1245,9 @@ private:
     uint64_t NativeMapsSignature() const;
     float SandWindBearing() const;
     // The native ground for the grass's capture (grass.cpp): the colour of the ground at cell coordinates (u, v) - its
-    // cell's tile, turned - and its light at lightmap coordinates.
-    bool NativeGroundRgb(float u, float v, uint8_t rgb[3]) const;
+    // cell's tile, turned (false while that tile's picture can't be read yet; *tile: its texture all the same) - and its
+    // light at lightmap coordinates.
+    bool NativeGroundRgb(float u, float v, uint8_t rgb[3], Texture** tile = nullptr) const;
     bool NativeLightRgb(float u, float v, uint8_t rgb[3]) const;
     void PollNativeSky();
     void FitNativeLight();

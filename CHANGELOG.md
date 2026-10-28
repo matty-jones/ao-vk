@@ -114,6 +114,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Ground grass grows on the grass again, not beside it: in a busy town (the Borealis lawns) blades stood on the
+  paving while patches of lawn next to them stayed bare. The grass took the ground's look while its textures were still
+  loading and kept it; it now waits for them, and looks again whenever one changes.
 - Walking into a shop or other room from outside no longer leaves it dark for its first five seconds (it was lit as
   the street by night until then).
 - Your character's own light keeps lighting the walls and floor around you as you step through a door between two

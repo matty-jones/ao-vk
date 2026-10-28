@@ -1823,6 +1823,9 @@ void DrawColumn(D& dev, const std::shared_ptr<rvk::skin::Source>& column, float 
 }
 
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
+uint32_t g_tileSwap[3] = {};   // --tile-swap N A B (RunGroundFile)
+float g_walkFrom[3] = {};   // --walk-from X Z N: the eye walks in a straight line from (X, Z) to --eye over the first N
+                            // frames (the grass's tiles coming and going as in game), then stays
 int g_lookRound = 0;   // --look-round N: the camera turns once round, level, over the first N frames (the environment
                        // probe sees all round: RVK_RtReflect's hits off the screen), then the given view
 template <typename D>
@@ -1860,19 +1863,21 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     std::memcpy(ground->codes.data(), d.data() + p, nc * 2);
     p += nc * 2;
     const uint32_t tiles = u32();
+    std::vector<maps::MipChain> chains(tiles);
     for (uint32_t t = 0; t < tiles; ++t) {
         const uint32_t n = u32();
         maps::Image img;
         std::string error;
-        Texture* tex = nullptr;
-        if (n && maps::LoadImageFromMemory(d.data() + p, n, &img, &error)) {
-            maps::MipChain chain;
-            maps::MakeAlbedoChain(img, &chain);
-            tex = maps::Upload(dev, chain);
-        }
-        ground->tiles.push_back(tex);
+        if (n && maps::LoadImageFromMemory(d.data() + p, n, &img, &error))
+            maps::MakeAlbedoChain(img, &chains[t]);
         p += n;
     }
+    // (--tile-swap N A B: tile A shows tile B's picture until frame N, then its own - as the game fills a ground
+    // texture again after the grass first saw it.)
+    const bool swap = g_tileSwap[0] > 0 && g_tileSwap[1] < tiles && g_tileSwap[2] < tiles &&
+                      chains[g_tileSwap[1]].w == chains[g_tileSwap[2]].w && chains[g_tileSwap[1]].h == chains[g_tileSwap[2]].h;
+    for (uint32_t t = 0; t < tiles; ++t)
+        ground->tiles.push_back(maps::Upload(dev, chains[swap && t == g_tileSwap[1] ? g_tileSwap[2] : t]));
     if (g_tileOrm) {
         const std::vector<uint32_t> shiny(16, 0xFFFF3000u);   // (occlusion 1, roughness 0.19, metal 0)
         for (size_t t = 0; t < ground->tiles.size(); t += 2)
@@ -1934,6 +1939,16 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         return (h[r * w + c] * (1 - u) + h[r * w + c + 1] * u) * (1 - v) + (h[(r + 1) * w + c] * (1 - u) + h[(r + 1) * w + c + 1] * u) * v;
     };
     for (int frame = 0; frame < frames; ++frame) {
+        if (swap && frame == int(g_tileSwap[0]) && ground->tiles[g_tileSwap[1]]) {
+            const maps::MipChain& own = chains[g_tileSwap[1]];
+            uint32_t w = own.w, h = own.h;
+            for (uint32_t level = 0; level < own.levels.size(); ++level) {
+                dev.UpdateTexture(ground->tiles[g_tileSwap[1]], level, 0, 0, w, h, own.levels[level].data(), w * 4);
+                w = std::max(w / 2, 1u);
+                h = std::max(h / 2, 1u);
+            }
+            std::printf("tile %u: its own picture from frame %d\n", g_tileSwap[1], frame);
+        }
         if (g_shotRun > 0 && frame >= frames - g_shotRun) {
             std::string name = shot;
             name.insert(name.size() - 4, "-" + std::to_string(frame - (frames - g_shotRun)));
@@ -1972,7 +1987,9 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
             std::memcpy(&bits, &fogStart, 4); dev.SetRenderState(RS_FOGSTART, bits);
             std::memcpy(&bits, &fogEnd, 4); dev.SetRenderState(RS_FOGEND, bits);
         }
-        const Vector eye{g_eye[0], g_eye[1], g_eye[2]};
+        const float walk = g_walkFrom[2] > 0.0f ? std::min(float(frame) / g_walkFrom[2], 1.0f) : 1.0f;
+        const Vector eye{g_walkFrom[0] + (g_eye[0] - g_walkFrom[0]) * walk, g_eye[1],
+                         g_walkFrom[1] + (g_eye[2] - g_walkFrom[1]) * walk};
         const bool round = frame < g_lookRound;
         const float yaw = round ? g_viewYaw + 2.0f * kPi * float(frame) / float(g_lookRound) : g_viewYaw;
         const float pitch = round ? 0.05f : g_viewPitch;
@@ -5681,6 +5698,8 @@ int main(int argc, char** argv)
         else if (a == "--water-style" && i + 1 < argc) g_waterStyle = float(std::atof(argv[++i]));
         else if (a == "--water-yaw" && i + 1 < argc) g_waterYaw = float(std::atof(argv[++i]));
         else if (a == "--water-turn" && i + 1 < argc) g_waterTurn = float(std::atof(argv[++i]));
+        else if (a == "--tile-swap" && i + 3 < argc) { for (uint32_t& x : g_tileSwap) x = uint32_t(std::atoi(argv[++i])); }
+        else if (a == "--walk-from" && i + 3 < argc) { for (float& x : g_walkFrom) x = float(std::atof(argv[++i])); }
         else if (a == "--look-round" && i + 1 < argc) g_lookRound = std::atoi(argv[++i]);
         else if (a == "--water-pitch" && i + 1 < argc) g_waterPitch = float(std::atof(argv[++i]));
         else if (a == "--water-height" && i + 1 < argc) g_waterHeight = float(std::atof(argv[++i]));
