@@ -104,6 +104,15 @@ struct TerrainFit {
 // Diagnostics. Default: stderr, flushed per line. SetLogSink redirects (e.g. into the game's log file).
 void Log(const char* fmt, ...);
 void SetLogSink(void (*sink)(const char* line));
+// The process's address space from its regions (VirtualQuery), bytes: free, the largest free block (a 32-bit game runs
+// out of one big enough for a zone's load before the free total reaches nothing), and the whole. Under Wine,
+// GlobalMemoryStatusEx's free figure is off by as much as a gigabyte either way; the regions are what can be reserved
+// (crash_check --addr).
+struct AddressSpace { uint64_t free = 0, largest = 0, total = 0; };
+AddressSpace QueryAddressSpace();
+// The same, walked once a second on a thread of its own (started at the first call; all zero until its first walk):
+// a game's thousands of regions take ~9 ms to walk, too long for its thread four times a second (the perf readout).
+AddressSpace LatestAddressSpace();
 // Where the pipeline cache is kept between runs (compiled pipelines load from it instead of being built again at every
 // start). Empty or never set: RANDYVK_PIPELINE_CACHE, else no cache file ("off" also disables it).
 void SetPipelineCachePath(const char* path);
@@ -318,6 +327,9 @@ public:
     // Reads a target (null = main) as B8G8R8A8 rows of width*4 bytes. Mid-frame this submits the work
     // recorded so far and waits for it (rendering then continues in the same frame).
     bool ReadPixels(Texture* target, void* out);
+    // A texture's level as it is on the GPU, its own format's bytes, rows packed (`bytes` must be that size): what
+    // the game last wrote there, for a surface whose CPU copy was given up after the upload (rvk_surface.cpp).
+    bool ReadTextureLevel(Texture* texture, uint32_t level, void* out, size_t bytes);
     void RequestScreenshot(const std::string& bmpPath);   // saved during the next EndFrame()
     void RequestFrameDump(const std::string& path, int frames = 1);   // the next frame's (frames') 3D draws, as text (diag.cpp)
     void SetDumpVertexCount(uint32_t count) { m_dumpVertexCount = count; }   // frame dumps list these draws' vertices
@@ -3019,6 +3031,7 @@ private:
     VkDeviceSize m_textureBytes[2] = {};         // live textures' images: the game's, render targets
     uint32_t m_textureCount[2] = {};
     std::string GpuMemoryReport() const;
+    void VramUse(uint64_t* used, uint64_t* budget) const;   // the GPU's own heaps, summed (the perf readout)
     void DestroyLeafResources();
     float m_pointLightScale = 1.0f, m_charLightScale = 1.0f;   // SetPointLightIntensity
     float LightScale(const d3d::Light& l) const;
@@ -3476,6 +3489,7 @@ private:
     void EndRendering();
     bool EnsureDepth(uint32_t width, uint32_t height);   // grows the shared depth buffer if needed
     void SubmitAndWait();                                // mid-frame flush; recording continues
+    void SubmitUploadsBetweenFrames(Frame& f);           // between frames: the recorded uploads run, waited for
     void Transition(VkCommandBuffer cmd, Texture* t, VkImageLayout to);
     VkCommandBuffer UploadCommands();
     void SaveScreenshot();
@@ -3647,10 +3661,18 @@ private:
     VkDeviceSize m_ringPeak = 0;                 // the most a frame used (logged with the flushes)
     uint32_t m_ringQuietWindows = 0;             // 600-frame windows in a row that used under a quarter of the ring
     uint32_t m_ringFlushesLogged = 0;
+    uint32_t m_ringTooSmallLogged = 0;           // requests bigger than the whole ring (logged, throttled)
+    VkDeviceSize m_ringRefused = 0;              // a ring size the driver had no memory for: not asked for again
+    std::vector<uint8_t> m_ringSpill;            // where a request bigger than the ring is written (never past its end)
+    void WantRing(VkDeviceSize bytes);           // the next frames' ring holds at least `bytes` (to kRingMaxSize)
     // The draw arenas' reserve targets (entries), grown between frames when one overflows.
     static constexpr uint32_t kDrawConstCapacity = 2048, kDrawRecordCapacity = 16384;
     static constexpr uint32_t kMaxDrawConstCapacity = 8192, kMaxDrawRecordCapacity = 131072;
     uint32_t m_constWanted = kDrawConstCapacity, m_recordWanted = kDrawRecordCapacity;
+    // The arenas' bytes in the ring (with the shadow arrays), and the sizes a frame reserves: the wanted ones, halved
+    // until they take at most half of the ring (the rest is the frame's geometry); the ring grows for the next frames.
+    VkDeviceSize ArenaBytes(uint32_t consts, uint32_t records) const;
+    void FitArenas(uint32_t* consts, uint32_t* records);
     uint32_t m_arenaFlushes = 0;                 // mid-frame arena overflows (logged, throttled)
     // M4: the sun/point shadow passes' caster records and indirect commands, also slices of the frame's ring.
     // Reserved with the draw arenas; `m_shadowRecordCount` is shared by both passes (they append, not reset).

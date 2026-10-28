@@ -79,6 +79,11 @@ void* HookSlot(HMODULE module, uint32_t vtable, uint32_t slot, uint32_t expected
 void InstallCrashLog();
 // A frame went by (Randy_t::Flip, the game's thread): feeds the hang watchdog.
 void HangBeat();
+// The game's window: the watchdog also reports when it stops answering Windows (IsHungAppWindow) for a while.
+void SetHangWindow(HWND window);
+// The process is exiting through ExitProcess (DllMain's process detach): one line with the exit code. A log that ends
+// without it was ended from outside the game's code paths (TerminateProcess, a fast fail, the system).
+void CrashLogExit();
 
 // The module the replacements run against (the original randy31_orig.dll), set once by Install.
 void SetOriginal(HMODULE module);

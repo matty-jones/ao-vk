@@ -1849,6 +1849,15 @@ int main(int argc, char** argv)
         }
         std::printf("heightmap %08x, %u cells above 0, %u settled\n", sum, raised, settled);
     }
+    // The original's texture and resource counts (ours keep them too): whether deleting the objects frees their
+    // textures (a native part that keeps them alive grows these zone after zone).
+    const auto counts = [](const char* when) {
+        const uint8_t* orig = reinterpret_cast<uint8_t*>(GetModuleHandleA("randy31_orig.dll"));
+        auto at = [&](uint32_t rva) { return *reinterpret_cast<const int32_t*>(orig + rva); };
+        std::printf("counts %s: textures %d, texture references %d, resource references %d\n", when, at(0x17D490),
+                    at(0x17D494), at(0x17D444));
+    };
+    if (destroy) counts("before --destroy");
     if (destroy) {                                   // --destroy: their destructors too (as the game deletes them)
         using DeleteFn = void*(__fastcall*)(void* self, void*, unsigned flags);
         auto deleting = [](void* o) { reinterpret_cast<DeleteFn>((*static_cast<void***>(o))[0])(o, nullptr, 1); };
@@ -1858,6 +1867,7 @@ int main(int argc, char** argv)
         for (void* c : scene.characters) deleting(c);
         std::printf("destroyed %zu statics, %zu characters\n", scene.statics.size(), scene.characters.size());
     }
+    if (destroy) counts("after --destroy");
     if (g_shutdown) {                                // Randy_t's deleting destructor (vtable slot 0), then what is left
         using DeleteFn = void*(__fastcall*)(void* self, void*, unsigned flags);
         reinterpret_cast<DeleteFn>((*static_cast<void***>(randy))[0])(randy, nullptr, 1);

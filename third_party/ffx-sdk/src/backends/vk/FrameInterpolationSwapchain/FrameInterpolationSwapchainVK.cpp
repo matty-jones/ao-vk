@@ -2848,11 +2848,27 @@ bool FrameInterpolationSwapChainVK::verifyUiDuplicateResource()
     VkImage                uiResource     = static_cast<VkImage>(presentInfo.currentUiSurface.resource);
     FfxResourceDescription uiResourceDesc = presentInfo.currentUiSurface.description;
 
+    // (ao-vk: the composition semaphore is signalled by the presenter thread alone, which frame generation switched
+    // off has ended - a loading screen's frames - while framesSentForPresentation goes on counting: waiting for it
+    // then never ended, and an interface layer that came or went there hung the game. Without the thread, the
+    // queues going idle is when the copy is no longer read.)
+    const auto waitForComposition = [&]() {
+        if (interpolationEnabled)
+        {
+            waitForSemaphoreValue(presentInfo.device, presentInfo.compositionSemaphore, framesSentForPresentation, UINT64_MAX, presentInfo.waitCallback);
+            return;
+        }
+        std::lock_guard<std::mutex> lock(ffxQueueMutex());
+        for (VkQueue queue : {presentInfo.asyncComputeQueue.queue, presentInfo.presentQueue.queue, presentInfo.gameQueue.queue})
+            if (queue != VK_NULL_HANDLE)
+                vkQueueWaitIdle(queue);
+    };
+
     if ((0 == (presentInfo.uiCompositionFlags & FFX_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING)) || (VK_NULL_HANDLE == uiResource))
     {
         if (uiReplacementBuffer.image != VK_NULL_HANDLE)
         {
-            waitForSemaphoreValue(presentInfo.device, presentInfo.compositionSemaphore, framesSentForPresentation, UINT64_MAX, presentInfo.waitCallback);
+            waitForComposition();
             destroyImage(uiReplacementBuffer, pAllocator);
             uiReplacementBuffer = {};
         }
@@ -2865,7 +2881,7 @@ bool FrameInterpolationSwapChainVK::verifyUiDuplicateResource()
 
             if (uiResourceDesc.format != internalDesc.format || uiResourceDesc.width != internalDesc.width || uiResourceDesc.height != internalDesc.height)
             {
-                waitForSemaphoreValue(presentInfo.device, presentInfo.compositionSemaphore, framesSentForPresentation, UINT64_MAX, presentInfo.waitCallback);
+                waitForComposition();
                 destroyImage(uiReplacementBuffer, pAllocator);
                 uiReplacementBuffer = {};
             }

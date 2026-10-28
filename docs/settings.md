@@ -15,14 +15,14 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
 
-329 settings, 161 of them in the settings window.
+330 settings, 161 of them in the settings window.
 
 ## Sections
 
 - [General](#general) (10)
 - [Lighting](#lighting) (17)
 - [Materials](#materials) (14)
-- [Debug](#debug) (7)
+- [Debug](#debug) (8)
 - [Terrain](#terrain) (22)
 - [Plants](#plants) (38)
 - [Water](#water) (22)
@@ -47,7 +47,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_WinScale` | Window size (%) - release to apply | 50 .. 200 | 100 | window |
 | `RVK_HudScale` | HUD size (%) | 50 .. 200 | 100 | window |
 | `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 / 30 / 60 / 90 / 120 | 60 | window |
-| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's | on / off | off | window |
+| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's, client memory and VRAM | on / off | off | window |
 | `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | window; knob |
 | `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | window |
 | `RVK_ViewRange` | How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws) | 1 .. 3 | 1.5 | window; game value 1 |
@@ -103,6 +103,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_Occlusion` | The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws) | on / off | on | ini only |
 | `RVK_TimeOfDay` | Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h) | -1 .. 27 | -1 | ini only |
 | `RVK_TimeSpeed` | Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own) | 0 .. 500 | 1 | ini only |
+| `RVK_TexKeepCpu` | Keep a CPU copy of every texture (off: given up once on the graphics card, read back if the game locks it again - saves the game's 32-bit address space) | on / off | off | ini only |
 | `RVK_HeapCheck` | Testing: the heap checked for corruption at points, the first broken one logged (0 off, 1 round the grass and each frame, 2 also round every object's grass cover - slow) | 0 .. 2 | 0 | ini only |
 
 ## Terrain
