@@ -982,7 +982,7 @@ void Device::DrawClouds(VkCommandBuffer cmd)
         m_cloudBaseClock = m_frameClock;
     }
     const bool shadow = m_cloudParams.shadow > 0.0f && m_cloudShadowPipeline;
-    const bool own = (half || shadow) && f.split && m_prepassArmed && f.clouds && !f.cloudsRecorded;
+    const bool own = (half || shadow) && f.split && !f.split2 && m_prepassArmed && f.clouds && !f.cloudsRecorded;
     const bool skipCovered = own && half && m_prepassFullClear;   // (else what the pre-pass didn't clear isn't sky)
     ProfileFrame& prof = m_profile[m_frameIndex];
     VkCommandBuffer work = cmd;                  // the shadow map's and the half-size march's commands

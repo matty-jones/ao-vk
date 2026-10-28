@@ -1310,6 +1310,7 @@ bool Device::CopySceneForWater(VkCommandBuffer cmd, const WaterMap* map)
         m_waterDepthH = h;
         m_waterDepthCopyLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     }
+    m_waterEndedPrepass = m_waterEndedPrepass || m_prepassArmed;   // (a second segment after the water: DrawWater)
     m_renderEndCause = kEndCopy;
     EndRendering();
     Transition(cmd, m_scene, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -2096,6 +2097,12 @@ void Device::DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const 
     m_arenaBound = m_bindlessBound = false;      // ... and its pushed set 0 replaced the scene's: rebind those too
     ProfileMark("water");
     ++m_waterDraws;
+    // The scene's copy ended the depth pre-pass's segment: the game's draws still to come (most of a forest's trees,
+    // drawn after a pond) get a second one (prepass.cpp PrepassContinue).
+    if (m_waterEndedPrepass) {
+        m_waterEndedPrepass = false;
+        PrepassContinue();
+    }
 }
 
 }  // namespace rvk

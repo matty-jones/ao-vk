@@ -10,7 +10,12 @@
 //
 // Only a contiguous stretch of the scene's rendering is pre-passed - the segment ends (PrepassEnd) when that rendering
 // ends (a target switch, a copy of the scene, a flush, the end of the scene) or at a second depth clear - because
-// within it an opaque surface drawn later only hides what was drawn earlier where it covers it anyway. "Opaque": no
+// within it an opaque surface drawn later only hides what was drawn earlier where it covers it anyway. The water's
+// copy of the scene (water.cpp) comes in the middle of the game's draws - in a forest by a pond with most of the trees
+// still to come, which then went unpre-passed: every layer of leaves shaded in full (6.6 shader runs a screen pixel,
+// foliage 7.3 ms of a 21 ms frame - the user, 2026-10-26). After it a second segment starts (PrepassContinue): mainB
+// ends, a second pre-pass over the depth so far (the water's included) and mainC follow. The water's copies keep what
+// came before them, as they did. "Opaque": no
 // discard, depth written, and either not blended or blended by its alpha with that alpha provably 1 (AlphaOneCheck).
 #include "internal.h"
 
@@ -330,7 +335,7 @@ void Device::PrepassEnd(uint32_t cause)
     m_prepassEndedThisFrame = true;
     ++m_prepassEndCause[cause < kEndCount ? cause : kEndOther];
     FlushPrepassGroup();
-    VkCommandBuffer cmd = m_frames[m_frameIndex].prepass;
+    VkCommandBuffer cmd = PrepassCommands();
     vkCmdEndRendering(cmd);
     const VkPipelineStageFlags2 tests =
         VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
@@ -338,8 +343,63 @@ void Device::PrepassEnd(uint32_t cause)
                  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, tests, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, tests,
                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     vkEndCommandBuffer(cmd);
-    if (RtShadowWanted())
+    if (RtShadowWanted() && !m_frames[m_frameIndex].split2)
         RenderRtShadow(cause);                   // (raytrace.cpp: the sun's mask from this depth, before mainB)
+}
+
+VkCommandBuffer Device::PrepassCommands() const
+{
+    const Frame& f = m_frames[m_frameIndex];
+    return f.split2 ? f.prepass2 : f.prepass;
+}
+
+// After the water's copy of the scene ended the segment (water.cpp DrawWater): mainB ends here; a second pre-pass -
+// no clear, the depth as mainB leaves it - then mainC, which goes on with the scene. False (nothing changed) when it
+// can't: the draws after it go unpre-passed, as before.
+bool Device::PrepassContinue()
+{
+    Frame& f = m_frames[m_frameIndex];
+    if (!m_prepassMore || !m_prepassOn || !m_prepassPipeline || !f.split || f.split2 || !f.prepass2 || !f.mainC ||
+        m_prepassArmed || !m_inFrame || !m_rendering || !m_scenePhase || m_target != m_scene || !m_depth ||
+        m_depthLayout != VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
+        return false;
+    EndRendering();                              // mainB's pending draws, its rendering and queries end here
+    vkEndCommandBuffer(f.main);
+    VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    b.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(f.prepass2, &b);
+    vkBeginCommandBuffer(f.mainC, &b);
+    f.main = f.mainC;
+    f.split2 = true;
+    m_cache = StateCache{};
+    m_arenaBound = m_bindlessBound = m_shadowArenaBound = false;
+
+    // The second pre-pass: after mainB's depth work (its draws' tests and writes, the water's copy).
+    VkCommandBuffer cmd = f.prepass2;
+    const VkPipelineStageFlags2 tests =
+        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    ImageBarrier(cmd, m_depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, tests | VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT, tests,
+                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    depth.imageView = m_depthView;
+    depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, {m_scene->m_width, m_scene->m_height}};
+    ri.layerCount = 1;
+    ri.pDepthAttachment = &depth;
+    vkCmdBeginRendering(cmd, &ri);
+    m_pre = PrepassCache{};
+    m_pre.depth = m_depth;
+    m_prepassArmed = true;
+    m_prepassDepthTouched = true;                // (the depth holds the scene so far: no backdrops to cull)
+    ++m_prepassSegments;
+    ProfileMark("depth pre-pass (after the water)");
+    BeginRenderingOn(m_scene);
+    return true;
 }
 
 // One draw's depth into the pre-pass: the same vertex shader, record, geometry and descriptors as its main draw.
@@ -350,7 +410,7 @@ void Device::PrepassDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, uint
                          uint32_t recordIndex, bool cutout)
 {
     Frame& f = m_frames[m_frameIndex];
-    VkCommandBuffer cmd = f.prepass;
+    VkCommandBuffer cmd = PrepassCommands();
     PrepassCache& c = m_pre;
     if (!c.bound) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_prepassPipeline);
@@ -486,7 +546,7 @@ bool Device::PrepassLeaves(uint32_t recordIndex, uint32_t first, uint32_t count,
     if (!m_prepassArmed || !m_leafPrepassPipeline || !m_leafPool || m_target != m_scene || !count)
         return false;
     Frame& f = m_frames[m_frameIndex];
-    VkCommandBuffer cmd = f.prepass;
+    VkCommandBuffer cmd = PrepassCommands();
     PrepassCache& c = m_pre;
     if (!c.bound)
         return false;                            // (no opaque draw has set the pass up yet: it binds the arrays)
@@ -536,7 +596,7 @@ void Device::FlushPrepassGroup()
     if (!m_pre.groupCount)
         return;
     Frame& f = m_frames[m_frameIndex];
-    vkCmdDrawIndexedIndirect(f.prepass, f.ring,
+    vkCmdDrawIndexedIndirect(PrepassCommands(), f.ring,
                              m_prepassIndirectBase + VkDeviceSize(m_pre.groupFirst) * sizeof(VkDrawIndexedIndirectCommand),
                              m_pre.groupCount, sizeof(VkDrawIndexedIndirectCommand));
     m_pre.groupCount = 0;
@@ -545,7 +605,7 @@ void Device::FlushPrepassGroup()
 
 // What a submission of this frame slot runs after its uploads: the main commands, or, split, mainA, the pre-pass and
 // mainB. The current main command buffer must already be ended; an armed pre-pass is ended here.
-uint32_t Device::FrameCommands(Frame& f, VkCommandBuffer out[5])
+uint32_t Device::FrameCommands(Frame& f, VkCommandBuffer out[7])
 {
     PrepassEnd(kEndFlush);
     if (!f.split) {
@@ -560,6 +620,10 @@ uint32_t Device::FrameCommands(Frame& f, VkCommandBuffer out[5])
     if (f.raysRecorded)
         out[n++] = f.rays;                       // (raytrace.cpp: the sun's mask from the pre-pass's depth)
     out[n++] = f.mainB;
+    if (f.split2) {
+        out[n++] = f.prepass2;
+        out[n++] = f.mainC;
+    }
     return n;
 }
 
@@ -571,8 +635,8 @@ void Device::FrameCommandsSubmitted(Frame& f)
     f.raysRecorded = false;
     if (!f.split)
         return;
-    std::swap(f.mainA, f.mainB);
-    f.split = false;
+    std::swap(f.mainA, f.split2 ? f.mainC : f.mainB);   // (the one being recorded: mainA from now on)
+    f.split = f.split2 = false;
 }
 
 }  // namespace rvk

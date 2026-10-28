@@ -5038,6 +5038,8 @@ float g_leafCamOrbit = 0.0f;       // --leaf-cam-orbit R: ... going round the ro
 int g_leafFilm = 0;                // --leaf-film N: ~60 frames a second, a screenshot every N frames (film_NNN.bmp)
 int g_frameGenToggle = 0;          // --frame-gen-toggle N: frame generation off at frame N, on again at 2N (the leaf
                                    // scenes; the swapchain made again each time)
+bool g_leafPond = false;           // --leaf-pond: a pond in front of the trees, drawn before them (as the game draws a
+                                   // pond's water before most of a forest: the depth pre-pass's second segment)
 int g_leafForest = 0;              // --leaf-forest N: an N x N grid of the trees (12 units apart), seen from eye height
 float g_crownShade = 1.0f;         // --crown-shade X: RVK_CrownShade
 bool g_freeCam = false;            // --free-cam: the free camera on from frame 10, turning and moving ahead (Device::SetFreeCam)
@@ -5236,6 +5238,22 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
             VtxMesh q[4] = {{-r + mid, 0, -r, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {r + mid, 0, -r, 0, 1, 0, 0xFFFFFFFF, 40, 0},
                             {r + mid, 0, r, 0, 1, 0, 0xFFFFFFFF, 40, 40}, {-r + mid, 0, r, 0, 1, 0, 0xFFFFFFFF, 0, 40}};
             dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
+        }
+        if (g_leafPond) {
+            const uint32_t tint = 0xCC00186A;
+            const Device::WaterVertex pond[4] = {{{mid - 12, 0.2f, -11}, tint}, {{mid + 12, 0.2f, -11}, tint},
+                                                 {{mid + 12, 0.2f, -2}, tint}, {{mid - 12, 0.2f, -2}, tint}};
+            const uint16_t pondIdx[6] = {0, 1, 2, 0, 2, 3};
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+            dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+            dev.SetRenderState(RS_ZWRITEENABLE, 0);
+            dev.SetTexture(0, nullptr);
+            dev.DrawWater(pond, 4, pondIdx, 6);
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
         }
         const uint32_t kFvfTree = FVF_XYZ | FVF_NORMAL | (1 << 8);   // 0x112, as the game's statics
         for (const Placed& pl : placed) {
@@ -5656,6 +5674,7 @@ int main(int argc, char** argv)
         else if (a == "--leaf-cam-turn" && i + 1 < argc) g_leafCamTurn = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-orbit" && i + 1 < argc) g_leafCamOrbit = float(std::atof(argv[++i]));
         else if (a == "--leaf-film" && i + 1 < argc) g_leafFilm = std::atoi(argv[++i]);
+        else if (a == "--leaf-pond") g_leafPond = true;
         else if (a == "--leaf-forest" && i + 1 < argc) g_leafForest = std::atoi(argv[++i]);
         else if (a == "--water-lake") { g_waterScene = 1; hdr = true; }
         else if (a == "--water-coast") { g_waterScene = 2; hdr = true; }

@@ -47,6 +47,7 @@ Setting g_settings[] = {
     {"RVK_Enhance",    "All enhancements (Ctrl+Shift+E)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Prepass",    "Depth pre-pass", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PrepassEq",  "Depth pre-pass: what it covers shaded only where it is seen", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
+    {"RVK_PrepassMore", "Depth pre-pass: a second stretch after the water's copy of the scene", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
     {"RVK_ZoneFade", "Zone changes: the last view stays up and fades into the new zone once it has loaded (off: the blank wait)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_ZoneHoldMax", "Zone changes: the longest the new zone stays hidden once it draws (seconds)", "General", Float, 0.5f, 5, 0.1f, 1.5f, nullptr, 0, "RVK_ZoneFade"},
@@ -456,7 +457,7 @@ const Vanilla kVanilla[] = {
 // presets. A setting whose feature switch is listed here is left out with it.
 const char* const kHidden[] = {
     "RVK_HeapCheck",
-    "RVK_Prepass", "RVK_PrepassEq", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
+    "RVK_Prepass", "RVK_PrepassEq", "RVK_PrepassMore", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
     "RVK_GrassTex", "RVK_ShadowMem", "RVK_FxGlowOn", "RVK_NightOn", "RVK_MoonOn", "RVK_GameSun", "RVK_HillShade",
     "RVK_DarkFloor", "RVK_GroundOne", "RVK_ZoneHoldMax", "RVK_PortalDist", "RVK_StreetNow",
     // leaves
