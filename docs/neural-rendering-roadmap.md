@@ -1,9 +1,9 @@
 # UI stabilization and DLSS 5 roadmap
 
-2026-10-28. Stages 1 (terrain quality, `93592f6`) and 2 (font metrics, `6fe876c`), including sidebar/PF map
-scaling (`aa9ee47`), have local gameplay confirmation. Text is clean and unclipped, performance is stable,
-terrain detail follows the requested radius, and scaled sidebar panels stack correctly.
-Stage 3 (processing inputs) remains paused; this branch adds no NVIDIA runtime or processing-input contract.
+2026-10-29. The baseline is fork `main` at `ab587fd` (`known-working-0.8`), combining ao-vk 0.8.0 with
+the UI and terrain fixes. Stages 1 and 2 and their follow-up corrections are included. The current
+[feasibility study](neural-rendering-feasibility.md) assesses NVIDIA runtime access, third-party reuse,
+architecture, visual acceptance and performance measurement. No neural runtime or bridge is integrated.
 
 ## What has landed
 
@@ -39,31 +39,21 @@ The sidebar rollup shares one display transform, preserving native panel stackin
 markers and outlines are transformed once after native zoom and clipping calculations. See the
 [UI implementation](ui-separation-scaling.md) and [performance audit](ui-scaling-performance-audit.md).
 
-## What DLSS 5 changes in the plan
+## Feasibility findings
 
-NVIDIA now describes DLSS 5 as a final neural appearance stage driven by rendered frame colour and engine motion
-vectors, with temporal state and developer controls. It is distinct from Super Resolution and Frame Generation.
-The public description does not make a deferred-renderer rewrite or path tracing a prerequisite. See the
-[technical description](https://research.nvidia.com/labs/adlr/DLSS5/) and
-[developer overview](https://developer.nvidia.com/blog/whats-new-for-game-developers-dlss-5-with-3d-guided-neural-rendering-nvidia-ace-updates-and-new-rtx-kit-capabilities/).
+The official Remix NR dependency package was obtained and inspected: it contains runtime 310.9.16, Vulkan
+helpers and an NVIDIA SDK licence, but only Windows x64/ARM64 runtimes. Streamline 2.14.16's inspected x64 release
+ZIP names NR in its feature definitions/changelog without supplying the NR plugin or model. Remix's source
+provides a concrete Vulkan integration reference. The study records download hashes and source revisions.
 
-The supplied logs identify an RTX 5080, in the currently documented RTX 50 hardware family. That removes one
-obvious hardware mismatch, but does not establish a supported SDK, driver or Wine integration.
+The deciding gates are supported invocation with ao-vk's own application identity, and an x86-to-x64 transport
+that works under the intended Wine build. ReShade, OptiScaler NR forks, DLSS5-Feeder, Linux Vulkan layers and
+Remix were assessed before proposing custom infrastructure. Feeder's current x86 Vulkan path blocks a known
+Wine cross-process D3D12 fence failure; a generic present-time injector also misses our world/overlay boundary.
 
-ao-vk is an x86 Windows DLL inside a 32-bit game. The public
-[DLSS library tree](https://github.com/NVIDIA/DLSS/tree/9981c6350dc58c0ce21f024fd65e31e851c31689/lib)
-contains Windows x86-64 and ARM64 variants, with no Windows x86 runtime. The inspected
-[Streamline build instructions](https://github.com/NVIDIA-RTX/Streamline/blob/625db07d4bca5abc67d781c42af7e7fb0761f1b6/README.md)
-target amd64, arm64 and arm64ec. A 64-bit DLL cannot load directly into the game process.
-
-The public Streamline checkout inspected here is 2.14.16, commit `625db07`, dated 2026-10-16. Its checked-in
-feature guides cover SR, FG and RR, but do not establish a DLSS 5 Neural Rendering API or supported Vulkan/x86
-deployment path. Binary artifacts are distributed separately in release packages. Obtain and inspect the actual
-authorized Neural Rendering package before deciding its API, formats, platform support or redistribution terms;
-absence of a checked-in guide is not proof that no package exists.
-
-This updates the older rendering plan's broad verdict against neural rendering. The architectural constraints
-remain real, but availability and a working integration path need current evidence.
+The recommendation is to proceed only with bounded probes before a production integration or renderer
+rewrite. AO-specific visual benefit, RTX 5080 GPU time, VRAM and latency remain unmeasured. Preserve the
+current UI compositor and ordinary-world fallback regardless of the selected neural route.
 
 ## Proposed milestones and exit criteria
 
@@ -73,18 +63,19 @@ remain real, but availability and a working integration path need current eviden
 2. **Finish font metrics and sidebar scaling — locally confirmed.** Retain regression coverage for text, panel
    stacking, PF map content, hover, title-bar/item anchors, Perk tabs, login and scale round trips. Broader browser
    and restart-persistence checks remain part of compatibility testing.
-3. **Prove the processing input — paused.** Capture world-only and composed frames at 4K across world scales 100/75/50,
-   UI refresh 0/60 and cached/redrawn frames. Visualize motion for camera movement, skinning, foliage, water and
+3. **Prove the processing input — pending feasibility review.** Capture world-only and composed frames at 4K across
+   world scales 100/75/50, UI refresh 0/60 and cached/redrawn frames. Visualize motion for camera movement, skinning, foliage, water and
    particles, and test cuts, zoning and resolution changes. Specify colour space, motion units/sign/jitter,
    dimensions, reset/frame IDs and image ownership. Existing FSR inputs are evidence to build on, not proof of
    an NVIDIA-compatible contract. The candidate colour boundary is after world processing and before held labels;
    its exact format and position must follow the chosen SDK.
-4. **Resolve the NVIDIA integration gate.** Verify the Neural Rendering package, hardware/driver checks,
-   supported graphics API and licensing. Prototype the smallest viable 64-bit worker with shared GPU images and
-   synchronization while retaining the 32-bit client. First prove a pass-through round trip is pixel-correct,
-   bounded in latency and survives resize, timeout and worker loss without freezing the game. Test on the RTX
+4. **Resolve the NVIDIA integration gate.** First prove official NR creation/evaluation in a standalone x64 Vulkan
+   test with a compatible base NGX SDK and own project identity. Validate hardware/driver support, Wine and
+   licensing. Prefer an existing helper/transport before a custom worker while retaining the 32-bit client.
+   Prove a pass-through round trip is pixel-correct, bounded in latency and survives resize, timeout and worker
+   loss without freezing the game. Test on the RTX
    machine and under the intended Wine configuration; the software-Vulkan cloud cannot establish this support.
-   Existing external-memory validation errors must be resolved for that path. Avoid per-frame CPU readback.
+   Validate external-memory/semaphore support and ownership for that path. Avoid per-frame CPU readback.
    A full 64-bit render worker is a larger alternative if a small post-processing worker cannot meet the contract.
 5. **Add an opt-in neural pass.** Once that gate passes, evaluate it on world colour with the SDK's required motion,
    state and controls, then compose the existing overlays. Start with frame generation disabled, preserve an
@@ -97,5 +88,5 @@ remain real, but availability and a working integration path need current eviden
    enhancement has its own compute cost; do not treat it as an automatic FPS improvement. Retain working TAA/FSR
    paths for unsupported configurations.
 
-Stages 1 and 2 are accepted locally. Processing-input work and NVIDIA feasibility are the next milestones;
-implementation remains paused until stage 3 is authorized.
+Stages 1 and 2 form the accepted 0.8 baseline. The feasibility study is ready for review; runtime, transport
+and processing-input experiments are the next decisions before implementation.
