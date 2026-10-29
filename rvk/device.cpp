@@ -2241,6 +2241,9 @@ void Device::EndFrame()
         if (r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_OUT_OF_DATE_KHR)
             m_swapchainStale = true;
     }
+    // (Its parts too: a session that slowed to 15 fps after an hour had all the time here, with frame generation -
+    // which of the three grew tells the swapchain's waits from the queue's (#20).)
+    ProfileCpuAdd("  of which acquire", presentStart);
     if (present) {
         VkImage dst = m_swapImages[imageIndex];
         ImageBarrier(f.main, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -2281,7 +2284,9 @@ void Device::EndFrame()
         si.pSignalSemaphores = &m_renderDone[imageIndex];
     }
     f.serial = ++m_submitted;
+    const double submitStart = ProfileCpu();
     vkQueueSubmit(m_queue, 1, &si, f.fence);
+    ProfileCpuAdd("  of which submit", submitStart);
     f.uploadsRecorded = false;
     FrameCommandsSubmitted(f);
     if (present) {
@@ -2291,7 +2296,9 @@ void Device::EndFrame()
         pi.swapchainCount = 1;
         pi.pSwapchains = &m_swapchain;
         pi.pImageIndices = &imageIndex;
+        const double queueStart = ProfileCpu();
         VkResult r = m_fg ? FgPresent(&pi) : vkQueuePresentKHR(m_queue, &pi);
+        ProfileCpuAdd("  of which present", queueStart);
         if (r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_OUT_OF_DATE_KHR)
             m_swapchainStale = true;
     }

@@ -129,6 +129,12 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   nearby sun shadows drew.
 
 ### Fixed
+- Shadowlands: the void around the floating land (the gardens, the drop below Adonis and other zones) no longer
+  shows a black plain tiled with the word "Brink". That is the game's marker for the void, a see-through ground tile;
+  the ground drawn by ao-vk (`RVK_GroundOn`) now leaves those cells out as the game does (#18).
+- Crashes on zoning or in doorways (Windows: "heap corruption"), more frequent since 0.7.1: the Shadowlands
+  special light on characters, and any object drawn with a set of its own textures, could free a texture the game
+  had already let go and then free it again (#19).
 - At night near shops, bright slanted sheets and white streaks no longer hang over the street. They were the soft
   edges of a shop room's glass and light beams, seen through its doorway (`RVK_Portals`), drawn outside the doorway.
 - With frame generation on (`RVK_FrameGen`), AOReloaded's cast and reload bars and the text shown after zoning
@@ -189,6 +195,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   keeps a second sheet of water hidden under the land, and the river was put at its height, under the ground.
 
 ### Diagnostics
+- The frame timing in randy-vk.log (`cpu ms` lines) splits the time spent presenting a frame into acquiring the
+  next picture, handing the frame to the GPU and presenting it, so a log of a session that slows down over time
+  shows which step grows (#20).
 - randy-vk.log lists, at startup, how the graphics driver compiled each version of ao-vk's main shader: the
   registers each needs and what spills to memory (`shader stats:` lines). They show how much of the GPU each kind
   of draw can use at once; please include them when reporting performance on a GPU of your own.
