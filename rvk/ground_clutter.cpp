@@ -418,6 +418,7 @@ std::vector<uint8_t> Device::GrassyTiles() const
         const Texture* t = m_native.ground->tiles[i];
         if (t && t->m_image && (!t->m_thumbValid || t->m_line < 0.0f)) return {};   // (not measured yet: again later)
         if (!t || t->m_mean[0] < 0.0f) continue;
+        if (NativeTileHole(t)) { out[i] = 2; continue; }   // (a hole: no rocks in it, nor at its edge)
         const float r = t->m_mean[0], g = t->m_mean[1], b = t->m_mean[2];
         if (g > r * 1.08f && g > b * 1.08f) { out[i] = 1; continue; }
         const float hi = std::max({r, g, b}), lo = std::min({r, g, b}), sat = (hi - lo) / std::max(hi, 1e-3f);

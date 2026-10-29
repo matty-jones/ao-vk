@@ -106,6 +106,8 @@ void Device::DestroyNativeGround()
     m_native.lightFit[0] = 0.0f;
     m_native.anyOrm = nullptr;
     m_native.patches.clear();
+    m_native.holes.clear();
+    m_native.holeCells = 0;
     m_native.ground.reset();
 }
 
@@ -177,7 +179,8 @@ void Device::SetNativeGround(std::shared_ptr<const NativeGround> ground)
                     std::memcpy(ix, q, sizeof(q));
                     ix += 6;
                 }
-            p.indices = indices;
+            p.indices = p.allIndices = indices;
+            p.indexCount = P * P * 6;
             m_native.patches.push_back(std::move(p));
         }
     m_native.ground = ground;
@@ -211,6 +214,7 @@ uint64_t Device::NativeMapsSignature() const
         h = (h ^ n) * 1099511628211ull;
         h = (h ^ o) * 1099511628211ull;
         h = (h ^ uint64_t(t && t->m_image)) * 1099511628211ull;
+        h = (h ^ uint64_t(NativeTileHole(t))) * 1099511628211ull;   // (known once its pixels are in)
     }
     return (h ^ uint64_t(reinterpret_cast<uintptr_t>(m_native.pebbleTable.get()))) * 1099511628211ull;   // (the sand)
 }
@@ -282,6 +286,72 @@ void Device::MakeNativeCodes()
     if (anyMaps) m_native.maps = CreateTexture(g.cellsX, g.cellsZ, maps.data());
     m_native.means = CreateTexture(g.cellsX, g.cellsZ, means.data());
     m_native.mapsSignature = NativeMapsSignature();
+    ApplyNativeHoles();
+}
+
+// A tile that is a hole in the ground: all but transparent (its alpha under 16 of 255 all over). The Shadowlands lay
+// one under the void around their floating land - 'shadowbrink', black with "Brink" written on it, alpha 2 - over
+// whole playfields (the gardens, 4380-4388) or the floor far below the islands (Adonis, 4873: about half its cells).
+// The game's draw lets it through to the sky; drawn opaque, the void was a plain of "Brink" to the horizon (#18).
+// Every other ground tile is opaque (all the rdb's terrain tiles checked, 2026-10-28).
+bool Device::NativeTileHole(const Texture* t)
+{
+    if (!t || !t->m_image || t->m_opaque || t->m_alphaMask.empty())
+        return false;
+    for (uint8_t a : t->m_alphaMask)
+        if (a >= 16) return false;
+    return true;
+}
+
+// The holes' cells left out of each patch's indices (a patch of holes alone isn't drawn): made again with the codes,
+// as the tiles' pixels come in.
+void Device::ApplyNativeHoles()
+{
+    const NativeGround& g = *m_native.ground;
+    std::vector<uint8_t> holes(g.tiles.size(), 0);
+    bool any = false;
+    for (size_t t = 0; t < g.tiles.size(); ++t)
+        any = (holes[t] = NativeTileHole(g.tiles[t])) || any;
+    if (holes == m_native.holes)
+        return;
+    m_native.holes = holes;
+    const uint32_t P = g.patch, pw = (g.cellsX + P - 1) / P;
+    uint32_t cells = 0, empty = 0;
+    for (size_t k = 0; k < m_native.patches.size(); ++k) {
+        NativePatch& p = m_native.patches[k];
+        const uint32_t px = uint32_t(k) % pw, pz = uint32_t(k) / pw;
+        auto hole = [&](uint32_t i, uint32_t j) {
+            const uint32_t c = px * P + i, r = pz * P + j;
+            if (!any || c >= g.cellsX || r >= g.cellsZ) return false;   // (past the playfield's edge: flat, unseen)
+            const uint32_t tile = g.codes[size_t(r) * g.cellsX + c] & 0x3FFFu;
+            return tile < holes.size() && holes[tile] != 0;
+        };
+        uint32_t cut = 0;
+        for (uint32_t j = 0; j < P; ++j)
+            for (uint32_t i = 0; i < P; ++i) cut += hole(i, j);
+        cells += cut;
+        if (!cut) {
+            p.indices = p.allIndices;
+            p.indexCount = P * P * 6;
+            continue;
+        }
+        auto kept = std::make_shared<std::vector<uint8_t>>();
+        kept->reserve(size_t(P * P - cut) * 6 * 2);
+        const uint8_t* all = p.allIndices->data();
+        for (uint32_t j = 0; j < P; ++j)
+            for (uint32_t i = 0; i < P; ++i)
+                if (!hole(i, j)) {
+                    const uint8_t* q = all + (size_t(j) * P + i) * 6 * 2;
+                    kept->insert(kept->end(), q, q + 6 * 2);
+                }
+        p.indexCount = uint32_t(kept->size() / 2);
+        p.indices = p.indexCount ? std::shared_ptr<const std::vector<uint8_t>>(std::move(kept)) : p.allIndices;
+        empty += p.indexCount == 0;
+    }
+    if (cells || m_native.holeCells)
+        Log("native ground: playfield %u - %u cells are holes (a see-through tile: the void), %u patches all holes",
+            g.id, cells, empty);
+    m_native.holeCells = cells;
 }
 
 // The hour's baked lightmap, as the game hands it to its ground: unpacked through the game's palette, a texel a cell.
@@ -592,7 +662,7 @@ void Device::DrawNativeGround(bool lightPass)
             outside[4] = outside[4] && c[2] < 0.0f;
             outside[5] = outside[5] && c[2] > c[3];
         }
-        if (outside[0] || outside[1] || outside[2] || outside[3] || outside[4] || outside[5])
+        if (!p.indexCount || outside[0] || outside[1] || outside[2] || outside[3] || outside[4] || outside[5])
             continue;
         // Tessellated only within kNativeTessDistance (its box): beyond it ffp.tesc splits nothing and ffp.tese moves
         // nothing, the very same triangles - but through the tessellation stages every one of the ground's triangles
@@ -603,7 +673,7 @@ void Device::DrawNativeGround(bool lightPass)
             d2 += d * d;
         }
         m_native.tessPatch = d2 < kNativeTessDistance * kNativeTessDistance && !m_streetGround;
-        DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, p.indices, m_native.indexCount);
+        DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, p.indices, p.indexCount);
         ++drawn;
     }
     DrawNativeClutter(vp);

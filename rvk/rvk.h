@@ -1203,6 +1203,8 @@ private:
     };
     struct NativePatch {
         std::shared_ptr<const std::vector<uint8_t>> vertices, indices;   // (each cell's diagonal its own)
+        std::shared_ptr<const std::vector<uint8_t>> allIndices;   // every cell's (indices: without the holes')
+        uint32_t indexCount = 0;                 // indices' (0: all holes - not drawn)
         float lo[3], hi[3];
         std::vector<NativeClutter> clutter;      // its rocks, made when the eye is near
         bool clutterMade = false;
@@ -1232,6 +1234,8 @@ private:
         bool anyHeight = false;                  // a tile's normal map has a height in its alpha (parallax.glsl)
         Texture* means = nullptr;                // each cell's tile's mean colour (the cliffs' rock tint, filtered)
         uint64_t mapsSignature = 0;              // the tiles' maps and the settings the two textures were made with
+        std::vector<uint8_t> holes;              // each tile: a hole (NativeTileHole) - its cells left out
+        uint32_t holeCells = 0;                  // (for the log)
         Texture* lightmap = nullptr;
         Texture* lightmapGrey = nullptr;         // (none handed over yet: a mid grey)
         Texture* lightmapPrev = nullptr;         // the hour's lightmap before (faded out over kLightmapFade seconds)
@@ -1286,6 +1290,8 @@ private:
     void FitNativeLight();
     void FillNativeLights(detail::FrameLights* fl);
     void MakeNativeCodes();
+    static bool NativeTileHole(const Texture* t);
+    void ApplyNativeHoles();
     void DrawNativeGround(bool lightPass);
     static ClutterBuild BuildNativeClutter(std::shared_ptr<const NativeGround> ground, uint32_t patch, float density,
                                            std::vector<uint8_t> grassy);
