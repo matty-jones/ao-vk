@@ -36,6 +36,24 @@ void ParticleFrame();
 void FlushOverlayText();                             // each presented frame (rvk_particles.cpp)
 void WeatherFrame();                              // each presented frame (rvk_weather.cpp)
 void SmokeFrame();                                // each presented frame (rvk_smoke.cpp)
+// The game's effects watched (rvk_fx.cpp: RVK_FxLog); FxPlay plays a template on the player at the next FxFrame.
+void FxFrame();                                   // each presented frame
+void FxPlay(int templateId, bool cast = false, bool capture = false);   // cast: from the player at the player
+                                                                      // (a Spell1); capture: the game's own, recorded
+void FxReload();
+// The effect editor's reference: a capture of the game's own effect, its sprites frame by frame (rvk_fx.cpp), for the
+// editor to play beside ours. While a captured sprite batch draws, the game's draws fill in the texture and blending it
+// uses (RDevice::TapDraw).
+struct DrawTap { uint32_t rdbType = 0, rdbId = 0, srcBlend = 0, destBlend = 0, alphaBlend = 0; bool seen = false; };
+extern DrawTap* g_drawTap;
+// Every GfxVisualDiaBill drawn (rvk_particles.cpp's hook), before the game draws it: its sprites (DiaBill_n::Sprite_t,
+// 32 bytes), world matrix (row vectors) and atlas. -> where its draws report to (the tap to set while the game draws
+// it), or null when it isn't being captured.
+DrawTap* FxCaptureBatch(const void* batch, const void* sprites, uint32_t count, const float* world, int32_t columns,
+                        int32_t rows, bool atlas, bool packed);
+// After the game's update of a _GfxControlStars_t (rvk_particles.cpp's hook of it): ours in its place, if one stands for
+// its template. worldMatrix: RRefFrame_t::GetWorldMatrix (its sprites' frame).
+void FxStarsUpdate(void* stars, const float* (__thiscall* worldMatrix)(const void* frame));                                  // our effects' files read again (console "fx reload")
 void TimeFrame();                                 // each presented frame (rvk_time.cpp: RVK_TimeOfDay)
 void StatelFrame();                               // each presented frame (rvk_statels.cpp: the playfield's pack)
 void GroundFrame();                               // each presented frame (rvk_ground.cpp: the native ground)
@@ -86,6 +104,25 @@ std::string RdbTextureName(uint32_t type, uint32_t id);   // the name the game g
 std::string DescribeTexture(const rvk::Texture* texture, std::string* reference = nullptr);
 // What a picked visual was made from: "RDB mesh 1010001:3545" (reference: "T:ID"), see rvk_materials.cpp.
 std::string DescribeMesh(uint32_t visual, uint32_t owner, uint32_t kind, std::string* reference = nullptr);
+
+// Mesh atlases and live geometry (rvk_materials.cpp, docs/live-meshes-plan.md): what is drawn instead for a tagged
+// static sub-mesh (rnative::meshdata::Tag). RVK_LiveMeshes off: nothing.
+struct LivePiece {
+    uint32_t fvf = 0, stride = 0, vertexCount = 0;
+    std::vector<uint8_t> vertices;
+    std::vector<uint16_t> indices;
+    // A lightmapped mesh's colours: each vertex's nearest vertex in the original sub-mesh (made at the first draw from
+    // a buffer of `nearestCount` vertices).
+    std::vector<uint32_t> nearest;
+    uint32_t nearestCount = 0;
+};
+struct MeshOverride {
+    rvk::Texture* atlas = nullptr;                 // drawn in place of the material's texture (null: its own)
+    std::vector<LivePiece>* pieces = nullptr;      // drawn instead of its geometry (null: its own; empty: nothing)
+};
+bool FindMeshOverride(uint32_t tag, MeshOverride* out);
+void SetLiveMeshes(bool on);                       // RVK_LiveMeshes
+void InstallMeshIds();                             // static meshes identified as the game reads them (MeshRead)
 
 // One lock around every call into the rvk backend: the game may use DirectDraw from more than one thread
 // (D3D serialises internally too). Recursive, since methods call each other. Logs each new thread once.
@@ -394,6 +431,10 @@ public:
     void ApplyStates(const rnative::device::StateChange* changes, uint32_t count);
     // DrawIndexedPrimitiveVB of a native mesh (the direct channel): the same as the COM call, but indices unchanged
     // since `indexGeneration` (a native triangle list's) are kept as a snapshot the renderer retains on the GPU.
+    // A tagged static sub-mesh's draw (the direct channel's meshBegin / meshEnd): its atlas bound, or its live
+    // geometry drawn instead (FindMeshOverride). -> 0 / 1 / 2 as rnative::device::Direct::meshBegin.
+    uint32_t MeshBegin(uint32_t tag, RVertexBuffer* vb, uint32_t vertexCount);
+    void MeshEnd();
     HRESULT DrawIndexedVBRetained(D3DPRIMITIVETYPE type, RVertexBuffer* vb, DWORD start, DWORD vcount, const WORD* idx,
                                   DWORD icount, uint64_t indexGeneration);
     // A draw of the game's water (RVertexBuffer::water): handed to the renderer as our water (the first this frame) or
@@ -439,6 +480,7 @@ protected:
     HRESULT DoGetInfo(DWORD, LPVOID data, DWORD size) override;
 
 private:
+    void TapDraw(DrawTap& tap) const;                // (an effect capture: this draw's texture and blending)
     RDirect3D* m_d3d;
     RSurface* m_target;
     GUID m_clsid;
@@ -450,6 +492,8 @@ private:
     D3DMATERIAL7 m_material{};
     std::vector<std::pair<D3DLIGHT7, BOOL>> m_lights;
     std::vector<rvk::ThreadedDevice::StateItem> m_stateItems;   // ApplyStates' scratch
+    bool m_meshAtlas = false, m_meshStage1 = false;   // MeshBegin bound an atlas (and turned stage 1 off)
+    std::vector<uint8_t> m_meshScratch;            // MeshBegin: a live piece with the lightmap's colours
     // DrawIndexedVBRetained's kept index arrays, by where they are and how many.
     struct KeptIndices {
         std::shared_ptr<const std::vector<uint8_t>> data;

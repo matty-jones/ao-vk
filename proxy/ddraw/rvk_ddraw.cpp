@@ -7,6 +7,7 @@
 #include "native/native.h"
 #include "native/rings.h"
 #include "native/scene.h"
+#include "native/zone.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -119,6 +120,9 @@ bool RvkState::EnsureDevice(uint32_t width, uint32_t height)
         size_t slash = cache.find_last_of("\\/");
         cache = (slash == std::string::npos ? std::string() : cache.substr(0, slash + 1)) + "randy-vk.cache";
         rvk::SetPipelineCachePath(cache.c_str());
+        // Captured shop interiors (shop portals): randy-vk\portals beside it - the game's meshes and textures, local.
+        rvk::SetPortalDir(((slash == std::string::npos ? std::string() : cache.substr(0, slash + 1)) +
+                           "randy-vk\\portals").c_str());
     }
     device = new rvk::ThreadedDevice;
     ++deviceSerial;
@@ -301,13 +305,20 @@ void RvkState::Present()
                                    // floating text goes just before it) and RVK_UiRate's layer
     rnative::rings::Install();     // N3.dll's statel rings, once it is loaded (RVK_DetailRange)
     rnative::ground::Install();    // DisplaySystem.dll's ground, once it is loaded (RVK_GroundRange)
+    rnative::zone::Install();      // the teleport and loading screen, logged (docs/zone-handover-plan.md)
     Frame();                  // a present without any rendering still shows a frame
     device->EndFrame();
     RSurface::DropIdleCopies();    // (once a second: idle textures' CPU copies, the game's address space)
+    rnative::zone::Frame(device->FramesWithout3D());
+    if (const uint32_t zone = rnative::zone::TakeSignals())
+        device->ZoneSignal((zone & rnative::zone::kTeleport ? rvk::kZoneTeleport : 0u) |
+                           (zone & rnative::zone::kTeleportTry ? rvk::kZoneTeleportTry : 0u) |
+                           (zone & rnative::zone::kTeleportFailed ? rvk::kZoneTeleportFailed : 0u));   // RVK_ZoneFade
     PollMaterialMaps();       // material maps decoded in the background, uploaded between frames
     ParticleFrame();
     WeatherFrame();
     SmokeFrame();
+    FxFrame();
     TimeFrame();
     StatelFrame();
     GroundFrame();

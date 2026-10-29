@@ -134,12 +134,20 @@ void Device::MeasureSceneLuma(VkCommandBuffer cmd)
         const float* out = reinterpret_cast<const float*>(m_lumaCpu + m_lumaStride * m_frameIndex);
         // (A few land samples only - the sky filling the screen - say little: kept as known.)
         if (out[1] >= 64.0f && std::isfinite(out[0])) {
-            m_landLuma = std::exp2(out[0] / out[1]);
-            m_landLumaFrame = m_frameNumber;
+            if (m_lumaView[m_frameIndex]) {
+                m_viewLuma = std::exp2(out[0] / out[1]);
+                m_viewLumaFrame = m_frameNumber;
+            } else {
+                m_landLuma = std::exp2(out[0] / out[1]);
+                m_landLumaFrame = m_frameNumber;
+            }
         }
         m_lumaMeasured[m_frameIndex] = false;
     }
-    if (!m_lumaPipeline || !m_lumaCpu || m_dark.floor <= 0.0f || !m_aoProjValid)
+    // (With the light rig: as the scene has it, the whole view and the land by turns - its metering, light_rig.cpp -
+    // in place of the floor's.)
+    const bool rig = m_rig.on, view = rig && (m_frameNumber & 1) != 0;
+    if (!m_lumaPipeline || !m_lumaCpu || (m_dark.floor <= 0.0f && !rig) || !m_aoProjValid)
         return;
     const bool depth = m_depthLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     struct Push { float info[4], tone[4]; } push{};
@@ -147,8 +155,10 @@ void Device::MeasureSceneLuma(VkCommandBuffer cmd)
     push.info[1] = float(m_scene->m_height);
     push.info[2] = m_prepassClearZ;
     push.info[3] = depth ? 1.0f : 0.0f;
-    push.tone[0] = m_exposure;
-    push.tone[1] = m_dark.tone * NightAmount();
+    push.tone[0] = rig ? 1.0f : m_exposure;
+    push.tone[1] = rig ? 0.0f : m_dark.tone * NightAmount();
+    push.tone[2] = view ? 1.0f : 0.0f;
+    m_lumaView[m_frameIndex] = view;
     // (The scene's writes and read layout were made for fragment shaders - this reads them in a compute one.)
     VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
     mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;

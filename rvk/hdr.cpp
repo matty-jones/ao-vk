@@ -80,6 +80,21 @@ const uint32_t kTaaSpirv[] = {
 const uint32_t kDepthUpSpirv[] = {
 #include "depth_up.frag.inc"
 };
+const uint32_t kCacaoPackSpirv[] = {
+#include "cacao_pack.frag.inc"
+};
+const uint32_t kBrixPackSpirv[] = {
+#include "brix_pack.frag.inc"
+};
+const uint32_t kSssrEnvSpirv[] = {
+#include "sssr_env.frag.inc"
+};
+const uint32_t kGbufferSpirv[] = {
+#include "gbuffer.frag.inc"
+};
+const uint32_t kSssrResolveSpirv[] = {
+#include "sssr_resolve.frag.inc"
+};
 const uint32_t kMotionFillSpirv[] = {
 #include "motion_fill.frag.inc"
 };
@@ -94,6 +109,15 @@ const uint32_t kFxaaSpirv[] = {
 };
 const uint32_t kUiCompositeSpirv[] = {
 #include "ui_composite.frag.inc"
+};
+const uint32_t kPortalOpenSpirv[] = {
+#include "portal_open.frag.inc"
+};
+const uint32_t kPortalMarkSpirv[] = {
+#include "portal_mark.frag.inc"
+};
+const uint32_t kHandoverSpirv[] = {
+#include "handover.frag.inc"
 };
 const uint32_t kMotionBlurSpirv[] = {
 #include "motion_blur.frag.inc"
@@ -197,17 +221,19 @@ bool Device::CreateHdrResources(std::string* error)
     {
         // Volumetric light: depth, the sun shadow cascades, the clouds' shadow map (clouds.cpp), the terrain's shade
         // from a low sun (terrain_sun.cpp), the frame lights (binding 4, as in the scene shaders); the sand fog's
-        // shelter (binding 5, sand_map.cpp SandFogShelter).
-        VkDescriptorSetLayoutBinding b[6] = {
+        // shelter (binding 5, sand_map.cpp SandFogShelter); the point lights' shadow cubes (binding 6: the lamps' light
+        // in the air, its shafts).
+        VkDescriptorSetLayoutBinding b[7] = {
             {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
             {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
             {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
             {3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
             {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-            {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
+            {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+            {6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
         VkDescriptorSetLayoutCreateInfo sl{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
         sl.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-        sl.bindingCount = 6;
+        sl.bindingCount = 7;
         sl.pBindings = b;
         if (!Check(vkCreateDescriptorSetLayout(m_device, &sl, nullptr, &m_volumeSetLayout), "volume set layout", error) ||
             !pipelineLayout(m_volumeSetLayout, &m_volumeLayout))
@@ -224,7 +250,8 @@ bool Device::CreateHdrResources(std::string* error)
     if (!module(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), &vert))
         return false;
     // A full-target triangle with one fragment shader, no depth. blend: 0 none, 1 additive (the bloom upsampling), 2
-    // a premultiplied image over the target (the interface layer); 3 no colour, the depth written (UpsampleDepth).
+    // a premultiplied image over the target (the interface layer); 3 no colour, the depth written (UpsampleDepth); 5 the
+    // same, only where it is greater (a shop portal's box given its depth back, the room drawn keeping its own).
     auto fullscreen = [&](const uint32_t* code, size_t size, VkFormat format, int blend, VkPipelineLayout layout,
                           VkPipeline* out) {
         VkShaderModule frag;
@@ -273,15 +300,16 @@ bool Device::CreateHdrResources(std::string* error)
             att.colorBlendOp = att.alphaBlendOp = VK_BLEND_OP_ADD;
         }
         VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        cb.attachmentCount = blend == 3 ? 0 : 1;
+        const bool depthOnly = blend == 3 || blend == 5;
+        cb.attachmentCount = depthOnly ? 0 : 1;
         cb.pAttachments = &att;
         VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-        rendering.colorAttachmentCount = blend == 3 ? 0 : 1;
+        rendering.colorAttachmentCount = depthOnly ? 0 : 1;
         rendering.pColorAttachmentFormats = &format;
-        if (blend == 3) {
+        if (depthOnly) {
             rendering.depthAttachmentFormat = kDepthFormat;
             dss.depthTestEnable = dss.depthWriteEnable = VK_TRUE;
-            dss.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+            dss.depthCompareOp = blend == 5 ? VK_COMPARE_OP_GREATER : VK_COMPARE_OP_ALWAYS;
         }
         VkGraphicsPipelineCreateInfo gi{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
         gi.pNext = &rendering;
@@ -319,6 +347,13 @@ bool Device::CreateHdrResources(std::string* error)
               fullscreen(kSandFogSpirv, sizeof(kSandFogSpirv), hdrFormat, false, m_volumeLayout, &m_sandFogPipeline) &&
               fullscreen(kSandFogBlurSpirv, sizeof(kSandFogBlurSpirv), hdrFormat, false, m_bloomLayout, &m_sandFogBlurPipeline) &&
               fullscreen(kSsrSpirv, sizeof(kSsrSpirv), hdrFormat, false, m_bloomLayout, &m_ssrPipeline) &&
+              fullscreen(kGbufferSpirv, sizeof(kGbufferSpirv), hdrFormat, false, m_bloomLayout, &m_gbufferPipeline) &&
+              fullscreen(kSssrEnvSpirv, sizeof(kSssrEnvSpirv), hdrFormat, false, m_bloomLayout, &m_sssrEnvPipeline) &&
+              fullscreen(kCacaoPackSpirv, sizeof(kCacaoPackSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
+                         &m_cacaoPackPipeline) &&
+              fullscreen(kBrixPackSpirv, sizeof(kBrixPackSpirv), hdrFormat, false, m_bloomLayout, &m_brixPackPipeline) &&
+              fullscreen(kSssrResolveSpirv, sizeof(kSssrResolveSpirv), hdrFormat, false, m_bloomLayout,
+                         &m_sssrResolvePipeline) &&
               fullscreen(kContactSpirv, sizeof(kContactSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_contactPipeline) &&
               fullscreen(kTaaSpirv, sizeof(kTaaSpirv), hdrFormat, false, m_bloomLayout, &m_taaPipeline) &&
@@ -328,6 +363,12 @@ bool Device::CreateHdrResources(std::string* error)
                          &m_uiCompositePipeline) &&
               fullscreen(kUiCompositeSpirv, sizeof(kUiCompositeSpirv), kColorFormat, 4, m_bloomLayout,
                          &m_uiOverlayPipeline) &&
+              fullscreen(kHandoverSpirv, sizeof(kHandoverSpirv), kColorFormat, 2, m_bloomLayout, &m_handoverPipeline) &&
+              fullscreen(kPortalOpenSpirv, sizeof(kPortalOpenSpirv), kColorFormat, 3, m_bloomLayout, &m_portalOpenPipeline) &&
+              fullscreen(kPortalOpenSpirv, sizeof(kPortalOpenSpirv), kColorFormat, 5, m_bloomLayout,
+                         &m_portalRestorePipeline) &&
+              fullscreen(kPortalMarkSpirv, sizeof(kPortalMarkSpirv), GetFormatInfo(Format::RGBA8).vk, false, m_bloomLayout,
+                         &m_portalMarkPipeline) &&
               fullscreen(kMotionBlurSpirv, sizeof(kMotionBlurSpirv), kColorFormat, false, m_bloomLayout, &m_motionPipeline) &&
               fullscreen(kTileMaxSpirv, sizeof(kTileMaxSpirv), GetFormatInfo(Format::RG16F).vk, false, m_bloomLayout,
                          &m_tileMaxPipeline) &&
@@ -387,6 +428,14 @@ void Device::DestroyHdrResources()
     if (m_taaOut) { DestroyTextureNow(m_taaOut); m_taaOut = nullptr; }
     DestroyFsr2();
     DestroyFsr3();
+    DestroySssr();
+    DestroyCacao();
+    DestroyVrs();
+    DestroyBrix();
+    DestroyRt();
+    DestroySceneSurfaces();
+    if (m_brixGi) { DestroyTextureNow(m_brixGi); m_brixGi = nullptr; }
+    if (m_brixGiLast) { DestroyTextureNow(m_brixGiLast); m_brixGiLast = nullptr; }
     if (m_uiLayer) { DestroyTextureNow(m_uiLayer); m_uiLayer = nullptr; }
     if (m_overlayLabels) { DestroyTextureNow(m_overlayLabels); m_overlayLabels = nullptr; }
     if (m_fgOverlay) { DestroyTextureNow(m_fgOverlay); m_fgOverlay = nullptr; }
@@ -400,9 +449,10 @@ void Device::DestroyHdrResources()
     for (VkPipeline* p : {&m_bloomDown, &m_bloomUp, &m_aoPipeline, &m_aoBlurPipeline, &m_giPipeline, &m_giBlurPipeline,
                           &m_envAccumPipeline, &m_envFilterPipeline, &m_atmosTransPipeline, &m_atmosMultiPipeline,
                           &m_atmosViewPipeline, &m_volumePipeline, &m_volumeBlurPipeline, &m_sandFogPipeline, &m_sandFogBlurPipeline, &m_ssrPipeline,
+                          &m_gbufferPipeline, &m_sssrResolvePipeline, &m_cacaoPackPipeline, &m_sssrEnvPipeline, &m_brixPackPipeline,
                           &m_contactPipeline, &m_taaPipeline, &m_sharpenPipeline, &m_fxaaPipeline, &m_uiCompositePipeline,
-                          &m_uiOverlayPipeline,
-                          &m_motionPipeline,
+                          &m_uiOverlayPipeline, &m_handoverPipeline, &m_portalOpenPipeline, &m_portalMarkPipeline,
+                          &m_portalRestorePipeline, &m_motionPipeline,
                           &m_tileMaxPipeline, &m_neighbourMaxPipeline, &m_objectBlurPipeline, &m_dofCompositePipeline,
                           &m_dofFocusPipeline, &m_dofPrefilterPipeline, &m_dofTilesPipeline, &m_dofGatherPipeline,
                           &m_dofFinalPipeline, &m_depthUpPipeline, &m_motionFillPipeline,
@@ -485,6 +535,9 @@ void Device::EndScene()
         DrawPendingGroundBase();                 // (RVK_GroundOne: no lighting pass came after the ground's base pass)
     if (!m_scenePhase)
         return;
+    DrawFx();                                    // our own effects' particles (fx.cpp)
+    DrawPortals();                               // RVK_Portals: shops' rooms through their doors (portal.cpp)
+    DrawStreetPortal();                          // RVK_StreetView: the street from inside a shop (portal.cpp)
     m_scenePhase = false;
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     bool wasMain = m_target == m_scene;
@@ -504,10 +557,21 @@ void Device::EndScene()
     if (bloom)
         RenderBloom(cmd);
     ProfileMark("bloom");
-    bool ao = RenderAo(cmd);
+    if (m_rt && !RtWanted())
+        DestroyRt();
+    const bool rays = RtWanted() && RtUpdate(cmd);   // (the ray tracing's structures, for the passes after)
+    ProfileMark("ray tracing");
+    // RVK_AoMode: 1 AMD's, 2 ray traced (ours where they can't run).
+    m_aoFull = m_aoMode >= 1.5f ? rays && RenderRtAo(cmd) : m_aoMode >= 0.5f && RenderCacao(cmd);
+    bool ao = m_aoFull || RenderAo(cmd);
     ProfileMark("ao");
-    bool gi = RenderGi(cmd);
+    if (m_brix && !BrixWanted())
+        DestroyBrix();                           // (RVK_GiMode back to 0: its field's memory goes)
+    m_giFull = BrixWanted() && RenderBrixGi(cmd);   // (RVK_GiMode 1: AMD's; ours where it can't run)
+    bool gi = m_giFull || RenderGi(cmd);
     ProfileMark("gi");
+    if (rays && m_rtDebug >= 0.5f)
+        RenderRtDebug(cmd);                      // (RVK_RtDebug: over the scene)
     RenderEnvProbe(cmd);
     ProfileMark("environment probe");
     bool volume = RenderVolume(cmd);
@@ -515,7 +579,15 @@ void Device::EndScene()
     m_sandFogValid = RenderSandFog(cmd);
     ProfileMark("sand fog");
     Transition(cmd, m_localFraction, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    bool ssr = RenderSsr(cmd);
+    // (RVK_SsrMode 1: AMD's; ours where they can't run. Only then: the scene's normals are made for AMD's GI and the
+    // traced AO too, and with them on AMD's reflections had taken over from ours.)
+    bool ssr = m_ssrMode >= 0.5f && SceneNormalsWanted() && RenderSssr(cmd);
+    if (!ssr) {
+        const bool traced = rays && RtReflectWanted() && RtReflectReady();   // (RVK_RtReflect: rays where ours miss)
+        ssr = RenderSsr(cmd, traced);
+        if (ssr && traced)
+            RenderRtReflect(cmd);
+    }
     ProfileMark("reflections");
     bool contact = RenderContactShadows(cmd);
     ProfileMark("contact shadows");
@@ -526,17 +598,28 @@ void Device::EndScene()
     // params[8..15]: colour grading (identity lookup tables until the proxy loads others).
     for (Texture*& lut : m_lut)
         if (!lut) lut = CreateLut(16, nullptr);
-    float params[16] = {m_tonemapKnee, m_exposure * m_darkGain, bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
+    // (With the light rig its land exposure takes the darkness floor's place: tonemap.frag.)
+    float params[16] = {m_tonemapKnee, m_exposure * (m_rig.on ? m_rig.meter : m_darkGain), bloom ? m_bloomStrength / m_bloomWeightSum : 0.0f,
                         m_bloomDepth ? m_bloomOverNearer : -1.0f, m_aoProj.m[2][2], m_aoProj.m[3][2],
                         gi ? m_giStrength : 0.0f,
-                        float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0))};
+                        float((volume ? 1 : 0) | (ssr ? 2 : 0) | (ao ? 4 : 0) | (contact ? 8 : 0) | (m_aoFull ? 32 : 0) |
+                              (gi && m_giFull ? 64 : 0))};
     GradingParams(params + 8);
-    // Depth of field blurs the scene with its ambient occlusion, indirect and volumetric light applied; the tone
-    // mapping then leaves them out.
-    bool dof = RenderDof(cmd, bloom, ao, gi, volume, params);
+    // Depth of field blurs the scene with its ambient occlusion and indirect light applied (they belong to its
+    // surfaces); the tone mapping then leaves them out. Not the volumetric light: it is in the air in front, and the
+    // tone mapping adds it after the haze, the mist and the storm's air - in the scene before them, a lamp's glow near
+    // the camera was hazed away as if it lay at the land behind it (the user: the trees behind a character's own light
+    // stood dark in its glow, sharp-edged, with RVK_Dof on).
+    float dofParams[16];
+    std::memcpy(dofParams, params, sizeof(dofParams));
+    dofParams[7] = float(int(dofParams[7]) & ~1);
+    bool dof = RenderDof(cmd, bloom, ao, gi, false, dofParams);
     ProfileMark("dof");
     Texture* scene = dof ? m_dofOut : m_scene;
-    if (dof) params[6] = params[7] = 0.0f;
+    if (dof) {
+        params[6] = 0.0f;
+        params[7] = float(volume ? 1 : 0);
+    }
     // With motion blur or anti-aliasing the tone mapping goes to an intermediate image: the anti-aliasing resolves
     // it (and sharpens it back into it, or into the main target), the blur reads it into the main target.
     // RVK_RenderScale: the tone mapping at the scene's size, the TAA bringing it up to the output's (with motion
@@ -579,8 +662,9 @@ void Device::EndScene()
     if (taa && !(scaled && m_upscaler == 1 && RenderFsr2(cmd, upscaled, taaParams)) &&
         !(scaled && m_upscaler == 2 && RenderFsr3(cmd, upscaled, taaParams)))
         RenderTaa(cmd, upscaled, taaParams);
-    if (taa && m_fg)
-        FgPrepare(cmd, taaParams);               // (RVK_FrameGen: the scene's depth and motion for the generated frame)
+    if (taa && m_fg && !HandoverShown())
+        FgPrepare(cmd, taaParams);               // (RVK_FrameGen: the scene's depth and motion for the generated frame;
+                                                 // none under a zone change's held picture - handover.cpp)
     if (fxaa) {
         // Into the main target, or - with motion blur - into an image of its own that the blur then reads (the two
         // swap: m_tonemapped is what the blur reads).
@@ -604,6 +688,7 @@ void Device::EndScene()
                            sizeof(motion), false);
     }
     ProfileMark("motion blur");
+    HandoverScene(cmd);                          // RVK_ZoneFade: a zone change's held picture over the scene
     // (A frame dump: the in-between images too - not every frame of a run.)
     if (m_dumpFile && m_dumpBurstIndex == 0 && !m_dumpOpenPath.empty())
         DumpTargets(m_dumpOpenPath.substr(0, m_dumpOpenPath.rfind('.')));
@@ -619,7 +704,7 @@ void Device::EndScene()
     m_constantsDirty = true;
     if (m_inFrame)
         BeginRenderingOn(m_target);
-    if (m_inFrame && m_target == m_ldrMain) {
+    if (m_inFrame && m_target == m_ldrMain && !HandoverOpaque()) {   // (not the new zone's labels on the old picture)
         // Keep labels outside world processing and frame interpolation.
         if (!m_heldLabels.empty() && OverlayLabelsBegin()) {
             DrawHeldLabels();
@@ -711,8 +796,8 @@ void Device::TonemapInputsPass(VkCommandBuffer cmd, Texture* dst, VkPipeline pip
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     Texture* glow = bloom ? m_bloomLevels[0] : m_scene;          // unread when the strength is 0
-    Texture* occlusion = ao ? m_aoTex[1] : m_scene;               // unread when off
-    Texture* indirect = gi ? m_giTex[1] : m_scene;                // unread when off
+    Texture* occlusion = ao ? (m_aoFull ? m_aoFullTex : m_aoTex[1]) : m_scene;   // unread when off
+    Texture* indirect = gi ? (m_giFull ? m_brixGi : m_giTex[1]) : m_scene;                // unread when off
     Texture* scattered = volume ? m_volumeTex[1] : m_scene;       // unread when off
     Texture* reflections = m_ssrTex && (int(params[7]) & 2) ? m_ssrTex : m_scene;   // unread when off
     Texture* contact = (int(params[7]) & 8) ? m_contactTex[1] : m_scene;              // unread when off
@@ -1173,7 +1258,8 @@ bool Device::RenderVolume(VkCommandBuffer cmd)
                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo coverInfo{m_linearSampler, cover ? m_cloudCover->m_view : m_blackTexture->m_view,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet wr[6] = {};
+    VkDescriptorImageInfo cubes{m_cubeSampler, m_cubeArrayView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr[7] = {};
     for (auto& x : wr) { x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; x.descriptorCount = 1; }
     wr[0].dstBinding = 0; wr[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[0].pImageInfo = &depth;
     wr[1].dstBinding = 1; wr[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[1].pImageInfo = &shadow;
@@ -1181,7 +1267,8 @@ bool Device::RenderVolume(VkCommandBuffer cmd)
     wr[3].dstBinding = 2; wr[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[3].pImageInfo = &clouds;
     wr[4].dstBinding = 3; wr[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[4].pImageInfo = &terrain;
     wr[5].dstBinding = 5; wr[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[5].pImageInfo = &coverInfo;
-    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_volumeLayout, 0, 6, wr);
+    wr[6].dstBinding = 6; wr[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr[6].pImageInfo = &cubes;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_volumeLayout, 0, m_cubeArrayView ? 7 : 6, wr);
     vkCmdPushConstants(cmd, m_volumeLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRendering(cmd);
@@ -1374,14 +1461,15 @@ bool Device::RenderSandFog(VkCommandBuffer cmd)
 
 // Screen-space reflections (ssr.frag) at full resolution into m_ssrTex: needs the scene, the depth buffer and the
 // reflectivity (the local-fraction attachment's G), all readable by now.
-bool Device::RenderSsr(VkCommandBuffer cmd)
+bool Device::RenderSsr(VkCommandBuffer cmd, bool traced)
 {
     bool perspective = m_aoProjValid && m_aoProj.m[2][3] == 1.0f && m_aoProj.m[3][3] == 0.0f;
     if (m_ssr <= 0.0f || !perspective || !m_depth)
         return false;
     if (!m_ssrTex || m_ssrTex->m_width != m_scene->m_width || m_ssrTex->m_height != m_scene->m_height) {
         if (m_ssrTex) DestroyTexture(m_ssrTex);
-        m_ssrTex = CreateImage(m_scene->m_width, m_scene->m_height, Format::RGBA16F, 1, true);
+        // (Storage too with ray tracing: RVK_RtReflect fills its misses in place.)
+        m_ssrTex = CreateImage(m_scene->m_width, m_scene->m_height, Format::RGBA16F, 1, true, m_rayQuery);
         if (!m_ssrTex)
             return false;
     }
@@ -1389,7 +1477,7 @@ bool Device::RenderSsr(VkCommandBuffer cmd)
     Transition(cmd, m_motionVectors, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);   // zw: PBR shading normals
     float params[12] = {m_aoProj.m[2][2], m_aoProj.m[3][2], m_aoProj.m[0][0], m_aoProj.m[1][1],
                         float(m_scene->m_width), float(m_scene->m_height), 48.0f, 80.0f,
-                        m_ssr, 0.0f, 0.0f, 0.0f};
+                        m_ssr, traced ? 1.0f : 0.0f, 0.0f, 0.0f};
     FullscreenPass(cmd, m_ssrTex, m_ssrPipeline, m_depthView, m_scene->m_view, m_pointSampler, params, sizeof(params), false,
                    m_localFraction->m_view, m_motionVectors->m_view);
     Transition(cmd, m_ssrTex, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1441,8 +1529,8 @@ bool Device::RenderContactShadows(VkCommandBuffer cmd)
 // holds the camera's world position (thousands of units), and a float inverse of view x projection is off by a
 // sub-pixel amount that differs with where the camera is - the TAA then resamples its history by it every frame and
 // the still image drifts and blurs. A camera that didn't change reprojects to exactly itself.
-static void CameraReprojection(const d3d::Matrix& view, const d3d::Matrix& proj, const d3d::Matrix& prevView,
-                               const d3d::Matrix& prevProj, d3d::Matrix* out)
+void detail::CameraReprojection(const d3d::Matrix& view, const d3d::Matrix& proj, const d3d::Matrix& prevView,
+                                const d3d::Matrix& prevProj, d3d::Matrix* out)
 {
     if (std::memcmp(&view, &prevView, sizeof(view)) == 0 && std::memcmp(&proj, &prevProj, sizeof(proj)) == 0) {
         *out = Identity();

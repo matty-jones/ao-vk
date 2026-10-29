@@ -8,6 +8,7 @@
 #include <vma/vk_mem_alloc.h>
 
 #include <algorithm>
+#include <emmintrin.h>
 #include <string>
 
 namespace rvk::detail {
@@ -62,6 +63,8 @@ struct DrawTransform {
                                    // native ground's base pass: x its cells' mean colours' bindless image + 1 (bits); its
                                    // rocks: y 2, its pebbles: y 3 and z kPebbleRange; w: kTerrainBase / kTerrainLight
                                    // (0 = not mapped)
+    float clip[4];                 // a shop's room drawn into its doorway (portal.cpp): kept where dot(world, xyz) + w
+                                   // >= 0 - behind the doorway's plane; all 0: everywhere
 };
 constexpr float kNativeTessDistance = 60.0f;   // world units: the native ground's tessellation gone from here on
 // The native ground's pebbles (ground_pebbles.cpp): drawn within this of the eye at most (each size its own range,
@@ -199,7 +202,16 @@ struct FrameLights {               // binding 4: per-frame data (constants.glsl 
     float fogBanks[4];             // fog banks (mist.cpp FogBankParams): their noise at the eye (x, z), how deep, how much
     float lightGrid[4];            // the frame lights' grid (Device::LightGridLights): its corner x, z, cells across, down
     float cond[4];                 // the world's conditions (rvk.h Conditions): x the clouds' night; y, z, w unused
-    float screen[4];               // x, y scene pixels per back-buffer pixel (RVK_RenderScale: the motion vectors); z, w unused
+    float screen[4];               // x, y scene pixels per back-buffer pixel (RVK_RenderScale: the motion vectors); z: 1 =
+                                   // every surface's normal into the motion vectors' zw (SceneNormalsWanted); w unused
+    float rtShadow[4];             // ray-traced sun shadows (raytrace.cpp): x the mask's bindless image + 1 | sampler
+                                   // << 20 (the float's bits; 0 none), y, z the world camera's projection m22, m32
+    float volume2[4];              // the volumetric light, more (volume.frag): x the lamps' light in the air
+                                   // (RVK_VolLamps; 0 none); y, z, w unused
+    float foliage[4];              // plants' light (docs/sss-plan.md): x crowns' ambient from above (RVK_CrownSky), y the
+                                   // sunlight through crowns by their depth (RVK_CrownDepth); z, w unused
+    float rigSky[4];               // the light rig (light_rig.cpp): rgb the sky's light the ground's lightmap holds, which
+                                   // lit things take too (by how far they face up); w unused
     GpuLight lights[kFrameLights];
 };
 
@@ -232,6 +244,9 @@ void ImageBarrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
 d3d::Matrix Identity();
 d3d::Matrix MulMatrix(const d3d::Matrix& a, const d3d::Matrix& b);   // D3D order: v * a * b
 bool InvertMatrix(const d3d::Matrix& m, d3d::Matrix* out);
+// This frame's clip -> last frame's clip for a still world, in double (hdr.cpp).
+void CameraReprojection(const d3d::Matrix& view, const d3d::Matrix& proj, const d3d::Matrix& prevView,
+                        const d3d::Matrix& prevProj, d3d::Matrix* out);
 // A model-space box through a matrix: the world box around it (shadow.cpp).
 void TransformBounds(const float mn[3], const float mx[3], const d3d::Matrix& m, float outMin[3], float outMax[3]);
 VkPrimitiveTopology TopologyOf(uint32_t d3dPrimitive);
@@ -245,6 +260,41 @@ int BoxInClip(const float mn[3], const float mx[3], const d3d::Matrix& vp, bool 
 // BoxInClip(mn, mx, vp, false) == -1 for an affine view-projection (orthographic: every point's w is 1) - the box's
 // centre and half extents through the matrix, not its eight corners (the sun cascades' cull, every caster each).
 bool BoxOutsideAffine(const float mn[3], const float mx[3], const d3d::Matrix& vp);
+
+// A spot light's cone, for culling its cube (pointshadow.cpp): the light gives nothing outside it (lighting.glsl: rho
+// <= the outer cone's cosine - no light, and no look into its shadow), so a cube face that sees none of the cone is
+// never read and a caster wholly outside it shades nothing lit. Widened by a margin for the shadow's taps and normal
+// offset (a few texels) near its edge. on: a spot light with a cone narrower than a half turn.
+struct Cone {
+    float axis[3];
+    float half;                                  // half the outer angle, with the margin (radians)
+    float cosHalf, sinHalf;
+    bool on;
+};
+Cone SpotCone(const d3d::Light& l);
+bool FaceInCone(int f, const Cone& c);           // whether the cone reaches into cube face f's view
+bool BoxInCone(const float mn[3], const float mx[3], const float p[3], const Cone& c);   // any of the box, seen from p
+
+// Whether two byte ranges are the same - memcmp(...) == 0, inline, 16 bytes at a time: the CRT's memcmp is a call
+// that compares byte by byte in 32-bit code, and the per-draw compares (world matrices, constant blocks) were ~3% of
+// the render thread.
+inline bool SameBytes(const void* a, const void* b, size_t n)
+{
+    const uint8_t* p = static_cast<const uint8_t*>(a);
+    const uint8_t* q = static_cast<const uint8_t*>(b);
+    size_t i = 0;
+    for (; i + 16 <= n; i += 16)
+        if (_mm_movemask_epi8(_mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p + i)),
+                                             _mm_loadu_si128(reinterpret_cast<const __m128i*>(q + i)))) != 0xFFFF)
+            return false;
+    for (; i < n; ++i)
+        if (p[i] != q[i]) return false;
+    return true;
+}
+
+// How much of the sun's direct light a thunderstorm's deck takes at its fullest (StormOvercast 1): lighting.glsl,
+// ffp_main.glsl kStormSunTaken the same.
+constexpr float kStormSunTaken = 0.9f;
 
 // GLSL's smoothstep: 0 at a, 1 at b, eased between (a > b runs backwards).
 inline float Smoothstep(float a, float b, float x)

@@ -34,6 +34,9 @@ const uint32_t kCloudNoiseSpirv[] = {
 const uint32_t kCloudHalfFragSpirv[] = {        // cloud.frag built with RVK_CLOUD_HALF
 #include "cloud_half.frag.inc"
 };
+const uint32_t kFullscreenFarVertSpirv[] = {   // (at the far plane: the sky into a street portal's opening)
+#include "fullscreen_far.vert.inc"
+};
 const uint32_t kFullscreenVertSpirv[] = {
 #include "fullscreen.vert.inc"
 };
@@ -290,6 +293,7 @@ bool Device::CreateCloudResources(std::string* error)
         return Check(vkCreateShaderModule(m_device, &ci, nullptr, out), "cloud module", error);
     };
     // Premultiplied over its targets; in the scene's rendering (its depth format) or its own (none).
+    bool farOnly = false;
     auto pipeline = [&](const uint32_t* vertCode, size_t vertSize, const uint32_t* fragCode, size_t fragSize,
                         VkPipelineLayout layout, const VkFormat* formats, uint32_t count, VkFormat depth, VkPipeline* out) {
         VkShaderModule vert = VK_NULL_HANDLE, frag = VK_NULL_HANDLE;
@@ -313,7 +317,12 @@ bool Device::CreateCloudResources(std::string* error)
             VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
             ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
             VkPipelineDepthStencilStateCreateInfo dss{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-            // (No depth test: the sky is behind everything drawn after it.)
+            // (No depth test: the sky is behind everything drawn after it. farOnly: drawn at the far plane, only where
+            // the depth is still the far plane - a street portal's opening, not the room around it: 1 <= the depth.)
+            if (farOnly) {
+                dss.depthTestEnable = VK_TRUE;
+                dss.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+            }
             VkPipelineColorBlendAttachmentState att[5] = {};
             for (auto& a : att) {
                 a.colorWriteMask = 0xF;
@@ -332,6 +341,7 @@ bool Device::CreateCloudResources(std::string* error)
             VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
             ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+            ci.flags = m_sceneRateFlag;   // (RVK_Vrs: drawn in the scene's rendering, vrs.cpp)
             ci.pNext = &rendering;
             ci.stageCount = 2;
             ci.pStages = stages;
@@ -394,6 +404,13 @@ bool Device::CreateCloudResources(std::string* error)
         if (!Check(vkCreatePipelineLayout(m_device, &pl, nullptr, &m_skyGlowLayout), "sky glow layout", error) ||
             !pipeline(kFullscreenVertSpirv, sizeof(kFullscreenVertSpirv), kSkyGlowFragSpirv, sizeof(kSkyGlowFragSpirv),
                       m_skyGlowLayout, sceneFormats, 5, kDepthFormat, &m_skyGlowPipeline))
+            return false;
+        farOnly = true;
+        const bool farMade = pipeline(kFullscreenFarVertSpirv, sizeof(kFullscreenFarVertSpirv), kSkyGlowFragSpirv,
+                                      sizeof(kSkyGlowFragSpirv), m_skyGlowLayout, sceneFormats, 5, kDepthFormat,
+                                      &m_skyGlowFarPipeline);
+        farOnly = false;
+        if (!farMade)
             return false;
         // How much of each is seen (sun_vis.comp): depth, clouds, the result (pushed); the result read by the CPU.
         const VkShaderStageFlags comp = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -666,6 +683,7 @@ void Device::DestroyCloudResources()
     m_sunVisCpu = nullptr;
     if (m_sunLayout) { vkDestroyPipelineLayout(m_device, m_sunLayout, nullptr); m_sunLayout = VK_NULL_HANDLE; }
     if (m_skyGlowPipeline) { vkDestroyPipeline(m_device, m_skyGlowPipeline, nullptr); m_skyGlowPipeline = VK_NULL_HANDLE; }
+    if (m_skyGlowFarPipeline) { vkDestroyPipeline(m_device, m_skyGlowFarPipeline, nullptr); m_skyGlowFarPipeline = VK_NULL_HANDLE; }
     if (m_skyGlowLayout) { vkDestroyPipelineLayout(m_device, m_skyGlowLayout, nullptr); m_skyGlowLayout = VK_NULL_HANDLE; }
     if (m_skyGlowSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_skyGlowSetLayout, nullptr); m_skyGlowSetLayout = VK_NULL_HANDLE; }
     DestroyAtmosphere();
@@ -964,7 +982,7 @@ void Device::DrawClouds(VkCommandBuffer cmd)
         m_cloudBaseClock = m_frameClock;
     }
     const bool shadow = m_cloudParams.shadow > 0.0f && m_cloudShadowPipeline;
-    const bool own = (half || shadow) && f.split && m_prepassArmed && f.clouds && !f.cloudsRecorded;
+    const bool own = (half || shadow) && f.split && !f.split2 && m_prepassArmed && f.clouds && !f.cloudsRecorded;
     const bool skipCovered = own && half && m_prepassFullClear;   // (else what the pre-pass didn't clear isn't sky)
     ProfileFrame& prof = m_profile[m_frameIndex];
     VkCommandBuffer work = cmd;                  // the shadow map's and the half-size march's commands

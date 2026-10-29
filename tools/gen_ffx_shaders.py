@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """gen_ffx_shaders.py GLSLC SPIRV_CROSS SDK_DIR OUT_DIR
 
-The FidelityFX SDK's compute passes for FSR 3.1 (third_party/ffx-sdk: the 3.1 upscaler, optical flow, frame
-interpolation; docs/fsr3-plan.md), compiled in place of AMD's FidelityFX_SC.exe (a Windows tool) into the
+The FidelityFX SDK's compute passes (third_party/ffx-sdk: FSR 3.1's upscaler, optical flow and frame interpolation,
+docs/fsr3-plan.md; the effects of docs/amd-fx-plan.md), compiled in place of AMD's FidelityFX_SC.exe (a Windows tool) into the
 `<pass>_permutations.h` headers AMD's blob accessors (src/backends/shared/blob_accessors) include - the same names and
 layout: a permutation key (the options' bits, `index`), an indirection table from key to variant, and each variant's
 SPIR-V and resources (names, bindings, counts, sets). The wave64 and 16-bit headers the accessors also include name
@@ -43,17 +43,42 @@ COMPONENTS = {
                            {'FFX_FRAMEINTERPOLATION_OPTION_LOW_RES_MOTION_VECTORS': (0, 1),
                             'FFX_FRAMEINTERPOLATION_OPTION_JITTER_MOTION_VECTORS': (0, 1)}),
     'opticalflow': ([], {'FFX_OPTICALFLOW_OPTION_HDR_COLOR_INPUT': (0, 1)}),
+    'sssr': ([], {}),                                   # (rvk's depth isn't inverted: every *_INVERTED option 0)
+    'denoiser': ([], {}),
+    'spd': ([], {'FFX_SPD_OPTION_LINEAR_SAMPLE': (0, 1), 'FFX_SPD_OPTION_WAVE_INTEROP_LDS': (0, 1),
+                 'FFX_SPD_OPTION_DOWNSAMPLE_FILTER': (0, 1, 2)}),
+    'cacao': ([], {'FFX_CACAO_OPTION_APPLY_SMART': (0, 1)}),
+    'vrs': ([], {'FFX_VRS_OPTION_ADDITIONALSHADINGRATES': (0, 1), 'FFX_VARIABLESHADING_TILESIZE': (8, 16, 32)}),
+    'brixelizer': ([], {}),
+    'brixelizergi': ([], {'FFX_BRIXELIZER_GI_OPTION_DISABLE_SPECULAR': (0, 1),
+                          'FFX_BRIXELIZER_GI_OPTION_DISABLE_DENOISER': (0, 1)}),
+    'parallelsort': ([], {'FFX_PARALLELSORT_OPTION_HAS_PAYLOAD': (0, 1)}),
 }
+
+# Options with more than two values (AMD's CMakeCompile*Shaders.txt): the key holds the value's index in this list,
+# in as many bits as the list needs. The rest are 0 / 1 in one bit.
+VALUES = {'FFX_SPD_OPTION_DOWNSAMPLE_FILTER': (0, 1, 2), 'FFX_VARIABLESHADING_TILESIZE': (8, 16, 32)}
+
+# Include folders besides the component's own (its shaders include another component's headers).
+INCLUDES = {'brixelizergi': ('brixelizer',)}
 
 KINDS = ('constantBuffer', 'srvTexture', 'uavTexture', 'srvBuffer', 'uavBuffer', 'sampler', 'rtAccelerationStructure')
 
 
 def options_of(component):
-    """The permutation options the accessor sets, in its order (POPULATE_PERMUTATION_KEY)."""
+    """The permutation options the accessor sets, in its order (POPULATE_PERMUTATION_KEY, and the ones it sets
+    outside that macro, as VRS and SPD do their many-valued ones)."""
     src = (sdk / 'src' / 'backends' / 'shared' / 'blob_accessors' / f'ffx_{component}_shaderblobs.cpp').read_text()
-    block = src[src.index('#define POPULATE_PERMUTATION_KEY'):]
-    block = block[:block.index('\n\n')]
-    return [o for o in re.findall(r'key\.(\w+)\s*=', block) if o != 'index']
+    return list(dict.fromkeys(o for o in re.findall(r'key\.(\w+)\s*=', src) if o != 'index'))
+
+
+def bits_of(option):
+    return (len(VALUES[option]) - 1).bit_length() if option in VALUES else 1
+
+
+def key_value(option, value):
+    """What the key holds for an option's value: the value itself (0 / 1), or its index in VALUES."""
+    return VALUES[option].index(value) if option in VALUES else value
 
 
 def variable_names(spv_path):
@@ -75,8 +100,9 @@ def variable_names(spv_path):
 def compile_variant(task):
     src, defines, opt, tmp, tag = task
     spv = tmp / f'{tag}{opt}.spv'
+    extra = [f'-I{GPU / d}' for d in INCLUDES.get(src.parent.name, ())]
     subprocess.run([glslc, '-fshader-stage=comp', '--target-env=vulkan1.2', opt, '-DFFX_GPU=1', '-DFFX_GLSL=1',
-                    '-DFFX_HALF=0', *defines, f'-I{GPU}', f'-I{src.parent.name and GPU / src.parent.name}',
+                    '-DFFX_HALF=0', *defines, f'-I{GPU}', f'-I{src.parent.name and GPU / src.parent.name}', *extra,
                     str(src), '-o', str(spv)], check=True)
     js = spv.with_suffix('.json')
     subprocess.run([spirv_cross, str(spv), '--reflect', '--output', str(js)], check=True)
@@ -144,7 +170,7 @@ def main():
                 lines += ['} RvkFfxPermutationInfo;', '#endif', '']
                 lines.append(f'typedef union {name}_PermutationKey {{')
                 lines.append('    struct {')
-                lines += [f'        uint32_t {o} : 1;' for o in options]
+                lines += [f'        uint32_t {o} : {bits_of(o)};' for o in options]
                 lines += ['    };', '    uint32_t index;', f'}} {name}_PermutationKey;', '']
                 infos = []
                 for n in range(len(variants)):
@@ -177,9 +203,13 @@ def main():
                 lines.append('};')
                 # Every key -> the variant with the same varying options (the fixed ones are rvk's choice).
                 table = []
-                for key in range(1 << len(options)):
-                    bits = {o: (key >> i) & 1 for i, o in enumerate(options)}
-                    match = next((n for n, v in enumerate(variants) if all(v[o] == bits[o] for o in varying)), 0)
+                for key in range(1 << sum(bits_of(o) for o in options)):
+                    bits, shift = {}, 0
+                    for o in options:
+                        bits[o] = (key >> shift) & ((1 << bits_of(o)) - 1)
+                        shift += bits_of(o)
+                    match = next((n for n, v in enumerate(variants)
+                                  if all(key_value(o, v[o]) == bits[o] for o in varying)), 0)
                     table.append(str(match))
                 lines.append(c_array('int32_t', f'g_{name}_IndirectionTable', table))
                 (out / f'{name}_permutations.h').write_text('\n'.join(lines) + '\n')

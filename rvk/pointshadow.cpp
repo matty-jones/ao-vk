@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace rvk {
@@ -79,6 +80,8 @@ uint32_t CubeFaceMask(const float mn[3], const float mx[3], const float p[3], fl
     return mask;
 }
 
+constexpr float kConeMargin = 0.06f;            // radians (~3.4 degrees)
+
 // Squared distance from a point to a box (0 inside).
 float BoxDistance2(const float mn[3], const float mx[3], const float p[3])
 {
@@ -91,6 +94,82 @@ float BoxDistance2(const float mn[3], const float mx[3], const float p[3])
 }
 
 }  // namespace
+
+namespace detail {
+
+Cone SpotCone(const d3d::Light& l)
+{
+    Cone c{};
+    const float len = std::sqrt(l.direction.x * l.direction.x + l.direction.y * l.direction.y + l.direction.z * l.direction.z);
+    if (l.type != d3d::LIGHT_SPOT || len < 1e-6f || !(l.phi > 0.0f))
+        return c;
+    c.half = std::min(0.5f * l.phi, 1.5707964f) + kConeMargin;
+    c.on = c.half < 1.5707964f;                  // (a half turn or more: every face and caster, as for a point light)
+    c.axis[0] = l.direction.x / len;
+    c.axis[1] = l.direction.y / len;
+    c.axis[2] = l.direction.z / len;
+    c.cosHalf = std::cos(c.half);
+    c.sinHalf = std::sin(c.half);
+    return c;
+}
+
+// Whether the cone reaches into cube face f's view (Vulkan's order: +X -X +Y -Y +Z -Z - CubeFaceMask's bits): the
+// directions d with s d[a] >= |d[b]| and |d[c]| (a the face's axis, s its sign), a convex cone - nearest the cone's
+// axis either the axis itself, or a direction on one of its four sides, or one of its four edges.
+bool FaceInCone(int f, const Cone& c)
+{
+    const int a = f / 2, b = a == 0 ? 1 : 0, k = a == 2 ? 1 : 2;
+    const float s = (f & 1) ? -1.0f : 1.0f;
+    float planes[4][3] = {};
+    for (int i = 0; i < 4; ++i) {
+        planes[i][a] = s;
+        planes[i][i < 2 ? b : k] = (i & 1) ? 1.0f : -1.0f;
+    }
+    auto inside = [&](const float d[3]) {
+        for (const auto& n : planes)
+            if (d[0] * n[0] + d[1] * n[1] + d[2] * n[2] < -1e-5f) return false;
+        return true;
+    };
+    if (inside(c.axis))
+        return true;
+    float best = -1.0f;                          // the nearest direction's cosine to the axis
+    for (const auto& n : planes) {
+        const float un = c.axis[0] * n[0] + c.axis[1] * n[1] + c.axis[2] * n[2];
+        float q[3] = {c.axis[0] - 0.5f * un * n[0], c.axis[1] - 0.5f * un * n[1], c.axis[2] - 0.5f * un * n[2]};
+        const float ql = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);   // (|n|^2 = 2: the projection's 0.5)
+        if (ql < 1e-6f) continue;
+        for (float& v : q) v /= ql;
+        if (inside(q)) best = std::max(best, c.axis[0] * q[0] + c.axis[1] * q[1] + c.axis[2] * q[2]);
+    }
+    for (int e = 0; e < 4; ++e) {
+        float d[3] = {};
+        d[a] = s;
+        d[b] = (e & 1) ? 1.0f : -1.0f;
+        d[k] = (e & 2) ? 1.0f : -1.0f;
+        best = std::max(best, (c.axis[0] * d[0] + c.axis[1] * d[1] + c.axis[2] * d[2]) * 0.57735027f);
+    }
+    return best >= c.cosHalf;
+}
+
+// Whether any of a box can lie in the cone seen from p (its bounding sphere against the cone): the angle from the
+// axis to the sphere's centre, less the sphere's angular radius (asin r/d), within the cone's half angle - compared
+// as cosines (both under a quarter turn, so their sum is under a half turn), without the trigonometry: it runs for
+// every caster in a floodlight's range, and acos + asin made the point lights' scan ~3x slower.
+bool BoxInCone(const float mn[3], const float mx[3], const float p[3], const Cone& c)
+{
+    float v[3], r2 = 0.0f;
+    for (int j = 0; j < 3; ++j) {
+        v[j] = 0.5f * (mn[j] + mx[j]) - p[j];
+        r2 += 0.25f * (mx[j] - mn[j]) * (mx[j] - mn[j]);
+    }
+    const float d2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    if (d2 <= r2)
+        return true;
+    const float along = v[0] * c.axis[0] + v[1] * c.axis[1] + v[2] * c.axis[2];   // d cos(angle)
+    return along >= c.cosHalf * std::sqrt(d2 - r2) - c.sinHalf * std::sqrt(r2);   // d cos(half + asin(r / d))
+}
+
+}  // namespace detail
 
 // The point lights' cube array: m_cubeCount cubes of m_pointShadowSize faces.
 bool Device::CreatePointShadowMaps(std::string* error)
@@ -231,6 +310,7 @@ bool Device::IsCarrierItem(const CapturedLight& c, const ShadowItem& item)
 
 void Device::FindCarriers()
 {
+    constexpr uint8_t kOwnerHeld = 10;           // frames a light keeps its carrier's owner with the carrier missed
     // Each run's box (union of its casters') and lowest origin, for the held-item test below.
     uint32_t groups = 0;
     for (const ShadowItem& it : m_shadowItems)
@@ -294,6 +374,8 @@ void Device::FindCarriers()
     for (CapturedLight& c : m_lightsCur) {
         c.hasCarrier = false;
         c.owner = 0;
+        c.carrierOwner = 0;
+        c.ownerHeld = 0;
         c.carrierGroup = ~0u;
         c.carrierGroups.clear();
         if (c.light.range < 1.0f)
@@ -309,7 +391,29 @@ void Device::FindCarriers()
                 float d2 = dx * dx + dy * dy + dz * dz;
                 if (d2 < bestD2) { bestD2 = d2; owner = s.owner; }
             }
-            c.owner = owner;
+            // The game's light hangs under a character's frames or next to it under a small parent - not always the
+            // one wearing it (a dump: a big piece 0.7 to the side named, the body under the light not, so with
+            // RVK_OwnShadow off the body still cast, coming and going with the pose). A body standing under the light
+            // (origin 1.5-2.6 below, within 0.5 sideways: the walk sways it) whose owner isn't the one named is taken.
+            if (owner) {
+                float under = 0.5f * 0.5f, namedD2 = 1e30f;
+                uint32_t body = 0;
+                gather(p.x, p.z, 0.5f, true);
+                inOrder();
+                for (uint32_t idx : nearby) {
+                    const ShadowItem& it = m_shadowItems[idx];
+                    const float dy = it.world.m[3][1] - p.y;
+                    const float extent = std::max(std::max(it.boundsMax[0] - it.boundsMin[0], it.boundsMax[1] - it.boundsMin[1]), it.boundsMax[2] - it.boundsMin[2]);
+                    if (!it.owner || dy <= -2.6f || dy >= -1.5f || extent >= 3.0f)
+                        continue;
+                    const float dx = it.world.m[3][0] - p.x, dz = it.world.m[3][2] - p.z, d2 = dx * dx + dz * dz;
+                    if (it.owner == owner) namedD2 = std::min(namedD2, d2);
+                    else if (d2 < under) { under = d2; body = it.owner; }
+                }
+                if (body && namedD2 > under)
+                    owner = body;
+            }
+            c.owner = c.carrierOwner = owner;
             if (owner) {
                 std::vector<uint8_t> linked(groups, 0);
                 auto from = std::lower_bound(byOwner.begin(), byOwner.end(), std::pair<uint32_t, uint32_t>{owner, 0u});
@@ -331,7 +435,7 @@ void Device::FindCarriers()
             }
             // (Not one of the game's lights this frame, or none of its owner's pieces cast: found as below, by
             // where the character stands under it - the player's own light, seen without a carrier in a dump.)
-            c.owner = 0;
+            c.owner = c.carrierOwner = 0;
         }
         // The same light last frame (it moves with its character, a little per frame) and who carried it.
         const CapturedLight* prev = nullptr;
@@ -353,6 +457,10 @@ void Device::FindCarriers()
         inOrder();
         for (uint32_t idx : nearby) {
             const ShadowItem& it = m_shadowItems[idx];   // (drawn: remembered copies may stand where it was)
+            // (With the draws' owners known, only a character's piece: a shop's terminal under a ceiling lamp made
+            // the lamp a character's - dimmed to RVK_CharLight, and with RVK_OwnShadow off its shadow gone.)
+            if (exact && !it.owner)
+                continue;
             float dy = it.world.m[3][1] - p.y;
             if (dy <= -2.6f || dy >= 0.3f)       // where IsCarrierPart looks for the carrier's parts
                 continue;
@@ -382,9 +490,26 @@ void Device::FindCarriers()
             c.carrier[1] = it.world.m[3][1];
             c.carrier[2] = it.world.m[3][2];
             c.carrierGroup = it.group;
+            c.carrierOwner = it.owner;           // (its character, exactly: the runs below can take in a neighbour's)
         }
-        if (!c.hasCarrier)
+        if (!c.hasCarrier) {
+            // Missed for a frame (running, the light swings out from the body): the owner the same light had is
+            // kept a few frames, or with RVK_OwnShadow off the character's shadow flickered back on as it ran.
+            const CapturedLight* held = nullptr;
+            float heldBest = 1.0f;
+            for (const CapturedLight& q : m_lightsPrev) {
+                if (!q.carrierOwner || q.ownerHeld >= kOwnerHeld || q.light.range != c.light.range)
+                    continue;
+                float dx = q.light.position.x - p.x, dy = q.light.position.y - p.y, dz = q.light.position.z - p.z;
+                float d = dx * dx + dy * dy + dz * dz;
+                if (d < heldBest) { heldBest = d; held = &q; }
+            }
+            if (held) {
+                c.carrierOwner = held->carrierOwner;
+                c.ownerHeld = uint8_t(held->ownerHeld + 1);
+            }
             continue;
+        }
 
         // The game doesn't draw a character in one go: its head, body and weapon pieces can each be a run of their
         // own, with other characters' pieces in between (dumps: player head, NPC body, player body). A run is the
@@ -607,8 +732,24 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             s = {};
             continue;
         }
-        const d3d::Light& l = m_lightsCur[candidates[slots[k].candidate].index].light;
+        const CapturedLight& lit = m_lightsCur[candidates[slots[k].candidate].index];
+        const d3d::Light& l = lit.light;
         float pos[3] = {l.position.x, l.position.y, l.position.z};
+        // RVK_OwnShadow off: a character's own light (a lamp it wears) leaves the character out of its cube - no
+        // shadow of it thrown round its feet. Its pieces are known by their owner (FindCarriers: the game's light's
+        // carrier, else the owner of the body found under it) - not by its runs of draws, which take in a character
+        // standing close (it lost its shadow: user's dumps); only without an owner by where they stand.
+        const bool leaveCarrier = !m_carrierCasts && (lit.hasCarrier || lit.carrierOwner);
+        // A spot light: only the faces and casters its cone reaches (SpotCone) - a floodlight looking down drew all six
+        // faces with every caster within its range (1,041 units over Borealis's bridges).
+        static const bool coneOff = [] { const char* v = std::getenv("RANDYVK_SPOT_CONE"); return v && *v == '0'; }();
+        Cone cone = SpotCone(l);
+        cone.on = cone.on && !coneOff;           // (RANDYVK_SPOT_CONE=0: every face and caster, for comparisons)
+        uint32_t coneFaces = 0x3F;
+        if (cone.on) {
+            coneFaces = 0;
+            for (int f = 0; f < 6; ++f) coneFaces |= FaceInCone(f, cone) ? 1u << f : 0u;
+        }
         float fade = slots[k].fade;
         // A cube still holding the same light where it was keeps its map while what is in the light's range is
         // unchanged - the same casters, where they were, none swaying, no grass (it sways) - redrawn at least every
@@ -634,10 +775,16 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         inRangeFaces.clear();
         // Batch-key order (CollectShadowItems): longer batches per face. The boxes come packed in that order
         // (m_shadowOrderBox): this scan runs per light over every caster.
-        uint64_t casters = 1469598103934665603ull;   // (FNV-1a over what each caster in range draws, and where)
+        // (FNV-1a over what each caster in range draws, and where - a 32-bit word at a time: every field is whole
+        // words, and byte by byte it was most of the scan for a floodlight with a city's casters in range.)
+        uint64_t casters = 1469598103934665603ull;
         bool swaying = false;
         const auto mix = [&](const void* p, size_t n) {
-            for (size_t b = 0; b < n; ++b) casters = (casters ^ static_cast<const uint8_t*>(p)[b]) * 1099511628211ull;
+            for (size_t b = 0; b + 4 <= n; b += 4) {
+                uint32_t w;
+                std::memcpy(&w, static_cast<const uint8_t*>(p) + b, sizeof(w));
+                casters = (casters ^ w) * 1099511628211ull;
+            }
         };
         const float* box = m_shadowOrderBox.data();
         for (size_t n = 0; n < m_shadowOrder.size(); ++n, box += 6) {
@@ -645,16 +792,20 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             if (d2 > l.range * l.range)
                 continue;
             uint32_t i = m_shadowOrder[n];
-            // A lamp's housing (small, around the light) would shadow everything around it. Characters always
-            // cast, the one carrying the light too (telling its pieces apart from others' proved unreliable;
-            // FindCarriers now only serves CarriedLight). Big objects (buildings, platforms with their pillars) cast
+            // A lamp's housing (small, around the light) would shadow everything around it. Characters cast, the one
+            // carrying the light too unless RVK_OwnShadow is off (above). Big objects (buildings, platforms with their pillars) cast
             // even when their box contains the light; the near plane clips geometry right at the light.
             float extent = std::max(std::max(box[3] - box[0], box[4] - box[1]), box[5] - box[2]);
             bool housing = d2 == 0.0f && extent < 1.5f;              // smaller than a character
             if (housing)
                 continue;
-            uint32_t faces = CubeFaceMask(box, box + 3, pos, kPointShadowNear);
-            if (!faces)
+            if (leaveCarrier) {
+                const ShadowItem& it = m_shadowItems[i];
+                if (lit.carrierOwner ? it.owner == lit.carrierOwner : IsCarrierPart(lit, it.world, it.boundsMin, it.boundsMax))
+                    continue;
+            }
+            uint32_t faces = CubeFaceMask(box, box + 3, pos, kPointShadowNear) & coneFaces;
+            if (!faces || (cone.on && !BoxInCone(box, box + 3, pos, cone)))
                 continue;
             inRange.push_back(i);
             inRangeFaces.push_back(uint8_t(faces));
@@ -674,7 +825,7 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             }
         }
         if (sameLight && !animatedNear) {
-            const bool still = !swaying && casters == s.casters && s.kept < kCubeKeepMost && !GrassNearLight(pos, l.range);
+            const bool still = !swaying && casters == s.casters && s.kept < kCubeKeepMost && !GrassNearLight(pos, l.range, cone.on ? &cone : nullptr);
             if (still || ((k + m_frameNumber) & 1)) {
                 // This frame's position (the game's lamps wobble in the last bits): PointShadowLayer matches exactly.
                 std::memcpy(s.position, pos, sizeof(pos));
@@ -689,8 +840,10 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
         s.kept = 0;
         pointScanMs += ProfileCpu() - scanStart;
         double drawStart = ProfileCpu();
-        const bool grassUp = !GrassBelow(pos, l.range);   // (+Y, face 2: only if some grass reaches above the light)
+        const bool grassUp = !GrassBelow(pos, l.range, cone.on ? &cone : nullptr);   // (+Y, face 2: only if some grass reaches above the light)
         for (int face = 0; face < 6; ++face) {
+            if (!(coneFaces >> face & 1u))
+                continue;                        // (outside a spot light's cone: never read)
             VkRenderingAttachmentInfo depthAtt{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
             depthAtt.imageView = m_cubeFaceViews[k * 6 + face];
             depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
@@ -721,7 +874,7 @@ void Device::RenderPointShadowMaps(VkCommandBuffer cmd)
             FlushShadowGroup(cmd);               // this face's batch (M4)
             // Our ground grass casts too (grass.cpp). Its pipeline replaces the shadow pipelines' bindings: they are
             // bound again for the next face, and the cube's depth bias set back.
-            if ((face != 2 || grassUp) && DrawGrassPointShadow(cmd, vp, pos, l.range)) {
+            if ((face != 2 || grassUp) && DrawGrassPointShadow(cmd, vp, pos, l.range, cone.on ? &cone : nullptr)) {
                 bind = ShadowBind{};
                 m_shadowArenaBound = false;
                 BindShadowRecords(cmd);

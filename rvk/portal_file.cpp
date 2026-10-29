@@ -1,0 +1,285 @@
+// Captured interiors on disk (portal_file.h): a small binary file, its fields in order, little-endian as written.
+#include "portal_file.h"
+
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <unordered_map>
+
+namespace rvk::portal {
+
+namespace {
+
+constexpr uint32_t kMagic = 0x504B5652;           // "RVKP"
+constexpr uint32_t kStandInTexture = 9279;        // 1010004:9279, what a room's walls are drawn with until theirs load
+constexpr uint32_t kVersion = 2;                  // (1: a character's attachments could be among the pieces)
+
+struct Writer {
+    FILE* f;
+    bool ok = true;
+    void Bytes(const void* p, size_t n) { if (ok && n && std::fwrite(p, 1, n, f) != n) ok = false; }
+    template <class T> void Value(const T& v) { Bytes(&v, sizeof(v)); }
+    template <class T> void Vector(const std::vector<T>& v)
+    {
+        Value(uint32_t(v.size()));
+        Bytes(v.data(), v.size() * sizeof(T));
+    }
+};
+
+struct Reader {
+    FILE* f;
+    bool ok = true;
+    void Bytes(void* p, size_t n) { if (ok && n && std::fread(p, 1, n, f) != n) ok = false; }
+    template <class T> void Value(T& v) { Bytes(&v, sizeof(v)); }
+    template <class T> void Vector(std::vector<T>& v, uint32_t most)
+    {
+        uint32_t n = 0;
+        Value(n);
+        if (!ok || n > most) { ok = false; return; }
+        v.resize(n);
+        Bytes(v.data(), size_t(n) * sizeof(T));
+    }
+};
+
+}  // namespace
+
+uint64_t Hash(const void* data, size_t size, uint64_t seed)
+{
+    const uint8_t* p = static_cast<const uint8_t*>(data);
+    uint64_t h = seed;
+    for (size_t i = 0; i < size; ++i)
+        h = (h ^ p[i]) * 0x100000001B3ull;
+    return h;
+}
+
+uint64_t GeometryHash(const CapturedPiece& p)
+{
+    return Hash(p.indices.data(), p.indices.size() * 2, Hash(p.vertices.data(), p.vertices.size()));
+}
+
+bool Save(const char* path, const Capture& c)
+{
+    // Written beside, then put in place: a crash mid-write leaves the last good file.
+    const std::string temp = std::string(path) + ".new";
+    FILE* f = std::fopen(temp.c_str(), "wb");
+    if (!f)
+        return false;
+    Writer w{f};
+    w.Value(kMagic);
+    w.Value(kVersion);
+    w.Value(c.playfield);
+    w.Value(uint32_t(c.entranceKnown));
+    w.Value(c.entrance);
+    w.Value(c.inward);
+    w.Value(uint32_t(c.textures.size()));
+    for (const CapturedTexture& t : c.textures) {
+        w.Value(t.rdbId);
+        w.Value(t.width);
+        w.Value(t.height);
+        w.Value(uint32_t(t.format));
+        w.Value(t.hash);
+        w.Vector(t.level0);
+    }
+    w.Value(uint32_t(c.pieces.size()));
+    for (const CapturedPiece& p : c.pieces) {
+        w.Value(p.key);
+        w.Value(p.kind);
+        w.Value(p.fvf);
+        w.Value(p.primitive);
+        w.Value(p.stride);
+        w.Value(p.vertexCount);
+        w.Value(p.world);
+        w.Value(p.texture);
+        w.Value(p.material);
+        w.Value(p.rs);
+        w.Value(p.tss);
+        w.Vector(p.lights);
+        w.Vector(p.vertices);
+        w.Vector(p.indices);
+    }
+    const CapturedGround& g = c.ground;
+    w.Value(uint32_t(g.cellsX && g.baseKnown && g.lightKnown));
+    if (g.cellsX && g.baseKnown && g.lightKnown) {
+        w.Value(g.cellsX);
+        w.Value(g.cellsZ);
+        w.Value(g.cellX0);
+        w.Value(g.cellZ0);
+        w.Value(g.cellX);
+        w.Value(g.cellZ);
+        w.Vector(g.heights);
+        w.Vector(g.codes);
+        w.Vector(g.tiles);
+        w.Vector(g.types);
+        w.Value(g.lightW);
+        w.Value(g.lightH);
+        w.Vector(g.light);
+        w.Value(g.baseRs);
+        w.Value(g.lightRs);
+        w.Value(g.baseTss);
+        w.Value(g.lightTss);
+        w.Value(g.material);
+        w.Vector(g.lights);
+    }
+    const bool ok = w.ok && std::fclose(f) == 0;
+    if (!ok) {
+        std::remove(temp.c_str());
+        return false;
+    }
+    std::remove(path);
+    return std::rename(temp.c_str(), path) == 0;
+}
+
+bool LoadHeader(const char* path, Capture& c)
+{
+    FILE* f = std::fopen(path, "rb");
+    if (!f)
+        return false;
+    Reader r{f};
+    uint32_t magic = 0, version = 0, entrance = 0;
+    r.Value(magic);
+    r.Value(version);
+    c = Capture{};
+    r.Value(c.playfield);
+    r.Value(entrance);
+    r.Value(c.entrance);
+    r.Value(c.inward);
+    c.entranceKnown = entrance != 0;
+    std::fclose(f);
+    return r.ok && magic == kMagic && version == kVersion;
+}
+
+bool Load(const char* path, Capture& c)
+{
+    FILE* f = std::fopen(path, "rb");
+    if (!f)
+        return false;
+    Reader r{f};
+    uint32_t magic = 0, version = 0, entrance = 0, textures = 0, pieces = 0;
+    r.Value(magic);
+    r.Value(version);
+    if (!r.ok || magic != kMagic || version != kVersion) {
+        std::fclose(f);
+        return false;
+    }
+    c = Capture{};
+    r.Value(c.playfield);
+    r.Value(entrance);
+    c.entranceKnown = entrance != 0;
+    r.Value(c.entrance);
+    r.Value(c.inward);
+    r.Value(textures);
+    if (textures > 4096) r.ok = false;
+    if (r.ok) c.textures.resize(textures);
+    for (CapturedTexture& t : c.textures) {
+        uint32_t format = 0;
+        r.Value(t.rdbId);
+        r.Value(t.width);
+        r.Value(t.height);
+        r.Value(format);
+        r.Value(t.hash);
+        r.Vector(t.level0, 64u << 20);
+        if (format >= uint32_t(Format::Count)) r.ok = false;
+        t.format = Format(format);
+        if (!r.ok) break;
+    }
+    r.Value(pieces);
+    if (pieces > 65536) r.ok = false;
+    if (r.ok) c.pieces.resize(pieces);
+    for (CapturedPiece& p : c.pieces) {
+        r.Value(p.key);
+        r.Value(p.kind);
+        r.Value(p.fvf);
+        r.Value(p.primitive);
+        r.Value(p.stride);
+        r.Value(p.vertexCount);
+        r.Value(p.world);
+        r.Value(p.texture);
+        r.Value(p.material);
+        r.Value(p.rs);
+        r.Value(p.tss);
+        r.Vector(p.lights, 8);
+        r.Vector(p.vertices, 16u << 20);
+        r.Vector(p.indices, 4u << 20);
+        if (!r.ok) break;
+        // (Sound: the vertices hold vertexCount of stride, the indices stay inside them, the textures exist.)
+        if (size_t(p.vertexCount) * p.stride != p.vertices.size()) r.ok = false;
+        for (uint16_t i : p.indices)
+            if (i >= p.vertexCount) { r.ok = false; break; }
+        for (int32_t t : p.texture)
+            if (t >= int32_t(c.textures.size())) r.ok = false;
+        if (!r.ok) break;
+    }
+    // The ground (a street's): a file that ends here has none.
+    uint32_t hasGround = 0;
+    if (r.ok && std::fread(&hasGround, sizeof(hasGround), 1, f) == 1 && hasGround) {
+        CapturedGround& g = c.ground;
+        r.Value(g.cellsX);
+        r.Value(g.cellsZ);
+        r.Value(g.cellX0);
+        r.Value(g.cellZ0);
+        r.Value(g.cellX);
+        r.Value(g.cellZ);
+        if (g.cellsX > 1024 || g.cellsZ > 1024) r.ok = false;
+        r.Vector(g.heights, 1u << 21);
+        r.Vector(g.codes, 1u << 20);
+        r.Vector(g.tiles, 1u << 14);
+        r.Vector(g.types, 1u << 14);
+        r.Value(g.lightW);
+        r.Value(g.lightH);
+        r.Vector(g.light, 1u << 20);
+        r.Value(g.baseRs);
+        r.Value(g.lightRs);
+        r.Value(g.baseTss);
+        r.Value(g.lightTss);
+        r.Value(g.material);
+        r.Vector(g.lights, 8);
+        g.baseKnown = g.lightKnown = true;
+        // (Sound: the sizes agree, the tiles' textures exist, the codes name tiles there are.)
+        if (r.ok && (g.heights.size() != size_t(g.cellsX + 1) * (g.cellsZ + 1) ||
+                     g.codes.size() != size_t(g.cellsX) * g.cellsZ || g.light.size() != size_t(g.lightW) * g.lightH ||
+                     (!g.types.empty() && g.types.size() != g.tiles.size())))
+            r.ok = false;
+        for (int32_t t : g.tiles)
+            if (t >= int32_t(c.textures.size())) r.ok = false;
+        for (uint16_t code : g.codes)
+            if ((code & 0x3FFFu) >= g.tiles.size()) { r.ok = false; break; }
+        if (!r.ok) c.ground = CapturedGround{};
+        r.ok = true;                             // (a broken ground: the street without it)
+    }
+    std::fclose(f);
+    if (!r.ok) {
+        c = Capture{};
+        return false;
+    }
+    // One piece a place: the same geometry, place and blending recorded twice (captures from before the texture left
+    // the key: the stand-in a room's first frames draw with, and the walls' own) - the later recorded kept.
+    std::unordered_map<uint64_t, size_t> last;
+    for (size_t i = 0; i < c.pieces.size(); ++i) {
+        const CapturedPiece& p = c.pieces[i];
+        const uint32_t blending[4] = {p.rs[d3d::RS_ALPHABLENDENABLE], p.rs[d3d::RS_SRCBLEND], p.rs[d3d::RS_DESTBLEND],
+                                      p.rs[d3d::RS_ALPHATESTENABLE]};
+        int32_t place[12];
+        for (int k = 0; k < 12; ++k)
+            place[k] = int32_t(std::lround((&p.world.m[0][0])[k < 9 ? k + k / 3 : 12 + (k - 9)] * 100.0f));
+        uint64_t key = Hash(blending, sizeof(blending), GeometryHash(p));
+        key = Hash(place, sizeof(place), key);
+        auto standIn = [&](const CapturedPiece& q) {
+            return q.texture[0] >= 0 && c.textures[size_t(q.texture[0])].rdbId == kStandInTexture;
+        };
+        auto [it, fresh] = last.emplace(key, i);
+        if (!fresh && !(standIn(p) && !standIn(c.pieces[it->second])))
+            it->second = i;                      // (the later - but never the stand-in over a real texture)
+    }
+    if (last.size() < c.pieces.size()) {
+        std::vector<bool> keep(c.pieces.size(), false);
+        for (const auto& [key, i] : last) keep[i] = true;
+        std::vector<CapturedPiece> kept;
+        for (size_t i = 0; i < c.pieces.size(); ++i)
+            if (keep[i]) kept.push_back(std::move(c.pieces[i]));
+        c.pieces = std::move(kept);
+    }
+    return true;
+}
+
+}  // namespace rvk::portal

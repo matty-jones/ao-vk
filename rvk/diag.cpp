@@ -13,6 +13,50 @@ namespace rvk {
 using namespace vk;
 using namespace detail;
 
+// One of the scene shader's builds as the driver compiled it (CreatePipelines, with the capture flag): each stage's
+// statistics on one line, named as the driver names them (RADV: VGPRs, SGPRs, spills, instructions, subgroups per
+// SIMD; NVIDIA its own) - the registers a variant needs decide how many of its pixels run at once.
+void Device::ShaderRegisterReport(VkPipeline pipeline, const char* build, const char* target, const char* cut)
+{
+    if (!vkGetPipelineExecutablePropertiesKHR || !vkGetPipelineExecutableStatisticsKHR || !pipeline)
+        return;
+    VkPipelineInfoKHR info{VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR};
+    info.pipeline = pipeline;
+    uint32_t count = 0;
+    if (vkGetPipelineExecutablePropertiesKHR(m_device, &info, &count, nullptr) != VK_SUCCESS || !count)
+        return;
+    std::vector<VkPipelineExecutablePropertiesKHR> props(count, {VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR});
+    if (vkGetPipelineExecutablePropertiesKHR(m_device, &info, &count, props.data()) != VK_SUCCESS)
+        return;
+    for (uint32_t i = 0; i < count; ++i) {
+        VkPipelineExecutableInfoKHR exe{VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR};
+        exe.pipeline = pipeline;
+        exe.executableIndex = i;
+        uint32_t n = 0;
+        if (vkGetPipelineExecutableStatisticsKHR(m_device, &exe, &n, nullptr) != VK_SUCCESS)
+            continue;
+        std::vector<VkPipelineExecutableStatisticKHR> stats(n, {VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR});
+        if (n && vkGetPipelineExecutableStatisticsKHR(m_device, &exe, &n, stats.data()) != VK_SUCCESS)
+            continue;
+        std::string line;
+        for (const VkPipelineExecutableStatisticKHR& s : stats) {
+            char value[48];
+            switch (s.format) {
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR: std::snprintf(value, sizeof(value), "%s", s.value.b32 ? "yes" : "no"); break;
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR: std::snprintf(value, sizeof(value), "%lld", (long long)s.value.i64); break;
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR: std::snprintf(value, sizeof(value), "%llu", (unsigned long long)s.value.u64); break;
+            default: std::snprintf(value, sizeof(value), "%.2f", s.value.f64); break;
+            }
+            line += line.empty() ? "" : " | ";
+            line += s.name;
+            line += ' ';
+            line += value;
+        }
+        Log("shader stats: %s, %s, %s - %s (subgroup %u): %s", build, target, cut, props[i].name, props[i].subgroupSize,
+            line.empty() ? "(none reported)" : line.c_str());
+    }
+}
+
 void Device::RequestFrameDump(const std::string& path, int frames)
 {
     m_dumpPath = path;
@@ -270,6 +314,40 @@ void Device::EndFrameDump()
                  m_shadowItemsCount, m_shadowStaticItems, m_shadowAnimatedItems, m_shadowDrawn, m_shadowStaticDrawn,
                  m_shadowAnimatedDrawn, m_shadowCulled, m_shadowCollectMs, m_shadowCullMs, m_shadowDrawMs,
                  m_shadowGroupCalls);
+    {
+        // The plants' pushers this frame (FillPushers: the characters where they are now, then their trails), of all
+        // the push points: grass standing up through a character means it wasn't among them.
+        size_t heads = 0;
+        for (const PushPoint& t : m_pushTrail) heads += t.head ? 1 : 0;
+        std::fprintf(m_dumpFile, "# pushers: %zu of %zu push points (%zu characters' heads):", m_framePushers.size(),
+                     m_pushTrail.size(), heads);
+        for (const FramePusher& fp : m_framePushers)
+            std::fprintf(m_dumpFile, " (%.1f %.1f %.1f)", fp.p[0], fp.p[1], fp.p[2]);
+        std::fprintf(m_dumpFile, "\n");
+    }
+    {
+        // The cameras the casters were drawn with (the world's: most casters), and the projection this frame's
+        // receivers were tested against (the last frame's world camera's): differing, no draw took the sun's shadow.
+        uint32_t world = 0;
+        for (uint32_t i = 1; i < m_casterViews.size(); ++i)
+            if (m_casterViews[i].count > m_casterViews[world].count) world = i;
+        std::fprintf(m_dumpFile, "# shadow cameras: %zu, %u casters left out as another camera's; receivers' projection "
+                                 "%s (was %.6f %.6f %.6f %.6f)\n",
+                     m_casterViews.size(), m_casterOtherView, m_shadowProjChanged ? "CHANGED" : "the same",
+                     double(m_shadowProjBefore.m[0][0]), double(m_shadowProjBefore.m[1][1]),
+                     double(m_shadowProjBefore.m[2][2]), double(m_shadowProjBefore.m[3][2]));
+        for (uint32_t i = 0; i < m_casterViews.size(); ++i) {
+            const auto& v = m_casterViews[i].view.m;
+            const auto& p = m_casterViews[i].proj.m;
+            float eye[3];
+            for (int k = 0; k < 3; ++k) eye[k] = -(v[3][0] * v[k][0] + v[3][1] * v[k][1] + v[3][2] * v[k][2]);
+            std::fprintf(m_dumpFile, "#   camera %u%s: %u casters, eye (%.3f %.3f %.3f) forward (%.4f %.4f %.4f), "
+                                     "projection %.6f %.6f %.6f %.6f\n",
+                         i, i == world ? " (world)" : "", m_casterViews[i].count, double(eye[0]), double(eye[1]),
+                         double(eye[2]), double(v[0][2]), double(v[1][2]), double(v[2][2]), double(p[0][0]),
+                         double(p[1][1]), double(p[2][2]), double(p[3][2]));
+        }
+    }
     std::fprintf(m_dumpFile, "# instancing: %u runs of >=2 identical static draws; %u draws could merge away (longest run"
                              " %u)\n", m_batchRuns, m_batchMerged, m_batchMaxRun);
     std::fprintf(m_dumpFile, "# M3 batching: %u indirect calls for %u draws (%u single); %u indexed draws left direct\n",
@@ -314,11 +392,11 @@ void Device::EndFrameDump()
             cube |= m_pointShadowLights[i].range == c.light.range &&
                     std::fabs(m_pointShadowLights[i].position[0] - c.light.position.x) < 1.0f &&
                     std::fabs(m_pointShadowLights[i].position[2] - c.light.position.z) < 1.0f;
-        if (!c.hasCarrier && !cube)
+        if (!c.hasCarrier && !c.carrierOwner && !cube)
             continue;
         const d3d::Vector& l = c.light.position;
-        std::fprintf(m_dumpFile, "# light (%.1f %.1f %.1f) r%.1f carrier%s:", l.x, l.y, l.z, c.light.range,
-                     c.owner ? " (the scene's, exact)" : "");
+        std::fprintf(m_dumpFile, "# light (%.1f %.1f %.1f) r%.1f carrier%s owner %08X%s:", l.x, l.y, l.z, c.light.range,
+                     c.owner ? " (the scene's, exact)" : "", c.carrierOwner, c.ownerHeld ? " (held from last frame)" : "");
         if (c.hasCarrier)
             std::fprintf(m_dumpFile, " g%u origin (%.2f %.2f %.2f), %.2f under the light;", c.carrierGroup,
                          c.carrier[0], c.carrier[1], c.carrier[2], l.y - c.carrier[1]);
@@ -481,10 +559,14 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
         m_dumpedLightValid[i] = true;
         const d3d::Light& l = s.light;
         std::fprintf(f, "L %zu: type %u pos (%.2f %.2f %.2f) dir (%.2f %.2f %.2f) range %.2f att %.3f/%.4f/%.5f"
-                        " diffuse (%.2f %.2f %.2f) ambient (%.2f %.2f %.2f)\n",
+                        " diffuse (%.2f %.2f %.2f) specular (%.2f %.2f %.2f) ambient (%.2f %.2f %.2f)",
                      i, uint32_t(l.type), l.position.x, l.position.y, l.position.z, l.direction.x, l.direction.y,
                      l.direction.z, l.range, l.attenuation0, l.attenuation1, l.attenuation2, l.diffuse.r, l.diffuse.g,
-                     l.diffuse.b, l.ambient.r, l.ambient.g, l.ambient.b);
+                     l.diffuse.b, l.specular.r, l.specular.g, l.specular.b, l.ambient.r, l.ambient.g, l.ambient.b);
+        if (l.type == d3d::LIGHT_SPOT)           // (its cone: inner and outer, full angles in degrees, and falloff)
+            std::fprintf(f, " cone %.1f/%.1f falloff %.2f", double(l.theta) * 57.29578, double(l.phi) * 57.29578,
+                         double(l.falloff));
+        std::fprintf(f, "\n");
     }
 
     // World positions -> nearest distance to each local light, and the screen rectangle.
@@ -522,9 +604,12 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
             else std::fprintf(f, " %zu:%.1f", k, nearest[k]);
         }
         const d3d::Material& m = m_material;
-        std::fprintf(f, " | mat d(%.2f %.2f %.2f %.2f) a(%.2f %.2f %.2f) e(%.2f %.2f %.2f) src %u/%u/%u/%u cv %u amb %08X",
+        std::fprintf(f, " | mat d(%.2f %.2f %.2f %.2f) a(%.2f %.2f %.2f) e(%.2f %.2f %.2f)",
                      m.diffuse.r, m.diffuse.g, m.diffuse.b, m.diffuse.a, m.ambient.r, m.ambient.g, m.ambient.b,
-                     m.emissive.r, m.emissive.g, m.emissive.b, m_rs[d3d::RS_DIFFUSEMATERIALSOURCE],
+                     m.emissive.r, m.emissive.g, m.emissive.b);
+        if (m_rs[d3d::RS_SPECULARENABLE])        // (specular on: its colour and power)
+            std::fprintf(f, " s(%.2f %.2f %.2f) p %.1f", m.specular.r, m.specular.g, m.specular.b, m.power);
+        std::fprintf(f, " src %u/%u/%u/%u cv %u amb %08X", m_rs[d3d::RS_DIFFUSEMATERIALSOURCE],
                      m_rs[d3d::RS_AMBIENTMATERIALSOURCE], m_rs[d3d::RS_SPECULARMATERIALSOURCE],
                      m_rs[d3d::RS_EMISSIVEMATERIALSOURCE], m_rs[d3d::RS_COLORVERTEX], m_rs[d3d::RS_AMBIENT]);
     }
@@ -541,6 +626,8 @@ void Device::DumpDraw(uint32_t primitive, uint32_t fvf, const void* vertices, ui
                          (long long)(m_frameNumber - t->m_uploadFrame),
                          t->m_level0NonZero == ~0u ? -1 : int(t->m_level0NonZero), t->m_image ? "" : " NO-IMAGE",
                          t->m_view ? "" : " NO-VIEW", t->m_albedoMap ? " albedo" : "", uint32_t(t->m_format));
+            if (t->m_rdbId)                      // (the game's texture id: the texture pack's file name, the picker's)
+                std::fprintf(f, " id %u", t->m_rdbId);
             if (!t->m_alphaMask.empty())         // (its alpha: hard edges, soft share - two-pass foliage, its dither)
                 std::fprintf(f, " alpha edges %.3f soft %.2f", double(t->m_alphaHardEdges), double(t->m_alphaSoftShare));
         }
@@ -656,13 +743,15 @@ void DumpBmp(const std::string& path, uint32_t w, uint32_t h, const std::vector<
 // (EndScene, after the post passes): the HDR scene before them (tone mapped simply: x / (1 + x), gamma 2.2), the
 // scene's other targets (the local lights' share, the surface colour, the glow), the half-size passes' results (ambient
 // occlusion, indirect light, scattered light, contact shadows: their first channel), the environment probe, the
-// reflections - where a fault first shows is where it comes from.
+// reflections, AMD's indirect light (brixgi), and the surfaces AMD's effects read (surface: each normal's size per
+// axis, half bright - a character's, written twice as long, full) - where a fault first shows is where it comes from.
 void Device::DumpTargets(const std::string& base)
 {
     struct Item { Texture* t; const char* name; };
     const Item items[] = {{m_scene, "scene"}, {m_localFraction, "local"}, {m_albedo, "albedo"}, {m_glow, "glow"},
                           {m_aoTex[1], "ao"}, {m_giTex[1], "gi"}, {m_volumeTex[1], "volume"},
-                          {m_contactTex[1], "contact"}, {m_envAtlas, "env"}, {m_ssrTex, "ssr"}};
+                          {m_contactTex[1], "contact"}, {m_envAtlas, "env"}, {m_ssrTex, "ssr"}, {m_brixGi, "brixgi"},
+                          {m_sceneSurface, "surface"}};
     struct Read { const Item* item; uint32_t bpp; VkBuffer buffer; VmaAllocation_T* allocation; const uint8_t* data; };
     std::vector<Read> reads;
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
@@ -693,9 +782,58 @@ void Device::DumpTargets(const std::string& base)
         vkCmdCopyImageToBuffer(cmd, t->m_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r.buffer, 1, &region);
         reads.push_back(r);
     }
-    if (reads.empty())
+    // The depth buffer as the frame left it (the scene's and the ground grass's depth: what stood in front of what),
+    // copied out as view depths (<dump>-depth.bin: width, height, then a float per pixel, 1e5 for the sky) and shown
+    // by their log (<dump>-depth.bmp: black at 0.25 units, white at 1000 and the sky).
+    VkBuffer depthBuffer = VK_NULL_HANDLE;
+    VmaAllocation_T* depthAllocation = nullptr;
+    const float* depthData = nullptr;
+    const uint32_t dw = m_depthWidth, dh = m_depthHeight;
+    if (m_depth && m_depthLayout != VK_IMAGE_LAYOUT_UNDEFINED && dw && dh) {
+        VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bi.size = VkDeviceSize(dw) * dh * 4;
+        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        VmaAllocationCreateInfo ac{};
+        ac.usage = VMA_MEMORY_USAGE_AUTO;
+        ac.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VmaAllocationInfo info{};
+        if (vmaCreateBuffer(m_allocator, &bi, &ac, &depthBuffer, &depthAllocation, &info) == VK_SUCCESS) {
+            depthData = static_cast<const float*>(info.pMappedData);
+            ImageBarrier(cmd, m_depth, VK_IMAGE_ASPECT_DEPTH_BIT, m_depthLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+            VkBufferImageCopy region{};
+            region.imageSubresource = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1};
+            region.imageExtent = {dw, dh, 1};
+            vkCmdCopyImageToBuffer(cmd, m_depth, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, depthBuffer, 1, &region);
+            ImageBarrier(cmd, m_depth, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_depthLayout,
+                         VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+        }
+    }
+    if (reads.empty() && !depthData)
         return;
     SubmitAndWait();
+    if (depthData) {
+        // (D3D's projection: view depth = m32 / (d - m22), as tonemap.frag has it.)
+        const float m22 = m_aoProj.m[2][2], m32 = m_aoProj.m[3][2];
+        std::vector<float> z(size_t(dw) * dh);
+        std::vector<uint8_t> rgb(size_t(dw) * dh * 3);
+        for (size_t p = 0; p < z.size(); ++p) {
+            const float d = depthData[p];
+            z[p] = d >= 1.0f ? 1e5f : m32 / std::min(d - m22, -1e-9f);
+            const float t = std::clamp(std::log2(std::max(z[p], 0.25f) / 0.25f) / std::log2(4000.0f), 0.0f, 1.0f);
+            rgb[p * 3] = rgb[p * 3 + 1] = rgb[p * 3 + 2] = uint8_t(t * 255.0f + 0.5f);
+        }
+        DumpBmp(base + "-depth.bmp", dw, dh, rgb);
+        if (FILE* f = std::fopen((base + "-depth.bin").c_str(), "wb")) {
+            const uint32_t size[2] = {dw, dh};
+            std::fwrite(size, sizeof(size), 1, f);
+            std::fwrite(z.data(), sizeof(float), z.size(), f);
+            std::fclose(f);
+        }
+        vmaDestroyBuffer(m_allocator, depthBuffer, depthAllocation);
+    }
     for (const Read& r : reads) {
         const Texture* t = r.item->t;
         const uint32_t w = t->m_width, h = t->m_height;
@@ -709,6 +847,10 @@ void Device::DumpTargets(const std::string& base)
                 std::memcpy(c, s, 6);
                 float v[3];
                 for (int k = 0; k < 3; ++k) v[k] = DumpHalf(c[k]);
+                if (t == m_sceneSurface) {
+                    for (int k = 0; k < 3; ++k) o[k] = uint8_t(std::min(std::fabs(v[k]), 2.0f) * 127.5f);
+                    continue;
+                }
                 // (Not a number: magenta; negative: cyan - where the faults are.)
                 if (std::isnan(v[0]) || std::isnan(v[1]) || std::isnan(v[2]) || std::isinf(v[0]) || std::isinf(v[1]) ||
                     std::isinf(v[2])) {

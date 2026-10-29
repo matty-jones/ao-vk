@@ -211,6 +211,9 @@ bool Device::LoadStatels(const char* path, uint32_t playfield)
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = std::max<VkDeviceSize>(m_statelIndexBase + indexBytes, 64);
     bi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    if (m_rayQuery)                              // (the ray tracing's structures are built from it: raytrace.cpp)
+        bi.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     VmaAllocationCreateInfo ac{};
     ac.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     ac.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
@@ -485,6 +488,7 @@ void Device::AddStatelShadowItems()
         return;
     UpdateFrameEye();
     const float range = CasterKeepRange();
+    const bool untraced = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();
     const float ex = m_frameEye[0], ez = m_frameEye[2];
     auto cell = [&](float v, float origin, uint32_t n) {
         return int(std::clamp(std::floor((v - origin) / kStatelCell), -1.0f, float(n)));
@@ -535,6 +539,7 @@ void Device::AddStatelShadowItems()
                 it.owner = 0;
                 it.kind = uint32_t(VisualKind::Static);
                 it.leafKey = 0;
+                it.traced = untraced && RtTraced(RtStatelPlace(i));   // (raytrace.cpp: in the rays)
                 std::memset(it.sway, 0, sizeof(it.sway));
                 it.cacheKey = 0x5354000000000000ull | i;   // ("ST": a statel piece, for the frame dump)
                 if (!m_statelItemKey[i]) m_statelItemKey[i] = ShadowItemKey(it);   // (the piece's: fixed)

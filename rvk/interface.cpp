@@ -22,7 +22,9 @@ void Device::InterfaceSceneEnd()
         m_particleOrphanTrigger = "the interface";
         DrawOrphanParticles();
     }
-    if (m_scenePhase && m_target == m_scene) {
+    // (Under a zone change's held picture the scene ends here even without 3D: the picture goes over the scene, the
+    // interface over the picture - handover.cpp.)
+    if (m_scenePhase && m_target == m_scene && (m_sceneSaw3D || HandoverShown())) {
         m_sceneEndDraw = m_dumpDraw;
         m_sceneEndFvf = 0;
         EndScene();
@@ -44,6 +46,7 @@ void Device::InterfaceBegin(bool redraw, bool guardAtlas)
     if (!m_inFrame || !m_main)
         return;
     InterfaceSceneEnd();
+    OverlayUnderEnd();                           // (2D draws before the interface: done, back on the frame)
     // Only over the 8-bit main target (the layer's format; HDR: after the scene's tone mapping). Otherwise - a frame
     // without 3D still in the float scene - the interface is drawn straight into the target, and is redrawn each
     // frame (not ready).
@@ -171,9 +174,29 @@ void Device::OverlayLabelsEnd()
     EndRendering();
     m_overlayLabelsActive = false;
     m_overlayLabelsFrame = m_frameNumber;
+    m_overlayUnder = false;
     m_target = m_ldrMain;
     m_cache = StateCache{};
     BeginRenderingOn(m_ldrMain);
+}
+
+// Frame generation: 2D between the scene and the interface joins the labels overlay (kept if this frame already
+// drew names into it). False: drawn on the frame.
+bool Device::OverlayUnderBegin()
+{
+    if (!m_fg || !OverlayLabelsBegin())
+        return false;
+    m_overlayUnder = true;
+    return true;
+}
+
+void Device::OverlayUnderEnd()
+{
+    if (!m_overlayUnder)
+        return;
+    if (m_overlayLabelsActive)
+        OverlayLabelsEnd();
+    m_overlayUnder = false;
 }
 
 // Late draws, including the cursor, stay above the console and interface.

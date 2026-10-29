@@ -75,6 +75,8 @@ public:
     void AddGameSection(const char* name, double ms);
     // The renderer drops blob shadow draws (sun shadows on and valid), as of a frame or two ago.
     bool BlobShadowsReplaced() const { return m_device.m_blobShadowsReplaced.load(std::memory_order_relaxed); }
+    // Frames in a row without 3D, as the worker last ended one (a frame behind the game's).
+    uint32_t FramesWithout3D() const { return m_device.m_framesWithout3DShared.load(std::memory_order_relaxed); }
     void SetTransform(uint32_t type, const d3d::Matrix& m);
     void SetMaterial(const d3d::Material& m);
     void SetLight(uint32_t index, const d3d::Light& light);
@@ -106,6 +108,7 @@ public:
     void LoadStatels(const char* path, uint32_t playfield);                   // (the path copied)
     void SetStatelMode(uint32_t mode);
     void SetSkyPlayfield(uint32_t playfield);
+    void ZoneSignal(uint32_t signal);          // (Device::ZoneSignal: a teleport began or failed)
     void SetGrassField(bool on, float distance, float density, float height, bool texOnly);
     void SetGrassStyle(float variety, float flowers, float glow, float gusts, bool trails);
     void SetGrassTrailLook(float seconds, float shade);
@@ -189,6 +192,9 @@ public:
     void ParticleEmitter(uint64_t key, const float center[3], const float origin[3], const Device::ParticleSprite* sprites,
                          uint32_t count);
     void EndParticleEmitter();
+    void FxSetEffect(uint32_t id, std::shared_ptr<const fx::Effect> effect);
+    void FxForget(uint32_t id);
+    void FxInstance(uint64_t key, uint32_t effect, const Device::FxAnchors& anchors);
     // The water (Device::DrawWater): vertices and indices copied.
     void SetWaterParams(const Device::WaterParams& params);
     void SetWeatherParams(const Device::WeatherParams& params);

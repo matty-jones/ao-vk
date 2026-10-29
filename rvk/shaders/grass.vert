@@ -266,14 +266,22 @@ void main()
     // darkened the land round it (user, 2026-10-18).
     float storm = FL.rainNear.y;
     float shade = 1.0 - 0.5 * storm;
+    // (With the light rig - FL.cond.z - the sun's parts by its share of the light, FL.cond.y, as ffp FlatShade; the
+    // moon's map's shadows on the moon's light alone, below.)
+    const bool rig = FL.cond.z > 0.5;
+    const float sunShare = rig ? FL.cond.y : 1.0;
+    float casters = 1.0;
+    if (rig) shade = 1.0 - 0.5 * storm * sunShare;
     if (FL.shadowParams.x > 0.5)
         // (Taken at the blade's axis a little towards the sun: the blades cast into the map too, and a blade
         // mustn't shadow itself - the map's copy of it faces the sun, this one the camera.)
     {
         // (The clouds' part takes only about the sun's share of the ground's light, as on the ground: ffp FlatShade.)
         vec3 q = axis - normalize(FL.sunDir.xyz + vec3(0.0, -1e-6, 0.0)) * 0.05;
-        shade = (1.0 - (1.0 - SunShadowCasters(q)) * ShadowStrength(length(q - GF.camera.xyz)) * (1.0 - storm)) *
-                (1.0 - 0.5 * max(1.0 - CloudShadowMap(q), storm));
+        casters = 1.0 - (1.0 - SunShadowCasters(q)) * ShadowStrength(length(q - GF.camera.xyz)) * (1.0 - storm);
+        shade = rig ? mix(1.0, FL.moon.w > 0.5 ? 1.0 : casters, sunShare) *
+                          (1.0 - 0.5 * max(1.0 - CloudShadowMap(q), storm) * sunShare)
+                    : casters * (1.0 - 0.5 * max(1.0 - CloudShadowMap(q), storm));
     }
     shade *= 1.0 - 0.5 * storm;                  // (the storm's sky dimmer too: as the ground, ffp FlatShade)
     // The terrain's shade from a low sun, as on the ground (ffp FlatShade: the darker of it and the shadows, at the
@@ -289,12 +297,14 @@ void main()
         float need = textureLod(terrainSunMap, clamp(tsUv, 0.0, 1.0), 0.0).r;
         terrainLit = mix(1.0, smoothstep(need - 1.0, need + 3.0, root.y + 2.0), FL.terrainSun2.y * tsInside);
     }
-    shade = min(shade, 1.0 - (1.0 - terrainLit) * FL.terrainSun2.z);
+    shade = min(shade, 1.0 - (1.0 - terrainLit) * FL.terrainSun2.z * sunShare);
     vec3 groundN = normalize(vec3(up.x * 0.5, 1.0, up.z * 0.5));
     vec3 sun = GF.sunColour.rgb * max(dot(groundN, -normalize(GF.sunDir.xyz + vec3(0.0, -1e-6, 0.0))), 0.0);
     // By night the moon's light (as on the ground: FL.moon), the map then its - its shadow takes only the moon's.
     float moonShade = 1.0;
-    if (FL.moon.w > 0.5) {
+    if (FL.moon.w > 0.5 && rig) {
+        moonShade = casters;                     // (the rig: the storm's and the clouds' dimming stays in shade)
+    } else if (FL.moon.w > 0.5) {
         moonShade = shade;
         shade = 1.0;
     }

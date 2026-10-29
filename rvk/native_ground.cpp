@@ -111,6 +111,8 @@ void Device::DestroyNativeGround()
     m_native.lightFit[0] = 0.0f;
     m_native.anyOrm = nullptr;
     m_native.patches.clear();
+    m_native.holes.clear();
+    m_native.holeCells = 0;
     m_native.ground.reset();
 }
 
@@ -184,7 +186,8 @@ void Device::SetNativeGround(std::shared_ptr<const NativeGround> ground)
                     std::memcpy(ix, q, sizeof(q));
                     ix += 6;
                 }
-            p.indices = indices;
+            p.indices = p.allIndices = indices;
+            p.indexCount = P * P * 6;
             m_native.patches.push_back(std::move(p));
         }
     m_native.ground = ground;
@@ -218,6 +221,7 @@ uint64_t Device::NativeMapsSignature() const
         h = (h ^ n) * 1099511628211ull;
         h = (h ^ o) * 1099511628211ull;
         h = (h ^ uint64_t(t && t->m_image)) * 1099511628211ull;
+        h = (h ^ uint64_t(NativeTileHole(t))) * 1099511628211ull;   // (known once its pixels are in)
     }
     return (h ^ uint64_t(reinterpret_cast<uintptr_t>(m_native.pebbleTable.get()))) * 1099511628211ull;   // (the sand)
 }
@@ -289,6 +293,72 @@ void Device::MakeNativeCodes()
     if (anyMaps) m_native.maps = CreateTexture(g.cellsX, g.cellsZ, maps.data());
     m_native.means = CreateTexture(g.cellsX, g.cellsZ, means.data());
     m_native.mapsSignature = NativeMapsSignature();
+    ApplyNativeHoles();
+}
+
+// A tile that is a hole in the ground: all but transparent (its alpha under 16 of 255 all over). The Shadowlands lay
+// one under the void around their floating land - 'shadowbrink', black with "Brink" written on it, alpha 2 - over
+// whole playfields (the gardens, 4380-4388) or the floor far below the islands (Adonis, 4873: about half its cells).
+// The game's draw lets it through to the sky; drawn opaque, the void was a plain of "Brink" to the horizon (#18).
+// Every other ground tile is opaque (all the rdb's terrain tiles checked, 2026-10-28).
+bool Device::NativeTileHole(const Texture* t)
+{
+    if (!t || !t->m_image || t->m_opaque || t->m_alphaMask.empty())
+        return false;
+    for (uint8_t a : t->m_alphaMask)
+        if (a >= 16) return false;
+    return true;
+}
+
+// The holes' cells left out of each patch's indices (a patch of holes alone isn't drawn): made again with the codes,
+// as the tiles' pixels come in.
+void Device::ApplyNativeHoles()
+{
+    const NativeGround& g = *m_native.ground;
+    std::vector<uint8_t> holes(g.tiles.size(), 0);
+    bool any = false;
+    for (size_t t = 0; t < g.tiles.size(); ++t)
+        any = (holes[t] = NativeTileHole(g.tiles[t])) || any;
+    if (holes == m_native.holes)
+        return;
+    m_native.holes = holes;
+    const uint32_t P = g.patch, pw = (g.cellsX + P - 1) / P;
+    uint32_t cells = 0, empty = 0;
+    for (size_t k = 0; k < m_native.patches.size(); ++k) {
+        NativePatch& p = m_native.patches[k];
+        const uint32_t px = uint32_t(k) % pw, pz = uint32_t(k) / pw;
+        auto hole = [&](uint32_t i, uint32_t j) {
+            const uint32_t c = px * P + i, r = pz * P + j;
+            if (!any || c >= g.cellsX || r >= g.cellsZ) return false;   // (past the playfield's edge: flat, unseen)
+            const uint32_t tile = g.codes[size_t(r) * g.cellsX + c] & 0x3FFFu;
+            return tile < holes.size() && holes[tile] != 0;
+        };
+        uint32_t cut = 0;
+        for (uint32_t j = 0; j < P; ++j)
+            for (uint32_t i = 0; i < P; ++i) cut += hole(i, j);
+        cells += cut;
+        if (!cut) {
+            p.indices = p.allIndices;
+            p.indexCount = P * P * 6;
+            continue;
+        }
+        auto kept = std::make_shared<std::vector<uint8_t>>();
+        kept->reserve(size_t(P * P - cut) * 6 * 2);
+        const uint8_t* all = p.allIndices->data();
+        for (uint32_t j = 0; j < P; ++j)
+            for (uint32_t i = 0; i < P; ++i)
+                if (!hole(i, j)) {
+                    const uint8_t* q = all + (size_t(j) * P + i) * 6 * 2;
+                    kept->insert(kept->end(), q, q + 6 * 2);
+                }
+        p.indexCount = uint32_t(kept->size() / 2);
+        p.indices = p.indexCount ? std::shared_ptr<const std::vector<uint8_t>>(std::move(kept)) : p.allIndices;
+        empty += p.indexCount == 0;
+    }
+    if (cells || m_native.holeCells)
+        Log("native ground: playfield %u - %u cells are holes (a see-through tile: the void), %u patches all holes",
+            g.id, cells, empty);
+    m_native.holeCells = cells;
 }
 
 // The hour's baked lightmap, as the game hands it to its ground: unpacked through the game's palette, a texel a cell.
@@ -430,14 +500,18 @@ void Device::FillNativeLights(detail::FrameLights* fl)
     fl->terrainLight2[3] = std::clamp(m_native.sun, 0.0f, 1.0f);
 }
 
-bool Device::NativeGroundRgb(float u, float v, uint8_t rgb[3]) const
+bool Device::NativeGroundRgb(float u, float v, uint8_t rgb[3], Texture** tileTex) const
 {
+    if (tileTex) *tileTex = nullptr;
     if (!m_native.ground) return false;
     const NativeGround& g = *m_native.ground;
     const int c = std::clamp(int(std::floor(u)), 0, int(g.cellsX) - 1), r = std::clamp(int(std::floor(v)), 0, int(g.cellsZ) - 1);
     const uint16_t code = g.codes[size_t(r) * g.cellsX + c];
     const uint32_t tile = code & 0x3FFFu, turn = code >> 14;
     if (tile >= g.tiles.size() || !g.tiles[tile]) return false;
+    if (tileTex) *tileTex = g.tiles[tile];
+    // (A tile texture of 32 x 32 or less is the game's stand-in while the real one streams in, as for its own ground.)
+    if (g.tiles[tile]->Width() * g.tiles[tile]->Height() <= 32u * 32u) return false;
     const float a = std::clamp(u - float(c), 0.0f, 1.0f), b = std::clamp(v - float(r), 0.0f, 1.0f);
     const float tu[4] = {a, 1.0f - b, 1.0f - a, b}, tv[4] = {1.0f - b, 1.0f - a, b, a};   // (terrain.glsl NativeTurn)
     return g.tiles[tile]->TexelRgbAt(tu[turn], tv[turn], rgb);
@@ -522,8 +596,12 @@ bool Device::PrepareNativeGround()
     if (!m_native.codes || !m_native.codes->m_image || !m_blackTexture || !m_blackTexture->m_image ||
         !m_native.lightmapGrey || !m_native.lightmapGrey->m_image || m_native.patches.empty() ||
         !m_native.vertices || !m_native.indexCount || m_native.ground->tiles.empty()) return false;
-    for (Texture* tile : m_native.ground->tiles) if (!tile || !tile->m_image) return false;
-    const auto vp = MulMatrix(m_view, m_proj);
+    // A street seen from a shop can name a tile that was not read back. The playfield cannot: the game's ground
+    // stays until every tile is on the GPU.
+    if (!m_streetGround)
+        for (Texture* tile : m_native.ground->tiles) if (!tile || !tile->m_image) return false;
+    // (World included: a street seen from a shop is moved to its door. The playfield's ground has none.)
+    const auto vp = MulMatrix(m_world, MulMatrix(m_view, m_proj));
     for (const auto& row : vp.m) for (float value : row)
         if (!std::isfinite(value)) { m_native.prepareFailure = InvalidCamera; return false; }
     if (m_native.visibilityFrame == m_frameNumber && std::memcmp(&vp, &m_native.visibilityVp, sizeof(vp)) == 0) {
@@ -535,8 +613,9 @@ bool Device::PrepareNativeGround()
     m_native.visible.clear();
     for (uint32_t i = 0; i < m_native.patches.size(); ++i) {
         const auto& p = m_native.patches[i];
-        if (!p.vertices || !p.indices || p.vertices->size() < size_t(m_native.vertices) * sizeof(Vertex) ||
-            p.indices->size() < size_t(m_native.indexCount) * sizeof(uint16_t)) { m_native.visible.clear(); return false; }
+        if (!p.vertices || p.vertices->size() < size_t(m_native.vertices) * sizeof(Vertex)) { m_native.visible.clear(); return false; }
+        if (!p.indexCount) { ++m_native.diagnostics.culled; continue; }   // (a patch of void tiles: not drawn)
+        if (!p.indices || p.indices->size() < size_t(p.indexCount) * sizeof(uint16_t)) { m_native.visible.clear(); return false; }
         float lo[3], hi[3];
         for (int j = 0; j < 3; ++j) {
             if (!std::isfinite(p.lo[j]) || !std::isfinite(p.hi[j]) || p.lo[j] > p.hi[j]) { m_native.visible.clear(); return false; }
@@ -568,7 +647,7 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
     if (!IsTerrain(fvf)) return NativeGroundDecision(fvf, UnsupportedFormat, false);
     if (!base && !light) return NativeGroundDecision(fvf, UnknownPass, false);
     if (m_target != m_main && m_target != m_scene) return NativeGroundDecision(fvf, SecondaryTarget, false);
-    const auto vp = MulMatrix(m_view, m_proj);
+    const auto vp = MulMatrix(m_world, MulMatrix(m_view, m_proj));
     if ((m_native.drawnBase == m_frameNumber || m_native.drawnLight == m_frameNumber) &&
         (std::memcmp(&vp, &m_native.visibilityVp, sizeof(vp)) || std::memcmp(&m_viewport, &m_native.baseViewport, sizeof(m_viewport))))
         return NativeGroundDecision(fvf, SecondaryTarget, false);
@@ -578,6 +657,7 @@ bool Device::NativeGroundReplaces(uint32_t fvf)
         return NativeGroundDecision(fvf, AlreadySubmitted, true);
     if (light && m_native.drawnBase != m_frameNumber && !m_native.basePending)
         return NativeGroundDecision(fvf, NoNativeBase, false);
+    StreetCaptureGroundPass(light);              // (a street being recorded: this pass's state - portal_street.cpp)
     EnsurePebbleTable();
     if (NativeMapsSignature() != m_native.mapsSignature) MakeNativeCodes();
     PollNativeSky();
@@ -702,9 +782,11 @@ uint32_t Device::DrawNativeGround(bool lightPass)
             const float d = std::max({p.lo[k] - m_frameEye[k], m_frameEye[k] - p.hi[k], 0.0f});
             d2 += d * d;
         }
-        m_native.tessPatch = d2 < kNativeTessDistance * kNativeTessDistance;
+        if (!p.indexCount)
+            continue;
+        m_native.tessPatch = d2 < kNativeTessDistance * kNativeTessDistance && !m_streetGround;
         const uint64_t before = m_native.submitted;
-        DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, p.indices, m_native.indexCount);
+        DrawSharedIndexed(d3d::TriangleList, kFvf, p.vertices, 0, m_native.vertices, p.indices, p.indexCount);
         drawn += m_native.submitted != before;
     }
     if (drawn) { DrawNativeClutter(vp); DrawNativePebbles(vp); }

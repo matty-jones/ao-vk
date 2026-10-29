@@ -14,6 +14,7 @@ namespace rvk {
 namespace {
 constexpr float kTurnSeconds = 8.0f;             // the direction's easing (a wind veers, it doesn't snap)
 constexpr float kStormSeconds = 4.0f;            // the storm building up and dying down
+constexpr float kSwellSeconds = 60.0f;           // the water's swell following the wind's direction
 }  // namespace
 
 void Device::UpdateWind()
@@ -40,6 +41,13 @@ void Device::UpdateWind()
     if (l > 1e-4f) {
         m_windDir[0] = x / l;
         m_windDir[1] = z / l;
+    }
+    const float swellTurn = dt > 0.0f ? 1.0f - std::exp(-dt / kSwellSeconds) : 1.0f;
+    x = m_swellDir[0] + (m_windDir[0] - m_swellDir[0]) * swellTurn;
+    z = m_swellDir[1] + (m_windDir[1] - m_swellDir[1]) * swellTurn;
+    if (const float sl = std::hypot(x, z); sl > 1e-4f) {
+        m_swellDir[0] = x / sl;
+        m_swellDir[1] = z / sl;
     }
 
     // A sand or ash storm: the game's tint, left out in Draw, says its colour and strength; eased in and out.
@@ -96,6 +104,8 @@ void Device::UpdateWind()
                 const double dx = ex - m_windPivot[0], dz = ez - m_windPivot[1];
                 m_windOffset[0] += dx * m_windDir[0] + dz * m_windDir[1];
                 m_windOffset[1] += -dx * m_windDir[1] + dz * m_windDir[0];
+                m_swellOffset[0] += dx * m_swellDir[0] + dz * m_swellDir[1];
+                m_swellOffset[1] += -dx * m_swellDir[1] + dz * m_swellDir[0];
             }
             m_windPivot[0] = ex;
             m_windPivot[1] = ez;
@@ -110,6 +120,9 @@ void Device::UpdateWind()
     m_windTime = std::fmod(m_windTime + double(std::min(dt, 0.1f)) * (1.0 + 0.9 * double(storm)), 3600.0);
     if (paused || m_windTime < m_windTimePrev)
         m_windTimePrev = m_windTime;             // wrapped, or the first frame after a pause (no motion from it)
+    // (Wrapped at 1000: a whole number of tiles of each of the ripples' layers, water.frag Ripples.)
+    for (int i = 0; i < 2; ++i)
+        m_rippleDrift[i] = std::fmod(m_rippleDrift[i] + double(m_windDir[i]) * (m_windTime - m_windTimePrev), 1000.0);
     if (m_frameNumber % 600 == 0)
     {
         Log("wind: towards %.2f %.2f (%s), strength x%.2f, gusts x%.2f, storm %.2f; the game's storm tint left out %u "
@@ -141,6 +154,15 @@ void Device::WindFrame(float out[4]) const
         out[2] = std::clamp(m_sand * m_sandHaze * 1.6f, 0.0f, 0.75f);
         out[3] = 0.0f;
     }
+}
+
+void Device::SwellFrame(float out[4]) const
+{
+    const double ax = m_swellDir[0], az = m_swellDir[1];
+    out[0] = m_swellDir[0];
+    out[1] = m_swellDir[1];
+    out[2] = float(m_swellOffset[0] - (m_windPivot[0] * ax + m_windPivot[1] * az));
+    out[3] = float(m_swellOffset[1] - (-m_windPivot[0] * az + m_windPivot[1] * ax));
 }
 
 void Device::WindAxes(float x, float z, float out[2]) const

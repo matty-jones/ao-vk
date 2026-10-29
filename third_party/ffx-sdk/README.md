@@ -1,8 +1,11 @@
-# FidelityFX SDK 1.1.4 - the FSR 3.1 parts (AMD)
+# FidelityFX SDK 1.1.4 - FSR 3.1 and the effects ao-vk tries (AMD)
 
 From https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK (tag v1.1.4, commit c6efa6b), MIT licence
 (`LICENSE.txt` - it ships with every release, as `LICENSE-FidelityFX-SDK.txt`). ao-vk uses it for FSR 3.1
-(`RVK_Upscaler 2`, `rvk/fsr3.cpp`; `docs/fsr3-plan.md`).
+(`RVK_Upscaler 2`, `rvk/fsr3.cpp`; `docs/fsr3-plan.md`) and for the effects of `docs/amd-fx-plan.md`: SSSR with its
+reflection denoiser (`RVK_SsrMode`, `rvk/sssr.cpp`), CACAO (`RVK_AoMode`, `rvk/cacao.cpp`), VRS (`RVK_Vrs`,
+`rvk/vrs.cpp`), Brixelizer and Brixelizer GI (`RVK_GiMode`, `rvk/brixelizer.cpp`), and - vendored, not used yet - SPD
+and Parallel Sort: their GPU headers, components, blob accessors and Vulkan GLSL as for FSR 3's.
 
 Here: the host headers, the GPU shaders of the 3.1 upscaler, optical flow and frame interpolation (and the shared
 ones they include), their components (`src/components/fsr3`, `fsr3upscaler`, `opticalflow`, `frameinterpolation`),
@@ -23,12 +26,20 @@ pointers) and Wine; each marked "ao-vk" where it is more than `nullptr` -> `VK_N
   function pointer types: `__stdcall` on 32-bit); the debug name helper takes a `uint64_t`; two `submit` calls get a
   named `SubmissionSemaphores` (clang-cl binds no temporary to a non-const reference).
 - `src/components/fsr3upscaler/ffx_fsr3upscaler.cpp`: its null tests of `resource` compare with 0.
+- `include/FidelityFX/host/ffx_brixelizer.h`: `FFX_BRIXELIZER_UPDATE_DESCRIPTION_SIZE` for a 32-bit build (the private
+  description it is an opaque copy of holds three pointers: 2099370, not 2099376, `uint32_t`s).
+- `include/FidelityFX/gpu/sssr/ffx_sssr_callbacks_glsl.h`: the environment is rvk's probe - an octahedral atlas of five
+  roughness levels (`rvk/shaders/env_common.glsl`) - not a cube map: its binding a `texture2D`, and
+  `FFX_SSSR_SampleEnvironmentMap` reads the atlas.
+- `include/FidelityFX/gpu/brixelizergi/ffx_brixelizergi_callbacks_glsl.h`: the same atlas for Brixelizer GI's
+  environment (`SampleEnvironmentMap`: its level for roughness 0.75).
 
 AMD bugs fixed (frame generation, `RVK_FrameGen`, `rvk/framegen.cpp`; each found by the validation layer):
 - `src/components/fsr3/ffx_fsr3.cpp`: an interpolation-only context never set its `interpolationOnly` field, and made
   the shared dilated depth / motion / previous depth images from the upscaler it hadn't made (0x0): they are made
   from the frame interpolation's descriptions.
-- `src/backends/vk/ffx_vk.cpp`: the backend's descriptor pool listed 6 sizes and said 5 (no storage buffers).
+- `src/backends/vk/ffx_vk.cpp`: the backend's descriptor pool listed 6 sizes and said 5 (no storage buffers); the
+  bindless descriptor pool (Brixelizer's) made without `FREE_DESCRIPTOR_SET_BIT`, its sets freed one by one.
 - `include/FidelityFX/gpu/fsr3upscaler/ffx_fsr3upscaler_callbacks_glsl.h`: the luma history (an RGBA16F image)
   declared `rgba8`, so its loads and stores were undefined (the 3.1 upscaler too).
 - `src/backends/vk/FrameInterpolationSwapchain/`: line width 1 (not 0) in the UI composition's and pacing debug's

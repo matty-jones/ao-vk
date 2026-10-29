@@ -399,7 +399,7 @@ std::string Label(const RvkSettingInfo& s)
     return s.label;
 }
 
-// "Bloom = 0.6   0 .. 2, default 0.6   Bloom strength [Effects]"
+// "Bloom = 0.6   0 .. 2, default 0.6   Bloom strength [Effects]   [no cost]"
 std::string Describe(const SettingRef& r)
 {
     const RvkSettingInfo& s = r.info;
@@ -409,6 +409,7 @@ std::string Describe(const SettingRef& r)
         t += C(cWarn) + " (trying " + FormatValue(s, tried->second) + ", not saved)";
     t += C(cDim) + "   " + Range(s) + ", default " + FormatValue(s, s.defaultValue) + "   " + C(cText) + Label(s) + C(cDim) +
          " [" + s.section + (r.hidden ? ", randy-vk.ini only" : "") + "]";
+    if (s.cost) t += C(cDim) + "   [" + s.cost + "]";
     const std::string why = NoEffect(s);
     if (!why.empty()) t += C(cWarn) + "   no effect: " + why;
     return t;
@@ -466,6 +467,7 @@ const Command kCommands[] = {
     {"profileui", "", "compare saved, 100%, 150% and 200% interface scaling; stand still", aAction},
     {"luts", "", "reload the colour look-up tables (Ctrl+Shift+L)", aAction},
     {"lightdebug", "", "the lighting debug view on / off (Ctrl+Shift+F11)", aAction},
+    {"fx", "<template id> [cast] | reload", "play one of the game's effect templates on your character (cast: a bolt from you at you; ao-assets: fx find); reload: our effects' files read again", aText},
     {"clear", "", "empty the console", aNone},
 };
 
@@ -759,6 +761,23 @@ void Execute(const std::string& text)
                 return;
             }
         Print(C(cError) + "no sky preset " + want);
+    } else if (cmd == "fx" && w.size() >= 2 && Lower(w[1]) == "reload") {
+        FxReload();
+        Print(C(cText) + "effects read again from randy-vk\\fx" + C(cDim) + "   (randy-vk.log: what loaded)");
+    } else if (cmd == "fx") {
+        const int id = w.size() >= 2 ? std::atoi(w[1].c_str()) : 0;
+        bool cast = false, capture = false;
+        for (size_t i = 2; i < w.size(); ++i) {
+            cast |= Lower(w[i]) == "cast";
+            capture |= Lower(w[i]) == "capture";
+        }
+        if (id <= 0) {
+            Print(C(cError) + "fx <template id> [cast] [capture]" + C(cDim) + "   fx 47119 (Lesser Controlled Rage)");
+            return;
+        }
+        FxPlay(id, cast, capture);
+        Print(C(cText) + "effect " + C(cValue) + std::to_string(id) + C(cText) + " played on your character" + C(cDim) +
+              "   (RVK_FxLog: what the game makes, in randy-vk.log)");
     } else if (const Command* c = FindCommand(cmd); c && c->arg == aAction) {
         RunAction(c->name);
         Print(C(cDim) + c->help);

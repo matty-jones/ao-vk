@@ -31,7 +31,8 @@ shared `.glsl` include to the `DEPENDS` lists. Shaders compile to `build/.../rvk
 Everything runs under Wine (`WINEPREFIX` defaults to `~/.wine-prk`). There is no unit-test framework; the checks are:
 
 - `tools/rvk-demo.sh [out-dir] [args]`: rvk alone, headless, with the Khronos validation layer; writes a PNG and
-  `validation.log`. Scene flags are in `tests/rvk_demo.cpp` (`--shadow-test`, `--grass-walk X`, `--tess 0.75`, ...).
+  `validation.log`. It runs in a Wine prefix of its own (`RVK_DEMO_PREFIX`, default `~/.wine`): the game's keeps a
+  wineserver on the desktop's display while the launcher is open, and hidden demos joining it hang. Scene flags are in `tests/rvk_demo.cpp` (`--shadow-test`, `--grass-walk X`, `--tess 0.75`, ...).
 - `tools/look-check.py [scene...]`: a few fixed rvk_demo scenes (dusk sweep, nights at three darkness levels, storm,
   the native ground) reduced to region averages and compared with `tests/look-baseline.tsv`; flags any region that
   moved and any validation message besides the known shutdown leaks. Run it after any change that shouldn't alter the

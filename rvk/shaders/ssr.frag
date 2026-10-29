@@ -11,7 +11,7 @@ layout(set = 0, binding = 3) uniform sampler2D normals;        // the motion vec
 layout(push_constant) uniform Push {
     vec4 proj;          // D3D projection: m[2][2], m[3][2], m[0][0], m[1][1]
     vec4 size;          // full target width, height, steps, longest ray (world units)
-    vec4 params;        // strength
+    vec4 params;        // strength, 1 = rays come after (rt_reflect.comp: a miss marked - its direction, minus its amount)
 } P;
 layout(location = 0) out vec4 outSsr;
 
@@ -41,10 +41,12 @@ void main()
     vec3 dx1 = ViewPos(pix + vec2(1, 0)) - p, dx0 = p - ViewPos(pix - vec2(1, 0));
     vec3 dy1 = ViewPos(pix + vec2(0, 1)) - p, dy0 = p - ViewPos(pix - vec2(0, 1));
     vec3 n = normalize(cross(abs(dx1.z) < abs(dx0.z) ? dx1 : dx0, abs(dy1.z) < abs(dy0.z) ? dy1 : dy0));
-    // A PBR surface's own shading normal where it gave one (ffp_main.glsl: octahedral, view space, w above 1.5):
-    // smooth over curved low-poly meshes, and with their normal maps' detail.
+    // A PBR surface's own shading normal where it gave one (ffp_main.glsl: octahedral, view space, w 2 .. 4):
+    // smooth over curved low-poly meshes, and with their normal maps' detail. (Other surfaces' normals, w 6 .. 8, are
+    // AMD's effects': ours keeps the depth buffer's there, as it was made with.)
     vec2 o = texelFetch(normals, ipix, 0).zw;
-    if (o.y > 1.5) {
+    if (o.y > 9.5 && o.y < 13.0) o.y -= 8.0;   // (a character's, w 10 .. 12)
+    if (o.y > 1.5 && o.y < 5.0) {
         o.y -= 3.0;
         vec3 s = vec3(o, 1.0 - abs(o.x) - abs(o.y));
         if (s.z < 0.0) s.xy = (1.0 - abs(s.yx)) * vec2(s.x >= 0.0 ? 1.0 : -1.0, s.y >= 0.0 ? 1.0 : -1.0);
@@ -112,5 +114,5 @@ void main()
             return;
         }
     }
-    outSsr = vec4(0.0);
+    outSsr = P.params.y > 0.5 ? vec4(dir, -amount) : vec4(0.0);
 }

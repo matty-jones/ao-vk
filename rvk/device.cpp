@@ -64,6 +64,39 @@ const uint32_t kFragNoCutSpirv[] = {            // no discard: a draw that never
 const uint32_t kFragGlowNoCutSpirv[] = {
 #include "ffp_glow_nocut.frag.inc"
 };
+// The same four without the ground's code (RVK_NO_GROUND, terrain.glsl): every draw but the ground's.
+const uint32_t kFragNgSpirv[] = {
+#include "ffp_ng.frag.inc"
+};
+const uint32_t kFragGlowNgSpirv[] = {
+#include "ffp_glow_ng.frag.inc"
+};
+const uint32_t kFragNoCutNgSpirv[] = {
+#include "ffp_nocut_ng.frag.inc"
+};
+const uint32_t kFragGlowNoCutNgSpirv[] = {
+#include "ffp_glow_nocut_ng.frag.inc"
+};
+// ... and without the frame lights' loop either (RVK_NO_FRAME_LIGHTS, lighting.glsl): the draws none reaches.
+const uint32_t kFragNfSpirv[] = {
+#include "ffp_nf.frag.inc"
+};
+const uint32_t kFragGlowNfSpirv[] = {
+#include "ffp_glow_nf.frag.inc"
+};
+const uint32_t kFragNoCutNfSpirv[] = {
+#include "ffp_nocut_nf.frag.inc"
+};
+const uint32_t kFragGlowNoCutNfSpirv[] = {
+#include "ffp_glow_nocut_nf.frag.inc"
+};
+// The 8-bit targets' 2D draws (the interface): the lean main() alone (RVK_LITE, RVK_LiteShader), as cut-out and not.
+const uint32_t kFragLiteSpirv[] = {
+#include "ffp_lite.frag.inc"
+};
+const uint32_t kFragLiteNoCutSpirv[] = {
+#include "ffp_lite_nocut.frag.inc"
+};
 
 // Access/stage masks to go with an image layout, for barriers.
 void LayoutUse(VkImageLayout layout, VkPipelineStageFlags2* stage, VkAccessFlags2* access)
@@ -242,6 +275,12 @@ Device::~Device()
     for (VkPipeline p : m_pipelinesHdrNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_tessPipelines) if (p) vkDestroyPipeline(m_device, p, nullptr);
     for (VkPipeline p : m_tessPipelinesNoCut) if (p) vkDestroyPipeline(m_device, p, nullptr);
+    for (VkPipeline* set : {m_groundPipelines, m_groundPipelinesHdr, m_groundPipelinesNoCut, m_groundPipelinesHdrNoCut,
+                            m_noFramePipelines, m_noFramePipelinesHdr, m_noFramePipelinesNoCut, m_noFramePipelinesHdrNoCut,
+                            m_pipelinesLite, m_pipelinesLiteNoCut})
+        for (int c = 0; c < 3; ++c) if (set[c]) vkDestroyPipeline(m_device, set[c], nullptr);
+    for (VkPipeline* set : {m_groundTessPipelines, m_groundTessPipelinesNoCut, m_noFrameTessPipelines, m_noFrameTessPipelinesNoCut})
+        for (int k = 0; k < 2; ++k) if (set[k]) vkDestroyPipeline(m_device, set[k], nullptr);
     if (m_prepassPipeline) vkDestroyPipeline(m_device, m_prepassPipeline, nullptr);
     if (m_prepassCutoutPipeline) vkDestroyPipeline(m_device, m_prepassCutoutPipeline, nullptr);
     if (m_leafPrepassPipeline) vkDestroyPipeline(m_device, m_leafPrepassPipeline, nullptr);
@@ -251,6 +290,7 @@ Device::~Device()
     DestroyDarknessResources();
     DestroyProfiler();
     DestroyParticleResources();
+    DestroyFxResources();
     DestroySkinResources();
     DestroyGrassResources();
     DestroyLeafResources();
@@ -260,6 +300,8 @@ Device::~Device()
     DestroyCloudResources();
     DestroyStaticGeometry();
     DestroyStatels();
+    DestroyHandover();
+    DestroyPortals();
     CollectGarbage();                            // (what those let go of: DestroyTexture defers - the device is idle)
     SavePipelineCache("at exit");
     if (m_pipelineCache) vkDestroyPipelineCache(m_device, m_pipelineCache, nullptr);
@@ -526,6 +568,20 @@ bool Device::CreateLogicalDevice(std::string* error)
             if (error) *error = std::string("device extension missing: ") + e;
             return false;
         }
+    // Variable rate shading (RVK_Vrs, vrs.cpp): a shading rate image as an attachment, its tiles a size the GPU takes
+    // (AMD's generator makes 8, 16 or 32).
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR rate{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+    const bool rateExt = has(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+    // Ray queries (raytrace.cpp, docs/rt-plan.md): acceleration structures of the scene, rays from any shader.
+    // RANDYVK_RAYTRACE=0 leaves them off.
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQuery{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    VkPhysicalDeviceBufferDeviceAddressFeatures address{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+    const char* rtEnv = std::getenv("RANDYVK_RAYTRACE");
+    const bool rtExt = !(rtEnv && *rtEnv == '0') && has(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+                       has(VK_KHR_RAY_QUERY_EXTENSION_NAME) && has(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    accel.pNext = &rayQuery;
+    rayQuery.pNext = &address;
 
     VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT vertexInput{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT};
@@ -534,13 +590,22 @@ bool Device::CreateLogicalDevice(std::string* error)
     VkPhysicalDeviceDescriptorIndexingFeatures descIdx{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
     VkPhysicalDeviceRobustness2FeaturesEXT rob2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
     VkPhysicalDeviceTimelineSemaphoreFeatures timeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
+    VkPhysicalDeviceShaderFloat16Int8Features half{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
+    // The driver's statistics of a compiled pipeline (registers, spills, instructions: ShaderRegisterReport).
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR exec{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
+    const bool execExt = has(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    features.pNext = &v13;
+    features.pNext = &half;
+    half.pNext = execExt ? static_cast<void*>(&exec) : static_cast<void*>(&v13);
+    exec.pNext = &v13;
     v13.pNext = &descIdx;
     descIdx.pNext = &rob2;
     rob2.pNext = &eds3;
     eds3.pNext = &vertexInput;
     vertexInput.pNext = &timeline;
+    if (rateExt) timeline.pNext = &rate;
+    if (rtExt) (rateExt ? rate.pNext : timeline.pNext) = &accel;
     vkGetPhysicalDeviceFeatures2(m_physical, &features);
     // Quad operations in fragment shaders (ffp_main.glsl: a 2x2 block of cut-out pixels stops before the lighting).
     VkPhysicalDeviceVulkan11Properties p11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES};
@@ -592,6 +657,9 @@ bool Device::CreateLogicalDevice(std::string* error)
     enDescIdx.shaderSampledImageArrayNonUniformIndexing = m_bindless ? VK_TRUE : VK_FALSE;
     enDescIdx.descriptorBindingSampledImageUpdateAfterBind = m_bindless ? VK_TRUE : VK_FALSE;
     enDescIdx.descriptorBindingPartiallyBound = m_bindless ? VK_TRUE : VK_FALSE;
+    // AMD's effects' shaders (third_party/ffx-sdk): Brixelizer indexes its arrays of buffers per instance; the SDK picks
+    // its 16-bit shaders where the GPU has half floats - both enabled where present.
+    enDescIdx.shaderStorageBufferArrayNonUniformIndexing = descIdx.shaderStorageBufferArrayNonUniformIndexing;
     VkPhysicalDeviceRobustness2FeaturesEXT enRob2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
     enRob2.nullDescriptor = m_bindless ? VK_TRUE : VK_FALSE;
     enRob2.pNext = &enEds3;
@@ -601,8 +669,64 @@ bool Device::CreateLogicalDevice(std::string* error)
     enTimeline.timelineSemaphore = timeline.timelineSemaphore;
     m_timelineSemaphores = timeline.timelineSemaphore == VK_TRUE;
     enVertexInput.pNext = &enTimeline;
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR enRate{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+    if (rateExt && rate.attachmentFragmentShadingRate && rate.pipelineFragmentShadingRate) {
+        VkPhysicalDeviceFragmentShadingRatePropertiesKHR rp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR};
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        p2.pNext = &rp;
+        vkGetPhysicalDeviceProperties2(m_physical, &p2);
+        const VkExtent2D lo = rp.minFragmentShadingRateAttachmentTexelSize, hi = rp.maxFragmentShadingRateAttachmentTexelSize;
+        m_vrsTexel = 0;
+        for (uint32_t t : {16u, 8u, 32u})
+            if (!m_vrsTexel && t >= lo.width && t <= hi.width && t >= lo.height && t <= hi.height) m_vrsTexel = t;
+        if (m_vrsTexel) {
+            enRate.pipelineFragmentShadingRate = VK_TRUE;
+            enRate.attachmentFragmentShadingRate = VK_TRUE;
+            enTimeline.pNext = &enRate;
+            extensions.push_back(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+            m_sceneRateFlag = VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+        }
+    }
+    Log("variable rate shading: %s", m_sceneRateFlag ? "yes" : "no (the GPU has no shading rate attachment of 8 .. 32)");
+    VkPhysicalDeviceRayQueryFeaturesKHR enRayQuery{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR enAccel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    VkPhysicalDeviceBufferDeviceAddressFeatures enAddress{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+    m_rayQuery = rtExt && accel.accelerationStructure && rayQuery.rayQuery && address.bufferDeviceAddress;
+    if (m_rayQuery) {
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR ap{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        p2.pNext = &ap;
+        vkGetPhysicalDeviceProperties2(m_physical, &p2);
+        m_asScratchAlign = std::max<VkDeviceSize>(ap.minAccelerationStructureScratchOffsetAlignment, 16);
+        enAccel.accelerationStructure = VK_TRUE;
+        enRayQuery.rayQuery = VK_TRUE;
+        enAddress.bufferDeviceAddress = VK_TRUE;
+        enAccel.pNext = &enRayQuery;
+        enRayQuery.pNext = &enAddress;
+        enAddress.pNext = enTimeline.pNext;      // (after the shading rate's, if any)
+        enTimeline.pNext = &enAccel;
+        for (const char* e : {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
+                              VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME})
+            extensions.push_back(e);
+    }
+    Log("ray queries: %s", m_rayQuery ? "yes"
+                           : rtExt ? "no (the GPU lacks acceleration structures, ray queries or buffer addresses)"
+                           : "no (no ray tracing extensions)");
+    VkPhysicalDeviceShaderFloat16Int8Features enHalf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
+    enHalf.shaderFloat16 = half.shaderFloat16;
+    enHalf.pNext = &enDescIdx;
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR enExec{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
+    m_shaderStats = execExt && exec.pipelineExecutableInfo;
+    if (m_shaderStats) {
+        enExec.pipelineExecutableInfo = VK_TRUE;
+        enExec.pNext = enHalf.pNext;
+        enHalf.pNext = &enExec;
+        extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+    }
+    Log("shader statistics (registers per variant): %s", m_shaderStats ? "yes" : "no (the driver doesn't report them)");
     VkPhysicalDeviceVulkan13Features enV13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-    enV13.pNext = &enDescIdx;
+    enV13.pNext = &enHalf;
     enV13.dynamicRendering = VK_TRUE;
     enV13.synchronization2 = VK_TRUE;
     enV13.shaderDemoteToHelperInvocation = VK_TRUE;     // glslc turns `discard` into OpDemoteToHelperInvocation
@@ -614,6 +738,9 @@ bool Device::CreateLogicalDevice(std::string* error)
     enabled.features.robustBufferAccess = features.features.robustBufferAccess;
     enabled.features.textureCompressionBC = features.features.textureCompressionBC;
     enabled.features.imageCubeArray = VK_TRUE;           // point light shadow maps
+    // Gathers with offsets: AMD's ambient occlusion's shaders (RVK_AoMode 1, cacao.cpp).
+    m_gatherExtended = features.features.shaderImageGatherExtended == VK_TRUE;
+    enabled.features.shaderImageGatherExtended = features.features.shaderImageGatherExtended;
     enabled.features.tessellationShader = features.features.tessellationShader;   // characters' Phong tessellation
     m_tessSupported = features.features.tessellationShader;
     // M3: a batch's indirect commands carry the record index in firstInstance (the shader's gl_InstanceIndex),
@@ -673,6 +800,8 @@ bool Device::CreateLogicalDevice(std::string* error)
     ai.pVulkanFunctions = &fns;
     if (m_memoryBudget)
         ai.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+    if (m_rayQuery)                              // (acceleration structures and their inputs by address)
+        ai.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     return Check(vmaCreateAllocator(&ai, &m_allocator), "vmaCreateAllocator", error);
 }
 
@@ -980,7 +1109,8 @@ bool Device::CreatePipelines(std::string* error)
         return false;
     if (m_bindless) {
         // (Also the tessellation stages: the native ground's cliffs' rock pushed out of their faces, ffp.tese.)
-        const VkShaderStageFlags stages = m_tessSupported ? vsfstess : vsfs;
+        // (And compute with ray tracing: the rays test a cut-out's texture at their hits - raytrace.cpp.)
+        const VkShaderStageFlags stages = (m_tessSupported ? vsfstess : vsfs) | (m_rayQuery ? VK_SHADER_STAGE_COMPUTE_BIT : 0);
         VkDescriptorSetLayoutBinding bb[2] = {
             {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kMaxBindlessImages, stages, nullptr},
             {1, VK_DESCRIPTOR_TYPE_SAMPLER, kMaxBindlessSamplers, stages, nullptr},
@@ -1027,12 +1157,24 @@ bool Device::CreatePipelines(std::string* error)
         ci.pCode = code;
         return Check(vkCreateShaderModule(m_device, &ci, nullptr, out), "vkCreateShaderModule", error);
     };
-    VkShaderModule vert, frag, fragGlow, fragNoCut, fragGlowNoCut;
-    if (!module(kVertSpirv, sizeof(kVertSpirv), &vert) || !module(kFragSpirv, sizeof(kFragSpirv), &frag) ||
-        !module(kFragGlowSpirv, sizeof(kFragGlowSpirv), &fragGlow) ||
-        !module(kFragNoCutSpirv, sizeof(kFragNoCutSpirv), &fragNoCut) ||
-        !module(kFragGlowNoCutSpirv, sizeof(kFragGlowNoCutSpirv), &fragGlowNoCut))
+    // frags[g][set][nc]: the pixel shader by its build (g: 0 without the ground's code, 1 with it, 2 without the frame
+    // lights' loop either), the target (8-bit, the HDR scene: glow) and whether it may discard (nc: no cut-out,
+    // early-Z).
+    VkShaderModule vert, frags[3][2][2];
+    if (!module(kVertSpirv, sizeof(kVertSpirv), &vert) || !module(kFragSpirv, sizeof(kFragSpirv), &frags[1][0][0]) ||
+        !module(kFragGlowSpirv, sizeof(kFragGlowSpirv), &frags[1][1][0]) ||
+        !module(kFragNoCutSpirv, sizeof(kFragNoCutSpirv), &frags[1][0][1]) ||
+        !module(kFragGlowNoCutSpirv, sizeof(kFragGlowNoCutSpirv), &frags[1][1][1]) ||
+        !module(kFragNgSpirv, sizeof(kFragNgSpirv), &frags[0][0][0]) ||
+        !module(kFragGlowNgSpirv, sizeof(kFragGlowNgSpirv), &frags[0][1][0]) ||
+        !module(kFragNoCutNgSpirv, sizeof(kFragNoCutNgSpirv), &frags[0][0][1]) ||
+        !module(kFragGlowNoCutNgSpirv, sizeof(kFragGlowNoCutNgSpirv), &frags[0][1][1]) ||
+        !module(kFragNfSpirv, sizeof(kFragNfSpirv), &frags[2][0][0]) ||
+        !module(kFragGlowNfSpirv, sizeof(kFragGlowNfSpirv), &frags[2][1][0]) ||
+        !module(kFragNoCutNfSpirv, sizeof(kFragNoCutNfSpirv), &frags[2][0][1]) ||
+        !module(kFragGlowNoCutNfSpirv, sizeof(kFragGlowNoCutNfSpirv), &frags[2][1][1]))
         return false;
+    const VkShaderModule frag = frags[0][0][0], fragGlow = frags[0][1][0];   // (the leaves': never the ground)
 
     VkPipelineShaderStageCreateInfo stages[2] = {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vert, "main", nullptr},
@@ -1073,22 +1215,37 @@ bool Device::CreatePipelines(std::string* error)
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachmentFormats = colorFormats;
     rendering.depthAttachmentFormat = kDepthFormat;
+    // RVK_Vrs: the scene shader shades at the shading rate image's rate (REPLACE) where the scene has one (vrs.cpp) -
+    // its no-discard variants: a draw that cuts out (leaves, fences, grilles) shades every pixel (KEEP), or its holes
+    // were cut 2 x 2 at a time - and two-pass foliage's core and edge layers, each cut at its own alpha, showed squares
+    // of the tiles' size through dense leaves (user, 2026-10-21).
+    VkPipelineFragmentShadingRateStateCreateInfoKHR rateState{
+        VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR};
+    rateState.fragmentSize = {1, 1};
+    rateState.combinerOps[0] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+    rateState.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
+    if (m_sceneRateFlag) rendering.pNext = &rateState;
 
     static const VkPrimitiveTopology kClassTopology[3] = {VK_PRIMITIVE_TOPOLOGY_POINT_LIST,
                                                           VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
                                                           VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
     bool ok = true;
     // One set for the 8-bit targets, one for the HDR scene (float); each also as a no-discard variant (early-Z for
-    // draws that never cut out).
+    // draws that never cut out); each without the ground's code (g 0), with it (g 1: the ground's draws), and without
+    // the frame lights' loop (g 2: the draws none reaches).
+    static const char* const kBuildName[3] = {"general", "ground", "no lamps"};
+    for (int g = 0; g < 3 && ok; ++g)
     for (int set = 0; set < 2 && ok; ++set)
     for (int nc = 0; nc < 2 && ok; ++nc)
     for (int c = 0; c < 3 && ok; ++c) {
         colorFormats[0] = set ? GetFormatInfo(Format::RGBA16F).vk : kColorFormat;
         rendering.colorAttachmentCount = cb.attachmentCount = set ? 5 : 1;
-        stages[1].module = nc ? (set ? fragGlowNoCut : fragNoCut) : (set ? fragGlow : frag);
+        rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+        stages[1].module = frags[g][set][nc];
         VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         ia.topology = kClassTopology[c];
         VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        ci.flags = m_sceneRateFlag;
         ci.pNext = &rendering;
         ci.stageCount = 2;
         ci.pStages = stages;
@@ -1100,11 +1257,52 @@ bool Device::CreatePipelines(std::string* error)
         ci.pColorBlendState = &cb;
         ci.pDynamicState = &ds;
         ci.layout = m_pipelineLayout;
-        VkPipeline* dst = set ? (nc ? &m_pipelinesHdrNoCut[c] : &m_pipelinesHdr[c])
-                              : (nc ? &m_pipelinesNoCut[c] : &m_pipelines[c]);
+        VkPipeline* const byBuild[3][2][2] = {
+            {{&m_pipelines[c], &m_pipelinesNoCut[c]}, {&m_pipelinesHdr[c], &m_pipelinesHdrNoCut[c]}},
+            {{&m_groundPipelines[c], &m_groundPipelinesNoCut[c]}, {&m_groundPipelinesHdr[c], &m_groundPipelinesHdrNoCut[c]}},
+            {{&m_noFramePipelines[c], &m_noFramePipelinesNoCut[c]}, {&m_noFramePipelinesHdr[c], &m_noFramePipelinesHdrNoCut[c]}}};
+        VkPipeline* dst = byBuild[g][set][nc];
+        const bool stats = m_shaderStats && c == 2;   // (the points' and lines' builds share the triangles' shaders)
+        if (stats) ci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
         ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                    "vkCreateGraphicsPipelines", error);
+        if (ok && stats)
+            ShaderRegisterReport(*dst, kBuildName[g], set ? "HDR" : "8-bit", nc ? "no cut" : "cut-out");
     }
+    // The interface's lean shader (RVK_LiteShader, m_drawLite): the 8-bit targets' set again with ffp_lite.frag.
+    VkShaderModule lite[2] = {};
+    ok = ok && module(kFragLiteSpirv, sizeof(kFragLiteSpirv), &lite[0]) &&
+         module(kFragLiteNoCutSpirv, sizeof(kFragLiteNoCutSpirv), &lite[1]);
+    colorFormats[0] = kColorFormat;
+    rendering.colorAttachmentCount = cb.attachmentCount = 1;
+    for (int nc = 0; nc < 2 && ok; ++nc)
+    for (int c = 0; c < 3 && ok; ++c) {
+        rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+        stages[1].module = lite[nc];
+        VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        ia.topology = kClassTopology[c];
+        VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        ci.flags = m_sceneRateFlag;
+        ci.pNext = &rendering;
+        ci.stageCount = 2;
+        ci.pStages = stages;
+        ci.pInputAssemblyState = &ia;
+        ci.pViewportState = &vp;
+        ci.pRasterizationState = &rs;
+        ci.pMultisampleState = &ms;
+        ci.pDepthStencilState = &dss;
+        ci.pColorBlendState = &cb;
+        ci.pDynamicState = &ds;
+        ci.layout = m_pipelineLayout;
+        const bool stats = m_shaderStats && c == 2;
+        if (stats) ci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+        VkPipeline* dst = nc ? &m_pipelinesLiteNoCut[c] : &m_pipelinesLite[c];
+        ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst), "lean pipeline", error);
+        if (ok && stats) ShaderRegisterReport(*dst, "interface (lean)", "8-bit", nc ? "no cut" : "cut-out");
+    }
+    for (VkShaderModule m : lite)
+        if (m) vkDestroyShaderModule(m_device, m, nullptr);
+    stages[1].module = frags[0][0][0];
     // Characters' Phong tessellation: triangles as 3-point patches, through ffp.tesc / ffp.tese (both targets).
     VkShaderModule tesc = VK_NULL_HANDLE, tese = VK_NULL_HANDLE;
     if (ok && m_tessSupported && module(kTescSpirv, sizeof(kTescSpirv), &tesc) && module(kTeseSpirv, sizeof(kTeseSpirv), &tese)) {
@@ -1120,14 +1318,18 @@ bool Device::CreatePipelines(std::string* error)
         VkPipelineTessellationStateCreateInfo ts{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
         ts.pNext = &origin;
         ts.patchControlPoints = 3;
+        // (The characters take g 0 or 2, the native ground g 1.)
+        for (int g = 0; g < 3 && ok; ++g)
         for (int set = 0; set < 2 && ok; ++set)
         for (int nc = 0; nc < 2 && ok; ++nc) {
             colorFormats[0] = set ? GetFormatInfo(Format::RGBA16F).vk : kColorFormat;
             rendering.colorAttachmentCount = cb.attachmentCount = set ? 5 : 1;
-            tstages[3].module = nc ? (set ? fragGlowNoCut : fragNoCut) : (set ? fragGlow : frag);
+            rateState.combinerOps[1] = nc ? VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR : VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+            tstages[3].module = frags[g][set][nc];
             VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
             ia.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
             VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+            ci.flags = m_sceneRateFlag;
             ci.pNext = &rendering;
             ci.stageCount = 4;
             ci.pStages = tstages;
@@ -1140,14 +1342,23 @@ bool Device::CreatePipelines(std::string* error)
             ci.pColorBlendState = &cb;
             ci.pDynamicState = &ds;
             ci.layout = m_pipelineLayout;
-            VkPipeline* dst = nc ? &m_tessPipelinesNoCut[set] : &m_tessPipelines[set];
+            VkPipeline* const byBuild[3][2] = {{&m_tessPipelines[set], &m_tessPipelinesNoCut[set]},
+                                               {&m_groundTessPipelines[set], &m_groundTessPipelinesNoCut[set]},
+                                               {&m_noFrameTessPipelines[set], &m_noFrameTessPipelinesNoCut[set]}};
+            VkPipeline* dst = byBuild[g][nc];
+            if (m_shaderStats) ci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
             ok = Check(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, dst),
                        "tessellation pipeline", error);
+            if (ok && m_shaderStats)
+                ShaderRegisterReport(*dst, kBuildName[g], set ? "HDR, tessellated" : "8-bit, tessellated",
+                                     nc ? "no cut" : "cut-out");
         }
     }
     if (tesc) vkDestroyShaderModule(m_device, tesc, nullptr);
     if (tese) vkDestroyShaderModule(m_device, tese, nullptr);
-    // A canopy's leaves (leaves.cpp): triangles through leaf.vert, cut out (both targets). Not fatal.
+    // A canopy's leaves (leaves.cpp): triangles through leaf.vert, cut out (both targets). Not fatal. Every pixel shaded
+    // (RVK_Vrs), as the other cut-out draws: their sprigs showed squares as the camera turned (user, 2026-10-21).
+    rateState.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
     VkShaderModule leafVert = VK_NULL_HANDLE;
     if (ok && module(kLeafVertSpirv, sizeof(kLeafVertSpirv), &leafVert)) {
         VkPipelineShaderStageCreateInfo lstages[2] = {stages[0], stages[1]};
@@ -1159,6 +1370,7 @@ bool Device::CreatePipelines(std::string* error)
             VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
             ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+            ci.flags = m_sceneRateFlag;
             ci.pNext = &rendering;
             ci.stageCount = 2;
             ci.pStages = lstages;
@@ -1187,13 +1399,12 @@ bool Device::CreatePipelines(std::string* error)
     if (leafVert)
         vkDestroyShaderModule(m_device, leafVert, nullptr);
     vkDestroyShaderModule(m_device, vert, nullptr);
-    vkDestroyShaderModule(m_device, fragGlow, nullptr);
-    vkDestroyShaderModule(m_device, frag, nullptr);
-    vkDestroyShaderModule(m_device, fragGlowNoCut, nullptr);
-    vkDestroyShaderModule(m_device, fragNoCut, nullptr);
+    for (auto& byGround : frags)
+        for (auto& bySet : byGround)
+            for (VkShaderModule m : bySet) vkDestroyShaderModule(m_device, m, nullptr);
     if (!ok || !CreateShadowResources(error) || !CreatePointShadowResources(error) || !CreateHdrResources(error) ||
         !CreateDarknessResources(error) ||
-        !CreateParticleResources(error) || !CreateSkinResources(error))
+        !CreateParticleResources(error) || !CreateFxResources(error) || !CreateSkinResources(error))
         return false;
     CreateGrassResources(error);                 // not fatal: without it the ground grass is simply unavailable
     {
@@ -1254,8 +1465,8 @@ bool Device::CreateFrames(std::string* error)
         VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         ai.commandPool = m_pool;
         ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        ai.commandBufferCount = 5;
-        VkCommandBuffer cmds[5];
+        ai.commandBufferCount = 8;
+        VkCommandBuffer cmds[8];
         if (!Check(vkAllocateCommandBuffers(m_device, &ai, cmds), "vkAllocateCommandBuffers", error))
             return false;
         f.upload = cmds[0];
@@ -1263,6 +1474,9 @@ bool Device::CreateFrames(std::string* error)
         f.prepass = cmds[2];                     // the depth pre-pass (prepass.cpp)
         f.mainB = cmds[3];
         f.clouds = cmds[4];                      // the clouds' own pass (clouds.cpp)
+        f.rays = cmds[5];                        // the ray-traced sun shadows (raytrace.cpp)
+        f.prepass2 = cmds[6];                    // a second pre-pass segment (prepass.cpp PrepassContinue)
+        f.mainC = cmds[7];
         VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -1368,6 +1582,8 @@ void Device::WaitFrame(Frame& f, const char* what)
 
 void Device::CollectGarbage()
 {
+    if (m_rt)
+        RtCollect();
     auto textures = std::remove_if(m_deadTextures.begin(), m_deadTextures.end(), [&](auto& e) {
         if (e.first > m_completed) return false;
         DestroyTextureNow(e.second);
@@ -1616,6 +1832,8 @@ void Device::EndRendering()
 void Device::BeginRenderingOn(Texture* target)
 {
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
+    if (target == m_scene && !m_glowCleared)
+        RenderVrsImage(cmd);                     // (RVK_Vrs: the scene's first rendering this frame)
     EnsureDepth(target->m_width, target->m_height);
     Transition(cmd, target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     if (m_depthLayout != VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) {
@@ -1657,6 +1875,13 @@ void Device::BeginRenderingOn(Texture* target)
     ri.colorAttachmentCount = colorCount;
     ri.pColorAttachments = colors;
     ri.pDepthAttachment = &depth;
+    // RVK_Vrs: the shading rate image (made before the scene's first rendering of the frame, above).
+    VkRenderingFragmentShadingRateAttachmentInfoKHR rate{VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR};
+    if (target == m_scene && (rate.imageView = VrsAttachment())) {
+        rate.imageLayout = VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
+        rate.shadingRateAttachmentTexelSize = {m_vrsTexel, m_vrsTexel};
+        ri.pNext = &rate;
+    }
     vkCmdBeginRendering(cmd, &ri);
     m_rendering = true;
     if (target == m_scene)
@@ -1678,6 +1903,8 @@ void Device::SetRenderTarget(Texture* target)
         target = m_uiLayer;                      // the interface is being drawn into its layer
     else if (m_overlayTopActive && target == m_main && m_overlayTop)
         target = m_overlayTop;                  // late overlays, including the cursor
+    else if (m_overlayUnder && target == m_main && m_overlayLabels)
+        target = m_overlayLabels;               // frame generation: 2D under the interface, until it starts
     if (!target->m_renderTarget || !target->m_image) {
         Log("SetRenderTarget: not a (usable) render target\n");
         return;
@@ -1697,6 +1924,7 @@ void Device::SetRenderTarget(Texture* target)
 
 void Device::BeginFrame()
 {
+    PortalCaptureFrame();                        // (shop portals: textures read back, a room's capture saved; outside a frame)
     HeapCheck("the frame's start", 1);
     if (!m_heapBroken && HeapCheckLevel() > 0) m_heapLastOk = "the frame's start";
     // Indoors (a room's playfield: rooms drawn, no terrain) for 10 frames running, or out again: no weather in there
@@ -1880,6 +2108,7 @@ void Device::BeginFrame()
     m_profileDraws += m_frameDraw;               // last frame's batching (the profile's log)
     m_frameDraw = 0;
     m_prepassEndedThisFrame = false;
+    m_waterEndedPrepass = false;
     m_grassDrawnThisFrame = false;
     m_profileGroupCalls += m_groupCalls;
     m_profileGroupDraws += m_groupDraws;
@@ -1903,6 +2132,7 @@ void Device::BeginFrame()
     m_particleOrphanTrigger = "none";
     m_particleSaw3D = false;
     SimulateParticles(f.main);                   // last frame's effects; reads last frame's world camera
+    SimulateFx(f.main);                          // our own effects (fx.cpp): last frame's announcements
     ProfileMark("particle simulation");
     m_inFrame = true;
     BeginScene();
@@ -1952,9 +2182,15 @@ void Device::EndFrame()
         m_particleOrphanTrigger = "end of the frame";   // no interface draw after the 3D
         DrawOrphanParticles();
     }
-    if (m_overlayLabelsActive) OverlayLabelsEnd();
+    if (m_overlayUnder)
+        OverlayUnderEnd();
+    else if (m_overlayLabelsActive)
+        OverlayLabelsEnd();
     EndScene();                                  // if the interface didn't end it (no interface drawn)
     m_framesWithout3D = m_sceneSaw3D ? 0u : std::min(m_framesWithout3D + 1u, 1000u);   // (RenderScaleNow)
+    m_framesWithout3DShared.store(m_framesWithout3D, std::memory_order_relaxed);
+    PortalDiagFrame();                           // (shop portals' phase 0: portal_diag.cpp)
+    PortalStreetDiagFrame();
     Frame& f = m_frames[m_frameIndex];
     m_renderEndCause = kEndScene;
     EndRendering();
@@ -2009,6 +2245,9 @@ void Device::EndFrame()
         if (r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_OUT_OF_DATE_KHR)
             m_swapchainStale = true;
     }
+    // (Its parts too: a session that slowed to 15 fps after an hour had all the time here, with frame generation -
+    // which of the three grew tells the swapchain's waits from the queue's (#20).)
+    ProfileCpuAdd("  of which acquire", presentStart);
     if (present) {
         VkImage dst = m_swapImages[imageIndex];
         ImageBarrier(f.main, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -2029,7 +2268,7 @@ void Device::EndFrame()
         FgBeforePresent(f.main);                 // (frame generation: whether to generate, the interface's layer)
     vkEndCommandBuffer(f.main);
 
-    VkCommandBuffer cmds[5];
+    VkCommandBuffer cmds[8];
     uint32_t cmdCount = 0;
     if (f.uploadsRecorded) {
         FinishSkinUploads(f.upload);
@@ -2049,7 +2288,9 @@ void Device::EndFrame()
         si.pSignalSemaphores = &m_renderDone[imageIndex];
     }
     f.serial = ++m_submitted;
+    const double submitStart = ProfileCpu();
     vkQueueSubmit(m_queue, 1, &si, f.fence);
+    ProfileCpuAdd("  of which submit", submitStart);
     f.uploadsRecorded = false;
     FrameCommandsSubmitted(f);
     if (present) {
@@ -2059,7 +2300,9 @@ void Device::EndFrame()
         pi.swapchainCount = 1;
         pi.pSwapchains = &m_swapchain;
         pi.pImageIndices = &imageIndex;
+        const double queueStart = ProfileCpu();
         VkResult r = m_fg ? FgPresent(&pi) : vkQueuePresentKHR(m_queue, &pi);
+        ProfileCpuAdd("  of which present", queueStart);
         if (r == VK_SUBOPTIMAL_KHR || r == VK_ERROR_OUT_OF_DATE_KHR)
             m_swapchainStale = true;
     }
@@ -2079,7 +2322,7 @@ void Device::SubmitAndWait()
     m_renderEndCause = kEndFlush;
     EndRendering();
     vkEndCommandBuffer(f.main);
-    VkCommandBuffer cmds[5];
+    VkCommandBuffer cmds[8];
     uint32_t n = 0;
     if (f.uploadsRecorded) {
         FinishSkinUploads(f.upload);

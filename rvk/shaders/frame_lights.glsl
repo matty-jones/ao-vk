@@ -109,6 +109,16 @@ layout(set = 0, binding = FL_BINDING, std140) uniform FrameLights {
     vec4 cond;                  // the world's conditions (rvk rvk.h Conditions): x the clouds' night; y, z, w unused
     vec4 screen;                // x, y the scene's pixels per back-buffer pixel (rvk RVK_RenderScale: the game's viewport is
                                 // in back-buffer pixels, the motion vectors in the scene's); z, w unused
+    vec4 rtShadow;              // ray-traced sun shadows (rvk raytrace.cpp, RVK_RtShadow): x the rays' mask (sun
+                                // visibility, view depth) - its bindless image + 1 | sampler << 20 (the float's bits; 0
+                                // none); y, z the world camera's projection m[2][2], m[3][2] (a fragment's view depth)
+    vec4 volume2;               // the volumetric light, more (volume.frag): x the lamps' light in the air (RVK_VolLamps;
+                                // 0 none); y a lamp's share of it (RVK_PtLight over the strength it lights with:
+                                // below 1 in rooms); z, w unused
+    vec4 foliage;               // plants' light (docs/sss-plan.md): x crowns' ambient from above (RVK_CrownSky), y the
+                                // sunlight through crowns by their depth (RVK_CrownDepth); z, w unused
+    vec4 rigSky;                // the light rig (rvk light_rig.cpp): rgb the sky's light the ground's lightmap holds,
+                                // which lit things take too (by how far they face up); w unused
     Light lights[64];
 } FL;
 

@@ -46,7 +46,11 @@ Device::ArenaChunk* Device::ArenaPlace(VkDeviceSize bytes, VkDeviceSize align, V
         VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bi.size = size;
         bi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |   // retained indices too
-                   (casters ? 0 : VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+                   (casters ? 0 : VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);   // (RVK_GiMode 1 reads it: brixelizer.cpp)
+        if (!casters && m_rayQuery)              // (the ray tracing's meshes are built from it: raytrace.cpp)
+            bi.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
         VmaAllocationCreateInfo ac{};
         VmaAllocationInfo info{};
         if (casters) {                           // written by the CPU once per caster, read by the shadow passes
@@ -73,8 +77,13 @@ Device::ArenaChunk* Device::ArenaPlace(VkDeviceSize bytes, VkDeviceSize align, V
 // the GPU is drawing.
 void Device::ArenaFree(ArenaChunk* chunk, VkDeviceSize offset, VkDeviceSize bytes)
 {
-    if (chunk)
-        m_deadArenaSlots.push_back({DeathTag(), chunk, offset, bytes});
+    if (!chunk)
+        return;
+    m_deadArenaSlots.push_back({DeathTag(), chunk, offset, bytes});
+    if (m_brix)                                  // (its distance field's instances made from the slot go now)
+        BrixForgetSlot(chunk->buffer, offset);
+    if (m_rt)                                    // (... and the ray tracing's meshes)
+        RtForgetSlot(chunk->buffer, offset);
 }
 
 void Device::CollectArenaSlots()
@@ -160,6 +169,8 @@ void Device::BeginStaticFrame()
 
 void Device::DestroyStaticGeometry()
 {
+    DestroyBrix();                               // (its instances read the arena)
+    DestroyRt();
     for (auto& c : m_staticArena)
         if (c->buffer) vmaDestroyBuffer(m_allocator, c->buffer, c->allocation);
     m_staticArena.clear();
@@ -184,6 +195,7 @@ void Device::DrawShared(uint32_t primitive, uint32_t fvf, const std::shared_ptr<
         VkDeviceSize base = 0;
         m_drawStaticBuffer = StaticBufferFor(data, &base, stride, &m_drawStaticSerial);
         m_drawStaticOffset = base + byteOffset;
+        m_drawStaticSlot = base;
     }
     Draw(primitive, fvf, data->data() + byteOffset, vertexCount, indices, indexCount);
     m_drawStaticBuffer = VK_NULL_HANDLE;
@@ -203,6 +215,7 @@ void Device::DrawSharedIndexed(uint32_t primitive, uint32_t fvf, const std::shar
         VkDeviceSize base = 0;
         m_drawStaticBuffer = StaticBufferFor(data, &base, stride, &m_drawStaticSerial);
         m_drawStaticOffset = base + byteOffset;
+        m_drawStaticSlot = base;
         if (m_drawStaticBuffer) {
             uint64_t serial = 0;
             VkDeviceSize indexBase = 0;
@@ -259,6 +272,7 @@ void Device::DrawMesh(uint32_t id)
         s.indexEntry->lastFrame = m_frameNumber;
         m_drawStaticBuffer = s.vb;
         m_drawStaticOffset = s.vbOffset;
+        m_drawStaticSlot = s.vbOffset - s.byteOffset;
         m_drawStaticSerial = s.serial;
         m_drawStaticIndexBuffer = s.ib;
         m_drawStaticIndexOffset = s.ibOffset;
@@ -279,6 +293,7 @@ void Device::DrawMesh(uint32_t id)
         VkDeviceSize base = 0;
         m_drawStaticBuffer = StaticBufferFor(s.vertices, &base, stride, &m_drawStaticSerial);
         m_drawStaticOffset = base + s.byteOffset;
+        m_drawStaticSlot = base;
         if (m_drawStaticBuffer) {
             uint64_t serial = 0;
             VkDeviceSize indexBase = 0;

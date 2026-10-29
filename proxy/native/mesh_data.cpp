@@ -26,6 +26,7 @@
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
+#include <unordered_map>
 #include <utility>
 
 namespace rnative::meshdata {
@@ -334,8 +335,11 @@ void AddRef(void* r) { orig::RResource_t_AddRefRResource(r); }
 void Release(void* r) { orig::RResource_t_ReleaseRResource(r); }
 uint32_t BufferFlags(void* m) { return (Field<uint8_t>(m, kSystemOnly) & 1) ? 1 : 3; }
 
+std::unordered_map<const void*, uint32_t> g_tags;   // SimpleMesh -> tag (SetTag)
+
 void InitMesh(void* m)
 {
+    if (!g_tags.empty()) g_tags.erase(m);
     S().construct(m, nullptr);
     Field<int32_t>(m, kMinusOne) = -1;
     Field<uint16_t>(m, kExtraCount) = 0;
@@ -361,6 +365,11 @@ void* __fastcall MeshConstruct(void* m, void*, void* material, void* triList, ui
 
 void* __fastcall MeshCopy(void* m, void*, void* from)   // FUN_1004e56f: shares the data and material
 {
+    if (!g_tags.empty()) {
+        auto it = g_tags.find(from);
+        if (it != g_tags.end()) g_tags[m] = it->second;
+        else g_tags.erase(m);
+    }
     S().construct(m, nullptr);
     SetVtable(m, kSimpleMeshVtable);
     Field<int32_t>(m, kMinusOne) = Field<int32_t>(from, kMinusOne);
@@ -393,6 +402,7 @@ void* __fastcall MeshCopy(void* m, void*, void* from)   // FUN_1004e56f: shares 
 
 void __fastcall MeshDestroy(void* m)                  // FUN_1004e689
 {
+    if (!g_tags.empty()) g_tags.erase(m);
     SetVtable(m, kSimpleMeshVtable);
     if (void* mat = Field<void*>(m, kMaterial)) Release(mat);
     if (void* d = Data(m)) Release(d);
@@ -949,6 +959,19 @@ void* __cdecl TriangleTable2() { return reinterpret_cast<uint8_t*>(g_orig) + 0x8
 void* __fastcall VisualDataSimpleMeshes(void* self, void*) { return static_cast<uint8_t*>(self) + 0x4C; }
 
 }  // namespace
+
+void SetTag(const void* mesh, uint32_t tag)
+{
+    if (tag) g_tags[mesh] = tag;
+    else g_tags.erase(mesh);
+}
+
+uint32_t Tag(const void* mesh)
+{
+    if (g_tags.empty()) return 0;
+    auto it = g_tags.find(mesh);
+    return it == g_tags.end() ? 0 : it->second;
+}
 
 void* MakePrivate(void* data, bool systemOnly) { return TriMeshDataPrivate(data, nullptr, systemOnly ? 1 : 0); }
 

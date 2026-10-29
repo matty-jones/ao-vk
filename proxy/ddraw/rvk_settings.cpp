@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <vector>
@@ -46,10 +47,19 @@ Setting g_settings[] = {
     // name               label                                                     section             type    min    max    step   default env                        value parent           choices
     {"RVK_Enhance",    "All enhancements (Ctrl+Shift+E)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_Prepass",    "Depth pre-pass", "General", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_LiteShader", "The interface drawn with a lean shader of its own (the same picture, far less GPU time)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PrepassEq",  "Depth pre-pass: what it covers shaded only where it is seen", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
+    {"RVK_PrepassMore", "Depth pre-pass: a second stretch after the water's copy of the scene", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
     {"RVK_WinScale", "Window size (%) - release to apply", "General", Int, 50, 200, 5, 100, nullptr, 0},
     {"RVK_HudScale", "HUD size (%)", "General", Int, 50, 200, 5, 100, nullptr, 0},
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
+    {"RVK_ZoneFade", "Zone changes: the last view stays up and fades into the new zone once it has loaded (off: the blank wait)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_ZoneHoldMax", "Zone changes: the longest the new zone stays hidden once it draws (seconds)", "General", Float, 0.5f, 5, 0.1f, 1.5f, nullptr, 0, "RVK_ZoneFade"},
+    {"RVK_Portals", "Shops' insides seen through their doors (once you have been in one of the kind)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_PortalDist", "Shops' insides through their doors: drawn within this distance", "General", Float, 10, 200, 5, 60, nullptr, 0, "RVK_Portals"},
+    {"RVK_PortalDim", "Shops' insides through their doors: their brightness by day (1 = as inside)", "General", Float, 0, 1, 0.05f, 0.7f, nullptr, 0, "RVK_Portals"},
+    {"RVK_StreetView", "The street seen from inside a shop through its open door (once you have stood at that door outside)", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Portals"},
+    {"RVK_StreetNow", "The street seen from inside a shop: lit for the hour it is now (off: as when it was recorded)", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_StreetView"},
     {"RVK_PerfHud", "Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's, client memory and VRAM", "General", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_AlienMap", "AI missions' PF map: rooms shown black on green (the game's is black on black)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_DetailRange", "How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws)", "General", Float, 1, 4, 0.25f, 2, nullptr, 0},
@@ -64,6 +74,8 @@ Setting g_settings[] = {
     {"RVK_LeafLightOn","Sunlight through leaves",                                  "Lighting",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_LeafLight",  "Strength",                                                 "Lighting",         Float, 0.25f, 2, 0.25f, 1, nullptr, 0, "RVK_LeafLightOn"},
     {"RVK_CrownShade", "Tree crowns lit as one rounded mass (darker inside, each tree's colour its own)", "Lighting", Float, 0, 1, 0.1f, 1, nullptr, 0},
+    {"RVK_CrownSky",   "Tree crowns lit by the sky from above (brighter tops, darker undersides)", "Lighting", Float, 0, 1, 0.1f, 1, nullptr, 0},
+    {"RVK_CrownDepth", "Sunlight through tree crowns fades with their depth (bright thin rims, dark middles)", "Lighting", Float, 0, 1, 0.1f, 1, nullptr, 0, "RVK_LeafLightOn"},
     {"RVK_PtLight", "Lamp and fire brightness", "Lighting",         Float, 0.25f, 2, 0.05f, 0.25f, nullptr, 0},
     {"RVK_CharLight", "Character light brightness", "Lighting",  Float, 0.1f, 2, 0.05f, 0.25f, nullptr, 0},
     {"RVK_TessOn", "Tessellation", "Lighting",         Bool,  0, 1, 1, 1, nullptr, 0},
@@ -73,6 +85,8 @@ Setting g_settings[] = {
     {"RVK_Aniso", "Texture filtering (anisotropic; 1 = off)", "Lighting",         Choice, 1, 16, 1, 16, "RANDYVK_ANISOTROPY", 0, nullptr, "1 2 4 8 16"},
 
     {"RVK_HillShade",   "The terrain's shade from a low sun (valleys under mountains)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_LightRig",    "One light for day and night (off: the old night lighting)", "Lighting", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_Metering",    "Camera metering: a view brighter than the land (a sunset sky) darkens the picture, as a camera does (0 = off)", "Lighting", Float, 0, 2, 0.1f, 0.5f, nullptr, 0, "RVK_LightRig"},
     {"RVK_BumpOn", "Generated bump maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Bump", "Strength", "Materials",         Float, 0.25f, 4, 0.25f, 0.25f, "RANDYVK_BUMP", 0, "RVK_BumpOn"},
     {"RVK_NormalMaps", "Normal maps", "Materials",         Bool,  0, 1, 1, 1, nullptr, 0},
@@ -88,6 +102,7 @@ Setting g_settings[] = {
     {"RVK_PbrGlow", "Emissive map brightness", "Materials", Float, 0, 8, 0.25f, 1, nullptr, 0, "RVK_Pbr"},
     {"RVK_PbrDebug",   "Debug view (Ctrl+Shift+K)", "Debug", Choice, 0, 11, 1, 0, nullptr, 0, "RVK_Pbr", "0 1 2 3 4 5 6 7 8 9 10 11"},
     {"RVK_Albedo", "Enhanced textures", "Materials",     Bool,  0, 1, 1, 1, nullptr, 0},
+    {"RVK_LiveMeshes", "Meshes with a texture of their own and live edits from the ao-assets workbench", "Materials", Bool, 0, 1, 1, 1, nullptr, 0},
 
     {"RVK_GroundOn", "Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_GroundOne",  "Ground drawn by ao-vk: in one pass - its texture and its light together (off: the game's two passes, the same look, slower)", "Terrain", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_GroundOn"},
@@ -154,6 +169,7 @@ Setting g_settings[] = {
     {"RVK_WaterOn", "New water", "Water",    Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_WaterStyle", "Look (game-like to realistic)",  "Water",     Float, 0, 1, 0.05f, 0.5f, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterQual",  "Quality (1 low, 2 medium, 3 high)",                        "Water",     Int,   1, 3, 1, 2, nullptr, 0, "RVK_WaterOn"},
+    {"RVK_WaterMesh",  "Surface from the game's own triangles (off: the older grid)", "Water", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterWaves", "Wave height",                                              "Water",     Float, 0, 3, 0.1f, 0.3f, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterRipple","Ripples",                                                  "Water",     Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_WaterOn"},
     {"RVK_WaterSwim",  "Wake strength (characters in the water)",                  "Water",     Float, 0, 3, 0.1f, 2, nullptr, 0, "RVK_WaterOn"},
@@ -226,6 +242,7 @@ Setting g_settings[] = {
     {"RVK_CloudBright", "Clouds: how light",                                       "Sky",     Float, 0.25f, 3, 0.05f, 0.5f, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_CloudNight",  "Clouds: how light at night (x the above)",                 "Sky",     Float, 0.25f, 2, 0.05f, 0.4f, nullptr, 0, "RVK_CloudsOn"},
     {"RVK_ShadowMem",   "Shadows of things out of view: what stood in view and stands still keeps casting", "Shadows", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_SunShadow"},
+    {"RVK_RtShadow",    "Sun shadows ray traced: soft, exact shadows of the static world (characters and plants: the shadow map as before; GPUs with ray tracing only)", "Shadows", Bool, 0, 1, 1, 0, nullptr, 0, "RVK_SunShadow"},
     {"RVK_StaticShad",  "Shadows of the playfield's placed objects from its own list - rocks, walls, trees, seen or not (ao-assets statels): 0 off, 1 once their placement is confirmed, 2 always", "Shadows", Int, 0, 2, 1, 1, nullptr, 0, "RVK_SunShadow"},
     {"RVK_ShadowView",  "Debug: show the sun shadow map's light (white lit, dark shadowed; tint = cascade)", "Debug", Bool, 0, 1, 1, 0, nullptr, 0},
     {"RVK_SceneProf",   "Debug: the scene's GPU time and overdraw by kind of draw in the gpu ms log (costs a little; console sceneprof 1)", "Debug", Bool, 0, 1, 1, 0, "RANDYVK_SCENE_PROFILE", 0},
@@ -294,6 +311,7 @@ Setting g_settings[] = {
     {"RVK_PtRes",      "Resolution (per face)",                 "Shadows",          Choice, 256, 2048, 1, 512, nullptr, 0, "RVK_PtOn", "256 512 1024 2048"},
     {"RVK_PtStrength", "Darkness", "Shadows",          Float, 0, 1, 0.05f, 1, "RANDYVK_POINT_SHADOW_STRENGTH", 0, "RVK_PtOn"},
     {"RVK_PtDay",      "Strength in daylight (fraction)",                          "Shadows",          Float, 0, 1, 0.05f, 1, "RANDYVK_POINT_SHADOW_DAY", 0, "RVK_PtOn"},
+    {"RVK_OwnShadow",  "A character's own light (a lamp it wears) casts the character's shadow", "Shadows", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_PtOn"},
 
     {"RVK_Hdr", "Off-screen scene for every effect (0: none - the game's own drawing)", "Effects",  Bool,  0, 1, 1, 1, "RANDYVK_HDR", 0},
     {"RVK_Knee", "Tone mapping knee (1 = only clip)", "Tone mapping",  Float, 0.5f, 1, 0.05f, 0.85f, "RANDYVK_TONEMAP_KNEE", 0, "RVK_Hdr"},
@@ -313,14 +331,17 @@ Setting g_settings[] = {
     {"RVK_AoOn", "Ambient occlusion", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Ao", "Strength", "Effects",  Float, 0.25f, 3, 0.25f, 1, "RANDYVK_AO", 0, "RVK_AoOn"},
     {"RVK_AoRadius", "Radius (world units)", "Effects",  Float, 0.25f, 4, 0.25f, 1, "RANDYVK_AO_RADIUS", 0, "RVK_AoOn"},
+    {"RVK_AoMode", "Ambient occlusion: whose (0 = ours, 1 = AMD's FidelityFX CACAO, 2 = ray traced: GPUs with ray tracing only)", "Effects", Choice, 0, 2, 1, 0, nullptr, 0, "RVK_AoOn", "0 1 2"},
     {"RVK_GiOn", "Indirect light (bounce light from the lit scene)", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Gi", "Strength", "Effects",  Float, 0.25f, 3, 0.25f, 1, nullptr, 0, "RVK_GiOn"},
     {"RVK_GiRadius", "Reach (world units)", "Effects",  Float, 1, 12, 0.5f, 4, nullptr, 0, "RVK_GiOn"},
+    {"RVK_GiMode", "Indirect light: whose (0 = ours, 1 = AMD's FidelityFX Brixelizer GI)", "Effects", Choice, 0, 1, 1, 0, nullptr, 0, "RVK_GiOn", "0 1"},
     {"RVK_VolOn", "Volumetric light (sun shafts)", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0},
     {"RVK_Volume", "Strength", "Effects",  Float, 0.25f, 4, 0.25f, 0.5f, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolHaze", "Haze", "Effects",  Float, 0.25f, 4, 0.25f, 0.5f, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolShafts", "Shaft contrast (0 = physical)", "Effects",  Float, 0, 3, 0.25f, 1, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolRays", "Light rays through gaps in the clouds", "Effects",  Float, 0, 3, 0.25f, 1, nullptr, 0, "RVK_VolOn"},
+ {"RVK_VolLamps", "Lamps' light in the air: a glow round each lamp, thicker in fog and mist (0: none)", "Effects", Float, 0, 2, 0.1f, 0, nullptr, 0, "RVK_VolOn"},
     {"RVK_DuskRays", "Sunset rays: beams fanning from a low sun through the clouds and over the hills (0: none)", "Effects", Float, 0, 2, 0.1f, 1, nullptr, 0, "RVK_VolOn"},
     {"RVK_VolLand", "Haze over distant land (cool, as the air makes it)", "Effects",  Float, 0, 1, 0.05f, 0.1f, nullptr, 0},
     {"RVK_DesertAir", "Deserts: dusty air in fair weather - far dunes paler and warmer, a pale band along the horizon (0 = none)", "Effects", Float, 0, 1, 0.1f, 1, nullptr, 0},
@@ -339,6 +360,14 @@ Setting g_settings[] = {
     {"RVK_SsrWater", "Water", "Effects",  Float, 0, 1, 0.05f, 0.25f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrGloss", "Glossy surfaces", "Effects",  Float, 0, 1, 0.05f, 0.3f, nullptr, 0, "RVK_SsrOn"},
     {"RVK_SsrWet", "Wet look of floors and ground (0 = dry)", "Effects",  Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_SsrOn"},
+    {"RVK_RtReflect", "Reflections ray traced where the screen has nothing to reflect - what is behind a wall, off the screen's edge, behind the camera (ours only; GPUs with ray tracing only)", "Effects", Bool, 0, 1, 1, 0, nullptr, 0, "RVK_SsrOn"},
+    {"RVK_SsrMode", "Reflections: whose (0 = ours, 1 = AMD's FidelityFX SSSR: rough surfaces too, denoised)", "Effects", Choice, 0, 1, 1, 0, nullptr, 0, "RVK_SsrOn", "0 1"},
+    {"RVK_SssrThick", "Reflections, AMD's: how far behind a surface a ray's hit still counts (world units; more: fewer gaps, more smearing)", "Effects", Float, 0.05f, 3, 0.05f, 0.5f, nullptr, 0, "RVK_SsrOn"},
+    {"RVK_Vrs", "Variable rate shading: flat or fast-moving parts of the scene shaded in 2 x 2 blocks, for speed (AMD's FidelityFX VRS; needs a GPU with shading rate images)", "Effects", Choice, 0, 1, 1, 0, nullptr, 0, nullptr, "0 1"},
+    {"RVK_GiDebug", "Indirect light, AMD's: a view (0 = none, 1 = its distance field of the world, 2 = its light alone)", "Effects", Choice, 0, 2, 1, 0, nullptr, 0, "RVK_GiOn", "0 1 2"},
+    {"RVK_GiSky", "Indirect light, AMD's: the sky's light on rays that hit nothing (0 = bounce light only: the game's ambient is the sky's)", "Effects", Float, 0, 1, 0.05f, 0, nullptr, 0, "RVK_GiOn"},
+    {"RVK_RtDebug", "Ray tracing: a view of what its rays hit, coloured by object (0 = off, 1 = on; GPUs with ray tracing only)", "Effects", Choice, 0, 1, 1, 0, nullptr, 0, nullptr, "0 1"},
+    {"RVK_VrsCutoff", "Variable rate shading: how much a block's brightness may vary and still be shaded once (higher: more blocks, blurrier)", "Effects", Float, 0.01f, 0.2f, 0.01f, 0.05f, nullptr, 0, "RVK_Vrs"},
     {"RVK_MBlurOn", "Motion blur", "Effects",  Bool,  0, 1, 1, 0, nullptr, 0},
     {"RVK_MBlurObj", "Per-object (off = camera only)", "Effects",  Bool,  0, 1, 1, 1, nullptr, 0, "RVK_MBlurOn"},
     {"RVK_MBlur", "Amount", "Effects",  Float, 0.05f, 2, 0.05f, 0.15f, "RANDYVK_MOTION_BLUR", 0, "RVK_MBlurOn"},
@@ -390,6 +419,8 @@ Setting g_settings[] = {
     {"RVK_PartAdapt",  "Adapt to each effect's own motion (0 = all alike)",        "Particles",        Float, 0, 1, 0.05f, 1, nullptr, 0, "RVK_Particles"},
     {"RVK_PartFollow", "Young particles follow their sprite",                      "Particles",        Float, 0, 1, 0.05f, 0.7f, nullptr, 0, "RVK_Particles"},
     {"RVK_PartCore",   "Brightness of the game's sprites",     "Particles",        Float, 0, 1, 0.05f, 0.1f, nullptr, 0, "RVK_Particles"},
+    {"RVK_Fx",         "Our own effects in place of the game's (randy-vk\\fx\\*.rvkfx in the client folder)", "Particles", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_FxLog",      "Log every effect the game makes: template, anchor, who asked (randy-vk.log)", "Particles", Bool, 0, 1, 1, 0, nullptr, 0},
 };
 constexpr uint32_t kCount = sizeof(g_settings) / sizeof(g_settings[0]);
 
@@ -417,14 +448,15 @@ Setting* Find(const char* name)
 // so switching it back on restores them). Settings not listed here only tune something these switch off.
 struct Vanilla { const char* name; float value; };
 const Vanilla kVanilla[] = {
-    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_GroundOn", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_Pebbles", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_Headroom", 1},
+    {"RVK_PixelLight", 0}, {"RVK_LightOver", 0}, {"RVK_Bump", 0}, {"RVK_NormalMaps", 0}, {"RVK_Pbr", 0}, {"RVK_Albedo", 0}, {"RVK_LiveMeshes", 0}, {"RVK_GroundOn", 0}, {"RVK_GroundAo", 0}, {"RVK_GroundTess", 0}, {"RVK_GroundGrain", 0}, {"RVK_GroundBlend", 0}, {"RVK_GroundSun", 0}, {"RVK_GroundRocks", 0}, {"RVK_Pebbles", 0}, {"RVK_SandRipple", 0}, {"RVK_DuneLight", 0}, {"RVK_SandGlint", 0}, {"RVK_SandPrints", 0}, {"RVK_RippleDepth", 0}, {"RVK_Parallax", 0}, {"RVK_CliffDepth", 0}, {"RVK_GroundRange", 1}, {"RVK_GroundFar", 8}, {"RVK_CliffTex", 0}, {"RVK_CliffRock", 0}, {"RVK_TileHide", 0}, {"RVK_GroundVary", 0}, {"RVK_LeafLight", 0}, {"RVK_CrownShade", 0}, {"RVK_CrownSky", 0}, {"RVK_CrownDepth", 0}, {"RVK_Headroom", 1},
     {"RVK_Sway", 0}, {"RVK_FolEdges", 0}, {"RVK_FolDither", 0}, {"RVK_GrassPush", 0}, {"RVK_GrassOn", 0}, {"RVK_LeafOn", 0}, {"RVK_PlantDetail", 0}, {"RVK_FoliageLod", 0}, {"RVK_PtLight", 1}, {"RVK_CharLight", 1}, {"RVK_Tess", 0}, {"RVK_Aniso", 1}, {"RVK_SunShadow", 0}, {"RVK_Contact", 0}, {"RVK_PtShadows", 0},
     {"RVK_Hdr", 0}, {"RVK_Bloom", 0}, {"RVK_BloomWide", 0}, {"RVK_NeonSat", 0}, {"RVK_BloomFx", 0}, {"RVK_NightGlow", 0}, {"RVK_MoonLight", 0}, {"RVK_Mist", 0}, {"RVK_FogBanks", 0}, {"RVK_HeatFlash", 0}, {"RVK_Sun", 0}, {"RVK_GameSun", 1}, {"RVK_Ao", 0}, {"RVK_Gi", 0},
     {"RVK_Volume", 0}, {"RVK_VolLand", 0}, {"RVK_DesertAir", 0}, {"RVK_HeatShimmer", 0}, {"RVK_Ssr", 0}, {"RVK_MBlur", 0}, {"RVK_Taa", 0}, {"RVK_RenderScale", 100}, {"RVK_Fxaa", 0}, {"RVK_Saturation", 1}, {"RVK_Contrast", 1},
     {"RVK_Warmth", 0}, {"RVK_NightTint", 0}, {"RVK_Vignette", 0}, {"RVK_LutAmount", 0}, {"RVK_Dof", 0},
-    {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
+    {"RVK_Particles", 0}, {"RVK_PartCore", 1}, {"RVK_Fx", 0}, {"RVK_WaterOn", 0}, {"RVK_CloudsOn", 0}, {"RVK_WeatherOn", 0},
     {"RVK_SmokeOn", 0}, {"RVK_Twilight", 0}, {"RVK_SkyGlow", 0}, {"RVK_BlueHour", 0}, {"RVK_MornHaze", 0}, {"RVK_DawnLight", 0},
     {"RVK_GoldenHour", 0}, {"RVK_Cirrus", 0}, {"RVK_Afterglow", 0}, {"RVK_StarFade", 0}, {"RVK_DuskRays", 0}, {"RVK_ProcSky", 0}, {"RVK_Rainbow", 0}, {"RVK_ViewRange", 1},
+    {"RVK_LightRig", 0}, {"RVK_Metering", 0}, {"RVK_ZoneFade", 0}, {"RVK_Portals", 0}, {"RVK_StreetView", 0},
 };
 
 // Left out of the settings window (randy-vk.ini only, like the "Debug" section): minor switches nearly nobody
@@ -432,9 +464,10 @@ const Vanilla kVanilla[] = {
 // presets. A setting whose feature switch is listed here is left out with it.
 const char* const kHidden[] = {
     "RVK_HeapCheck", "RVK_TexKeepCpu",
-    "RVK_Prepass", "RVK_PrepassEq", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
+    "RVK_Prepass", "RVK_LiteShader", "RVK_PrepassEq", "RVK_PrepassMore", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
     "RVK_GrassTex", "RVK_ShadowMem", "RVK_FxGlowOn", "RVK_NightOn", "RVK_MoonOn", "RVK_GameSun", "RVK_HillShade",
-    "RVK_DarkFloor", "RVK_GroundOne",
+    "RVK_DarkFloor", "RVK_GroundOne", "RVK_ZoneHoldMax", "RVK_PortalDist", "RVK_StreetNow",
+    "RVK_FxLog",
     // leaves
     "RVK_LeafSize", "RVK_LeafCore", "RVK_LeafWind", "RVK_LeafFlutter", "RVK_LeafOwn", "RVK_LeafTrees",
     "RVK_LeafShrubs", "RVK_LeafPalms", "RVK_LeafShadow",
@@ -458,11 +491,11 @@ const char* const kHidden[] = {
     "RVK_SkyDayTop", "RVK_SkyDayLow", "RVK_SkyDuskSun", "RVK_SkyDuskAway", "RVK_SkyDuskTop",
     "RVK_SkyBlueTop", "RVK_SkyBlueLow", "RVK_SkyNightTop", "RVK_SkyNightLow", "RVK_Twinkle", "RVK_AuroraCol",
     // the Advanced tab: tuning past what most players change
-    "RVK_CrownShade", "RVK_TessLevel", "RVK_TessDist", "RVK_PbrSsr", "RVK_PbrAo", "RVK_PbrProbe", "RVK_PbrGlow",
+    "RVK_CrownShade", "RVK_CrownSky", "RVK_CrownDepth", "RVK_TessLevel", "RVK_TessDist", "RVK_PbrSsr", "RVK_PbrAo", "RVK_PbrProbe", "RVK_PbrGlow",
     "RVK_GrassWidth", "RVK_GrassVary", "RVK_GrassGlow", "RVK_GrassGusts", "RVK_TrailTime", "RVK_TrailShade",
     "RVK_GrassEven", "RVK_SunCascade", "RVK_StaticShad", "RVK_PtDay", "RVK_Knee", "RVK_HdrRoom", "RVK_LutAmount",
     "RVK_BloomThr", "RVK_BloomOcc", "RVK_AoRadius", "RVK_GiRadius", "RVK_VolShafts", "RVK_VolRays", "RVK_VolLand",
-    "RVK_SunSize", "RVK_SunBleed", "RVK_SsrWater", "RVK_SsrGloss", "RVK_SsrWet", "RVK_MBlurNear", "RVK_DofMacro",
+    "RVK_SunSize", "RVK_SunBleed", "RVK_GiDebug", "RVK_RtDebug", "RVK_SsrWater", "RVK_SsrGloss", "RVK_SsrWet", "RVK_MBlurNear", "RVK_DofMacro",
     "RVK_DofRadius", "RVK_DofRange", "RVK_PartUniform", "RVK_PartAbsSize", "RVK_PartSize", "RVK_PartTrailMx",
     "RVK_PartLife", "RVK_PartCurl", "RVK_PartScale", "RVK_PartSwirl", "RVK_PartPull", "RVK_PartDrag", "RVK_PartSpeed",
     "RVK_PartAdapt", "RVK_PartFollow", "RVK_PartCore",
@@ -488,6 +521,237 @@ bool Hidden(const Setting& s)
     const Setting* parent = s.parent && !AlwaysOn(s.parent) ? Find(s.parent) : nullptr;
     return parent && Hidden(*parent);
 }
+
+// What each setting in the settings window costs the frame, shown after its label so players can tell where their
+// frame rate and GPU time go. The bands are GPU time a frame at 1920 x 1080 (2560 x 1440 at 75% render scale) on an
+// RTX 4070 Ti, from in-game logs and rvk_demo sweeps of the native ground: low under 0.3 ms, medium 0.3 to 1 ms, high
+// over 1 ms; "more with the value" where the cost follows a slider, "no cost" where the setting only changes the look
+// of work done anyway. AOReloaded's Renderer tab explains the bands; keep the two in step.
+struct Cost { const char* name; const char* text; };
+const Cost kCosts[] = {
+    // General
+    {"RVK_Enhance", "GPU: all of the below (off: the cheapest)"},
+    {"RVK_WinScale", "no cost"},
+    {"RVK_HudScale", "no cost"},
+    {"RVK_UiRate", "saves GPU and CPU: 30 or 60 cheaper than every frame"},
+    {"RVK_ZoneFade", "no cost"},
+    {"RVK_ZoneHoldMax", "no cost"},
+    {"RVK_Portals", "GPU: low, with a shop's door in view"},
+    {"RVK_PortalDist", "no cost"},
+    {"RVK_StreetNow", "no cost"},
+    {"RVK_PortalDim", "no cost"},
+    {"RVK_StreetView", "GPU: low, with a shop's open door in view"},
+    {"RVK_PerfHud", "no cost"},
+    {"RVK_AlienMap", "no cost"},
+    {"RVK_DetailRange", "CPU and GPU: more with the value"},
+    {"RVK_ViewRange", "CPU and GPU: more with the value"},
+    // Lighting
+    {"RVK_Darkness", "no cost"},
+    {"RVK_PixelLight", "GPU: low"},
+    {"RVK_PtLight", "no cost"},
+    {"RVK_CharLight", "no cost"},
+    {"RVK_TessOn", "GPU: low"},
+    {"RVK_Tess", "no cost"},
+    {"RVK_Aniso", "GPU: low"},
+    // Materials
+    {"RVK_BumpOn", "GPU: low"},
+    {"RVK_Bump", "no cost"},
+    {"RVK_NormalMaps", "GPU: low"},
+    {"RVK_NormalStr", "no cost"},
+    {"RVK_Parallax", "GPU: low"},
+    {"RVK_DepthSteps", "GPU: low, more with the value"},
+    {"RVK_Pbr", "GPU: low"},
+    {"RVK_PbrSpec", "no cost"},
+    {"RVK_PbrEnv", "no cost"},
+    {"RVK_Albedo", "video memory: more textures"},
+    {"RVK_LiveMeshes", "no cost (only meshes that have one)"},
+    // Terrain
+    {"RVK_GroundOn", "GPU: medium (in place of the game's ground)"},
+    {"RVK_GroundAo", "no cost"},
+    {"RVK_GroundSun", "no cost"},
+    {"RVK_GroundRocks", "GPU: medium, more with the value"},
+    {"RVK_Pebbles", "GPU: low"},
+    {"RVK_SandRipple", "GPU: low"},
+    {"RVK_SandPrints", "GPU: low"},
+    {"RVK_RippleDepth", "no cost"},
+    {"RVK_RippleSoft", "no cost"},
+    {"RVK_DuneLight", "no cost"},
+    {"RVK_SandGlint", "no cost"},
+    {"RVK_GroundGrain", "GPU: low"},
+    {"RVK_GroundBlend", "GPU: low"},
+    {"RVK_GroundTess", "GPU: low"},
+    {"RVK_CliffDepth", "GPU: low"},
+    {"RVK_GroundFar", "video memory: 32 a lot"},
+    {"RVK_GroundRange", "CPU: more with the value"},
+    {"RVK_CliffTex", "GPU: low"},
+    {"RVK_CliffRock", "no cost"},
+    {"RVK_TileHide", "GPU: low"},
+    {"RVK_GroundVary", "no cost"},
+    // Plants
+    {"RVK_SwayOn", "GPU: low"},
+    {"RVK_Sway", "no cost"},
+    {"RVK_PushOn", "GPU: low"},
+    {"RVK_GrassPush", "no cost"},
+    {"RVK_FolEdges", "GPU: low"},
+    {"RVK_FolDither", "no cost"},
+    {"RVK_GrassOn", "GPU: medium, high in thick grass"},
+    {"RVK_GrassDist", "GPU: more with the value"},
+    {"RVK_GrassBlades", "GPU: more with the value"},
+    {"RVK_GrassHeight", "GPU: more with the value"},
+    {"RVK_GrassBright", "no cost"},
+    {"RVK_GrassFlower", "no cost"},
+    {"RVK_GrassTrail", "GPU: low"},
+    {"RVK_LeafOn", "GPU: medium, high in forests"},
+    {"RVK_LeafDensity", "GPU: more with the value"},
+    {"RVK_LeafDist", "GPU: more with the value"},
+    {"RVK_LeafFall", "GPU: low"},
+    // Water
+    {"RVK_WaterOn", "GPU: low, medium on a large lake or the sea"},
+    {"RVK_WaterStyle", "no cost"},
+    {"RVK_WaterQual", "GPU: more with the value"},
+    {"RVK_WaterMesh", "no cost"},
+    {"RVK_WaterWaves", "no cost"},
+    // Weather
+    {"RVK_WeatherOn", "GPU: low, medium in storms"},
+    {"RVK_RainForce", "GPU: medium while it rains"},
+    {"RVK_RainAmount", "GPU: more with the value"},
+    {"RVK_StormForce", "GPU: medium while it storms"},
+    {"RVK_StormThick", "no cost"},
+    {"RVK_HeatFlash", "no cost"},
+    {"RVK_SandForce", "GPU: medium in a sandstorm"},
+    // Smoke
+    {"RVK_SmokeOn", "GPU: medium, high near many fires"},
+    {"RVK_SmokeQual", "GPU: more with the value"},
+    {"RVK_SmokeThick", "no cost"},
+    // Sky
+    {"RVK_CloudsOn", "GPU: medium"},
+    {"RVK_ProcSky", "GPU: low"},
+    {"RVK_SkyZone", "no cost"},
+    {"RVK_SkyBright", "no cost"},
+    {"RVK_Twilight", "no cost"},
+    {"RVK_BlueHour", "no cost"},
+    {"RVK_SkyGlow", "no cost"},
+    {"RVK_Afterglow", "no cost"},
+    {"RVK_StarFade", "no cost"},
+    {"RVK_Stars", "GPU: low"},
+    {"RVK_StarBright", "no cost"},
+    {"RVK_Galaxy", "no cost"},
+    {"RVK_Meteors", "no cost"},
+    {"RVK_Aurora", "GPU: low"},
+    {"RVK_AuroraForce", "GPU: low"},
+    {"RVK_Rainbow", "no cost"},
+    {"RVK_Cirrus", "GPU: low"},
+    {"RVK_CloudShadow", "GPU: low"},
+    {"RVK_CloudSteps", "GPU: more with the value"},
+    {"RVK_CloudCover", "no cost"},
+    {"RVK_CloudQual", "GPU: more with the value"},
+    {"RVK_CloudMorph", "no cost"},
+    // Shadows
+    {"RVK_SunShadow", "GPU: high outdoors by day"},
+    {"RVK_RtShadow", "GPU: medium"},
+    {"RVK_SunRes", "GPU and video memory: more with the value"},
+    {"RVK_SunStrength", "no cost"},
+    {"RVK_SunDist", "GPU: more with the value"},
+    {"RVK_SunSoft", "GPU: low"},
+    {"RVK_GrassShadow", "GPU: medium in grass"},
+    {"RVK_ContactOn", "GPU: low"},
+    {"RVK_Contact", "no cost"},
+    {"RVK_PtOn", "GPU: very high in towns at night"},
+    {"RVK_PtShadows", "GPU: more with the value"},
+    {"RVK_PtRes", "GPU and video memory: more with the value"},
+    {"RVK_PtStrength", "no cost"},
+    {"RVK_OwnShadow", "no cost"},
+    // Effects
+    {"RVK_BloomOn", "GPU: low"},
+    {"RVK_Bloom", "no cost"},
+    {"RVK_BloomWide", "no cost"},
+    {"RVK_NeonSat", "no cost"},
+    {"RVK_AoOn", "GPU: low (ray traced: medium)"},
+    {"RVK_Ao", "no cost"},
+    {"RVK_AoMode", "GPU: AMD's a little more, ray traced medium"},
+    {"RVK_GiOn", "GPU: low (AMD's: high)"},
+    {"RVK_Gi", "no cost"},
+    {"RVK_GiMode", "GPU: AMD's high - about 1 ms more"},
+    {"RVK_GiSky", "no cost"},
+    {"RVK_VolOn", "GPU: medium"},
+    {"RVK_Volume", "no cost"},
+    {"RVK_VolHaze", "no cost"},
+    {"RVK_VolLamps", "GPU: low, medium by many lamps"},
+    {"RVK_DuskRays", "GPU: low"},
+    {"RVK_DesertAir", "no cost"},
+    {"RVK_HeatShimmer", "GPU: low"},
+    {"RVK_Sun", "no cost"},
+    {"RVK_Atmos", "GPU: low"},
+    {"RVK_Mist", "no cost"},
+    {"RVK_FogBanks", "GPU: low"},
+    {"RVK_DawnLight", "no cost"},
+    {"RVK_MornHaze", "no cost"},
+    {"RVK_SsrOn", "GPU: low (AMD's: medium)"},
+    {"RVK_Ssr", "no cost"},
+    {"RVK_RtReflect", "GPU: low to medium"},
+    {"RVK_SsrMode", "GPU: AMD's about 0.25 ms more"},
+    {"RVK_SssrThick", "no cost"},
+    {"RVK_Vrs", "saves GPU: about 0.5 ms"},
+    {"RVK_VrsCutoff", "saves GPU: more with the value"},
+    {"RVK_MBlurOn", "GPU: low"},
+    {"RVK_MBlurObj", "GPU: low"},
+    {"RVK_MBlur", "no cost"},
+    // Anti-aliasing
+    {"RVK_Taa", "GPU: low (FSR: medium) - and it lets Render scale save"},
+    {"RVK_Sharpen", "no cost"},
+    {"RVK_RenderScale", "saves GPU: the biggest saving - lower is much faster"},
+    {"RVK_FrameGen", "GPU: medium - about twice the frames shown"},
+    {"RVK_Upscaler", "GPU: FSR about 0.5 ms more than ao-vk's own"},
+    {"RVK_Fxaa", "GPU: low"},
+    // Colour grading, depth of field, particles
+    {"RVK_GradeOn", "no cost"},
+    {"RVK_Saturation", "no cost"},
+    {"RVK_Contrast", "no cost"},
+    {"RVK_LightRig", "no cost"},
+    {"RVK_Metering", "no cost"},
+    {"RVK_Warmth", "no cost"},
+    {"RVK_NightTint", "no cost"},
+    {"RVK_Vignette", "no cost"},
+    {"RVK_GoldenHour", "no cost"},
+    {"RVK_NeonNight", "no cost"},
+    {"RVK_Exposure", "no cost"},
+    {"RVK_Dof", "GPU: low"},
+    {"RVK_DofBokeh", "GPU: low"},
+    {"RVK_DofNear", "GPU: low"},
+    {"RVK_DofFar", "no cost"},
+    {"RVK_DofAmount", "no cost"},
+    {"RVK_DofFocus", "no cost"},
+    {"RVK_Particles", "GPU: low"},
+    {"RVK_PartCount", "GPU: more with the value"},
+    {"RVK_Fx", "GPU: low, while an effect plays"},
+    {"RVK_FxLog", "no cost"},
+    {"RVK_PartBright", "no cost"},
+    {"RVK_PartTrail", "GPU: low"},
+};
+
+// Names for a choice setting's values in the settings window, in the order of its `choices`.
+const Cost kChoiceNames[] = {
+    {"RVK_UiRate", "every frame|30|60|90|120"},
+    {"RVK_Aniso", "off|2x|4x|8x|16x"},
+    {"RVK_GroundFar", "8 (the game's)|16|32"},
+    {"RVK_Stars", "the game's|ours"},
+    {"RVK_CloudQual", "low|medium|high|ultra"},
+    {"RVK_AoMode", "ours|AMD CACAO|ray traced"},
+    {"RVK_GiMode", "ours|AMD Brixelizer"},
+    {"RVK_SsrMode", "ours|AMD SSSR"},
+    {"RVK_Vrs", "off|on"},
+    {"RVK_RenderScale", "100%|85%|75%|67%|50%"},
+    {"RVK_Upscaler", "ao-vk's TAA|AMD FSR 2.2|AMD FSR 3.1"},
+};
+
+const char* Lookup(const Cost* table, size_t n, const char* name)
+{
+    for (size_t i = 0; i < n; ++i)
+        if (std::strcmp(table[i].name, name) == 0) return table[i].text;
+    return nullptr;
+}
+const char* CostOf(const char* name) { return Lookup(kCosts, std::size(kCosts), name); }
+const char* ChoiceNamesOf(const char* name) { return Lookup(kChoiceNames, std::size(kChoiceNames), name); }
 
 float Stored(const char* name) { Setting* s = Find(name); return s ? s->value : 0.0f; }
 
@@ -716,6 +980,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
     }
     else if (is("RVK_WinScale") || is("RVK_HudScale")) rnative::gui::SetScale(V("RVK_WinScale"), V("RVK_HudScale"));
     else if (is("RVK_UiRate")) SetInterfaceRate(V(n));
+    else if (is("RVK_LiveMeshes")) SetLiveMeshes(V(n) != 0.0f);
     else if (is("RVK_PixelLight")) d->SetPixelLighting(V(n) != 0.0f);
     else if (is("RVK_LightOver")) d->SetLightOverride(V(n) != 0.0f);
     else if (is("RVK_Bump")) d->SetBump(V(n));
@@ -872,6 +1137,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         w.enable = V("RVK_WaterOn") != 0.0f;
         w.style = V("RVK_WaterStyle");
         w.quality = uint32_t(V("RVK_WaterQual"));
+        w.mesh = V("RVK_WaterMesh") != 0.0f;
         w.waves = V("RVK_WaterWaves");
         w.ripples = V("RVK_WaterRipple");
         w.swimRipples = V("RVK_WaterSwim");
@@ -1422,6 +1688,8 @@ bool Info(uint32_t index, RvkSettingInfo* out, bool* hidden)
     out->defaultValue = s.defaultValue;
     out->parent = AlwaysOn(s.parent) ? nullptr : s.parent;
     out->choices = s.choices;
+    out->cost = CostOf(s.name);
+    out->choiceNames = ChoiceNamesOf(s.name);
     if (hidden) *hidden = Hidden(s);
     return true;
 }
@@ -1466,9 +1734,13 @@ int RvkSettings_Get(uint32_t index, RvkSettingInfo* out)
     out->step = s.step;
     out->value = s.value;
     out->defaultValue = s.defaultValue;
-    if (out->size >= sizeof(RvkSettingInfo)) {
+    if (out->size >= offsetof(RvkSettingInfo, cost)) {
         out->parent = AlwaysOn(s.parent) ? nullptr : s.parent;   // (grouped by their section instead)
         out->choices = s.choices;
+    }
+    if (out->size >= sizeof(RvkSettingInfo)) {
+        out->cost = CostOf(s.name);
+        out->choiceNames = ChoiceNamesOf(s.name);
     }
     return 1;
 }

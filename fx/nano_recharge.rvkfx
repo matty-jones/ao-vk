@@ -1,0 +1,43 @@
+{
+  // A nano recharger's burst (Stars 13600: the Basic Nano Recharger; Acid Coating's too): nano energy drawn in round
+  // the character. ao-vk's own effect (docs/fx-plan.md); copy into <client>\randy-vk\fx.
+  "format": 1,
+  "name": "Nano recharge",
+  "templates": [13600],
+  "mode": "replace",
+  "emitters": [
+    {
+      "name": "flash", "at": "head", "during": ["play"],
+      "shape": "point", "rate": 0, "burst": 1, "count": 4,
+      "life": [0.5, 0.5], "speed": [0, 0],
+      "size": [[0, 0.4], [0.2, 1.4], [1, 0.2]],
+      "colour": [[0, "#E0D0FF", 0.0], [0.15, "#C0A0FF", 0.8], [1, "#4060FF", 0.0]],
+      "intensity": 2.5, "sprite": "flare", "blend": "add"
+    },
+    {
+      "name": "inflow", "at": "head", "during": ["play"],
+      "shape": "shell", "radius": 0.9, "rate": 220, "burst": 60, "count": 512,
+      "life": [0.4, 0.7], "speed": [0.0, 0.1], "pull": 5.0, "swirl": 4.0, "drag": 2.5,
+      "size": [[0, 0.0], [0.3, 0.05], [1, 0.02]],
+      "colour": [[0, "#9060FF", 0.0], [0.3, "#A080FF", 1.0], [1, "#60E0FF", 0.9]],
+      "intensity": 3.0, "sprite": "dot", "blend": "add"
+    },
+    {
+      "name": "spiral", "at": "head", "offset": [0, -0.9, 0], "during": ["play"],
+      "shape": "ring", "radius": 0.5, "rate": 160, "count": 512,
+      "life": [0.6, 1.0], "speed": [0.6, 1.0], "direction": [0, 1, 0], "spread": 10,
+      "swirl": 3.0, "drag": 1.2, "pull": 0.5,
+      "size": [[0, 0.06], [1, 0.0]],
+      "colour": [[0, "#70A0FF", 0.9], [0.5, "#A070FF", 0.7], [1, "#4020C0", 0.0]],
+      "intensity": 2.5, "sprite": "dot", "blend": "add", "stretch": 0.03
+    },
+    {
+      "name": "twinkles", "at": "head", "during": ["play"],
+      "shape": "sphere", "radius": 0.7, "rate": 25, "burst": 8, "count": 64,
+      "life": [0.25, 0.5], "speed": [0, 0.05],
+      "size": [[0, 0.0], [0.5, 0.14], [1, 0.0]],
+      "colour": [[0, "#FFFFFF", 1.0], [1, "#A0C0FF", 1.0]],
+      "intensity": 3.5, "sprite": "star", "blend": "add"
+    }
+  ]
+}

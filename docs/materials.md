@@ -12,13 +12,21 @@ load):
 | `<type>_<id>_d.png` | albedo (diffuse colour): drawn **instead of** the game's texture wherever it is used, alpha included (cut-outs and shadows use its alpha) |
 | `<type>_<id>_e.png` | emissive: the light the surface gives off (black = none), added after its lighting; beyond white with HDR, so it blooms |
 
+**Mesh atlases and live geometry**: a static mesh's own maps, named after the mesh (`1010001_<id>_d.png`, `_n`,
+`_orm`, `_e`, `_h`), are drawn on every sub-mesh of that mesh instead of its materials' textures (ao-assets' own UVs);
+`live\1010001_<id>_mesh.rvkm` (hot reload) is drawn instead of its sub-meshes. `RVK_LiveMeshes`;
+docs/live-meshes-plan.md.
+
 `<type>` is the full-quality table, which also covers the lower quality levels: 1010004 world (1010016/17),
 1010006 ground (1010021/22), 1010011 character skins (1010019/20). `<id>_<suffix>` works for any type.
 
 **Texture packs**: `<client>\randy-vk\packs\<name>\` holds the same names (a released texture pack is one such
-folder; ao-assets `pack` makes the zips). A texture's maps all come from one place: the workbench's `live\` preview
-(hot reload), else `materials\` if it has any file for that texture, else the first pack (by folder name) that has
-one. Packs are read once at startup; the log names each (`materials: pack 'ao-vk-textures', N files`).
+folder; ao-assets `pack` makes the zips, and an ao-assets authored pack installs itself as one). A texture's maps all
+come from one place: the workbench's `live\` preview (hot reload), else the first folder that has any file for that
+texture, in the order `packs\order.txt` gives - folder names, one a line, `materials` for `materials\`, `#` comments -
+and then the folders it leaves out (`materials\`, then packs by folder name: without the file, `materials\` wins as
+before). A static mesh's atlas and its `_mesh.rvkm` geometry (an authored pack's remodels) are found the same way.
+Packs are read once at startup; the log names each (`materials: pack 'ao-vk-textures', N files`) and the order.
 
 ao-assets makes and collects these files (its `docs/blender-workflow.md`):
 - `python -m aoassets material-template <texture or model> [--luma|--relief] [--pbr [--roughness R] [--metallic M]]`
@@ -38,8 +46,8 @@ pick frame, so they are hit like anything else. rvk_demo `--pbr-test --pick X Y`
 
 **Ctrl+Shift+J**: the same for the mesh under the cursor - `pick: RDB mesh 1010001:3545` (a character: `RDB character
 model 1010002:5900`; a piece a character wears names it too). randy-vk learns the ids while DisplaySystem loads: the
-exported RCATMesh_t constructor (characters) and RTriMesh_t::Archive (each static mesh read from its .abiff) are hooked
-and find the RDBCATMesh_t / RDBMesh_t being loaded on the caller's stack (the log's `meshes:` lines). The meshes in the
+exported RCATMesh_t constructor (characters) and the native RTriMesh_t(archive) constructor (each static mesh read from
+its .abiff; `[Native] Scene` on) are hooked and find the RDBCATMesh_t / RDBMesh_t being loaded on the caller's stack (the log's `meshes:` lines). The meshes in the
 world are clones sharing the loaded mesh's data (RTriMesh_t +0x184), so a picked mesh is looked up by its data. Both picks also go to `logs/last-pick.txt`, which the ao-assets workbench
 follows (it jumps to the asset). `RANDYVK_PICK_AT=frame,x,y,I|J` picks without the keys (tests).
 

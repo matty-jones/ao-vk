@@ -6,8 +6,10 @@
 #pragma once
 
 #include "d3d7.h"
+#include "fx_def.h"
 #include "skin.h"
 #include "vk.h"
+#include "water_surface.h"
 
 #include <array>
 #include <memory>
@@ -28,7 +30,8 @@ struct VmaAllocator_T;
 struct VmaAllocation_T;
 struct VmaVirtualBlock_T;
 
-namespace rvk::detail { struct FrameLights; struct FvfLayout; struct DrawConstants; struct DrawTransform; struct ShadowRecord; }
+namespace rvk::portal { struct Capture; }
+namespace rvk::detail { struct FrameLights; struct FvfLayout; struct DrawConstants; struct DrawTransform; struct ShadowRecord; struct Cone; }
 
 namespace rvk {
 
@@ -116,6 +119,9 @@ AddressSpace LatestAddressSpace();
 // Where the pipeline cache is kept between runs (compiled pipelines load from it instead of being built again at every
 // start). Empty or never set: RANDYVK_PIPELINE_CACHE, else no cache file ("off" also disables it).
 void SetPipelineCachePath(const char* path);
+// Where captured interiors go (shop portals, portal_capture.cpp): <client>\randy-vk\portals. Unset: none captured.
+void SetPortalDir(const char* dir);
+const std::string& PortalDir();                  // (with a trailing backslash; empty: none)
 
 // Texture formats (the D3DX 7 / DirectDraw pixel formats the client can create).
 enum class Format : uint32_t {
@@ -267,6 +273,9 @@ struct DeviceInfo {
     X(SandTint, m_sandTint, 0)                        /* the land tinted by a sandstorm's light, x */ \
     X(SunSoft, m_sunSoftness, L)                      /* sun shadows' softening with distance (0 hard) */ \
     X(CrownShade, m_crownShade, L)                    /* tree crowns lit as one rounded mass (0..1) */ \
+    X(Metering, m_metering, 0)                        /* the camera's metering: how far a bright view takes the exposure down (0 off) */ \
+    X(CrownSky, m_crownSky, L)                        /* crowns' ambient as the sky's: from above (0..1) */ \
+    X(CrownDepth, m_crownDepth, L)                    /* sunlight through crowns by their depth (0..1) */ \
     X(NightGlow, m_nightGlow, C|L)                    /* windows, signs and screens glowing at night, x */ \
     X(MoonLight, m_moonLight, C|L)                    /* the moon's light, x (night.cpp) */ \
     X(Mist, m_mist, 0)                                /* valley mist, x (mist.cpp) */ \
@@ -278,12 +287,30 @@ struct DeviceInfo {
     X(SunSize, m_sunSize, 0)                          /* the suns' size, x the game's sprites */ \
     X(SunBleed, m_sunBleed, 0)                        /* the suns' glow through thick cloud (0..1) */ \
     X(Contact, m_contact, C)                          /* contact shadows' strength */ \
-    X(Headroom, m_lightHeadroom, C|L)                 /* how bright local lights may make a surface (1..2) */
+    X(Headroom, m_lightHeadroom, C|L)                 /* how bright local lights may make a surface (1..2) */ \
+    X(SsrMode, m_ssrMode, 0)                          /* whose reflections: 0 ours, 1 AMD's (sssr.cpp) */ \
+    X(SssrThick, m_sssrThick, 0)                      /* ... how far behind the depth buffer a hit counts (units) */ \
+    X(AoMode, m_aoMode, 0)                            /* ambient occlusion: 0 ours, 1 AMD's (cacao.cpp), 2 traced */ \
+    X(Vrs, m_vrsMode, 0)                              /* variable rate shading of the scene (vrs.cpp; 0 off) */ \
+    X(VrsCutoff, m_vrsCutoff, 0)                      /* ... the luminance variance a coarser rate allows */ \
+    X(GiMode, m_giMode, 0)                            /* whose indirect light: 0 ours, 1 AMD's (brixelizer.cpp) */ \
+    X(GiDebug, m_giDebug, 0)                          /* ... a view: 1 its distance field, 2 its light alone */ \
+    X(GiSky, m_giSky, 0)                              /* ... the sky's light on rays that miss (0: bounce only) */ \
+    X(RtDebug, m_rtDebug, 0)                          /* ray tracing's view: 1 what its rays hit (raytrace.cpp) */ \
+    X(RtShadow, m_rtShadow, 0)                        /* the sun's shadows ray traced (raytrace.cpp; 0 off) */ \
+    X(RtReflect, m_rtReflect, 0)                      /* reflections the screen lacks ray traced (raytrace.cpp) */ \
+    X(VolLamps, m_volLamps, 0)                        /* the lamps' light in the air (volume.frag; 0 none) */ \
+    X(ZoneHoldMax, m_zoneHoldMax, 0)                  /* the longest a zone change hides the new zone once it draws (s) */ \
+    X(PortalDist, m_portalDist, 0)                    /* shops' rooms drawn through their doors within this (units) */ \
+    X(PortalDim, m_portalDim, 0)                      /* ... their brightness by day (0..1 of their own) */
 #define RVK_BOOL_KNOBS(X) \
     X(Prepass, m_prepassOn, 0)                        /* the depth pre-pass */ \
+    X(LiteShader, m_liteShader, 0)                    /* the interface's draws through the lean shader */ \
     X(PrepassEq, m_prepassEqual, 0)                   /* pre-passed draws shaded only where their depth is */ \
+    X(PrepassMore, m_prepassMore, 0)                  /* a second pre-pass segment after the water's copy */ \
     X(FolEdges, m_foliageEdges, 0)                    /* plants' soft edges in a second pass */ \
     X(OwnLight, m_carrierLit, C)                      /* a character's own light lights the character */ \
+    X(OwnShadow, m_carrierCasts, 0)                   /* a character casts a shadow in its own light */ \
     X(Fxaa, m_fxaa, 0)                                /* FXAA while TAA is off */ \
     X(StormTint, m_stormTint, 0)                      /* the game's storm sheet drawn */ \
     X(StormFlash, m_stormFlash, 0)                    /* the game's lightning glow drawn */ \
@@ -292,15 +319,23 @@ struct DeviceInfo {
     X(ShadowView, m_shadowViewDebug, L)               /* debug: the sun shadow map's light shown */ \
     X(AlienMap, m_alienMap, 0)                        /* AI missions' map on green */ \
     X(HillShade, m_hillShade, 0)                      /* the terrain shaded from a low sun */ \
+    X(LightRig, m_lightRig, C)                        /* one light for day and night (light_rig.cpp) */ \
     X(GroundOne, m_groundOnePass, C)                  /* the native ground drawn in one pass, not two */ \
-    X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */
+    X(SceneProf, m_sceneProfile, 0)                   /* debug: the scene timed and its overdraw counted by kind */ \
+    X(ZoneFade, m_zoneFade, 0)                        /* a zone change holds the old zone's picture, fades into the new */ \
+    X(Portals, m_portalsOn, 0)                        /* shops' rooms seen through their doors (portal.cpp) */ \
+    X(StreetView, m_streetViewOn, 0)                  /* ... and the street from inside them */ \
+    X(StreetNow, m_streetNow, 0)                      /* ... lit for the hour it is now */
 enum class Knob : uint32_t {
 #define RVK_KNOB_NAME(name, member, refresh) name,
     RVK_FLOAT_KNOBS(RVK_KNOB_NAME) RVK_BOOL_KNOBS(RVK_KNOB_NAME)
 #undef RVK_KNOB_NAME
     Count
 };
-int KnobByName(const char* setting);             // "RVK_Mist" -> Knob::Mist; -1: not a knob
+int KnobByName(const char* setting);
+// Device::ZoneSignal's bits (the zone hand-over, handover.cpp; from proxy/native/zone.cpp's teleport hooks).
+enum : uint32_t { kZoneTeleport = 1, kZoneTeleportFailed = 2, kZoneTeleportTry = 4 };   // (Try: an attempt, the world
+                                                                                       // still there; Teleport: it stops)             // "RVK_Mist" -> Knob::Mist; -1: not a knob
 
 class Device {
 public:
@@ -593,6 +628,7 @@ public:
         m_frameLightsDirty = true;
     }
     float m_crownShade = 1.0f;
+    float m_crownSky = 1.0f, m_crownDepth = 1.0f;   // RVK_CrownSky, RVK_CrownDepth (ffp.vert, ffp_main.glsl; FL.foliage)
     // RVK_GrassShadow: the blades cast the sun's shadow (into its nearest cascade: onto the ground and each other).
     void SetGrassShadows(bool on) { m_grassShadows = on; }
     // RVK_GrassEven: the blades' colour from one green (1) rather than the ground texel under each (0); baked.
@@ -748,6 +784,10 @@ public:
     void SetSkyTime(double t) { m_skyTime = t; }
     // The playfield the game is in (its resource id; 0 none): its climate leans the sky (sky.cpp SkyZoneLean).
     void SetSkyPlayfield(uint32_t playfield);
+    // The zone hand-over (handover.cpp, RVK_ZoneFade): kZoneTeleport a teleport began (the old zone's picture is kept
+    // from here), kZoneTeleportFailed it failed.
+    void ZoneSignal(uint32_t signal);
+    bool HandoverFading() const;                 // (tests)
     void SetEffectGlow(float gain) { if (m_effectGlow != gain) { m_effectGlow = gain; m_constantsDirty = true; } }
     float EffectGlow() const { return m_effectGlow; }
     float BloomStrength() const { return m_bloomStrength; }
@@ -797,6 +837,20 @@ public:
     void ParticleEmitter(uint64_t key, const float center[3], const float origin[3], const ParticleSprite* sprites,
                          uint32_t count);
     void EndParticleEmitter() { m_particlePending = nullptr; }
+
+    // Our own effects (fx.cpp; docs/fx-plan.md): definitions by id (FxSetEffect, again to change one, FxForget), and
+    // effects playing - each announced every frame it lives (FxInstance: the game effect it stands for, by a key stable
+    // while it lives, its points and the phase it is in). Each emitter of a playing effect is a block of particles,
+    // simulated on the GPU at the next frame's start and drawn at the scene's end; once an effect is no longer
+    // announced its particles live out their lives.
+    struct FxAnchors {
+        float head[3] = {}, source[3] = {}, target[3] = {};
+        uint32_t phase = fx::kFlight;            // the one of fx::PhaseBits it is in
+    };
+    void FxSetEffect(uint32_t id, std::shared_ptr<const fx::Effect> effect);
+    void FxForget(uint32_t id);
+    void FxInstance(uint64_t key, uint32_t effect, const FxAnchors& anchors);
+    static constexpr uint32_t kFxBlocks = 256, kFxDrawnBlocks = 128;
     static constexpr uint32_t kParticleSlots = 128, kParticleChildren = 32;
     static constexpr uint32_t kParticlesPerBlock = kParticleSlots * kParticleChildren, kParticleBlocks = 256;
     static constexpr uint32_t kParticleDrawnBlocks = 128;     // effects simulated and drawn per frame (nearest first)
@@ -831,7 +885,8 @@ public:
         float fallSpray = 1.0f;                  // the spray and mist at a fall's foot (RVK_WaterSpray)
         float fallChurn = 1.0f;                  // the pool churned and foaming where a fall lands (RVK_WaterChurn)
         float fallSpeed = 1.75f;                 // how fast a fall's water falls, x a natural fall's (RVK_WaterSpeed)
-        uint32_t quality = 2;                    // 1 low, 2 medium, 3 high: grid density, reflection steps
+        uint32_t quality = 2;                    // 1 low, 2 medium, 3 high: mesh density, reflection steps
+        bool mesh = true;                        // the surface from the game's triangles (RVK_WaterMesh; off: the grid)
     };
     void SetWaterParams(const WaterParams& params) { m_waterParams = params; UpdateWaterReady(); }
     void DrawWater(const WaterVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount);
@@ -1004,10 +1059,18 @@ private:
         // one being recorded (mainA unless split). Submitted in that order.
         VkCommandBuffer mainA = VK_NULL_HANDLE, prepass = VK_NULL_HANDLE, mainB = VK_NULL_HANDLE;
         bool split = false;
+        // ... and once more where a copy of the scene broke the rendering (the water's: PrepassContinue) - `prepass2`
+        // (the depth of the opaque draws after it, over the depth so far), `mainC` from there on.
+        VkCommandBuffer prepass2 = VK_NULL_HANDLE, mainC = VK_NULL_HANDLE;
+        bool split2 = false;
         // Clouds (clouds.cpp DrawClouds): their shadow map and half-size march, recorded where the sky ends but run
         // between the pre-pass and mainB - outside the scene's rendering, which goes on unbroken (its pre-pass too).
         VkCommandBuffer clouds = VK_NULL_HANDLE;
         bool cloudsRecorded = false;
+        // Ray-traced sun shadows (raytrace.cpp RenderRtShadow): recorded where the pre-pass ends, run after it (and
+        // the clouds), before mainB - whose draws read their mask.
+        VkCommandBuffer rays = VK_NULL_HANDLE;
+        bool raysRecorded = false;
         VkFence fence = VK_NULL_HANDLE;
         VkSemaphore imageAvailable = VK_NULL_HANDLE;
         VkBuffer ring = VK_NULL_HANDLE;
@@ -1095,6 +1158,7 @@ private:
     bool m_constantsDirty = true;
     bool m_pixelLighting = false, m_lightingDebug = false, m_lightOverride = false;
     bool m_carrierLit = true;
+    bool m_carrierCasts = true;                  // RVK_OwnShadow: off, a carried light's cube leaves out its carrier
     float m_lightHeadroom = 1.0f;
     float m_bump = 0.0f;
     bool m_normalMaps = true;
@@ -1127,6 +1191,7 @@ private:
         uint32_t indexCount = 0;                 // (the pebbles: their own indices)
         bool pebbles = false;                    // the small rocks (drawn nearer); the pebbles' blocks
         uint8_t size = 0;                        // (the pebbles: grit 0, small 1, bigger 2 - each its own range)
+        float lo[3] = {}, hi[3] = {};            // (the rocks: the piece's box - each a block of the patch, culled alone)
     };
     struct ClutterBuild {                        // a patch's rocks as made (on a worker)
         std::vector<NativeClutter> pieces;
@@ -1134,6 +1199,8 @@ private:
     };
     struct NativePatch {
         std::shared_ptr<const std::vector<uint8_t>> vertices, indices;   // (each cell's diagonal its own)
+        std::shared_ptr<const std::vector<uint8_t>> allIndices;   // every cell's (indices: without the holes')
+        uint32_t indexCount = 0;                 // indices' (0: all holes - not drawn)
         float lo[3], hi[3];
         std::vector<NativeClutter> clutter;      // its rocks, made when the eye is near
         bool clutterMade = false;
@@ -1163,6 +1230,8 @@ private:
         bool anyHeight = false;                  // a tile's normal map has a height in its alpha (parallax.glsl)
         Texture* means = nullptr;                // each cell's tile's mean colour (the cliffs' rock tint, filtered)
         uint64_t mapsSignature = 0;              // the tiles' maps and the settings the two textures were made with
+        std::vector<uint8_t> holes;              // each tile: a hole (NativeTileHole) - its cells left out
+        uint32_t holeCells = 0;                  // (for the log)
         Texture* lightmap = nullptr;
         Texture* lightmapGrey = nullptr;         // (none handed over yet: a mid grey)
         Texture* lightmapPrev = nullptr;         // the hour's lightmap before (faded out over kLightmapFade seconds)
@@ -1221,13 +1290,16 @@ private:
     uint64_t NativeMapsSignature() const;
     float SandWindBearing() const;
     // The native ground for the grass's capture (grass.cpp): the colour of the ground at cell coordinates (u, v) - its
-    // cell's tile, turned - and its light at lightmap coordinates.
-    bool NativeGroundRgb(float u, float v, uint8_t rgb[3]) const;
+    // cell's tile, turned (false while that tile's picture can't be read yet; *tile: its texture all the same) - and its
+    // light at lightmap coordinates.
+    bool NativeGroundRgb(float u, float v, uint8_t rgb[3], Texture** tile = nullptr) const;
     bool NativeLightRgb(float u, float v, uint8_t rgb[3]) const;
     void PollNativeSky();
     void FitNativeLight();
     void FillNativeLights(detail::FrameLights* fl);
     void MakeNativeCodes();
+    static bool NativeTileHole(const Texture* t);
+    void ApplyNativeHoles();
     uint32_t DrawNativeGround(bool lightPass);
     bool PrepareNativeGround();
     bool NativeGroundDecision(uint32_t fvf, uint32_t reason, bool replaced);
@@ -1339,6 +1411,8 @@ private:
         float carrier[3] = {};
         float carried = 0.0f;                    // 0..1: counted as a character's light (smoothed over frames)
         uint32_t owner = 0;                      // its carrier (SetDrawVisual owner) when the scene's lights are known
+        uint32_t carrierOwner = 0;               // the carrier's owner: owner, else that of the piece found under it
+        uint8_t ownerHeld = 0;                   // frames carrierOwner has been kept with the carrier not found
     };
     // End of frame: for each light, the character carrying it - the body origin nearest under it. The game places a
     // character's light up to ~0.4 sideways off the body while it moves, so a fixed radius around the light either
@@ -1363,7 +1437,12 @@ private:
     static constexpr uint32_t kShadowCascades = 4;   // layers of the sun shadow map, each 3x the area of the last
     // ... and after them the ground grass's own (grass_shadow.vert; the nearest cascade's square): receivers weigh it
     // apart from the other casters' (a field shading itself in full would be far darker than its ground).
-    static constexpr uint32_t kGrassShadowLayer = kShadowCascades, kShadowLayers = kShadowCascades + 1;
+    // ... and, with ray-traced shadows (RVK_RtShadow), the cascades again holding only the casters the rays lack
+    // (characters, plants, cut-outs; m_shadowUntraced): what the traced pixels take with the rays' mask.
+    static constexpr uint32_t kGrassShadowLayer = kShadowCascades, kUntracedLayer = kShadowCascades + 1,
+                              kShadowLayers = 2 * kShadowCascades + 1;
+    uint32_t m_shadowLayerCount = kShadowCascades + 1;   // the map's layers now (the untraced ones only while wanted)
+    bool m_shadowUntraced = false;               // the map's untraced layers were drawn with it (the next frame's mask)
     static constexpr float kCasterCacheRange = 60.0f; // remembered casters: kept within 3x, forgotten beyond 4x - at least
     // As far as the sun's shadows reach (the widest cascade: its half width, and its centre ahead of the camera): a
     // caster further off than 180 units was never remembered, and its shadow on a cliff in view went when the camera
@@ -1387,6 +1466,7 @@ private:
         uint32_t owner;                          // the character it belongs to (SetDrawVisual), 0: unknown
         uint32_t kind;                           // VisualKind of the visual that drew it (m_drawVisualKind)
         uint64_t leafKey;                        // a canopy with leaves: its leaf set (m_leafSets), 0 = none
+        uint64_t rtPlace;                        // its instance in the ray tracing (raytrace.cpp RtTraced), 0 = none
     };
     // One caster as the shadow passes draw it: from this frame's ring or from the caster cache (own buffer).
     struct ShadowItem {
@@ -1406,6 +1486,7 @@ private:
         uint32_t owner;                          // ShadowCaster owner
         uint32_t kind;                           // ShadowCaster kind (VisualKind)
         uint64_t leafKey = 0;                    // ShadowCaster leafKey
+        bool traced = false;                     // the rays hold it (RtTraced): not in the untraced layers
         // Made at its first draw this frame and shared by every cascade and cube face it is drawn into (the pass's
         // light matrix is a push constant): its record (kNoShadowRecord: the arena was full) and its group key.
         uint32_t record = ~0u;
@@ -1445,6 +1526,11 @@ private:
     uint64_t m_casterViewGen = 0, m_casterViewFrame = 0;   // ... as of this camera generation, this frame
     d3d::Matrix m_shadowWorldProj{};             // the world camera's projection: only its draws take shadows
     bool WorldCamera() const;
+    // (Diagnostics: this frame's casters left out as another camera's, and whether the world camera's projection
+    // differed from the last frame's - which the frame's receivers were tested against; frame dumps and the log.)
+    uint32_t m_casterOtherView = 0, m_logViewSplitFrames = 0, m_logOtherViewCasters = 0, m_logProjChanges = 0;
+    bool m_shadowProjChanged = false;
+    d3d::Matrix m_shadowProjBefore{};
     bool m_drawIsLabel = false;                  // the current draw is a name label (IsLabel)
     bool IsLabel(uint32_t primitive, uint32_t fvf, uint32_t vertexCount) const;
     // Name labels drawn during the scene are held back - their vertices and the state they were drawn with - and
@@ -1474,6 +1560,7 @@ private:
     VkImageLayout m_shadowImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkSampler m_shadowSampler = VK_NULL_HANDLE;
     VkSampler m_shadowDepthSampler = VK_NULL_HANDLE;   // the same map without comparison
+    VkSampler m_cutoutSampler = VK_NULL_HANDLE;   // the shadow passes' cut-out textures (repeating, anisotropic)
     VkDescriptorSetLayout m_shadowSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_shadowPipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_shadowPipelines[2] = {};        // opaque, alpha-tested
@@ -1488,7 +1575,10 @@ private:
     float m_cascadeDepth[kShadowCascades] = {};  // world units per unit of each one's depth
     float m_frameSunDir[3] = {0.0f, -1.0f, 0.0f}, m_frameSunColor[3] = {};   // this frame's sun, shadows or not (0: none)
     uint32_t m_cascadeCount = 0;                 // cascades the map holds
-    uint64_t m_cascadeFrame = 0;                 // the far cascades are redrawn on alternate frames
+    uint64_t m_cascadeFrame = 0;                 // the cascades past the nearest take turns (RenderShadowMap)
+    uint64_t m_cascadeDrawnFrame = ~0ull;        // the frame the map was last drawn in
+    bool m_cascadeUntraced = false;              // ... with the rays' layers (RVK_RtShadow)
+    float m_cascadeCenter[kShadowCascades][3] = {};   // each cascade's centre when it was last drawn
     float m_shadowSunDir[3] = {};
     // The moon (night.cpp, RVK_MoonLight): once the sun is down, a dim cool light from the moon on the land - the
     // shadow map drawn from it, the game's night light (from under the ground) turned to come from it.
@@ -1509,6 +1599,10 @@ private:
     float m_darkGain = 1.0f;                     // the floor's exposure gain, eased
     float m_landLuma = -1.0f;                    // the land's brightness as shown, last measured (scene_luma.comp)
     uint64_t m_landLumaFrame = ~0ull;            // ... when
+    float m_viewLuma = -1.0f;                    // the whole view's (sky too) in the scene, last measured (the light rig;
+                                                 // m_landLuma then the land's alone, as the scene has it)
+    uint64_t m_viewLumaFrame = ~0ull;
+    bool m_lumaView[kFramesInFlight] = {};       // the measure in that slot is the whole view's
     VkPipeline m_lumaPipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_lumaLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_lumaSetLayout = VK_NULL_HANDLE;
@@ -1624,7 +1718,7 @@ private:
     double m_skyFogClock = -1.0;
     uint64_t m_skyDrawFrame = ~0ull, m_skyGlowFrame = ~0ull;
     uint32_t m_skyDraws = 0;                     // the sky's draws so far this frame (the glow before the second)
-    VkPipeline m_skyGlowPipeline = VK_NULL_HANDLE;
+    VkPipeline m_skyGlowPipeline = VK_NULL_HANDLE, m_skyGlowFarPipeline = VK_NULL_HANDLE;   // (far: into a street portal)
     VkPipelineLayout m_skyGlowLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_skyGlowSetLayout = VK_NULL_HANDLE;   // (the sky view table)
     // Our own sky (atmosphere.cpp; RVK_ProcSky): the atmosphere's tables, the sky view's frame; the dome's draw skipped.
@@ -1680,7 +1774,8 @@ private:
     int m_heapCheck = 0;                         // RVK_HeapCheck
     bool m_heapBroken = false;
     const char* m_heapLastOk = nullptr;
-    void SunThroughAir(float up, float out[3]) const;   // the sun's colour through the air (unit luma)
+    // The sun's colour through the air (unit luma); transmittance: how much of its light gets through (luma), if asked.
+    void SunThroughAir(float up, float out[3], float* transmittance = nullptr) const;
     void OurSkyFog(float rgb[3]) const;          // the scene fog's colour into our sky's horizon (its mean), if on
     bool ProcSkyReady() const;
     // What the game fogs fades into our sky's horizon instead of the zone's fog colour: our sky drawn, outdoors (the sun
@@ -1689,7 +1784,7 @@ private:
     void UpdateAtmosphere(VkCommandBuffer cmd);
     void DestroyAtmosphere();
     void UpdateSkyModel();
-    void DrawSkyGlow();
+    void DrawSkyGlow(const VkRect2D* box = nullptr);   // (box: a street portal's opening, at the far plane only)
     // The sun's clock (sky.cpp UpdateSunClock; docs/dusk-plan.md): the true sun's direction eased over real time (the
     // game's light, below the horizon too: m_trueSunDir), and from its height the dusk's phases - one smooth day to
     // night that the sky, the light handover and the grading all read, instead of each its own narrow ramp.
@@ -1718,7 +1813,70 @@ private:
     };
     Conditions m_cond;
     void UpdateConditions();
-    float m_sunRising = 1.0f;                    // 1 rising .. 0 setting, eased (the trend over minutes)
+    // The light rig (light_rig.cpp, docs/light-rig-plan.md): one account of the frame's light, day and night alike -
+    // the sun, the sky and the moon by the sun's height (physical shapes: the air's transmittance, the sky's light
+    // through twilight), the storm's share taken from each, the eye's adaptation over all of it - in the game's units
+    // (each zone's own day light, measured by day, is what noon is) and exposed already: what a surface lit by it shows.
+    // So far only logged, beside what the game gives now (its sun and ambient: the gains the rig would apply).
+    struct LightRig {
+        bool on = false;          // a sun known (outdoors); off: the game's light as it is
+        float sunUp = 1.0f;       // the sun's height (m_cond.sunUp)
+        // Physical, relative to the noon sun's light on a surface facing it (sky: to the noon sky's on level ground).
+        float sunN = 1.0f;        // the sun's light on a surface facing it (the air's transmittance; its disc setting)
+        float sky = 1.0f;         // the sky's light on level ground
+        float moonN = 0.0f;       // the moon's on a surface facing it
+        float land = 1.0f;        // all of it on level ground, lux (the adaptation's measure)
+        float adapt = 1.0f;       // the eye's gain: (land / noon's) ^ -alpha, eased (RVK_Darkness: alpha)
+        // The key light: the sun or the moon, whichever lights more (they cross where both are next to none).
+        float keyDir[3] = {0.0f, -1.0f, 0.0f};   // the way its light travels
+        float keySun = 1.0f;      // 1 the sun's .. 0 the moon's
+        float storm = 0.0f;       // a thunderstorm's overcast (StormOvercast), taken from the sun and the sky alike
+        // Exposed, in the game's units: the key light on a surface facing it, the sky's light (an ambient), and the
+        // key's share of the light on level ground (what a shadow can take).
+        float key = 1.0f, ambient = 0.4f, keyShare = 0.7f;
+        // The sun's share of the land's light (its light on level ground over that and the sky's, clear air), over
+        // noon's: 1 at noon, ~0.5 with the sun 5 degrees up, none at the horizon - how much a shadow, a hill's shade, a
+        // cloud's take (FL.cond.y): the difference between sun and shade dies away as the sun goes down.
+        float sunShare = 1.0f;
+        // The ground's lightmap round the camera (its rgb, eased; the ground grass's capture of it) and the sky's part
+        // of it (all of it by night; by day what the sun's share leaves, physical; a storm's dimmer sky): the light
+        // the ground has over what lit things got - its baked sky -, given to them too (FL.rigSky).
+        float groundLight[3] = {}, groundSky[3] = {};
+        bool groundKnown = false;
+        // The land's exposure (RigLandGain, tonemap.frag: the darks and middle tones, the bright kept): the physical
+        // target for the hour - the clear sky's, sun's and moon's light over noon's, to the power 1 - alpha (the eye's
+        // adaptation) - over how bright the game's own light makes the land now, against the zone's noon (its
+        // lightmap round the camera and its ambient). Storms are left out of both: their darkness is in our lighting.
+        // In place of the night's darkening by NightAmount and RVK_Darkness, and the darkness floor.
+        float landTarget = 1.0f, landGame = 1.0f, landGain = 1.0f;
+        // The camera's metering (the one exposure for everything, on top of the land's): the whole view's brightness
+        // over the land's (view), the zone's by day (viewRef), the exposure from them (meter: tone mapping's).
+        float view = -1.0f, viewRef = 1.0f, meter = 1.0f;
+        bool metered = false;
+        // The zone's day light (its game sun's and ambient's luma, the ambient at noon): what the rig is in units of.
+        uint32_t zone = 0;
+        float zoneSun = 1.0f, zoneSky = 0.4f;
+        bool zoneMeasured = false;
+        // What the game gives now (its sun's luma - by night its light from under the ground -, its ambient's) and the
+        // rig over it.
+        float gameSun = 0.0f, gameAmbient = 0.0f, sunGain = 1.0f, skyGain = 1.0f;
+        // The game's sun on lit things (RigGameLight): its own light down to ~10 degrees up, then the air's and its
+        // disc's setting - to none a degree under.
+        float sunFade = 1.0f;
+    };
+    LightRig m_rig;
+    struct RigZone {
+        float sun = 1.0f, sky = 0.4f, land = 1.0f, view = 1.0f;
+        bool landSeen = false, viewDay = false;
+    };
+    std::unordered_map<uint32_t, RigZone> m_rigZones;   // each zone's day light, measured by day
+    bool m_rigAdaptSet = false, m_rigGainSet = false;
+    double m_rigSteadySince = -1.0;              // since when the zone and the game's ambient have been seen steadily
+    void UpdateLightRig();
+    // A game light as the rig has it (lit draws, the light override): false - not a light the rig changes. The game's
+    // directional light from under the ground (its night light) gone, its sun faded out over its last degrees.
+    bool RigGameLight(const d3d::Light& game, d3d::Light* out) const;
+    float m_sunRising = 1.0f;                   // 1 rising .. 0 setting, eased (the trend over minutes)
     bool m_nightSet = false;
     void UpdateSunClock();
     float SunUp() const;                         // the eased sun's height (the sine of its elevation)
@@ -1759,6 +1917,8 @@ private:
     uint32_t m_shadowMemory = 1;                 // RVK_ShadowMem: remembered casters drawn into the sun's shadows
     uint32_t m_memoryTraceFrames = 0;            // (frames left of the counts' trace)
     bool m_hillShade = true;                     // RVK_HillShade: the terrain's shade from a low sun (terrain_sun.cpp)
+    bool m_lightRig = true;                      // RVK_LightRig: one light for day and night (light_rig.cpp)
+    float m_metering = 0.5f;                     // RVK_Metering: the camera metering's power of the view over the land
     TerrainSettings m_terrainSettings;           // RVK_Terrain*: the ground's own texturing (terrain.cpp)
     bool m_shadowViewDebug = false;              // RVK_ShadowView: the sun shadow map's say painted on the scene
     // The next draws only cast (native mesh.cpp: static meshes the game culled, within the shadows' reach): recorded as
@@ -1784,6 +1944,7 @@ private:
         float plantSway[4];                      // a plant's wind sway (as ShadowCaster sway)
         uint32_t kind;                           // ShadowCaster kind (VisualKind)
         uint64_t leafKey;                        // ShadowCaster leafKey
+        uint64_t rtPlace;                        // ShadowCaster rtPlace
         uint64_t itemKey;                        // its shadow item's batch key (ShadowItemKey), 0: not yet
         Texture* itemKeyTexture;                 // ... made with this cut-out texture (null: solid)
     };
@@ -1791,7 +1952,48 @@ private:
     static constexpr size_t kSwaySamples = 80;
     // (at: where it stood when the streak began; moved: it has moved since - a thing that moves isn't remembered.)
     struct CasterStreak { uint64_t lastFrame = 0; uint32_t count = 0; float at[3] = {}; bool moved = false; };
-    std::unordered_map<uint64_t, CachedCaster> m_casterCache;
+    // The remembered casters, dense (a frame walks all of them: CollectShadowItems, UpdateCasterCache - through a
+    // node map that was most of their time), found by key through an index. Erasing moves the last entry into the
+    // gap, growing may move them all (emplace says so): pointers into it hold only while m_casterCacheEpoch stays.
+    struct CasterCacheStore {
+        using Entry = std::pair<uint64_t, CachedCaster>;   // (key, entry), as a map's
+        std::vector<Entry> entries;
+        std::unordered_map<uint64_t, uint32_t> index;
+        size_t size() const { return entries.size(); }
+        void clear() { entries.clear(); index.clear(); }
+        size_t count(uint64_t key) const { return index.count(key); }
+        CachedCaster* find(uint64_t key)
+        {
+            auto it = index.find(key);
+            return it == index.end() ? nullptr : &entries[it->second].second;
+        }
+        // True: the entries moved (the vector grew).
+        bool emplace(uint64_t key, const CachedCaster& e)
+        {
+            if (index.count(key)) return false;
+            const bool moves = entries.size() == entries.capacity();
+            index.emplace(key, uint32_t(entries.size()));
+            entries.emplace_back(key, e);
+            return moves;
+        }
+        void erase(uint64_t key)
+        {
+            auto it = index.find(key);
+            if (it == index.end()) return;
+            const uint32_t at = it->second;
+            index.erase(it);
+            if (at + 1 != entries.size()) {
+                entries[at] = std::move(entries.back());
+                index[entries[at].first] = at;
+            }
+            entries.pop_back();
+        }
+        std::vector<Entry>::iterator begin() { return entries.begin(); }
+        std::vector<Entry>::iterator end() { return entries.end(); }
+        std::vector<Entry>::const_iterator begin() const { return entries.begin(); }
+        std::vector<Entry>::const_iterator end() const { return entries.end(); }
+    };
+    CasterCacheStore m_casterCache;
     // Placed objects (statels.cpp): every piece of the playfield's static objects, placed; a grid (x, z) over them.
     // (opaque: of a cut-out piece's mask, the share kept by its alpha test - a roof's cut-out mostly whole, a canopy's
     // leaves not; 1 for a solid piece.)
@@ -1864,7 +2066,7 @@ private:
     void NoteBatch(uint64_t key);
     uint32_t m_meshStaticDraws = 0, m_meshHashedDraws = 0;   // frame dump: DrawMeshInfo by snapshot vs by content hash
     void UpdateCasterCache();
-    void ForgetCachedCaster(std::unordered_map<uint64_t, CachedCaster>::iterator it);
+    void ForgetCachedCaster(uint64_t key);
     void ForgetCasterTexture(Texture* texture);
     static double SwayClock();
     static void TickFixedClock();
@@ -1909,6 +2111,27 @@ private:
     VkPipeline m_pipelinesHdrNoCut[3] = {};
     VkPipeline m_tessPipelines[2] = {};          // characters' Phong tessellation: 8-bit target, float target
     VkPipeline m_tessPipelinesNoCut[2] = {};     // ... no-discard
+    // The scene pipelines above are built without the ground's code (ffp_*_ng.frag: 128 registers, the full shader
+    // 168 and a spill - fewer pixels in flight); the ground's draws (and its rocks: their record's terrainAt.w) take
+    // these, the full shader's, in the same arrangement.
+    VkPipeline m_groundPipelines[3] = {}, m_groundPipelinesHdr[3] = {}, m_groundPipelinesNoCut[3] = {},
+               m_groundPipelinesHdrNoCut[3] = {}, m_groundTessPipelines[2] = {}, m_groundTessPipelinesNoCut[2] = {};
+    // ... and for the draws no frame light reaches (ffp_*_nf.frag, RVK_NO_FRAME_LIGHTS: 96 registers) - their mask is
+    // empty, or the light override is off; never the ground's.
+    VkPipeline m_noFramePipelines[3] = {}, m_noFramePipelinesHdr[3] = {}, m_noFramePipelinesNoCut[3] = {},
+               m_noFramePipelinesHdrNoCut[3] = {}, m_noFrameTessPipelines[2] = {}, m_noFrameTessPipelinesNoCut[2] = {};
+    bool m_drawGround = false;                   // the current draw takes the ground's path (its record's terrainAt.w)
+    bool m_drawNoFrameLights = false;            // ... no frame light reaches it (m_noFrame*Pipelines)
+    // The interface's lean shader (RVK_LiteShader, ffp_lite.frag): the 8-bit targets' 2D draws take it (m_drawLite).
+    bool m_liteShader = true;
+    bool m_drawLite = false;
+    VkPipeline m_pipelinesLite[3] = {}, m_pipelinesLiteNoCut[3] = {};
+    // The scene shader's variants as the driver compiled them (VK_KHR_pipeline_executable_properties): each stage's
+    // statistics - registers, spills, instructions, waves - one line each in the log at startup. Registers decide how
+    // many pixels the GPU shades at once: a variant's worst path sets them for every draw that takes it.
+    bool m_shaderStats = false;
+    void ShaderRegisterReport(VkPipeline pipeline, const char* build, const char* target, const char* cut);
+    bool m_constLightOverride = false;           // the current constant block has F_LIGHTOVERRIDE (Draw, as it writes it)
     bool m_tessSupported = false;
     // Phong tessellation of characters near the camera (draw.cpp TessellateDraw): RVK_Tess*.
     float m_tessShape = 0.0f;                    // 0 = off; how far towards the smooth shape (Phong's alpha)
@@ -2000,6 +2223,8 @@ private:
     VkPipeline m_prepassCutoutPipeline = VK_NULL_HANDLE;
     VkPipeline m_leafPrepassPipeline = VK_NULL_HANDLE;   // ... leaf.vert + prepass_cutout.frag (our own canopy's sprigs)
     bool m_prepassEqual = true;                  // RVK_PrepassEq: pre-passed draws test EQUAL, no depth write
+    bool m_prepassMore = true;                   // RVK_PrepassMore: a second segment after the water's copy
+    bool m_waterEndedPrepass = false;            // the water's copy ended this frame's segment (PrepassContinue)
     bool m_prepassSway = true;                   // swaying plants in the pre-pass too (RANDYVK_PREPASS_SWAY=0: not)
     struct PrepassCache {
         bool bound = false;                      // pipeline, front face, depth state, arrays, set 1
@@ -2035,6 +2260,8 @@ private:
     bool m_prepassEndedThisFrame = false;        // a segment ended: later draws are "after end"
     bool PrepassArm(const VkClearRect* rects, uint32_t count, float z);   // at a scene depth clear: split, arm
     void PrepassEnd(uint32_t cause);             // end the armed segment (its commands are complete)
+    bool PrepassContinue();                      // after the water's copy: a second segment over the depth so far
+    VkCommandBuffer PrepassCommands() const;     // the armed segment's pre-pass command buffer
     uint32_t PrepassCheck(uint32_t primitive, uint32_t fvf, bool swaying) const;   // kPreIn: into the pre-pass
     uint32_t AlphaOneCheck(uint32_t fvf) const;  // kPreIn: the output alpha is provably 1; else the input in the way
     bool BackdropCull(uint32_t fvf) const;       // the current draw gets the backdrop cull (m_drawBackdrop)
@@ -2043,10 +2270,11 @@ private:
                      VkDeviceSize vbOffset, VkDeviceSize ibOffset, VkBuffer vb, VkBuffer ib,
                      VkDeviceSize frameLightsOffset, VkBuffer prevBuffer, VkDeviceSize prevOffset, VkDeviceSize prevBytes,
                      VkBuffer smoothBuffer, VkDeviceSize smoothOffset, VkDeviceSize smoothBytes, uint32_t recordIndex, bool cutout);
-    uint32_t FrameCommands(Frame& f, VkCommandBuffer out[4]);   // what a submission runs (ends the pre-pass)
+    uint32_t FrameCommands(Frame& f, VkCommandBuffer out[7]);   // what a submission runs (ends the pre-pass)
     void FrameCommandsSubmitted(Frame& f);       // back to one main command buffer
     // Shared with ApplyDynamicState: the D3D viewport as Vulkan's (and its scissor), the FVF's vertex input.
     void ViewportState(VkViewport* vp, VkRect2D* scissor) const;
+    void ViewportStateOf(VkViewport* vp, VkRect2D* scissor) const;   // (without a portal's box)
     Rect SceneRect(const Rect& r) const;         // back-buffer pixels -> the scene's (RVK_RenderScale)
     static void SetVertexInput(VkCommandBuffer cmd, uint32_t fvf, uint32_t stride);
     Texture* m_contactTex[2] = {};               // half resolution: contact shadow (1 = lit), view depth (ping-pong)
@@ -2197,6 +2425,7 @@ private:
     VkDeviceSize m_staticBytes = 0;              // on the GPU now
     VkBuffer m_drawStaticBuffer = VK_NULL_HANDLE;   // the current draw's vertices are in this buffer, at this offset
     VkDeviceSize m_drawStaticOffset = 0;
+    VkDeviceSize m_drawStaticSlot = 0;           // ... the start of its arena slot (Brixelizer: brixelizer.cpp)
     VkBuffer m_drawStaticIndexBuffer = VK_NULL_HANDLE;   // with m_drawStaticBuffer: its indices retained here, at
     VkDeviceSize m_drawStaticIndexOffset = 0;            // this offset (DrawSharedIndexed); else through the ring
     // A slot in the static arena (device memory, filled by uploads) or, `casters`, the caster arena (host memory).
@@ -2455,9 +2684,11 @@ private:
     // The blades into the sun's nearest cascade (RVK_GrassShadow), after its casters: lightViewProj its matrix, texel
     // its texel size, depth its light-space depth range.
     void DrawGrassShadow(VkCommandBuffer cmd, const d3d::Matrix& lightViewProj, float texel, float depth);
-    bool DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range);
-    bool GrassNearLight(const float light[3], float range) const;   // some of our grass casts into its cube (it sways)
-    bool GrassBelow(const float light[3], float range) const;
+    // The blades into a point light's cube face; cone: a spot light's (only the tiles it reaches), or null.
+    bool DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range,
+                              const detail::Cone* cone);
+    bool GrassNearLight(const float light[3], float range, const detail::Cone* cone) const;   // some of our grass casts into its cube (it sways)
+    bool GrassBelow(const float light[3], float range, const detail::Cone* cone) const;
     bool m_grassDrawnThisFrame = false;            // the blades go in before the game's transparent pass (see Draw)
     // The water (water.cpp).
     WaterParams m_waterParams;
@@ -2472,6 +2703,23 @@ private:
         uint64_t lastFrame = 0;
     };
     std::vector<WaterMap> m_waterMaps;
+    // The surface from the game's own triangles (water_surface.h), made once for each mesh the game hands over (by the
+    // map's key), the last few kept.
+    struct WaterSurface {
+        uint64_t key = 0;
+        uint64_t lastFrame = 0;
+        water::Surface surface;
+    };
+    std::vector<WaterSurface> m_waterSurfaces;
+    // With the surface from the game's triangles, the disturbance field's map: a window round the camera (the field
+    // reaches some 45 units), made again when the camera leaves its cell or the mesh changes - not the playfield's
+    // whole map (~30 ms over Borealis each time the game's mesh changed).
+    WaterMap m_waterSimMap;
+    int32_t m_waterSimMapCell[2] = {INT32_MIN, INT32_MIN};
+    WaterMap* WaterSimMapFor(uint64_t key, const WaterVertex* v, const std::vector<uint32_t>& flat);
+    const water::Surface* WaterSurfaceFor(uint64_t key, const WaterVertex* v, uint32_t count, const std::vector<uint32_t>& flat,
+                                          const std::vector<uint32_t>& steep);
+    std::vector<uint32_t> m_waterFlat;
     struct WaterGrid { uint32_t segments = 0; VkBuffer buffer = VK_NULL_HANDLE; VmaAllocation_T* allocation = nullptr; };
     std::vector<WaterGrid> m_waterGrids;
     std::vector<uint32_t> m_waterSteep;
@@ -2492,6 +2740,7 @@ private:
     VkDescriptorSetLayout m_waterSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_waterLayout = VK_NULL_HANDLE;
     VkPipeline m_waterPipeline = VK_NULL_HANDLE;
+    VkPipeline m_waterSurfacePipeline = VK_NULL_HANDLE;   // the surface's tessellated patches (water_surface.*)
     VkSampler m_waterRepeatSampler = VK_NULL_HANDLE;
     Texture* m_waterDetail = nullptr;            // RG ripple slope, B noise, A cell edges (tiled, mipmapped)
     Texture* m_waterSceneCopy = nullptr;         // the scene before the water (once a frame)
@@ -2555,6 +2804,13 @@ private:
     float m_rainWet = 1.0f;                      // RVK_RainWet: the wet ground and the puddles, x
     // The shared wind (wind.cpp UpdateWind, read through Wind()): every swaying, falling and drifting thing's.
     float m_windDir[2] = {0.848f, 0.530f};       // where it blows (world x, z, unit)
+    // The water's swell: the wind's direction eased over a minute (in a storm the game's wind swings tens of degrees
+    // every few seconds; the waves turned with it, sliding about). Its frame as the wind's (SwellFrame).
+    float m_swellDir[2] = {0.848f, 0.530f};
+    double m_swellOffset[2] = {0.0, 0.0};
+    // The water's ripples' drift: the wind's direction x its clock, added up a frame at a time (as direction x clock,
+    // a turn of the wind jumped them by whole tiles of the pattern).
+    double m_rippleDrift[2] = {0.0, 0.0};
     float m_windStrength = 1.0f;                 // x the sway: 1 calm .. ~3 in a full storm
     float m_windGusts = 1.0f;                    // x RVK_GrassGusts: stronger gust fronts in storms
     float m_storm = 0.0f;                        // 0 .. 1: how stormy (the rain, eased)
@@ -2929,8 +3185,9 @@ private:
     void MakeSandGround(const float corner[3], float size, uint32_t n);
     void UpdateWaterReady();
     const WaterGrid* WaterGridFor(uint32_t segments);
-    WaterMap* WaterMapFor(const WaterVertex* v, uint32_t count, const uint16_t* idx, uint32_t icount,
-                          std::vector<uint32_t>& steep);
+    void SplitWaterTriangles(const WaterVertex* v, uint32_t count, const uint16_t* idx, uint32_t icount,
+                             std::vector<uint32_t>& flat, std::vector<uint32_t>& steep);
+    WaterMap* WaterMapFor(uint64_t key, const WaterVertex* v, const std::vector<uint32_t>& flat);
     bool CopySceneForWater(VkCommandBuffer cmd, const WaterMap* map);
     void WaterLog(const char* fmt, ...);
     bool CreateGrassResources(std::string* error);
@@ -3035,6 +3292,9 @@ private:
     void DestroyLeafResources();
     float m_pointLightScale = 1.0f, m_charLightScale = 1.0f;   // SetPointLightIntensity
     float LightScale(const d3d::Light& l) const;
+    // RVK_PtLight for a lamp: outdoors only. In a room's playfield (no sun) the lamps are the room's light - its walls
+    // and floor have theirs baked in at the game's strength - so the things in it take them at the game's strength too.
+    float LampScale() const { return m_cond.sunKnown ? m_pointLightScale : 1.0f; }
     bool FoliageFar() const;                  // pieces per 0.3 world units (0 = plants drawn as the game gives them)
     bool DrawFartherThan(float distance) const;  // the current draw's box beyond `distance` from the camera
     void SubdividePlant(uint32_t& primitive, uint32_t fvf, const detail::FvfLayout& layout, const void*& vertices,
@@ -3042,8 +3302,15 @@ private:
     float m_drawSway[4] = {};                    // the current draw's sway (for its shadow caster)
     bool m_dynamicWriteMask = false;             // per-draw colour write masks (extended dynamic state 3)
     void FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount, uint32_t out[4]);
-    struct LightSphere { float x, y, z, r2; };
+    struct LightSphere {
+        float x, y, z, r2;
+        // A spot light's cone (SpotCone, with its margin): the light gives nothing outside it - ambient included
+        // (lighting.glsl) - so a draw wholly outside leaves it out of its mask. on: a cone under a half turn.
+        float axis[3] = {}, cosHalf = 0.0f, sinHalf = 0.0f;
+        bool spot = false;
+    };
     std::vector<LightSphere> m_frameLightSpheres;  // the frame lights' spheres in FrameLights order (light masks)
+    bool LightReachesBox(const LightSphere& l, const float mn[3], const float mx[3]) const;   // (draw.cpp)
     uint32_t m_pusherSeenMax = 0;                // the most pushers any frame in the window had (the grass's log)
     // A coarse x/z grid over those lights, so a draw's mask tests only the lights near it, not all of them (a busy
     // scene captures up to kFrameLights): per cell the mask of the lights whose sphere reaches into it, over the
@@ -3075,6 +3342,8 @@ private:
     void WindFrame(float out[4]) const;
     // (along, across) of a world x, z in it (as WindAxes).
     void WindAxes(float x, float z, float out[2]) const;
+    // The swell's direction (xy) and its frame (zw, as WindFrame's xy), and the ripples' drift (xy, wrapped).
+    void SwellFrame(float out[4]) const;
     double m_windPivot[2] = {0.0, 0.0}, m_windOffset[2] = {0.0, 0.0};
     bool m_windPivotSet = false;
     double m_windTime = 0.0, m_windTimePrev = 0.0;   // this frame's and last frame's (set at the frame's start)
@@ -3095,6 +3364,234 @@ private:
     // the interface and 2D pictures, which the upscaling would only soften. Scaled again at the first 3D frame.
     uint32_t RenderScaleNow() const { return TaaActive() && m_framesWithout3D < 60 ? m_renderScaleWanted : 100u; }
     uint32_t m_framesWithout3D = 0;              // frames in a row whose scene drew no 3D (EndFrame)
+    std::atomic<uint32_t> m_framesWithout3DShared{0};   // the same, for the game thread (FramesWithout3D)
+    // The zone hand-over (handover.cpp, docs/zone-handover-plan.md, RVK_ZoneFade): the old zone's last picture held over
+    // the blank frames of a zone change and the new zone's first ones, then faded out.
+    void HandoverScene(VkCommandBuffer cmd);     // (EndScene, after the post passes)
+    bool HandoverPick(bool before);
+    void HandoverBegin(double now);
+    bool HandoverShown() const;                  // the held picture is over the frame's scene (whole or fading)
+    bool HandoverOpaque() const;                 // ... whole
+    void DestroyHandover();
+    enum class Handover : uint8_t { Idle, Armed, Holding, Fading };
+    static constexpr uint32_t kHandoverFrames = 10;   // the new zone's frame times looked at for steadiness
+    struct {
+        Handover state = Handover::Idle;
+        Texture* shots[2] = {};                  // the latest two 3D frames' finished scenes (the output's size)
+        uint64_t shotFrame[2] = {};              // ... their frame numbers
+        int latest = -1;                         // ... the newer one (-1: none)
+        Texture* image = nullptr;                // the held picture: one of them
+        bool cameraSet = false;
+        bool picked = false;                     // the held picture chosen (Armed: the old playfield stopped)
+        double armed = 0, holdStart = 0, first3D = 0, fadeStart = 0, fadeLength = 0.5, lastFrame = 0;   // (s)
+        uint32_t frames3D = 0, frameCount = 0;
+        float frameMs[kHandoverFrames] = {};
+        float eye[3] = {}, forward[3] = {};      // the camera at the new zone's first 3D frame
+        const NativeGround* groundAtArm = nullptr;   // a different one: the new zone's ground is in
+    } m_ho;
+    VkPipeline m_handoverPipeline = VK_NULL_HANDLE;
+    // Shop portals, phase 0 (portal_diag.cpp, docs/shop-portal-plan.md): a playfield's pieces as first drawn after
+    // arriving in it.
+    void PortalDiagPlayfield(uint32_t playfield);
+    void PortalDiagDraw(uint32_t fvf, uint32_t vertexCount, uint32_t indexCount);
+    void PortalDiagFrame();
+    // The reverse (docs/street-portal-plan.md, phase 0): what a walked-through doorway sees of the street (portal_diag.cpp).
+    struct BlackQuad;
+    void PortalStreetDiagStart(const BlackQuad& quad, const float outward[3], uint32_t interior);
+    void PortalStreetDiagDraw(uint32_t fvf, uint32_t vertexCount, uint32_t indexCount, uint32_t stride);
+    void PortalStreetDiagFrame();
+    struct StreetDiag {
+        bool active = false;
+        uint32_t arrival = 0, interior = 0, framesLeft = 0, pieces = 0, terrain = 0;
+        size_t bytes = 0, textureBytes = 0;
+        float apex[3] = {}, dir[3] = {};
+        char mesh[48] = {};
+        std::unordered_set<uint64_t> seen;
+        std::unordered_set<Texture*> textures;
+    } m_sd;
+    // Shop portals' capture (portal_capture.cpp): a room's playfield's static draws, saved when quiet.
+    void PortalCapturePlayfield(uint32_t playfield);
+    void PortalCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
+                           const uint16_t* indices, uint32_t indexCount);
+    void PortalCaptureFrame();                   // (BeginFrame, before anything is recorded)
+    struct PortalCaptureState;
+    void PortalCaptureSave(PortalCaptureState& state);
+    void PortalNoteCharacters(PortalCaptureState& state);
+    void PortalCaptureReadBack(PortalCaptureState& state);
+    void PortalRecordPiece(PortalCaptureState& state, VisualKind kind, uint32_t primitive, uint32_t fvf, uint32_t stride,
+                           const void* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+                           bool door = false);
+    void PortalForgetTexture(Texture* texture);  // (DestroyTexture)
+    bool ReadTexturesLevel0(const std::vector<Texture*>& textures, std::vector<std::vector<uint8_t>*>& out);   // (outside a frame)
+    struct PortalDoor { float base[3], axis[3]; char name[48]; float width, height; };   // (size: its pieces' largest)
+    struct PortalCaptureState {
+        bool on = false, terrainSeen = false, roomsSeen = false, arrivalSet = false;
+        std::shared_ptr<portal::Capture> capture;
+        std::unordered_map<uint64_t, size_t> pieceAt;   // a piece's key -> its place in capture->pieces
+        std::unordered_map<Texture*, int32_t> textureIndex;
+        std::vector<std::pair<Texture*, int32_t>> pending;   // textures to read back
+        std::vector<PortalDoor> doors;
+        float arrival[3] = {}, arrivalForward[3] = {}, roomCentre[3] = {};
+        float roomFloor = 1e30f;                 // the rooms' lowest point (an entrance without a door: its floor)
+        uint32_t roomPieces = 0, unsaved = 0;
+        uint32_t saves = 0, againLines = 0;   // saves this visit; lines on what made it unsaved after one
+        size_t bytes = 0;                        // its vertices, indices and textures so far
+        // A street's (portal_street.cpp): its file, and the doorway it is seen from - in front of it, the cone kept.
+        bool street = false;
+        std::string path;
+        float apex[3] = {}, dir[3] = {};
+        double lastNear = 0.0;
+        float nearDistance = 0.0f;               // ... the doorway's distance from the camera then
+        std::unordered_map<uint64_t, std::vector<std::array<float, 3>>> placesOf;   // a prop's places, by its geometry
+        std::vector<std::array<float, 3>> characters;   // where characters stood (their attachments are dropped)
+        double lastNew = 0.0, lastSave = 0.0;
+    };
+    PortalCaptureState m_pc, m_pcLeaving;        // (leaving: saved at the next frame's start)
+    PortalCaptureState m_sc, m_scLeaving;        // a street's (portal_street.cpp), the same way
+    // Shop portals' links (portal_links.cpp): the black texture's quads drawn (doorways and windows), and which
+    // doorway leads to which room's playfield.
+    struct BlackQuad {
+        float centre[3] = {}, normal[3] = {}, modelCentre[3] = {};
+        float modelNormal[3] = {};               // (normal on the mesh, before its world matrix)
+        std::vector<float> triangles;            // its triangles in the world (9 floats each: the opening, portal.cpp)
+        float sill = 0, width = 0, height = 0;
+        char mesh[48] = {};
+        uint16_t piece = 0;
+        mutable uint64_t drawnFrame = ~0ull;     // its room drawn behind it (portal.cpp: once a frame)
+    };
+    struct BlackDraw {
+        uint64_t lastFrame = 0;
+        uint32_t reportedIn = 0;
+        uint32_t linksGen = ~0u;                 // (hasPortal as of m_portalLinksGen)
+        bool hasPortal = false;                  // a doorway of it leads to a room
+        std::vector<BlackQuad> quads;
+    };
+    uint32_t m_portalLinksGen = 0;               // links loaded or learned
+    bool m_portalArmed = false;                  // a doorway with a room drawn since its room was: DrawPortals next
+    uint64_t m_portalsFrame = ~0ull;             // (the frame m_portalsDrawn counts)
+    uint32_t m_portalsDrawn = 0;
+    uint32_t m_portalArrivals = 1;               // playfield changes (PortalCapturePlayfield): BlackDraw::reportedIn
+    void PortalReportLinks(BlackDraw& draw);
+    std::unordered_map<uint64_t, BlackDraw> m_blackDraws;   // by geometry and place
+    struct PortalLink {
+        uint32_t outdoor = 0, interior = 0;
+        char mesh[48] = {};
+        uint16_t piece = 0;
+        float modelCentre[3] = {}, centre[3] = {}, normal[3] = {};   // (normal: outward)
+        float sill = 0, width = 0, height = 0;
+        // Outward on the mesh (0 0 0: not known yet - a link saved before it was kept, learned when its doorway is
+        // next drawn): the same building's doorway elsewhere faces out the same way.
+        mutable float modelOutward[3] = {};
+    };
+    std::vector<PortalLink> m_portalLinks;
+    bool m_portalLinksLoaded = false;
+    struct PortalPending { bool active = false; double time = 0; uint32_t from = 0; BlackQuad quad; } m_portalPending;
+    void PortalNoteBlack(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
+                         const uint16_t* indices, uint32_t indexCount);
+    const PortalLink* PortalLinkFor(const BlackQuad& quad, uint32_t playfield);
+    bool PortalOutward(const BlackQuad& quad, const PortalLink& link, float out[3]);
+    void PortalLinkTeleport();                   // (ZoneSignal)
+    void PortalLinkFrame();                      // (PortalCaptureFrame)
+    void PortalLoadLinks();
+    bool PortalSaveLinks();
+    // Street portals' capture (portal_street.cpp): what a walked-through doorway sees of the street.
+    void StreetCaptureNear(const PortalLink& link, const BlackQuad& quad, const float outward[3], float distance);
+    void StreetCaptureDraw(uint32_t primitive, uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount,
+                           const uint16_t* indices, uint32_t indexCount);
+    void StreetCaptureFrame();
+    void StreetCaptureGround(const BlackQuad& quad, const float outward[3]);   // (the native ground in front of it)
+    void StreetCaptureGroundPass(bool light);    // (NativeGroundReplaces: the game's ground passes' states)
+    void StreetCaptureLight();                   // (the hour's lightmap over the cut-out, once there is one)
+    int32_t PortalTextureOf(PortalCaptureState& state, Texture* texture);   // (into its capture; read back later)
+    // The street's light now (phase 4): the game's light on the street's statics - its directional lights, ambient and
+    // fog - noted each outdoor frame (m_outdoorNow), kept with the ground's lightmap at the teleport into a room
+    // (m_streetLight): the street seen from inside is lit for the hour it is, not the hour it was recorded.
+    struct OutdoorLight {
+        bool known = false;
+        uint32_t playfield = 0;
+        uint64_t frame = 0;
+        std::vector<d3d::Light> directional;
+        uint32_t ambient = 0;
+        std::array<uint32_t, 8> fog{};           // (kOutdoorFogStates' values)
+        std::vector<uint32_t> lightPixels;       // the hour's lightmap over the playfield (cellsX x cellsZ cells)
+        uint32_t lightW = 0, lightH = 0, cellsX = 0, cellsZ = 0;
+        uint32_t generation = 0;
+    };
+    OutdoorLight m_outdoorNow, m_streetLight;
+    uint32_t m_streetLightGen = 0, m_streetGroundLightGen = 0;
+    // Shop portals (portal.cpp): the rooms behind the linked doorways in view, drawn at the scene's end.
+    struct LoadedPortal {
+        std::shared_ptr<portal::Capture> capture;
+        std::vector<Texture*> textures;          // the capture's, made on the GPU
+        bool ok = false;
+        double lastUsed = 0.0, tried = 0.0;
+    };
+    std::unordered_set<uint32_t> m_portalMissingLogged;   // (rooms logged as not captured yet)
+    void PortalForget(uint32_t playfield);
+    std::unordered_map<uint32_t, LoadedPortal> m_portals;   // by the room's playfield (failed loads too: not retried)
+    LoadedPortal* PortalLoad(uint32_t playfield);
+    void PortalForgetUnused(bool all);
+    void DestroyPortals();
+    bool PortalCopyDepth(VkCommandBuffer cmd);
+    void DrawPortals();                          // (EndScene)
+    bool PortalOpenPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, bool& copied,
+                        const std::vector<float>* triangles = nullptr, VkPipeline pipeline = VK_NULL_HANDLE);
+    uint32_t PortalReplay(const portal::Capture& capture, const std::vector<Texture*>& textures, const d3d::Matrix& place,
+                          const OutdoorLight* now = nullptr);
+    void PortalSetLights(const std::vector<d3d::Light>& lights, const d3d::Matrix& place);
+    void PortalMarkPass(VkCommandBuffer cmd, const float push[32], const VkRect2D& box, const std::vector<float>& triangles);
+    static void PortalTrianglePush(const float push[32], const float* triangle, float out[32]);
+    bool m_drawingPortal = false;                // a room's piece being drawn into a doorway: no side effects
+    VkRect2D m_portalScissor{};                  // ... kept to the doorway's box on the scene
+    float m_portalClip[4] = {};                  // ... and behind its plane (DrawTransform clip)
+    std::unordered_set<uint64_t> m_portalLogged; // (the doorways logged as drawn since arriving)
+    VkPipeline m_portalOpenPipeline = VK_NULL_HANDLE, m_portalMarkPipeline = VK_NULL_HANDLE;
+    VkPipeline m_portalRestorePipeline = VK_NULL_HANDLE;   // (the open pass's, depth GREATER: mode 2)
+    VkImage m_portalDepthCopy = VK_NULL_HANDLE;
+    VkImageView m_portalDepthCopyView = VK_NULL_HANDLE;
+    VmaAllocation_T* m_portalDepthCopyAllocation = nullptr;
+    VkImageLayout m_portalDepthCopyLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    uint32_t m_portalDepthW = 0, m_portalDepthH = 0;
+    bool m_portalsOn = true;                     // RVK_Portals
+    float m_portalDist = 60.0f;                  // RVK_PortalDist: drawn within this of the camera (units)
+    float m_portalDim = 0.7f;                    // RVK_PortalDim: the room's brightness by day, of its own (0..1)
+    // The reverse (portal.cpp DrawStreetPortal, docs/street-portal-plan.md): the street from inside a shop.
+    void DrawStreetPortal();                     // (EndScene)
+    bool StreetDeclined(const char* why);        // why not, logged as it changes; true: declined
+    // The street's ground (portal_street.cpp, phase 2): its capture's cut-out of the native ground, made a native
+    // ground of its own - swapped into m_native to be made and drawn through the native ground's path.
+    NativeState m_streetNative;
+    void NoteOutdoorLight();                     // (the draw path: a lit static outdoors)
+    void KeepStreetLight();                      // (PortalLinkTeleport: leaving the street through a doorway)
+    void StreetLightPiece(const OutdoorLight& now, std::array<uint32_t, d3d::RS_COUNT>& rs,
+                          const std::vector<d3d::Light>& lights, std::vector<d3d::Light>& out) const;
+    bool m_streetGround = false;                 // it is drawing (its patches are the ground: IsTerrain)
+    bool BuildStreetGround(const portal::Capture& capture, const std::vector<Texture*>& textures);
+    void DrawStreetGround(const portal::Capture& capture, const d3d::Matrix& place, const OutdoorLight* now);
+    void DestroyStreetGround();
+    bool m_streetViewOn = true;                  // RVK_StreetView
+    bool m_streetNow = true;                     // RVK_StreetNow: lit for the hour it is now (else as recorded)
+    bool m_enteredValid = false;                 // the doorway walked in through (PortalLinkFrame)
+    PortalLink m_enteredFrom;
+    struct StreetRoom { uint32_t playfield = ~0u; bool known = false; float entrance[3] = {}, inward[3] = {}; } m_streetRoom;
+    struct StreetLoaded {
+        std::string path;
+        LoadedPortal lp;
+        bool logged = false;
+        float inset = 0.0f;
+    } m_street;
+    uint64_t m_streetShownFrame = 0;             // the last frame the street was drawn through the entrance
+    std::string m_streetWhy;                     // why it isn't drawn, as last logged (StreetDeclined)
+    uint32_t m_streetWhyLines = 0;               // ... lines this visit
+    struct {
+        bool active = false, cameraLogged = false;
+        uint32_t playfield = 0, pieces = 0, newSince = 0, lines = 0;
+        uint32_t byKind[16] = {};
+        double start = 0, lastSummary = 0;
+        std::unordered_set<uint64_t> seen;
+    } m_pd;
+    bool m_zoneFade = true;                      // RVK_ZoneFade
+    float m_zoneHoldMax = 1.5f;                  // RVK_ZoneHoldMax: the longest the new zone stays hidden once it draws (s)
     void ApplyRenderScale();
     // The scene is smaller than the output: the TAA upscales it, and the depth is brought up to the output size
     // after it (UpsampleDepth).
@@ -3136,6 +3633,11 @@ private:
     Texture* m_fgOverlay = nullptr;              // combined overlay for the interpolation swapchain
     bool OverlayLabelsBegin();
     void OverlayLabelsEnd();
+    // 2D draws between the scene and the interface (cast bars, zoning text) while frame generation is on: into the
+    // labels overlay, so they are not interpolated.
+    bool m_overlayUnder = false;
+    bool OverlayUnderBegin();
+    void OverlayUnderEnd();
     // Late draws, including the cursor, stay above the interface and console.
     Texture* m_overlayTop = nullptr;
     bool m_overlayTopActive = false;
@@ -3201,6 +3703,30 @@ private:
     void RenderObjectMotionBlur(VkCommandBuffer cmd, Texture* src, const float params[28]);
     float m_aoStrength = 1.0f, m_aoRadius = 1.5f;
     Texture* m_aoTex[2] = {};                    // half resolution: raw, blurred (ping-pong)
+    // RVK_AoMode 1 (cacao.cpp): AMD's AO (FidelityFX CACAO) in place of ours, into m_cacaoAo - full resolution,
+    // occlusion and view depth as m_aoTex[1] holds ours; ours where it can't run. docs/amd-fx-plan.md.
+    float m_aoMode = 0.0f;
+    struct CacaoState;
+    CacaoState* m_cacao = nullptr;
+    Texture* m_cacaoOut = nullptr;               // its output (storage)
+    Texture* m_cacaoAo = nullptr;
+    bool m_aoFull = false;                       // this frame's AO is full resolution, in m_aoFullTex
+    Texture* m_aoFullTex = nullptr;              // m_cacaoAo, or the ray-traced (RVK_AoMode 2, raytrace.cpp)
+    bool m_gatherExtended = false;               // (its shaders gather with offsets: shaderImageGatherExtended)
+    VkPipeline m_cacaoPackPipeline = VK_NULL_HANDLE;     // cacao_pack.frag
+    bool RenderCacao(VkCommandBuffer cmd);
+    void DestroyCacao();
+    // RVK_Vrs (vrs.cpp): variable rate shading - AMD's shading rate image (FidelityFX VRS) as the scene rendering's
+    // fragment shading rate attachment, taken by the scene shader's pipelines. m_sceneRateFlag: every pipeline is made
+    // for the attachment when the GPU has it (VK_KHR_fragment_shading_rate; 0 otherwise); m_vrsTexel its tile size.
+    float m_vrsMode = 0.0f, m_vrsCutoff = 0.05f;
+    VkPipelineCreateFlags m_sceneRateFlag = 0;
+    uint32_t m_vrsTexel = 16;
+    struct VrsState;
+    VrsState* m_vrs = nullptr;
+    bool RenderVrsImage(VkCommandBuffer cmd);
+    VkImageView VrsAttachment() const;
+    void DestroyVrs();
     VkPipeline m_aoPipeline = VK_NULL_HANDLE, m_aoBlurPipeline = VK_NULL_HANDLE;
     float m_giStrength = 1.0f, m_giRadius = 4.0f;
     Texture* m_albedo = nullptr;                 // fifth scene attachment: surface colour without lighting (fogged)
@@ -3237,7 +3763,93 @@ private:
     float m_ssr = 1.0f, m_ssrWater = 1.0f, m_ssrGloss = 0.3f, m_ssrWet = 0.0f;
     Texture* m_ssrTex = nullptr;                 // full resolution: reflected colour, how much it shows
     VkPipeline m_ssrPipeline = VK_NULL_HANDLE;
-    bool RenderSsr(VkCommandBuffer cmd);
+    bool RenderSsr(VkCommandBuffer cmd, bool traced = false);   // (traced: misses marked for RenderRtReflect)
+    // RVK_SsrMode 1 (sssr.cpp): AMD's reflections (FidelityFX SSSR) in place of ours, into m_ssrTex as ours; ours
+    // where they can't run. docs/amd-fx-plan.md.
+    float m_ssrMode = 0.0f, m_sssrThick = 0.5f;
+    struct SssrState;
+    SssrState* m_sssr = nullptr;
+    Texture* m_sssrOut = nullptr;                // its output (storage)
+    VkPipeline m_sssrResolvePipeline = VK_NULL_HANDLE;   // sssr_resolve.frag
+    bool RenderSssr(VkCommandBuffer cmd);
+    void DestroySssr();
+    // RVK_GiMode 1 (brixelizer.cpp): AMD's indirect light (FidelityFX Brixelizer GI, traced through a distance field
+    // of the static world) in place of ours, into m_brixGi - full resolution, light and view depth as m_giTex[1]
+    // holds ours; ours where it can't run. RVK_GiDebug (ini): 1 the distance field, 2 its light alone.
+    float m_giMode = 0.0f, m_giDebug = 0.0f, m_giSky = 0.0f;
+    struct BrixState;
+    BrixState* m_brix = nullptr;
+    Texture* m_brixGi = nullptr;
+    Texture* m_brixGiLast = nullptr;             // last frame's m_brixGi (brix_pack.frag steadies characters with it)
+    uint64_t m_brixGiFrame = 0;                  // the frame m_brixGi was last made
+    bool m_giFull = false;                       // this frame's indirect light is m_brixGi
+    VkPipeline m_brixPackPipeline = VK_NULL_HANDLE;      // brix_pack.frag
+    bool BrixWanted() const { return m_giStrength > 0.0f && m_giMode >= 0.5f; }
+    void BrixNoteDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t stride, uint32_t vertexCount,
+                      VkBuffer ib, uint32_t indexCount);
+    void BrixForgetSlot(VkBuffer buffer, VkDeviceSize offset);
+    bool RenderBrixGi(VkCommandBuffer cmd);
+    void DestroyBrix();
+    // Ray queries (raytrace.cpp, docs/rt-plan.md): acceleration structures of the static world - a BLAS per mesh the
+    // static arena keeps, a TLAS of their places round the camera each frame - for rays from any shader. Only where
+    // the GPU has them (m_rayQuery); RVK_RtDebug 1 shows what the rays hit.
+    bool m_rayQuery = false;
+    VkDeviceSize m_asScratchAlign = 128;         // (the GPU's minAccelerationStructureScratchOffsetAlignment)
+    float m_rtDebug = 0.0f;
+    struct RtState;
+    RtState* m_rt = nullptr;
+    bool RtAoWanted() const { return m_rayQuery && m_aoStrength > 0.0f && m_aoMode >= 1.5f; }   // RVK_AoMode 2
+    // RVK_RtShadow 1: the sun's shadows ray traced where the pre-pass's depth is (raytrace.cpp RenderRtShadow).
+    float m_rtShadow = 0.0f;
+    bool RtShadowWanted() const { return m_rayQuery && m_rtShadow >= 0.5f && m_shadows && m_prepassOn; }
+    // RVK_RtReflect 1: where our screen-space reflections find nothing, a ray (raytrace.cpp RenderRtReflect).
+    float m_rtReflect = 0.0f;
+    float m_volLamps = 0.0f;                     // RVK_VolLamps (volume.frag: FL.volume2.x)
+    bool RtReflectWanted() const { return m_rayQuery && m_rtReflect >= 0.5f && m_ssr > 0.0f; }
+    bool RtReflectReady() const;                 // this frame's structures and its pass are there (else no misses marked)
+    void RenderRtReflect(VkCommandBuffer cmd);
+    bool RtWanted() const
+    {
+        return m_rayQuery && (m_rtDebug >= 0.5f || RtAoWanted() || RtShadowWanted() || RtReflectWanted());
+    }
+    // (Its instance's key when the draw's place is kept - else 0.)
+    // (cutout: its texture, alpha-tested at the rays' hits - alpha over alphaRef, at uvOffset in its vertices.)
+    uint64_t RtNoteDraw(uint32_t primitive, const void* vertices, uint32_t stride, uint32_t vertexCount, VkBuffer ib,
+                        uint32_t indexCount, bool ground, Texture* cutout = nullptr, float alphaRef = 0.0f,
+                        uint32_t uvOffset = 0);
+    void RtForgetTexture(Texture* texture);      // (its cut-outs' instances go: DestroyTexture)
+    uint64_t m_drawRtPlace = 0;                  // this draw's (RtNoteDraw), for its shadow caster
+    // A character's piece skinned on the GPU (draw.cpp): its BLAS refitted this frame, an instance where it is drawn.
+    uint64_t RtNoteSkinned(const void* job, VkBuffer arena, VkDeviceSize vertexOffset, uint32_t vertexCount,
+                           VkBuffer meshBuffer, VkDeviceSize indexOffset, uint32_t indexCount);
+    bool RtTraced(uint64_t place) const;         // that instance is in the rays (its BLAS built)
+    uint64_t RtStatelPlace(uint32_t item) const; // a placed object's piece's instance key (statels.cpp), 0 = none
+    void RenderRtShadow(uint32_t cause);         // at the pre-pass's end: the rays' sun mask (Frame::rays)
+    uint32_t RtShadowMaskBits();                 // FL.rtShadow.x: the mask's bindless image + 1 | sampler << 20
+    void RtForgetSlot(VkBuffer buffer, VkDeviceSize offset);
+    void RtSyncStatels();                        // the placed objects' pieces as meshes and instances
+    void RtCompact(VkCommandBuffer cmd);         // built BLAS copied into their compacted size
+    bool RtUpdate(VkCommandBuffer cmd);          // this frame's BLAS builds and TLAS; false: none to trace
+    void RenderRtDebug(VkCommandBuffer cmd);
+    bool RenderRtAo(VkCommandBuffer cmd);
+    void RtCollect();                            // (structures no submission in flight can still read)
+    void DestroyRt();
+    // The scene's surfaces for AMD's effects: every surface's normal written into the motion vectors' zw while one
+    // reads them (FL.screen.z), unpacked by gbuffer.frag into m_sceneSurface - world normal, roughness. Each of these
+    // is made once a frame, by the first effect that asks (sssr.cpp).
+    bool SceneNormalsWanted() const { return (m_ssr > 0.0f && m_ssrMode >= 0.5f) || BrixWanted() || RtAoWanted(); }
+    Texture* m_sceneSurface = nullptr;
+    VkPipeline m_gbufferPipeline = VK_NULL_HANDLE;       // gbuffer.frag
+    uint64_t m_sceneSurfaceFrame = ~0ull;
+    bool RenderSceneSurface(VkCommandBuffer cmd);
+    Texture* m_sceneMotion = nullptr;            // the motion vectors whole (motion_fill.frag), RG16F
+    uint64_t m_sceneMotionFrame = ~0ull;
+    bool RenderSceneMotion(VkCommandBuffer cmd);
+    Texture* m_sceneEnv = nullptr;               // the environment: the probe's atlas, the sky guessed where unseen
+    VkPipeline m_sssrEnvPipeline = VK_NULL_HANDLE;       // sssr_env.frag
+    uint64_t m_sceneEnvFrame = ~0ull;
+    bool RenderSceneEnv(VkCommandBuffer cmd);
+    void DestroySceneSurfaces();
     d3d::Matrix m_aoProj{};                      // the world camera's projection (first depth-writing 3D draw)
     d3d::Matrix m_aoView{};                      // ... and view
     float m_motionBlur = 0.0f, m_motionNear = 8.0f;
@@ -3384,6 +3996,48 @@ private:
     uint32_t m_particleDraws = 0;                // this frame (frame dumps)
     bool CreateParticleResources(std::string* error);
     void DestroyParticleResources();
+    // Our own effects (fx.cpp).
+    struct FxEmitterRun {
+        int32_t block = -1;                      // its block of particles (-1: none yet / none free)
+        uint32_t cursor = 0;                     // where the next particles spawn in it
+        float carry = 0.0f;                      // the rate's fraction of a particle carried to the next frame
+        bool reset = true;                       // newly given its block: its particles start dead
+    };
+    struct FxPlaying {
+        uint64_t key = 0;
+        uint32_t effect = 0;
+        std::shared_ptr<const fx::Effect> def;   // (kept while its particles live, even once redefined)
+        FxAnchors now, prev;
+        bool havePrev = false, gone = false;
+        uint32_t lastPhase = 0;
+        uint64_t lastSeen = 0;                   // the frame it was last announced in
+        double goneAt = 0.0;
+        float noise = 0.0f;                      // its offset into the flow
+        std::vector<FxEmitterRun> runs;          // one an emitter
+    };
+    struct FxDrawn { uint32_t playing, emitter, region; };
+    std::unordered_map<uint32_t, std::shared_ptr<const fx::Effect>> m_fxEffects;
+    std::vector<FxPlaying> m_fxPlaying;
+    std::vector<uint32_t> m_fxFreeBlocks;
+    std::vector<FxDrawn> m_fxDrawn;              // this frame's simulated blocks, in quad-region order
+    VkDescriptorSetLayout m_fxSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout m_fxLayout = VK_NULL_HANDLE;
+    VkPipeline m_fxPipeline = VK_NULL_HANDLE;
+    VkBuffer m_fxState = VK_NULL_HANDLE, m_fxIndices = VK_NULL_HANDLE;
+    VmaAllocation_T* m_fxStateAllocation = nullptr;
+    VmaAllocation_T* m_fxIndicesAllocation = nullptr;
+    VkBuffer m_fxQuads[kFramesInFlight] = {};
+    VmaAllocation_T* m_fxQuadsAllocation[kFramesInFlight] = {};
+    Texture* m_fxAtlas = nullptr;                // the sprites (fx::Sprite), made at the first effect
+    bool m_fxStateCleared = false;
+    double m_fxLastClock = 0.0;
+    float m_fxTime = 0.0f;
+    uint32_t m_fxDraws = 0;
+    bool CreateFxResources(std::string* error);
+    void DestroyFxResources();
+    void SimulateFx(VkCommandBuffer cmd);        // BeginFrame, before rendering starts (last frame's announcements)
+    void DrawFx();                               // EndScene, before the portals
+    void MakeFxAtlas();
     void SimulateParticles(VkCommandBuffer cmd); // BeginFrame, before rendering starts
     void DrawParticles(ParticleBlock& block, bool orphan = false);   // right after the effect's own draw, with its state
     // Particles of effects the game didn't draw this frame (ended, or out of view): drawn with their effect's last state
@@ -3763,6 +4417,31 @@ private:
     std::vector<LightSlot> m_lights;
     std::array<Texture*, 2> m_textures{};
     d3d::Viewport m_viewport{};
+
+    // The street seen from inside a shop (portal.cpp): the room's door's draws this frame, drawn again over the street
+    // (its leaf swung open out of the room stands behind the opening, which the street covers).
+    struct StreetDoorDraw {
+        uint32_t primitive = 0, fvf = 0, vertexCount = 0;
+        std::vector<uint8_t> vertices;
+        std::vector<uint16_t> indices;
+        std::array<uint32_t, d3d::RS_COUNT> rs{};
+        std::array<std::array<uint32_t, d3d::TSS_COUNT>, 2> tss{};
+        std::array<Texture*, 2> textures{};
+        std::vector<LightSlot> lights;
+        d3d::Matrix world{};
+        d3d::Material material{};
+        const MeshInfo* mesh = nullptr;
+        const char* visualName = "";
+        uint32_t kind = 0, visual = 0, owner = 0;
+    };
+    std::vector<StreetDoorDraw> m_streetDoorDraws;
+    // What was taken, for the log: each piece once a visit, and frames that took fewer than the one before.
+    std::vector<std::pair<uint64_t, uint32_t>> m_streetDoorSeen;   // (geometry, vertices)
+    uint32_t m_streetDoorLast = 0, m_streetDoorLines = 0;
+    bool m_redrawingDoor = false;
+    void NoteStreetDoorDraw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32_t vertexCount,
+                            const uint16_t* indices, uint32_t indexCount);
+    void RedrawStreetDoor(std::vector<StreetDoorDraw>& draws);
 };
 
 }  // namespace rvk

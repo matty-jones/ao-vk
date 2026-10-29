@@ -14,440 +14,472 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - Presets (Original, Classic+, Modern, Ultra) set every setting outside General; Modern is the defaults.
 - A setting renamed or given a new default carries over once (`kMigrations`); its old names are listed.
 - *knob*: a plain value set through the generic path (`rvk.h` `RVK_FLOAT_KNOBS`, `RVK_BOOL_KNOBS`).
+- *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
+  75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-330 settings, 161 of them in the settings window.
+360 settings, 181 of them in the settings window.
 
 ## Sections
 
-- [General](#general) (10)
-- [Lighting](#lighting) (17)
-- [Materials](#materials) (14)
+- [General](#general) (19)
+- [Lighting](#lighting) (21)
+- [Materials](#materials) (15)
 - [Debug](#debug) (8)
 - [Terrain](#terrain) (22)
 - [Plants](#plants) (38)
-- [Water](#water) (22)
+- [Water](#water) (23)
 - [Weather](#weather) (35)
 - [Smoke](#smoke) (12)
 - [Sky](#sky) (45)
-- [Shadows](#shadows) (16)
-- [Effects](#effects) (46)
+- [Shadows](#shadows) (18)
+- [Effects](#effects) (57)
 - [Tone mapping](#tone-mapping) (2)
 - [Anti-aliasing](#anti-aliasing) (6)
 - [Colour grading](#colour-grading) (10)
 - [Depth of field](#depth-of-field) (9)
-- [Particles](#particles) (18)
+- [Particles](#particles) (20)
 
 ## General
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_Enhance` | All enhancements (Ctrl+Shift+E) | on / off | on | window |
-| `RVK_Prepass` | Depth pre-pass | on / off | on | ini only; knob |
-| `RVK_PrepassEq` | Depth pre-pass: what it covers shaded only where it is seen | on / off | on | ini only; switch `RVK_Prepass`; knob |
-| `RVK_WinScale` | Window size (%) - release to apply | 50 .. 200 | 100 | window |
-| `RVK_HudScale` | HUD size (%) | 50 .. 200 | 100 | window |
-| `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 / 30 / 60 / 90 / 120 | 60 | window |
-| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's, client memory and VRAM | on / off | off | window |
-| `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | window; knob |
-| `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | window |
-| `RVK_ViewRange` | How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws) | 1 .. 3 | 1.5 | window; game value 1 |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_Enhance` | All enhancements (Ctrl+Shift+E) | on / off | on | GPU: all of the below (off: the cheapest) | window |
+| `RVK_Prepass` | Depth pre-pass | on / off | on |  | ini only; knob |
+| `RVK_LiteShader` | The interface drawn with a lean shader of its own (the same picture, far less GPU time) | on / off | on |  | ini only; knob |
+| `RVK_PrepassEq` | Depth pre-pass: what it covers shaded only where it is seen | on / off | on |  | ini only; switch `RVK_Prepass`; knob |
+| `RVK_PrepassMore` | Depth pre-pass: a second stretch after the water's copy of the scene | on / off | on |  | ini only; switch `RVK_Prepass`; knob |
+| `RVK_WinScale` | Window size (%) - release to apply | 50 .. 200 | 100 | no cost | window |
+| `RVK_HudScale` | HUD size (%) | 50 .. 200 | 100 | no cost | window |
+| `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 (every frame) / 30 / 60 / 90 / 120 | 60 | saves GPU and CPU: 30 or 60 cheaper than every frame | window |
+| `RVK_ZoneFade` | Zone changes: the last view stays up and fades into the new zone once it has loaded (off: the blank wait) | on / off | on | no cost | window; game value off; knob |
+| `RVK_ZoneHoldMax` | Zone changes: the longest the new zone stays hidden once it draws (seconds) | 0.5 .. 5 | 1.5 | no cost | ini only; switch `RVK_ZoneFade`; knob |
+| `RVK_Portals` | Shops' insides seen through their doors (once you have been in one of the kind) | on / off | on | GPU: low, with a shop's door in view | window; game value off; knob |
+| `RVK_PortalDist` | Shops' insides through their doors: drawn within this distance | 10 .. 200 | 60 | no cost | ini only; switch `RVK_Portals`; knob |
+| `RVK_PortalDim` | Shops' insides through their doors: their brightness by day (1 = as inside) | 0 .. 1 | 0.7 | no cost | window; switch `RVK_Portals`; knob |
+| `RVK_StreetView` | The street seen from inside a shop through its open door (once you have stood at that door outside) | on / off | on | GPU: low, with a shop's open door in view | window; switch `RVK_Portals`; game value off; knob |
+| `RVK_StreetNow` | The street seen from inside a shop: lit for the hour it is now (off: as when it was recorded) | on / off | on | no cost | ini only; switch `RVK_StreetView`; knob |
+| `RVK_PerfHud` | Performance readout in the top left: frames a second, the game's and the renderer's CPU time, the GPU's, client memory and VRAM | on / off | off | no cost | window |
+| `RVK_AlienMap` | AI missions' PF map: rooms shown black on green (the game's is black on black) | on / off | on | no cost | window; knob |
+| `RVK_DetailRange` | How far out rocks and shrubs are shown, x the game's (1: the game's own; more draws) | 1 .. 4 | 2 | CPU and GPU: more with the value | window |
+| `RVK_ViewRange` | How far you see, x the game's view distance - the far land and mountains fading into the sky by true distance, no popping as you turn (1: the game's own; more draws) | 1 .. 3 | 1.5 | CPU and GPU: more with the value | window; game value 1 |
 
 ## Lighting
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_Darkness` | Darkness: how dark nights, storms and dim places get (0 lightest, as the blue hour after sunset; 1 ao-vk's earlier nights; 2 very dark) | 0 .. 2 | 0 | window; was `RVK_NightDark` |
-| `RVK_DarkFloor` | Darkness: the floor under the land's brightness, x (the exposure raised in the darkest places, as eyes adapt; 0 none) | 0 .. 2 | 1 | ini only |
-| `RVK_PixelLight` | Per-pixel lighting | on / off | on | window; game value off; was env `RANDYVK_PIXEL_LIGHTING` |
-| `RVK_LightOver` | All nearby lights (light override) | on / off | on | ini only; game value off; was env `RANDYVK_LIGHT_OVERRIDE` |
-| `RVK_Headroom` | All nearby lights: light headroom without effects | 1 .. 2 | 1.15 | ini only; switch `RVK_LightOver`; game value 1; knob; was env `RANDYVK_LIGHT_HEADROOM` |
-| `RVK_OwnLight` | A character's own light lights the character | on / off | on | ini only; switch `RVK_LightOver`; knob |
-| `RVK_LeafLightOn` | Sunlight through leaves | on / off | on | ini only |
-| `RVK_LeafLight` | Sunlight through leaves: strength | 0.25 .. 2 | 1 | ini only; switch `RVK_LeafLightOn`; game value 0 |
-| `RVK_CrownShade` | Tree crowns lit as one rounded mass (darker inside, each tree's colour its own) | 0 .. 1 | 1 | ini only; game value 0; knob |
-| `RVK_PtLight` | Lamp and fire brightness | 0.25 .. 2 | 0.25 | window; game value 1 |
-| `RVK_CharLight` | Character light brightness | 0.1 .. 2 | 0.25 | window; game value 1 |
-| `RVK_TessOn` | Tessellation | on / off | on | window |
-| `RVK_Tess` | Tessellation: roundness | 0.25 .. 1 | 0.6 | window; switch `RVK_TessOn`; game value 0 |
-| `RVK_TessLevel` | Detail up close (pieces per triangle edge) | 2 .. 8 | 3 | ini only; switch `RVK_TessOn` |
-| `RVK_TessDist` | Up to this distance (world units) | 5 .. 60 | 16 | ini only; switch `RVK_TessOn` |
-| `RVK_Aniso` | Texture filtering (anisotropic; 1 = off) | 1 / 2 / 4 / 8 / 16 | 16 | window; game value 1; was env `RANDYVK_ANISOTROPY` |
-| `RVK_HillShade` | The terrain's shade from a low sun (valleys under mountains) | on / off | on | ini only; knob |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_Darkness` | Darkness: how dark nights, storms and dim places get (0 lightest, as the blue hour after sunset; 1 ao-vk's earlier nights; 2 very dark) | 0 .. 2 | 0 | no cost | window; was `RVK_NightDark` |
+| `RVK_DarkFloor` | Darkness: the floor under the land's brightness, x (the exposure raised in the darkest places, as eyes adapt; 0 none) | 0 .. 2 | 1 |  | ini only |
+| `RVK_PixelLight` | Per-pixel lighting | on / off | on | GPU: low | window; game value off; was env `RANDYVK_PIXEL_LIGHTING` |
+| `RVK_LightOver` | All nearby lights (light override) | on / off | on |  | ini only; game value off; was env `RANDYVK_LIGHT_OVERRIDE` |
+| `RVK_Headroom` | All nearby lights: light headroom without effects | 1 .. 2 | 1.15 |  | ini only; switch `RVK_LightOver`; game value 1; knob; was env `RANDYVK_LIGHT_HEADROOM` |
+| `RVK_OwnLight` | A character's own light lights the character | on / off | on |  | ini only; switch `RVK_LightOver`; knob |
+| `RVK_LeafLightOn` | Sunlight through leaves | on / off | on |  | ini only |
+| `RVK_LeafLight` | Sunlight through leaves: strength | 0.25 .. 2 | 1 |  | ini only; switch `RVK_LeafLightOn`; game value 0 |
+| `RVK_CrownShade` | Tree crowns lit as one rounded mass (darker inside, each tree's colour its own) | 0 .. 1 | 1 |  | ini only; game value 0; knob |
+| `RVK_CrownSky` | Tree crowns lit by the sky from above (brighter tops, darker undersides) | 0 .. 1 | 1 |  | ini only; game value 0; knob |
+| `RVK_CrownDepth` | Sunlight through tree crowns fades with their depth (bright thin rims, dark middles) | 0 .. 1 | 1 |  | ini only; switch `RVK_LeafLightOn`; game value 0; knob |
+| `RVK_PtLight` | Lamp and fire brightness | 0.25 .. 2 | 0.25 | no cost | window; game value 1 |
+| `RVK_CharLight` | Character light brightness | 0.1 .. 2 | 0.25 | no cost | window; game value 1 |
+| `RVK_TessOn` | Tessellation | on / off | on | GPU: low | window |
+| `RVK_Tess` | Tessellation: roundness | 0.25 .. 1 | 0.6 | no cost | window; switch `RVK_TessOn`; game value 0 |
+| `RVK_TessLevel` | Detail up close (pieces per triangle edge) | 2 .. 8 | 3 |  | ini only; switch `RVK_TessOn` |
+| `RVK_TessDist` | Up to this distance (world units) | 5 .. 60 | 16 |  | ini only; switch `RVK_TessOn` |
+| `RVK_Aniso` | Texture filtering (anisotropic; 1 = off) | 1 (off) / 2 (2x) / 4 (4x) / 8 (8x) / 16 (16x) | 16 | GPU: low | window; game value 1; was env `RANDYVK_ANISOTROPY` |
+| `RVK_HillShade` | The terrain's shade from a low sun (valleys under mountains) | on / off | on |  | ini only; knob |
+| `RVK_LightRig` | One light for day and night (off: the old night lighting) | on / off | on | no cost | window; game value off; knob |
+| `RVK_Metering` | Camera metering: a view brighter than the land (a sunset sky) darkens the picture, as a camera does (0 = off) | 0 .. 2 | 0.5 | no cost | window; switch `RVK_LightRig`; game value 0; knob |
 
 ## Materials
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_BumpOn` | Generated bump maps | on / off | on | window |
-| `RVK_Bump` | Generated bump maps: strength | 0.25 .. 4 | 0.25 | window; switch `RVK_BumpOn`; game value 0; was env `RANDYVK_BUMP` |
-| `RVK_NormalMaps` | Normal maps | on / off | on | window; game value off |
-| `RVK_NormalStr` | Normal maps: strength | 0.1 .. 4 | 1 | window; switch `RVK_NormalMaps` |
-| `RVK_Parallax` | Depth: textures with a height map (_h.png) stand out of the surface up close (0 = flat) | 0 .. 2 | 0.3 | window; switch `RVK_NormalMaps`; game value 0 |
-| `RVK_DepthSteps` | Depth detail: how finely the depth is traced (more: sharper edges at flat views, slower) | 0.5 .. 3 | 1 | window; switch `RVK_NormalMaps`; was `RVK_ParallaxSteps` |
-| `RVK_Pbr` | PBR materials | on / off | on | window; game value off |
-| `RVK_PbrSpec` | PBR materials: highlights | 0 .. 2 | 0.5 | window; switch `RVK_Pbr` |
-| `RVK_PbrEnv` | PBR materials: reflections | 0 .. 2 | 1 | window; switch `RVK_Pbr` |
-| `RVK_PbrSsr` | PBR materials: screen-space reflections | 0 .. 2 | 1 | ini only; switch `RVK_Pbr` |
-| `RVK_PbrAo` | PBR materials: occlusion map strength | 0 .. 1 | 0.1 | ini only; switch `RVK_Pbr` |
-| `RVK_PbrProbe` | PBR materials: environment probe | 0 .. 1 | 1 | ini only; switch `RVK_Pbr` |
-| `RVK_PbrGlow` | PBR materials: emissive map brightness | 0 .. 8 | 1 | ini only; switch `RVK_Pbr` |
-| `RVK_Albedo` | Enhanced textures | on / off | on | window; game value off |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_BumpOn` | Generated bump maps | on / off | on | GPU: low | window |
+| `RVK_Bump` | Generated bump maps: strength | 0.25 .. 4 | 0.25 | no cost | window; switch `RVK_BumpOn`; game value 0; was env `RANDYVK_BUMP` |
+| `RVK_NormalMaps` | Normal maps | on / off | on | GPU: low | window; game value off |
+| `RVK_NormalStr` | Normal maps: strength | 0.1 .. 4 | 1 | no cost | window; switch `RVK_NormalMaps` |
+| `RVK_Parallax` | Depth: textures with a height map (_h.png) stand out of the surface up close (0 = flat) | 0 .. 2 | 0.3 | GPU: low | window; switch `RVK_NormalMaps`; game value 0 |
+| `RVK_DepthSteps` | Depth detail: how finely the depth is traced (more: sharper edges at flat views, slower) | 0.5 .. 3 | 1 | GPU: low, more with the value | window; switch `RVK_NormalMaps`; was `RVK_ParallaxSteps` |
+| `RVK_Pbr` | PBR materials | on / off | on | GPU: low | window; game value off |
+| `RVK_PbrSpec` | PBR materials: highlights | 0 .. 2 | 0.5 | no cost | window; switch `RVK_Pbr` |
+| `RVK_PbrEnv` | PBR materials: reflections | 0 .. 2 | 1 | no cost | window; switch `RVK_Pbr` |
+| `RVK_PbrSsr` | PBR materials: screen-space reflections | 0 .. 2 | 1 |  | ini only; switch `RVK_Pbr` |
+| `RVK_PbrAo` | PBR materials: occlusion map strength | 0 .. 1 | 0.1 |  | ini only; switch `RVK_Pbr` |
+| `RVK_PbrProbe` | PBR materials: environment probe | 0 .. 1 | 1 |  | ini only; switch `RVK_Pbr` |
+| `RVK_PbrGlow` | PBR materials: emissive map brightness | 0 .. 8 | 1 |  | ini only; switch `RVK_Pbr` |
+| `RVK_Albedo` | Enhanced textures | on / off | on | video memory: more textures | window; game value off |
+| `RVK_LiveMeshes` | Meshes with a texture of their own and live edits from the ao-assets workbench | on / off | on | no cost (only meshes that have one) | window; game value off |
 
 ## Debug
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_PbrDebug` | PBR materials: debug view (Ctrl+Shift+K) | 0 / 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 | 0 | ini only; switch `RVK_Pbr` |
-| `RVK_ShadowView` | Debug: show the sun shadow map's light (white lit, dark shadowed; tint = cascade) | on / off | off | ini only; knob |
-| `RVK_SceneProf` | Debug: the scene's GPU time and overdraw by kind of draw in the gpu ms log (costs a little; console sceneprof 1) | on / off | off | ini only; knob; was env `RANDYVK_SCENE_PROFILE` |
-| `RVK_Occlusion` | The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws) | on / off | on | ini only |
-| `RVK_TimeOfDay` | Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h) | -1 .. 27 | -1 | ini only |
-| `RVK_TimeSpeed` | Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own) | 0 .. 500 | 1 | ini only |
-| `RVK_TexKeepCpu` | Keep a CPU copy of every texture (off: given up once on the graphics card, read back if the game locks it again - saves the game's 32-bit address space) | on / off | off | ini only |
-| `RVK_HeapCheck` | Testing: the heap checked for corruption at points, the first broken one logged (0 off, 1 round the grass and each frame, 2 also round every object's grass cover - slow) | 0 .. 2 | 0 | ini only |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_PbrDebug` | PBR materials: debug view (Ctrl+Shift+K) | 0 / 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10 / 11 | 0 |  | ini only; switch `RVK_Pbr` |
+| `RVK_ShadowView` | Debug: show the sun shadow map's light (white lit, dark shadowed; tint = cascade) | on / off | off |  | ini only; knob |
+| `RVK_SceneProf` | Debug: the scene's GPU time and overdraw by kind of draw in the gpu ms log (costs a little; console sceneprof 1) | on / off | off |  | ini only; knob; was env `RANDYVK_SCENE_PROFILE` |
+| `RVK_Occlusion` | The game's culling of what hills hide (off: all in view drawn - whole shadows, more draws) | on / off | on |  | ini only |
+| `RVK_TimeOfDay` | Testing: the game's time of day set to this hour (-1: the game's own; a day is 27 h) | -1 .. 27 | -1 |  | ini only |
+| `RVK_TimeSpeed` | Testing: how fast the time of day runs, x the game's (0 still; 1 and the hour -1: the game's own) | 0 .. 500 | 1 |  | ini only |
+| `RVK_TexKeepCpu` | Keep a CPU copy of every texture (off: given up once on the graphics card, read back if the game locks it again - saves the game's 32-bit address space) | on / off | off |  | ini only |
+| `RVK_HeapCheck` | Testing: the heap checked for corruption at points, the first broken one logged (0 off, 1 round the grass and each frame, 2 also round every object's grass cover - slow) | 0 .. 2 | 0 |  | ini only |
 
 ## Terrain
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_GroundOn` | Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter | on / off | on | window; game value off; was `RVK_NativeGround` |
-| `RVK_GroundOne` | Ground drawn by ao-vk: in one pass - its texture and its light together (off: the game's two passes, the same look, slower) | on / off | on | ini only; switch `RVK_GroundOn`; knob |
-| `RVK_GroundAo` | Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none) | 0 .. 1 | 0.6 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_GroundSun` | Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_GroundRocks` | Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many) | 0 .. 2 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_Pebbles` | Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many) | 0 .. 2 | 2 | window; switch `RVK_GroundOn`; game value 0; was `RVK_GroundPebble` |
-| `RVK_SandRipple` | Ground drawn by ao-vk: wind ripples in loose sand, in depth up close (0 = none) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_SandPrints` | Ground drawn by ao-vk: footprints in loose sand, where characters walk (0 = none) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_RippleDepth` | Ground drawn by ao-vk: how deep the sand ripples are up close (0 = flat; its own, not Depth's) | 0 .. 3 | 2 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_RippleSoft` | Ground drawn by ao-vk: the sand ripples smoother - less wobble in their crests, less of the tile's bumps (0 = rough) | 0 .. 1 | 0.3 | window; switch `RVK_GroundOn`; was `RVK_RippleSmooth` |
-| `RVK_DuneLight` | Ground drawn by ao-vk: dunes of loose sand shaped by the sun as it stands, their far sides in shade (0 = the game's flat light) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_SandGlint` | Ground drawn by ao-vk: a sparkle of sunlit grains in loose sand near you (0 = none) | 0 .. 1 | 0.5 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_GroundGrain` | Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_GroundBlend` | Ground drawn by ao-vk: neighbouring ground textures blend into each other along a ragged edge instead of meeting in a hard straight line (0 = hard edges) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_GroundTess` | Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes) | 0 .. 1 | 1 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_CliffDepth` | Ground drawn by ao-vk: cliffs' rock stands out of their faces up close (units; 0 = flat) | 0 .. 1 | 0.4 | window; switch `RVK_GroundOn`; game value 0 |
-| `RVK_GroundFar` | Ground past that: texture detail (texels a 4 x 4 cell; 8 = the game's, 32 costs a lot of memory) | 8 / 16 / 32 | 16 | window; game value 8 |
-| `RVK_GroundRange` | Ground drawn at full quality this many times further out (1 = the game's; above 2 the game stutters as you move) | 1 .. 2.5 | 1 | window; game value 1 |
-| `RVK_CliffTex` | Cliffs: the ground's texture laid on their faces, not stretched down them | 0 .. 1 | 1 | window; game value 0 |
-| `RVK_CliffRock` | Cliffs: rock laid on their faces, in the colour of the ground | on / off | on | window; switch `RVK_CliffTex`; game value off |
-| `RVK_TileHide` | Cliffs: the same tile not repeated in rows down their faces | 0 .. 1 | 1 | window; game value 0 |
-| `RVK_GroundVary` | Large patches of lighter and darker ground over the land | 0 .. 2 | 1 | window; game value 0 |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_GroundOn` | Ground drawn by ao-vk: every patch of land with its own textures to the horizon, no stutter | on / off | on | GPU: medium (in place of the game's ground) | window; game value off; was `RVK_NativeGround` |
+| `RVK_GroundOne` | Ground drawn by ao-vk: in one pass - its texture and its light together (off: the game's two passes, the same look, slower) | on / off | on |  | ini only; switch `RVK_GroundOn`; knob |
+| `RVK_GroundAo` | Ground drawn by ao-vk: valleys and the feet of cliffs darker, as less of the sky reaches them (0 = none) | 0 .. 1 | 0.6 | no cost | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_GroundSun` | Ground drawn by ao-vk: slopes lit from where the sun is now, not where it was when the hour's light was made (0 = as made) | 0 .. 1 | 1 | no cost | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_GroundRocks` | Ground drawn by ao-vk: rocks and scree at the feet of cliffs and on rough slopes (0 = none, 2 = twice as many) | 0 .. 2 | 1 | GPU: medium, more with the value | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_Pebbles` | Ground drawn by ao-vk: small loose stones on flat dirt, gravel and sand near you (0 = none, 2 = twice as many) | 0 .. 2 | 2 | GPU: low | window; switch `RVK_GroundOn`; game value 0; was `RVK_GroundPebble` |
+| `RVK_SandRipple` | Ground drawn by ao-vk: wind ripples in loose sand, in depth up close (0 = none) | 0 .. 1 | 1 | GPU: low | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_SandPrints` | Ground drawn by ao-vk: footprints in loose sand, where characters walk (0 = none) | 0 .. 1 | 1 | GPU: low | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_RippleDepth` | Ground drawn by ao-vk: how deep the sand ripples are up close (0 = flat; its own, not Depth's) | 0 .. 3 | 2 | no cost | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_RippleSoft` | Ground drawn by ao-vk: the sand ripples smoother - less wobble in their crests, less of the tile's bumps (0 = rough) | 0 .. 1 | 0.3 | no cost | window; switch `RVK_GroundOn`; was `RVK_RippleSmooth` |
+| `RVK_DuneLight` | Ground drawn by ao-vk: dunes of loose sand shaped by the sun as it stands, their far sides in shade (0 = the game's flat light) | 0 .. 1 | 1 | no cost | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_SandGlint` | Ground drawn by ao-vk: a sparkle of sunlit grains in loose sand near you (0 = none) | 0 .. 1 | 0.5 | no cost | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_GroundGrain` | Ground drawn by ao-vk: fine grit in the ground at your feet, where its texture is a soft smear (0 = none) | 0 .. 1 | 1 | GPU: low | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_GroundBlend` | Ground drawn by ao-vk: neighbouring ground textures blend into each other along a ragged edge instead of meeting in a hard straight line (0 = hard edges) | 0 .. 1 | 1 | GPU: low | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_GroundTess` | Ground drawn by ao-vk: hills and cliff edges rounded, finer triangles up close (0 = the game's shapes) | 0 .. 1 | 1 | GPU: low | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_CliffDepth` | Ground drawn by ao-vk: cliffs' rock stands out of their faces up close (units; 0 = flat) | 0 .. 1 | 0.4 | GPU: low | window; switch `RVK_GroundOn`; game value 0 |
+| `RVK_GroundFar` | Ground past that: texture detail (texels a 4 x 4 cell; 8 = the game's, 32 costs a lot of memory) | 8 (8 (the game's)) / 16 / 32 | 16 | video memory: 32 a lot | window; game value 8 |
+| `RVK_GroundRange` | Ground drawn at full quality this many times further out (1 = the game's; above 2 the game stutters as you move) | 1 .. 2.5 | 1 | CPU: more with the value | window; game value 1 |
+| `RVK_CliffTex` | Cliffs: the ground's texture laid on their faces, not stretched down them | 0 .. 1 | 1 | GPU: low | window; game value 0 |
+| `RVK_CliffRock` | Cliffs: rock laid on their faces, in the colour of the ground | on / off | on | no cost | window; switch `RVK_CliffTex`; game value off |
+| `RVK_TileHide` | Cliffs: the same tile not repeated in rows down their faces | 0 .. 1 | 1 | GPU: low | window; game value 0 |
+| `RVK_GroundVary` | Large patches of lighter and darker ground over the land | 0 .. 2 | 1 | no cost | window; game value 0 |
 
 ## Plants
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_SwayOn` | Plants sway in the wind | on / off | on | window |
-| `RVK_Sway` | Plants sway in the wind: sway strength | 0.25 .. 3 | 1 | window; switch `RVK_SwayOn`; game value 0; knob |
-| `RVK_PushOn` | Interactive grass | on / off | on | window |
-| `RVK_GrassPush` | Interactive grass: how far grass leans | 0.25 .. 2 | 1 | window; switch `RVK_PushOn`; game value 0; knob |
-| `RVK_PlantDetOn` | Split big plant quads so they bend smoothly | on / off | on | ini only |
-| `RVK_PlantDetail` | Detail (pieces per 0.3 units) | 0.5 .. 2 | 1 | ini only; switch `RVK_PlantDetOn`; game value 0; knob |
-| `RVK_FolEdges` | Soft leaf edges | on / off | on | window; game value off; knob |
-| `RVK_FolDither` | Soft leaf edges dithered (one pass, the TAA smooths them) from this distance (0 never) | 0 .. 150 | 20 | window; switch `RVK_FolEdges`; game value 0; knob |
-| `RVK_FolLodOn` | Cheaper shading of distant foliage | on / off | on | ini only |
-| `RVK_FoliageLod` | From this distance (world units) | 10 .. 150 | 35 | ini only; switch `RVK_FolLodOn`; game value 0; knob |
-| `RVK_GrassOn` | Ground grass | on / off | on | window; game value off |
-| `RVK_GrassTex` | Ground grass: only on grassy ground | on / off | on | ini only; switch `RVK_GrassOn` |
-| `RVK_GrassDist` | Ground grass: distance (m) | 8 .. 80 | 40 | window; switch `RVK_GrassOn` |
-| `RVK_GrassBlades` | Ground grass: density | 1 .. 12 | 8 | window; switch `RVK_GrassOn` |
-| `RVK_GrassHeight` | Ground grass: blade height (m) | 0.15 .. 2 | 0.3 | window; switch `RVK_GrassOn` |
-| `RVK_GrassWidth` | Blade width (1 = default) | 0.25 .. 3 | 0.75 | ini only; switch `RVK_GrassOn`; knob |
-| `RVK_GrassBright` | Ground grass: brightness | 0.5 .. 1.5 | 1 | window; switch `RVK_GrassOn`; knob |
-| `RVK_GrassVary` | Grass variety (0 = even) | 0 .. 2 | 1 | ini only; switch `RVK_GrassOn` |
-| `RVK_GrassFlower` | Ground grass: wildflowers | 0 .. 3 | 1 | window; switch `RVK_GrassOn` |
-| `RVK_GrassGlow` | Ground grass: sunlight on the blades | 0 .. 2 | 1 | ini only; switch `RVK_GrassOn` |
-| `RVK_GrassGusts` | Gusts of wind sweeping over the grass (0 = none) | 0 .. 2 | 1 | ini only; switch `RVK_GrassOn` |
-| `RVK_GrassTrail` | Ground grass: grass trails | on / off | on | window; switch `RVK_GrassOn` |
-| `RVK_TrailTime` | Grass trails: how long (seconds) | 2 .. 30 | 12 | ini only; switch `RVK_GrassOn` |
-| `RVK_TrailShade` | Grass trails: lawn stripes | 0 .. 2 | 1 | ini only; switch `RVK_GrassOn` |
-| `RVK_GrassEven` | Ground grass: even grass colour | 0 .. 1 | 1 | ini only; switch `RVK_GrassOn` |
-| `RVK_LeafOn` | Leaves on trees and shrubs | on / off | on | window; game value off |
-| `RVK_LeafDensity` | Leaves on trees and shrubs: leaf density | 0.25 .. 3 | 1 | window; switch `RVK_LeafOn` |
-| `RVK_LeafSize` | Sprig size (1 = an eighth of the leaf texture) | 0.5 .. 2.5 | 1 | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafDist` | Leaves on trees and shrubs: distance | 15 .. 150 | 50 | window; switch `RVK_LeafOn` |
-| `RVK_LeafCore` | Canopy cut to an inner core | 0 .. 1 | 0.3 | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafWind` | Branches swaying in the wind | 0 .. 3 | 0.25 | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafFlutter` | Leaves on trees and shrubs: leaves fluttering | 0 .. 3 | 1 | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafOwn` | Trees: our own canopies where there is leaf art (randy-vk\\materials\\*_leaves.png), not the game's cards | on / off | on | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafTrees` | Leaves on trees and shrubs: leaves on trees | on / off | on | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafShrubs` | Leaves on shrubs and bushes | on / off | on | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafPalms` | Palm fronds bending in the wind | on / off | on | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafShadow` | Leaves on trees and shrubs: leaves cast sun shadows | on / off | on | ini only; switch `RVK_LeafOn` |
-| `RVK_LeafFall` | Falling leaves (0 = none) | 0 .. 3 | 1 | window; switch `RVK_LeafOn` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_SwayOn` | Plants sway in the wind | on / off | on | GPU: low | window |
+| `RVK_Sway` | Plants sway in the wind: sway strength | 0.25 .. 3 | 1 | no cost | window; switch `RVK_SwayOn`; game value 0; knob |
+| `RVK_PushOn` | Interactive grass | on / off | on | GPU: low | window |
+| `RVK_GrassPush` | Interactive grass: how far grass leans | 0.25 .. 2 | 1 | no cost | window; switch `RVK_PushOn`; game value 0; knob |
+| `RVK_PlantDetOn` | Split big plant quads so they bend smoothly | on / off | on |  | ini only |
+| `RVK_PlantDetail` | Detail (pieces per 0.3 units) | 0.5 .. 2 | 1 |  | ini only; switch `RVK_PlantDetOn`; game value 0; knob |
+| `RVK_FolEdges` | Soft leaf edges | on / off | on | GPU: low | window; game value off; knob |
+| `RVK_FolDither` | Soft leaf edges dithered (one pass, the TAA smooths them) from this distance (0 never) | 0 .. 150 | 20 | no cost | window; switch `RVK_FolEdges`; game value 0; knob |
+| `RVK_FolLodOn` | Cheaper shading of distant foliage | on / off | on |  | ini only |
+| `RVK_FoliageLod` | From this distance (world units) | 10 .. 150 | 35 |  | ini only; switch `RVK_FolLodOn`; game value 0; knob |
+| `RVK_GrassOn` | Ground grass | on / off | on | GPU: medium, high in thick grass | window; game value off |
+| `RVK_GrassTex` | Ground grass: only on grassy ground | on / off | on |  | ini only; switch `RVK_GrassOn` |
+| `RVK_GrassDist` | Ground grass: distance (m) | 8 .. 80 | 40 | GPU: more with the value | window; switch `RVK_GrassOn` |
+| `RVK_GrassBlades` | Ground grass: density | 1 .. 12 | 8 | GPU: more with the value | window; switch `RVK_GrassOn` |
+| `RVK_GrassHeight` | Ground grass: blade height (m) | 0.15 .. 2 | 0.3 | GPU: more with the value | window; switch `RVK_GrassOn` |
+| `RVK_GrassWidth` | Blade width (1 = default) | 0.25 .. 3 | 0.75 |  | ini only; switch `RVK_GrassOn`; knob |
+| `RVK_GrassBright` | Ground grass: brightness | 0.5 .. 1.5 | 1 | no cost | window; switch `RVK_GrassOn`; knob |
+| `RVK_GrassVary` | Grass variety (0 = even) | 0 .. 2 | 1 |  | ini only; switch `RVK_GrassOn` |
+| `RVK_GrassFlower` | Ground grass: wildflowers | 0 .. 3 | 1 | no cost | window; switch `RVK_GrassOn` |
+| `RVK_GrassGlow` | Ground grass: sunlight on the blades | 0 .. 2 | 1 |  | ini only; switch `RVK_GrassOn` |
+| `RVK_GrassGusts` | Gusts of wind sweeping over the grass (0 = none) | 0 .. 2 | 1 |  | ini only; switch `RVK_GrassOn` |
+| `RVK_GrassTrail` | Ground grass: grass trails | on / off | on | GPU: low | window; switch `RVK_GrassOn` |
+| `RVK_TrailTime` | Grass trails: how long (seconds) | 2 .. 30 | 12 |  | ini only; switch `RVK_GrassOn` |
+| `RVK_TrailShade` | Grass trails: lawn stripes | 0 .. 2 | 1 |  | ini only; switch `RVK_GrassOn` |
+| `RVK_GrassEven` | Ground grass: even grass colour | 0 .. 1 | 1 |  | ini only; switch `RVK_GrassOn` |
+| `RVK_LeafOn` | Leaves on trees and shrubs | on / off | on | GPU: medium, high in forests | window; game value off |
+| `RVK_LeafDensity` | Leaves on trees and shrubs: leaf density | 0.25 .. 3 | 1 | GPU: more with the value | window; switch `RVK_LeafOn` |
+| `RVK_LeafSize` | Sprig size (1 = an eighth of the leaf texture) | 0.5 .. 2.5 | 1 |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafDist` | Leaves on trees and shrubs: distance | 15 .. 150 | 50 | GPU: more with the value | window; switch `RVK_LeafOn` |
+| `RVK_LeafCore` | Canopy cut to an inner core | 0 .. 1 | 0.3 |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafWind` | Branches swaying in the wind | 0 .. 3 | 0.25 |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafFlutter` | Leaves on trees and shrubs: leaves fluttering | 0 .. 3 | 1 |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafOwn` | Trees: our own canopies where there is leaf art (randy-vk\\materials\\*_leaves.png), not the game's cards | on / off | on |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafTrees` | Leaves on trees and shrubs: leaves on trees | on / off | on |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafShrubs` | Leaves on shrubs and bushes | on / off | on |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafPalms` | Palm fronds bending in the wind | on / off | on |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafShadow` | Leaves on trees and shrubs: leaves cast sun shadows | on / off | on |  | ini only; switch `RVK_LeafOn` |
+| `RVK_LeafFall` | Falling leaves (0 = none) | 0 .. 3 | 1 | GPU: low | window; switch `RVK_LeafOn` |
 
 ## Water
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_WaterOn` | New water | on / off | on | window; game value off |
-| `RVK_WaterStyle` | New water: look (game-like to realistic) | 0 .. 1 | 0.5 | window; switch `RVK_WaterOn` |
-| `RVK_WaterQual` | Quality (1 low, 2 medium, 3 high) | 1 .. 3 | 2 | window; switch `RVK_WaterOn` |
-| `RVK_WaterWaves` | New water: wave height | 0 .. 3 | 0.3 | window; switch `RVK_WaterOn` |
-| `RVK_WaterRipple` | New water: ripples | 0 .. 2 | 1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterSwim` | Wake strength (characters in the water) | 0 .. 3 | 2 | ini only; switch `RVK_WaterOn` |
-| `RVK_WakeGain` | New water: wake visibility | 0 .. 4 | 2 | ini only; switch `RVK_WaterOn` |
-| `RVK_WakeLife` | New water: wake duration | 0.2 .. 4 | 0.3 | ini only; switch `RVK_WaterOn` |
-| `RVK_WakeSpeed` | Wake speed (how fast the waves travel, m/s) | 0.5 .. 4 | 3.6 | ini only; switch `RVK_WaterOn` |
-| `RVK_WakeStir` | Treading water (a character standing still) | 0 .. 4 | 1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WakeSplash` | Splash (jumping into the water) | 0 .. 4 | 0 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterRefl` | New water: reflections | 0 .. 1.5 | 1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterRefr` | Refraction (bending what is seen through it) | 0 .. 2 | 0.3 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterClear` | Clarity (how far one sees into it) | 0.2 .. 4 | 1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterFoam` | New water: foam (shores, crests) | 0 .. 2 | 0 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterCaust` | Caustics (sunlight patterns under water) | 0 .. 2 | 1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterTex` | The game's water texture on the surface | 0 .. 1 | 0.5 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterSheen` | Waterfalls: sheen (how much the clear water reflects) | 0 .. 2 | 0.2 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterSpark` | Waterfalls: sparkles (sunlight and lamplight) | 0 .. 3 | 0.1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterSpray` | Waterfalls: spray and mist at the foot | 0 .. 3 | 1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterChurn` | Waterfalls: churn and foam where they land | 0 .. 3 | 1 | ini only; switch `RVK_WaterOn` |
-| `RVK_WaterSpeed` | Waterfalls: how fast the water falls | 0.25 .. 4 | 2 | ini only; switch `RVK_WaterOn` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_WaterOn` | New water | on / off | on | GPU: low, medium on a large lake or the sea | window; game value off |
+| `RVK_WaterStyle` | New water: look (game-like to realistic) | 0 .. 1 | 0.5 | no cost | window; switch `RVK_WaterOn` |
+| `RVK_WaterQual` | Quality (1 low, 2 medium, 3 high) | 1 .. 3 | 2 | GPU: more with the value | window; switch `RVK_WaterOn` |
+| `RVK_WaterMesh` | Surface from the game's own triangles (off: the older grid) | on / off | on | no cost | window; switch `RVK_WaterOn` |
+| `RVK_WaterWaves` | New water: wave height | 0 .. 3 | 0.3 | no cost | window; switch `RVK_WaterOn` |
+| `RVK_WaterRipple` | New water: ripples | 0 .. 2 | 1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterSwim` | Wake strength (characters in the water) | 0 .. 3 | 2 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WakeGain` | New water: wake visibility | 0 .. 4 | 2 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WakeLife` | New water: wake duration | 0.2 .. 4 | 0.3 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WakeSpeed` | Wake speed (how fast the waves travel, m/s) | 0.5 .. 4 | 3.6 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WakeStir` | Treading water (a character standing still) | 0 .. 4 | 1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WakeSplash` | Splash (jumping into the water) | 0 .. 4 | 0 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterRefl` | New water: reflections | 0 .. 1.5 | 1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterRefr` | Refraction (bending what is seen through it) | 0 .. 2 | 0.3 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterClear` | Clarity (how far one sees into it) | 0.2 .. 4 | 1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterFoam` | New water: foam (shores, crests) | 0 .. 2 | 0 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterCaust` | Caustics (sunlight patterns under water) | 0 .. 2 | 1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterTex` | The game's water texture on the surface | 0 .. 1 | 0.5 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterSheen` | Waterfalls: sheen (how much the clear water reflects) | 0 .. 2 | 0.2 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterSpark` | Waterfalls: sparkles (sunlight and lamplight) | 0 .. 3 | 0.1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterSpray` | Waterfalls: spray and mist at the foot | 0 .. 3 | 1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterChurn` | Waterfalls: churn and foam where they land | 0 .. 3 | 1 |  | ini only; switch `RVK_WaterOn` |
+| `RVK_WaterSpeed` | Waterfalls: how fast the water falls | 0.25 .. 4 | 2 |  | ini only; switch `RVK_WaterOn` |
 
 ## Weather
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_WeatherOn` | New weather | on / off | on | window; game value off |
-| `RVK_RainForce` | Force rain (0 = the game's weather) | 0 .. 1 | 0 | window; switch `RVK_WeatherOn` |
-| `RVK_RainSpeed` | Rain: how fast the drops fall (units a second) | 3 .. 40 | 30 | ini only; switch `RVK_WeatherOn` |
-| `RVK_RainLength` | Rain: how long each falling drop's streak is (units) | 0.05 .. 2 | 0.2 | ini only; switch `RVK_WeatherOn` |
-| `RVK_RainLean` | Rain: how far the wind slants it at most, sideways per unit of fall (0.3 ~17 degrees; 0 straight down) | 0 .. 1 | 0.3 | ini only; switch `RVK_WeatherOn` |
-| `RVK_RainAmount` | New weather: rain amount | 0 .. 4 | 3 | window; switch `RVK_WeatherOn` |
-| `RVK_RainSplash` | Rain: splashes where it lands (0 = none) | 0 .. 3 | 1 | ini only; switch `RVK_WeatherOn` |
-| `RVK_RainBright` | Rain: brightness | 0 .. 3 | 1 | ini only; switch `RVK_WeatherOn` |
-| `RVK_WindStorm` | Storm wind: how hard storms blow - grass, plants, trees and leaves (0: as on a calm day) | 0 .. 3 | 2 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_StormTint` | The game's storm tint: its flat sheet over the screen in sand and ash storms (off: left out) | on / off | on | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_StormForce` | Force a thunderstorm (0 = the game's weather) | 0 .. 1 | 0 | window; switch `RVK_WeatherOn` |
-| `RVK_StrikeRate` | Thunderstorm, forced: lightning strikes a minute at full strength | 0 .. 60 | 20 | ini only; switch `RVK_WeatherOn` |
-| `RVK_StormDebris` | Storms: blown debris - leaves, straw and twigs skimming over the ground, leaves torn off the trees (x; 0: none) | 0 .. 3 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_StormBolt` | Lightning: our own bolts - branching, flickering with each stroke, glowing - in place of the game's (x; 0: the game's) | 0 .. 3 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_RainWet` | Rain: the ground soaked - darker and reflecting - and puddles gathering in hollows; dry under roofs and trees (x; 0: none) | 0 .. 1.5 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_StormDark` | Thunderstorms: the land darker as the storm hides the sun - its shadows gone (x; 0: lit as the game lights it) | 0 .. 1.5 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_StormGreen` | Thunderstorms: their clouds and mist cast green, as the game's storm air (0: grey) | 0 .. 1 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_StormThick` | Thunderstorms: how thick and dark their clouds (1: shapes and light in them; 2: one dark mass) | 0.25 .. 2 | 1 | window; switch `RVK_WeatherOn`; knob |
-| `RVK_RainVeils` | Thunderstorms: grey rain veils under the far clouds, x (0: none) | 0 .. 3 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_RainFog` | Thunderstorms: the rain's mist - the distance grey, rain shafts hanging under the storm, lit by lightning (x; 0: none; with RVK_SandFog) | 0 .. 3 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_Lightning` | Lightning: each of the game's strikes lights the land and the clouds round it with a flash (x; 0: none) | 0 .. 3 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_HeatFlash` | Heat lightning: on some warm, dry nights silent flashes in far-off clouds (x; 0: none) | 0 .. 2 | 1 | window; switch `RVK_WeatherOn`; game value 0 |
-| `RVK_StormFlash` | The game's lightning glow: the sky flashing over the clouds in storms - it flickers (off: left out; the bolts stay) | on / off | on | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandHaze` | Sand and ash storms: how thick the storm's air - the fog (or the flat haze), in place of the game's tint, x (0: none) | 0 .. 3 | 0.4 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandForce` | Force a sandstorm (1 = full storm; 0 = the game's weather) | 0 .. 2 | 0 | window; switch `RVK_WeatherOn` |
-| `RVK_SandAsh` | Sand and ash storms: the forced one is an ash storm (grey) instead of sand | on / off | off | ini only; switch `RVK_WeatherOn` |
-| `RVK_SandRes` | Sand and ash storms: the blowing sand's cells a side (its 32-unit box; finer costs more; 0: by RVK_SmokeQual - 48, 64, 80) | 0 / 48 / 64 / 80 / 96 / 112 / 128 | 0 | ini only; switch `RVK_WeatherOn` |
-| `RVK_SandProc` | Sand and ash storms: the blowing sand made procedurally (cheaper; off: simulated - the default) | on / off | off | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandContrast` | Sand and ash storms: the blowing sand's contrast (crisper streaks, deeper shade; 1 = soft) | 0.5 .. 3 | 1 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandClear` | Sand and ash storms: the air clear round the camera, units (so you always see out; 0 = none) | 0 .. 20 | 6 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandGusts` | Sand and ash storms: distant gusts - billows of dust drifting through the fog beyond the near sand (0 = none) | 0 .. 2 | 2 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandFog` | Sand and ash storms: the storm's air as a lit fog - shaded by dunes and walls, glowing towards the sun (off: a flat haze, cheaper) | on / off | on | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandSun` | Sand and ash storms, with the sand fog: how clearly the sun shows through the storm, dim and red (0: hidden as the dust) | 0 .. 1 | 0.9 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandTint` | Sand and ash storms, with the sand fog: the light under the storm the dust's colour - the sun behind it lights the land orange (0: the sun's own) | 0 .. 1 | 0.7 | ini only; switch `RVK_WeatherOn`; knob |
-| `RVK_SandBlow` | Sand and ash storms: sand blowing round you, simulated - streaks, eddies, kicked up by feet (x; 0: none) | 0 .. 3 | 2 | ini only; switch `RVK_WeatherOn`; knob |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_WeatherOn` | New weather | on / off | on | GPU: low, medium in storms | window; game value off |
+| `RVK_RainForce` | Force rain (0 = the game's weather) | 0 .. 1 | 0 | GPU: medium while it rains | window; switch `RVK_WeatherOn` |
+| `RVK_RainSpeed` | Rain: how fast the drops fall (units a second) | 3 .. 40 | 30 |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_RainLength` | Rain: how long each falling drop's streak is (units) | 0.05 .. 2 | 0.2 |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_RainLean` | Rain: how far the wind slants it at most, sideways per unit of fall (0.3 ~17 degrees; 0 straight down) | 0 .. 1 | 0.3 |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_RainAmount` | New weather: rain amount | 0 .. 4 | 3 | GPU: more with the value | window; switch `RVK_WeatherOn` |
+| `RVK_RainSplash` | Rain: splashes where it lands (0 = none) | 0 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_RainBright` | Rain: brightness | 0 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_WindStorm` | Storm wind: how hard storms blow - grass, plants, trees and leaves (0: as on a calm day) | 0 .. 3 | 2 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_StormTint` | The game's storm tint: its flat sheet over the screen in sand and ash storms (off: left out) | on / off | on |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_StormForce` | Force a thunderstorm (0 = the game's weather) | 0 .. 1 | 0 | GPU: medium while it storms | window; switch `RVK_WeatherOn` |
+| `RVK_StrikeRate` | Thunderstorm, forced: lightning strikes a minute at full strength | 0 .. 60 | 20 |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_StormDebris` | Storms: blown debris - leaves, straw and twigs skimming over the ground, leaves torn off the trees (x; 0: none) | 0 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_StormBolt` | Lightning: our own bolts - branching, flickering with each stroke, glowing - in place of the game's (x; 0: the game's) | 0 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_RainWet` | Rain: the ground soaked - darker and reflecting - and puddles gathering in hollows; dry under roofs and trees (x; 0: none) | 0 .. 1.5 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_StormDark` | Thunderstorms: the land darker as the storm hides the sun - its shadows gone (x; 0: lit as the game lights it) | 0 .. 1.5 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_StormGreen` | Thunderstorms: their clouds and mist cast green, as the game's storm air (0: grey) | 0 .. 1 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_StormThick` | Thunderstorms: how thick and dark their clouds (1: shapes and light in them; 2: one dark mass) | 0.25 .. 2 | 1 | no cost | window; switch `RVK_WeatherOn`; knob |
+| `RVK_RainVeils` | Thunderstorms: grey rain veils under the far clouds, x (0: none) | 0 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_RainFog` | Thunderstorms: the rain's mist - the distance grey, rain shafts hanging under the storm, lit by lightning (x; 0: none; with RVK_SandFog) | 0 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_Lightning` | Lightning: each of the game's strikes lights the land and the clouds round it with a flash (x; 0: none) | 0 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_HeatFlash` | Heat lightning: on some warm, dry nights silent flashes in far-off clouds (x; 0: none) | 0 .. 2 | 1 | no cost | window; switch `RVK_WeatherOn`; game value 0 |
+| `RVK_StormFlash` | The game's lightning glow: the sky flashing over the clouds in storms - it flickers (off: left out; the bolts stay) | on / off | on |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandHaze` | Sand and ash storms: how thick the storm's air - the fog (or the flat haze), in place of the game's tint, x (0: none) | 0 .. 3 | 0.4 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandForce` | Force a sandstorm (1 = full storm; 0 = the game's weather) | 0 .. 2 | 0 | GPU: medium in a sandstorm | window; switch `RVK_WeatherOn` |
+| `RVK_SandAsh` | Sand and ash storms: the forced one is an ash storm (grey) instead of sand | on / off | off |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_SandRes` | Sand and ash storms: the blowing sand's cells a side (its 32-unit box; finer costs more; 0: by RVK_SmokeQual - 48, 64, 80) | 0 / 48 / 64 / 80 / 96 / 112 / 128 | 0 |  | ini only; switch `RVK_WeatherOn` |
+| `RVK_SandProc` | Sand and ash storms: the blowing sand made procedurally (cheaper; off: simulated - the default) | on / off | off |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandContrast` | Sand and ash storms: the blowing sand's contrast (crisper streaks, deeper shade; 1 = soft) | 0.5 .. 3 | 1 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandClear` | Sand and ash storms: the air clear round the camera, units (so you always see out; 0 = none) | 0 .. 20 | 6 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandGusts` | Sand and ash storms: distant gusts - billows of dust drifting through the fog beyond the near sand (0 = none) | 0 .. 2 | 2 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandFog` | Sand and ash storms: the storm's air as a lit fog - shaded by dunes and walls, glowing towards the sun (off: a flat haze, cheaper) | on / off | on |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandSun` | Sand and ash storms, with the sand fog: how clearly the sun shows through the storm, dim and red (0: hidden as the dust) | 0 .. 1 | 0.9 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandTint` | Sand and ash storms, with the sand fog: the light under the storm the dust's colour - the sun behind it lights the land orange (0: the sun's own) | 0 .. 1 | 0.7 |  | ini only; switch `RVK_WeatherOn`; knob |
+| `RVK_SandBlow` | Sand and ash storms: sand blowing round you, simulated - streaks, eddies, kicked up by feet (x; 0: none) | 0 .. 3 | 2 |  | ini only; switch `RVK_WeatherOn`; knob |
 
 ## Smoke
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_SmokeOn` | Simulated smoke | on / off | on | window; game value off |
-| `RVK_SmokeQual` | Quality (1 low, 2 medium, 3 high) | 1 .. 3 | 2 | window; switch `RVK_SmokeOn` |
-| `RVK_SmokeRes` | Smoke: cells per world unit (detail) | 4 .. 24 | 12 | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeThick` | Simulated smoke: thickness | 0.1 .. 8 | 1 | window; switch `RVK_SmokeOn`; was `RVK_SmokeDensity` |
-| `RVK_SmokeLife` | Smoke: how long it lasts (x the game's) | 0.25 .. 4 | 2 | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeStir` | Smoke: how much characters stir it | 0 .. 2 | 1 | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeWisps` | Smoke: fine wisps carried by the flow | 0 .. 1 | 1 | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeBright` | Smoke: how light it is | 0.25 .. 3 | 0.25 | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeOpaque` | Smoke: how opaque it is drawn | 0.05 .. 8 | 3 | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeBudget` | Smoke: the simulation's GPU time a frame, about (ms; over it the smoke steps less often; 0: no cap) | 0 .. 8 | 1.5 | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeHalf` | Smoke: drawn at half resolution (much cheaper) | on / off | on | ini only; switch `RVK_SmokeOn` |
-| `RVK_SmokeGame` | Smoke: the game's smoke sprites too | on / off | off | ini only; switch `RVK_SmokeOn` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_SmokeOn` | Simulated smoke | on / off | on | GPU: medium, high near many fires | window; game value off |
+| `RVK_SmokeQual` | Quality (1 low, 2 medium, 3 high) | 1 .. 3 | 2 | GPU: more with the value | window; switch `RVK_SmokeOn` |
+| `RVK_SmokeRes` | Smoke: cells per world unit (detail) | 4 .. 24 | 12 |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeThick` | Simulated smoke: thickness | 0.1 .. 8 | 1 | no cost | window; switch `RVK_SmokeOn`; was `RVK_SmokeDensity` |
+| `RVK_SmokeLife` | Smoke: how long it lasts (x the game's) | 0.25 .. 4 | 2 |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeStir` | Smoke: how much characters stir it | 0 .. 2 | 1 |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeWisps` | Smoke: fine wisps carried by the flow | 0 .. 1 | 1 |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeBright` | Smoke: how light it is | 0.25 .. 3 | 0.25 |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeOpaque` | Smoke: how opaque it is drawn | 0.05 .. 8 | 3 |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeBudget` | Smoke: the simulation's GPU time a frame, about (ms; over it the smoke steps less often; 0: no cap) | 0 .. 8 | 1.5 |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeHalf` | Smoke: drawn at half resolution (much cheaper) | on / off | on |  | ini only; switch `RVK_SmokeOn` |
+| `RVK_SmokeGame` | Smoke: the game's smoke sprites too | on / off | off |  | ini only; switch `RVK_SmokeOn` |
 
 ## Sky
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_CloudsOn` | Volumetric clouds | on / off | on | window; game value off |
-| `RVK_CloudThick` | Clouds: how thick | 0.1 .. 4 | 1 | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudBright` | Clouds: how light | 0.25 .. 3 | 0.5 | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudNight` | Clouds: how light at night (x the above) | 0.25 .. 2 | 0.4 | ini only; switch `RVK_CloudsOn` |
-| `RVK_SkyVary` | Clouds: the sky changes, clear to overcast (0: always some cloud) | 0 .. 1 | 1 | ini only; switch `RVK_CloudsOn` |
-| `RVK_ProcSky` | Sky: our own sky in place of the game's - blue by day, sunsets, the blue hour and night from the sun's height (off: the game's sky) | on / off | on | window; game value off |
-| `RVK_SkyZone` | Sky: how much of each zone's own sky colour is kept (0: none, 1: mostly the zone's) | 0 .. 1 | 0.25 | window; switch `RVK_ProcSky` |
-| `RVK_SkyBright` | Sky: our sky's brightness against the game's (and the far haze's, which takes its colour) | 0.25 .. 2 | 1 | window; switch `RVK_ProcSky` |
-| `RVK_SkyDayTop` | Sky colour: by day, overhead | RRGGBB | 404F71 | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyDayLow` | Sky colour: by day, low | RRGGBB | 8EA4B6 | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyDuskSun` | Sky colour: dawn and dusk, low towards the sun | RRGGBB | DB8862 | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyDuskAway` | Sky colour: dawn and dusk, low away from the sun | RRGGBB | 79475D | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyDuskTop` | Sky colour: dawn and dusk, overhead | RRGGBB | 424361 | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyBlueTop` | Sky colour: the blue hour, overhead | RRGGBB | 222A3C | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyBlueLow` | Sky colour: the blue hour, low | RRGGBB | 535455 | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyNightTop` | Sky colour: at night, overhead | RRGGBB | 171B25 | ini only; switch `RVK_ProcSky` |
-| `RVK_SkyNightLow` | Sky colour: at night, low | RRGGBB | 25292E | ini only; switch `RVK_ProcSky` |
-| `RVK_Twilight` | Sky: sunrise and sunset colours - orange and red towards the sun, pink above, the pink band opposite (0: the game's sky; above 1 more vivid) | 0 .. 1.5 | 0.5 | window; game value 0 |
-| `RVK_BlueHour` | Sky: the blue hour after sunset and before sunrise - a deep blue sky going over to the night's (0: none) | 0 .. 1 | 1 | window; game value 0 |
-| `RVK_SkyGlow` | Sky: the glow round the sun and along the horizon under it (0: none) | 0 .. 2 | 0.25 | window; game value 0 |
-| `RVK_SkyZones` | Clouds: each zone its own skies - deserts clearer, coasts and forests cloudier (0: the same everywhere) | 0 .. 1 | 1 | ini only; switch `RVK_CloudsOn` |
-| `RVK_Afterglow` | Clouds: how strongly they take the sunset's colours - gold, orange, red, pink undersides after the sun has set (0: the game's hues) | 0 .. 2 | 1 | window; switch `RVK_CloudsOn`; game value 0; knob |
-| `RVK_StarFade` | Sky: the stars come out slowly as the sky darkens after sunset, and fade before sunrise (off: as the game shows them) | on / off | on | window; game value off |
-| `RVK_Stars` | Sky: our own stars - thousands, in their colours, wheeling through the night, twinkling low (0: the game's) | 0 / 1 | 1 | window; switch `RVK_ProcSky` |
-| `RVK_StarBright` | Sky: the stars' brightness, x | 0.25 .. 3 | 3 | window; switch `RVK_ProcSky` |
-| `RVK_Twinkle` | Sky: how much the stars twinkle (most low in the sky; 0 steady) | 0 .. 1 | 0.2 | ini only; switch `RVK_ProcSky` |
-| `RVK_Galaxy` | Sky: the galaxy's band across the night sky, x (0 none) | 0 .. 2 | 1 | window; switch `RVK_ProcSky` |
-| `RVK_Meteors` | Sky: shooting stars on clear nights, how often x (0 none) | 0 .. 3 | 1 | window; switch `RVK_ProcSky` |
-| `RVK_Aurora` | Sky: auroras on some clear nights, how often and how strong x (0 none) | 0 .. 2 | 1 | window; switch `RVK_ProcSky` |
-| `RVK_AuroraForce` | Sky: an aurora every night, this strong (0: only some nights, by chance) | 0 .. 2 | 0 | window; switch `RVK_ProcSky` |
-| `RVK_AuroraCol` | Sky colour: the aurora's glow | RRGGBB | ? | ini only; switch `RVK_ProcSky` |
-| `RVK_Rainbow` | Sky: rainbows after rain, with the sun low behind you, x (0 none) | 0 .. 2 | 1 | window; game value 0 |
-| `RVK_Cirrus` | Clouds: thin high wisps, most on clear days - pink and gold round sunrise and sunset (0: none; off by default: under our own sky they showed as coarse streaks) | 0 .. 2 | 0 | window; switch `RVK_CloudsOn`; game value 0 |
-| `RVK_CloudDetail` | Clouds: billows and wisps (0 smooth) | 0 .. 2 | 2 | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudHalf` | Clouds: drawn at half resolution (much cheaper) | on / off | on | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudShadow` | Shadows on the ground (0 = none) | 0 .. 1 | 0 | window; switch `RVK_CloudsOn` |
-| `RVK_CloudSteps` | Quality (steps through a cloud) | 8 .. 96 | 32 | window; switch `RVK_CloudsOn` |
-| `RVK_CloudLayer` | Clouds: a cloud layer over the sky (off: each game cloud a volume) | on / off | on | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudCover` | Coverage (- less, + more) | -1 .. 1 | 0 | window; switch `RVK_CloudsOn` |
-| `RVK_CloudHeight` | Clouds: the layer's height | 200 .. 3000 | 900 | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudShade` | Clouds: contrast (light and shade; 1 as lit) | 0.5 .. 3 | 1 | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudLow` | Clouds: low grey deck on overcast days, x (0 none) | 0 .. 2 | 0 | ini only; switch `RVK_CloudsOn` |
-| `RVK_CloudQual` | Clouds: quality - less noise, more cost (0 low .. 3 ultra) | 0 / 1 / 2 / 3 | 3 | window; switch `RVK_CloudsOn` |
-| `RVK_CloudMorph` | Clouds: how fast they churn and change shape, x (0 still) | 0 .. 3 | 1 | window; switch `RVK_CloudsOn` |
-| `RVK_CloudSheet` | Clouds: the game's flat sheets behind them, x (0 none) | 0 .. 2 | 1 | ini only; switch `RVK_CloudsOn` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_CloudsOn` | Volumetric clouds | on / off | on | GPU: medium | window; game value off |
+| `RVK_CloudThick` | Clouds: how thick | 0.1 .. 4 | 1 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudBright` | Clouds: how light | 0.25 .. 3 | 0.5 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudNight` | Clouds: how light at night (x the above) | 0.25 .. 2 | 0.4 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_SkyVary` | Clouds: the sky changes, clear to overcast (0: always some cloud) | 0 .. 1 | 1 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_ProcSky` | Sky: our own sky in place of the game's - blue by day, sunsets, the blue hour and night from the sun's height (off: the game's sky) | on / off | on | GPU: low | window; game value off |
+| `RVK_SkyZone` | Sky: how much of each zone's own sky colour is kept (0: none, 1: mostly the zone's) | 0 .. 1 | 0.25 | no cost | window; switch `RVK_ProcSky` |
+| `RVK_SkyBright` | Sky: our sky's brightness against the game's (and the far haze's, which takes its colour) | 0.25 .. 2 | 1 | no cost | window; switch `RVK_ProcSky` |
+| `RVK_SkyDayTop` | Sky colour: by day, overhead | RRGGBB | 404F71 |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyDayLow` | Sky colour: by day, low | RRGGBB | 8EA4B6 |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyDuskSun` | Sky colour: dawn and dusk, low towards the sun | RRGGBB | DB8862 |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyDuskAway` | Sky colour: dawn and dusk, low away from the sun | RRGGBB | 79475D |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyDuskTop` | Sky colour: dawn and dusk, overhead | RRGGBB | 424361 |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyBlueTop` | Sky colour: the blue hour, overhead | RRGGBB | 222A3C |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyBlueLow` | Sky colour: the blue hour, low | RRGGBB | 535455 |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyNightTop` | Sky colour: at night, overhead | RRGGBB | 171B25 |  | ini only; switch `RVK_ProcSky` |
+| `RVK_SkyNightLow` | Sky colour: at night, low | RRGGBB | 25292E |  | ini only; switch `RVK_ProcSky` |
+| `RVK_Twilight` | Sky: sunrise and sunset colours - orange and red towards the sun, pink above, the pink band opposite (0: the game's sky; above 1 more vivid) | 0 .. 1.5 | 0.5 | no cost | window; game value 0 |
+| `RVK_BlueHour` | Sky: the blue hour after sunset and before sunrise - a deep blue sky going over to the night's (0: none) | 0 .. 1 | 1 | no cost | window; game value 0 |
+| `RVK_SkyGlow` | Sky: the glow round the sun and along the horizon under it (0: none) | 0 .. 2 | 0.25 | no cost | window; game value 0 |
+| `RVK_SkyZones` | Clouds: each zone its own skies - deserts clearer, coasts and forests cloudier (0: the same everywhere) | 0 .. 1 | 1 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_Afterglow` | Clouds: how strongly they take the sunset's colours - gold, orange, red, pink undersides after the sun has set (0: the game's hues) | 0 .. 2 | 1 | no cost | window; switch `RVK_CloudsOn`; game value 0; knob |
+| `RVK_StarFade` | Sky: the stars come out slowly as the sky darkens after sunset, and fade before sunrise (off: as the game shows them) | on / off | on | no cost | window; game value off |
+| `RVK_Stars` | Sky: our own stars - thousands, in their colours, wheeling through the night, twinkling low (0: the game's) | 0 (the game's) / 1 (ours) | 1 | GPU: low | window; switch `RVK_ProcSky` |
+| `RVK_StarBright` | Sky: the stars' brightness, x | 0.25 .. 3 | 3 | no cost | window; switch `RVK_ProcSky` |
+| `RVK_Twinkle` | Sky: how much the stars twinkle (most low in the sky; 0 steady) | 0 .. 1 | 0.2 |  | ini only; switch `RVK_ProcSky` |
+| `RVK_Galaxy` | Sky: the galaxy's band across the night sky, x (0 none) | 0 .. 2 | 1 | no cost | window; switch `RVK_ProcSky` |
+| `RVK_Meteors` | Sky: shooting stars on clear nights, how often x (0 none) | 0 .. 3 | 1 | no cost | window; switch `RVK_ProcSky` |
+| `RVK_Aurora` | Sky: auroras on some clear nights, how often and how strong x (0 none) | 0 .. 2 | 1 | GPU: low | window; switch `RVK_ProcSky` |
+| `RVK_AuroraForce` | Sky: an aurora every night, this strong (0: only some nights, by chance) | 0 .. 2 | 0 | GPU: low | window; switch `RVK_ProcSky` |
+| `RVK_AuroraCol` | Sky colour: the aurora's glow | RRGGBB | ? |  | ini only; switch `RVK_ProcSky` |
+| `RVK_Rainbow` | Sky: rainbows after rain, with the sun low behind you, x (0 none) | 0 .. 2 | 1 | no cost | window; game value 0 |
+| `RVK_Cirrus` | Clouds: thin high wisps, most on clear days - pink and gold round sunrise and sunset (0: none; off by default: under our own sky they showed as coarse streaks) | 0 .. 2 | 0 | GPU: low | window; switch `RVK_CloudsOn`; game value 0 |
+| `RVK_CloudDetail` | Clouds: billows and wisps (0 smooth) | 0 .. 2 | 2 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudHalf` | Clouds: drawn at half resolution (much cheaper) | on / off | on |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudShadow` | Shadows on the ground (0 = none) | 0 .. 1 | 0 | GPU: low | window; switch `RVK_CloudsOn` |
+| `RVK_CloudSteps` | Quality (steps through a cloud) | 8 .. 96 | 32 | GPU: more with the value | window; switch `RVK_CloudsOn` |
+| `RVK_CloudLayer` | Clouds: a cloud layer over the sky (off: each game cloud a volume) | on / off | on |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudCover` | Coverage (- less, + more) | -1 .. 1 | 0 | no cost | window; switch `RVK_CloudsOn` |
+| `RVK_CloudHeight` | Clouds: the layer's height | 200 .. 3000 | 900 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudShade` | Clouds: contrast (light and shade; 1 as lit) | 0.5 .. 3 | 1 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudLow` | Clouds: low grey deck on overcast days, x (0 none) | 0 .. 2 | 0 |  | ini only; switch `RVK_CloudsOn` |
+| `RVK_CloudQual` | Clouds: quality - less noise, more cost (0 low .. 3 ultra) | 0 (low) / 1 (medium) / 2 (high) / 3 (ultra) | 3 | GPU: more with the value | window; switch `RVK_CloudsOn` |
+| `RVK_CloudMorph` | Clouds: how fast they churn and change shape, x (0 still) | 0 .. 3 | 1 | no cost | window; switch `RVK_CloudsOn` |
+| `RVK_CloudSheet` | Clouds: the game's flat sheets behind them, x (0 none) | 0 .. 2 | 1 |  | ini only; switch `RVK_CloudsOn` |
 
 ## Shadows
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_ShadowMem` | Shadows of things out of view: what stood in view and stands still keeps casting | on / off | on | ini only; switch `RVK_SunShadow` |
-| `RVK_StaticShad` | Shadows of the playfield's placed objects from its own list - rocks, walls, trees, seen or not (ao-assets statels): 0 off, 1 once their placement is confirmed, 2 always | 0 .. 2 | 1 | ini only; switch `RVK_SunShadow` |
-| `RVK_SunShadow` | Sun shadows | on / off | on | window; game value off; was env `RANDYVK_SHADOWS` |
-| `RVK_SunRes` | Sun shadows: resolution | 1024 / 2048 / 4096 / 8192 | 2048 | window; switch `RVK_SunShadow` |
-| `RVK_SunStrength` | Sun shadows: darkness | 0 .. 1 | 0.75 | window; switch `RVK_SunShadow`; was env `RANDYVK_SHADOW_STRENGTH` |
-| `RVK_SunDist` | Sun shadows: distance (m) | 40 .. 1000 | 400 | window; switch `RVK_SunShadow` |
-| `RVK_SunCascade` | Cascades (more = sharper near, same reach) | 1 .. 4 | 4 | ini only; switch `RVK_SunShadow` |
-| `RVK_SunSoft` | Sun shadows: softness (0 = hard) | 0 .. 4 | 1 | window; switch `RVK_SunShadow`; knob |
-| `RVK_GrassShadow` | Sun shadows: grass shadows | on / off | on | window; switch `RVK_SunShadow` |
-| `RVK_ContactOn` | Contact shadows (small sun shadows the map misses) | on / off | on | window |
-| `RVK_Contact` | Contact shadows: strength | 0.05 .. 1 | 0.65 | window; switch `RVK_ContactOn`; game value 0; knob |
-| `RVK_PtOn` | Point light shadows | on / off | on | window |
-| `RVK_PtShadows` | Point light shadows: lights with shadows | 1 .. 16 | 8 | window; switch `RVK_PtOn`; game value 0; was env `RANDYVK_POINT_SHADOWS` |
-| `RVK_PtRes` | Point light shadows: resolution (per face) | 256 / 512 / 1024 / 2048 | 512 | window; switch `RVK_PtOn` |
-| `RVK_PtStrength` | Point light shadows: darkness | 0 .. 1 | 1 | window; switch `RVK_PtOn`; was env `RANDYVK_POINT_SHADOW_STRENGTH` |
-| `RVK_PtDay` | Point light shadows: strength in daylight (fraction) | 0 .. 1 | 1 | ini only; switch `RVK_PtOn`; was env `RANDYVK_POINT_SHADOW_DAY` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_ShadowMem` | Shadows of things out of view: what stood in view and stands still keeps casting | on / off | on |  | ini only; switch `RVK_SunShadow` |
+| `RVK_RtShadow` | Sun shadows ray traced: soft, exact shadows of the static world (characters and plants: the shadow map as before; GPUs with ray tracing only) | on / off | off | GPU: medium | window; switch `RVK_SunShadow`; knob |
+| `RVK_StaticShad` | Shadows of the playfield's placed objects from its own list - rocks, walls, trees, seen or not (ao-assets statels): 0 off, 1 once their placement is confirmed, 2 always | 0 .. 2 | 1 |  | ini only; switch `RVK_SunShadow` |
+| `RVK_SunShadow` | Sun shadows | on / off | on | GPU: high outdoors by day | window; game value off; was env `RANDYVK_SHADOWS` |
+| `RVK_SunRes` | Sun shadows: resolution | 1024 / 2048 / 4096 / 8192 | 2048 | GPU and video memory: more with the value | window; switch `RVK_SunShadow` |
+| `RVK_SunStrength` | Sun shadows: darkness | 0 .. 1 | 0.75 | no cost | window; switch `RVK_SunShadow`; was env `RANDYVK_SHADOW_STRENGTH` |
+| `RVK_SunDist` | Sun shadows: distance (m) | 40 .. 1000 | 400 | GPU: more with the value | window; switch `RVK_SunShadow` |
+| `RVK_SunCascade` | Cascades (more = sharper near, same reach) | 1 .. 4 | 4 |  | ini only; switch `RVK_SunShadow` |
+| `RVK_SunSoft` | Sun shadows: softness (0 = hard) | 0 .. 4 | 1 | GPU: low | window; switch `RVK_SunShadow`; knob |
+| `RVK_GrassShadow` | Sun shadows: grass shadows | on / off | on | GPU: medium in grass | window; switch `RVK_SunShadow` |
+| `RVK_ContactOn` | Contact shadows (small sun shadows the map misses) | on / off | on | GPU: low | window |
+| `RVK_Contact` | Contact shadows: strength | 0.05 .. 1 | 0.65 | no cost | window; switch `RVK_ContactOn`; game value 0; knob |
+| `RVK_PtOn` | Point light shadows | on / off | on | GPU: very high in towns at night | window |
+| `RVK_PtShadows` | Point light shadows: lights with shadows | 1 .. 16 | 8 | GPU: more with the value | window; switch `RVK_PtOn`; game value 0; was env `RANDYVK_POINT_SHADOWS` |
+| `RVK_PtRes` | Point light shadows: resolution (per face) | 256 / 512 / 1024 / 2048 | 512 | GPU and video memory: more with the value | window; switch `RVK_PtOn` |
+| `RVK_PtStrength` | Point light shadows: darkness | 0 .. 1 | 1 | no cost | window; switch `RVK_PtOn`; was env `RANDYVK_POINT_SHADOW_STRENGTH` |
+| `RVK_PtDay` | Point light shadows: strength in daylight (fraction) | 0 .. 1 | 1 |  | ini only; switch `RVK_PtOn`; was env `RANDYVK_POINT_SHADOW_DAY` |
+| `RVK_OwnShadow` | A character's own light (a lamp it wears) casts the character's shadow | on / off | on | no cost | window; switch `RVK_PtOn`; knob |
 
 ## Effects
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_Hdr` | Off-screen scene for every effect (0: none - the game's own drawing) | on / off | on | ini only; game value off; was env `RANDYVK_HDR` |
-| `RVK_BloomOn` | Bloom | on / off | on | window |
-| `RVK_Bloom` | Bloom: strength | 0.25 .. 5 | 1 | window; switch `RVK_BloomOn`; game value 0; was env `RANDYVK_BLOOM` |
-| `RVK_BloomThr` | Threshold (1 = above white) | 0.5 .. 2 | 0.5 | ini only; switch `RVK_BloomOn`; was env `RANDYVK_BLOOM_THRESHOLD` |
-| `RVK_BloomOcc` | Over objects in front of its light (1 = unchanged) | 0 .. 1 | 0.15 | ini only; switch `RVK_BloomOn`; knob |
-| `RVK_BloomWide` | Wide haze round its core (0 = even; wider in rain by night) | 0 .. 1 | 0.4 | window; switch `RVK_BloomOn`; game value 0; knob |
-| `RVK_NeonSat` | Bright coloured lights keep their colour (0 = they go white) | 0 .. 1 | 0.6 | window; game value 0; knob |
-| `RVK_FxGlowOn` | Glow of effects (spells, fire, light halos) | on / off | on | ini only |
-| `RVK_BloomFx` | Glow of effects: strength | 0.25 .. 4 | 1 | ini only; switch `RVK_FxGlowOn`; game value 0; was env `RANDYVK_BLOOM_EFFECTS` |
-| `RVK_NightOn` | Night glow of windows, signs and screens | on / off | on | ini only |
-| `RVK_NightGlow` | Night glow of windows, signs and screens: strength | 0.25 .. 4 | 1 | ini only; switch `RVK_NightOn`; game value 0; knob |
-| `RVK_MoonOn` | Moonlight at night (light and shadows from the moon) | on / off | on | ini only |
-| `RVK_MoonLight` | Moonlight at night: strength | 0.25 .. 3 | 1 | ini only; switch `RVK_MoonOn`; game value 0; knob |
-| `RVK_AoOn` | Ambient occlusion | on / off | on | window |
-| `RVK_Ao` | Ambient occlusion: strength | 0.25 .. 3 | 1 | window; switch `RVK_AoOn`; game value 0; was env `RANDYVK_AO` |
-| `RVK_AoRadius` | Ambient occlusion: radius (world units) | 0.25 .. 4 | 1 | ini only; switch `RVK_AoOn`; was env `RANDYVK_AO_RADIUS` |
-| `RVK_GiOn` | Indirect light (bounce light from the lit scene) | on / off | on | window |
-| `RVK_Gi` | Indirect light: strength | 0.25 .. 3 | 1 | window; switch `RVK_GiOn`; game value 0 |
-| `RVK_GiRadius` | Indirect light: reach (world units) | 1 .. 12 | 4 | ini only; switch `RVK_GiOn` |
-| `RVK_VolOn` | Volumetric light (sun shafts) | on / off | on | window |
-| `RVK_Volume` | Volumetric light: strength | 0.25 .. 4 | 0.5 | window; switch `RVK_VolOn`; game value 0 |
-| `RVK_VolHaze` | Volumetric light: haze | 0.25 .. 4 | 0.5 | window; switch `RVK_VolOn` |
-| `RVK_VolShafts` | Shaft contrast (0 = physical) | 0 .. 3 | 1 | ini only; switch `RVK_VolOn` |
-| `RVK_VolRays` | Light rays through gaps in the clouds | 0 .. 3 | 1 | ini only; switch `RVK_VolOn` |
-| `RVK_DuskRays` | Sunset rays: beams fanning from a low sun through the clouds and over the hills (0: none) | 0 .. 2 | 1 | window; switch `RVK_VolOn`; game value 0; knob |
-| `RVK_VolLand` | Haze over distant land (cool, as the air makes it) | 0 .. 1 | 0.1 | ini only; game value 0 |
-| `RVK_DesertAir` | Deserts: dusty air in fair weather - far dunes paler and warmer, a pale band along the horizon (0 = none) | 0 .. 1 | 1 | window; game value 0 |
-| `RVK_HeatShimmer` | Deserts: heat shimmer over distant land in the midday sun (0 = none) | 0 .. 1 | 0.5 | window; game value 0 |
-| `RVK_Sun` | Sun brightness (0 = the game's own sun) | 0 .. 2 | 1 | window; game value 0 |
-| `RVK_SunSize` | The suns' size (1: the game's own; less: tamer) | 0.3 .. 1.5 | 0.75 | ini only; switch `RVK_Sun`; knob |
-| `RVK_SunBleed` | How much of the suns' glow shows through thick cloud (0 none) | 0 .. 1 | 0.3 | ini only; switch `RVK_Sun`; knob |
-| `RVK_Atmos` | Atmospheric haze | on / off | on | window; knob |
-| `RVK_Mist` | Valley mist (night and dawn) | 0 .. 2 | 1 | window; switch `RVK_Atmos`; game value 0; knob |
-| `RVK_FogBanks` | Fog banks: thick mist drifting through the low ground at dawn and after rain, most in wet country (x; 0: none) | 0 .. 2 | 1 | window; switch `RVK_Atmos`; game value 0 |
-| `RVK_DawnLight` | Low sun's light: golden on what faces it, the shade cooler, round sunrise and sunset (0: the game's colours) | 0 .. 2 | 1 | window; game value 0; knob |
-| `RVK_MornHaze` | Morning haze: the air thicker round sunrise, half as much round sunset (0: none) | 0 .. 2 | 1 | window; switch `RVK_Atmos`; game value 0; knob |
-| `RVK_GameSun` | The game's own sun glow sprites (off: only the suns above) | on / off | off | ini only; game value on |
-| `RVK_SsrOn` | Reflections (screen-space) | on / off | off | window |
-| `RVK_Ssr` | Reflections: strength | 0.25 .. 2 | 0.25 | window; switch `RVK_SsrOn`; game value 0 |
-| `RVK_SsrWater` | Reflections: water | 0 .. 1 | 0.25 | ini only; switch `RVK_SsrOn` |
-| `RVK_SsrGloss` | Reflections: glossy surfaces | 0 .. 1 | 0.3 | ini only; switch `RVK_SsrOn` |
-| `RVK_SsrWet` | Wet look of floors and ground (0 = dry) | 0 .. 1 | 0 | ini only; switch `RVK_SsrOn` |
-| `RVK_MBlurOn` | Motion blur | on / off | off | window |
-| `RVK_MBlurObj` | Per-object (off = camera only) | on / off | on | window; switch `RVK_MBlurOn` |
-| `RVK_MBlur` | Motion blur: amount | 0.05 .. 2 | 0.15 | window; switch `RVK_MBlurOn`; game value 0; was env `RANDYVK_MOTION_BLUR` |
-| `RVK_MBlurNear` | Camera blur: sharp nearer than (world units) | 2 .. 20 | 8 | ini only; switch `RVK_MBlurOn`; was env `RANDYVK_MOTION_BLUR_NEAR` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_Hdr` | Off-screen scene for every effect (0: none - the game's own drawing) | on / off | on |  | ini only; game value off; was env `RANDYVK_HDR` |
+| `RVK_BloomOn` | Bloom | on / off | on | GPU: low | window |
+| `RVK_Bloom` | Bloom: strength | 0.25 .. 5 | 1 | no cost | window; switch `RVK_BloomOn`; game value 0; was env `RANDYVK_BLOOM` |
+| `RVK_BloomThr` | Threshold (1 = above white) | 0.5 .. 2 | 0.5 |  | ini only; switch `RVK_BloomOn`; was env `RANDYVK_BLOOM_THRESHOLD` |
+| `RVK_BloomOcc` | Over objects in front of its light (1 = unchanged) | 0 .. 1 | 0.15 |  | ini only; switch `RVK_BloomOn`; knob |
+| `RVK_BloomWide` | Wide haze round its core (0 = even; wider in rain by night) | 0 .. 1 | 0.4 | no cost | window; switch `RVK_BloomOn`; game value 0; knob |
+| `RVK_NeonSat` | Bright coloured lights keep their colour (0 = they go white) | 0 .. 1 | 0.6 | no cost | window; game value 0; knob |
+| `RVK_FxGlowOn` | Glow of effects (spells, fire, light halos) | on / off | on |  | ini only |
+| `RVK_BloomFx` | Glow of effects: strength | 0.25 .. 4 | 1 |  | ini only; switch `RVK_FxGlowOn`; game value 0; was env `RANDYVK_BLOOM_EFFECTS` |
+| `RVK_NightOn` | Night glow of windows, signs and screens | on / off | on |  | ini only |
+| `RVK_NightGlow` | Night glow of windows, signs and screens: strength | 0.25 .. 4 | 1 |  | ini only; switch `RVK_NightOn`; game value 0; knob |
+| `RVK_MoonOn` | Moonlight at night (light and shadows from the moon) | on / off | on |  | ini only |
+| `RVK_MoonLight` | Moonlight at night: strength | 0.25 .. 3 | 1 |  | ini only; switch `RVK_MoonOn`; game value 0; knob |
+| `RVK_AoOn` | Ambient occlusion | on / off | on | GPU: low (ray traced: medium) | window |
+| `RVK_Ao` | Ambient occlusion: strength | 0.25 .. 3 | 1 | no cost | window; switch `RVK_AoOn`; game value 0; was env `RANDYVK_AO` |
+| `RVK_AoRadius` | Ambient occlusion: radius (world units) | 0.25 .. 4 | 1 |  | ini only; switch `RVK_AoOn`; was env `RANDYVK_AO_RADIUS` |
+| `RVK_AoMode` | Ambient occlusion: whose (0 = ours, 1 = AMD's FidelityFX CACAO, 2 = ray traced: GPUs with ray tracing only) | 0 (ours) / 1 (AMD CACAO) / 2 (ray traced) | 0 | GPU: AMD's a little more, ray traced medium | window; switch `RVK_AoOn`; knob |
+| `RVK_GiOn` | Indirect light (bounce light from the lit scene) | on / off | on | GPU: low (AMD's: high) | window |
+| `RVK_Gi` | Indirect light: strength | 0.25 .. 3 | 1 | no cost | window; switch `RVK_GiOn`; game value 0 |
+| `RVK_GiRadius` | Indirect light: reach (world units) | 1 .. 12 | 4 |  | ini only; switch `RVK_GiOn` |
+| `RVK_GiMode` | Indirect light: whose (0 = ours, 1 = AMD's FidelityFX Brixelizer GI) | 0 (ours) / 1 (AMD Brixelizer) | 0 | GPU: AMD's high - about 1 ms more | window; switch `RVK_GiOn`; knob |
+| `RVK_VolOn` | Volumetric light (sun shafts) | on / off | on | GPU: medium | window |
+| `RVK_Volume` | Volumetric light: strength | 0.25 .. 4 | 0.5 | no cost | window; switch `RVK_VolOn`; game value 0 |
+| `RVK_VolHaze` | Volumetric light: haze | 0.25 .. 4 | 0.5 | no cost | window; switch `RVK_VolOn` |
+| `RVK_VolShafts` | Shaft contrast (0 = physical) | 0 .. 3 | 1 |  | ini only; switch `RVK_VolOn` |
+| `RVK_VolRays` | Light rays through gaps in the clouds | 0 .. 3 | 1 |  | ini only; switch `RVK_VolOn` |
+| `RVK_VolLamps` | Lamps' light in the air: a glow round each lamp, thicker in fog and mist (0: none) | 0 .. 2 | 0 | GPU: low, medium by many lamps | window; switch `RVK_VolOn`; knob |
+| `RVK_DuskRays` | Sunset rays: beams fanning from a low sun through the clouds and over the hills (0: none) | 0 .. 2 | 1 | GPU: low | window; switch `RVK_VolOn`; game value 0; knob |
+| `RVK_VolLand` | Haze over distant land (cool, as the air makes it) | 0 .. 1 | 0.1 |  | ini only; game value 0 |
+| `RVK_DesertAir` | Deserts: dusty air in fair weather - far dunes paler and warmer, a pale band along the horizon (0 = none) | 0 .. 1 | 1 | no cost | window; game value 0 |
+| `RVK_HeatShimmer` | Deserts: heat shimmer over distant land in the midday sun (0 = none) | 0 .. 1 | 0.5 | GPU: low | window; game value 0 |
+| `RVK_Sun` | Sun brightness (0 = the game's own sun) | 0 .. 2 | 1 | no cost | window; game value 0 |
+| `RVK_SunSize` | The suns' size (1: the game's own; less: tamer) | 0.3 .. 1.5 | 0.75 |  | ini only; switch `RVK_Sun`; knob |
+| `RVK_SunBleed` | How much of the suns' glow shows through thick cloud (0 none) | 0 .. 1 | 0.3 |  | ini only; switch `RVK_Sun`; knob |
+| `RVK_Atmos` | Atmospheric haze | on / off | on | GPU: low | window; knob |
+| `RVK_Mist` | Valley mist (night and dawn) | 0 .. 2 | 1 | no cost | window; switch `RVK_Atmos`; game value 0; knob |
+| `RVK_FogBanks` | Fog banks: thick mist drifting through the low ground at dawn and after rain, most in wet country (x; 0: none) | 0 .. 2 | 1 | GPU: low | window; switch `RVK_Atmos`; game value 0 |
+| `RVK_DawnLight` | Low sun's light: golden on what faces it, the shade cooler, round sunrise and sunset (0: the game's colours) | 0 .. 2 | 1 | no cost | window; game value 0; knob |
+| `RVK_MornHaze` | Morning haze: the air thicker round sunrise, half as much round sunset (0: none) | 0 .. 2 | 1 | no cost | window; switch `RVK_Atmos`; game value 0; knob |
+| `RVK_GameSun` | The game's own sun glow sprites (off: only the suns above) | on / off | off |  | ini only; game value on |
+| `RVK_SsrOn` | Reflections (screen-space) | on / off | off | GPU: low (AMD's: medium) | window |
+| `RVK_Ssr` | Reflections: strength | 0.25 .. 2 | 0.25 | no cost | window; switch `RVK_SsrOn`; game value 0 |
+| `RVK_SsrWater` | Reflections: water | 0 .. 1 | 0.25 |  | ini only; switch `RVK_SsrOn` |
+| `RVK_SsrGloss` | Reflections: glossy surfaces | 0 .. 1 | 0.3 |  | ini only; switch `RVK_SsrOn` |
+| `RVK_SsrWet` | Wet look of floors and ground (0 = dry) | 0 .. 1 | 0 |  | ini only; switch `RVK_SsrOn` |
+| `RVK_RtReflect` | Reflections ray traced where the screen has nothing to reflect - what is behind a wall, off the screen's edge, behind the camera (ours only; GPUs with ray tracing only) | on / off | off | GPU: low to medium | window; switch `RVK_SsrOn`; knob |
+| `RVK_SsrMode` | Reflections: whose (0 = ours, 1 = AMD's FidelityFX SSSR: rough surfaces too, denoised) | 0 (ours) / 1 (AMD SSSR) | 0 | GPU: AMD's about 0.25 ms more | window; switch `RVK_SsrOn`; knob |
+| `RVK_SssrThick` | Reflections, AMD's: how far behind a surface a ray's hit still counts (world units; more: fewer gaps, more smearing) | 0.05 .. 3 | 0.5 | no cost | window; switch `RVK_SsrOn`; knob |
+| `RVK_Vrs` | Variable rate shading: flat or fast-moving parts of the scene shaded in 2 x 2 blocks, for speed (AMD's FidelityFX VRS; needs a GPU with shading rate images) | 0 (off) / 1 (on) | 0 | saves GPU: about 0.5 ms | window; knob |
+| `RVK_GiDebug` | Indirect light, AMD's: a view (0 = none, 1 = its distance field of the world, 2 = its light alone) | 0 / 1 / 2 | 0 |  | ini only; switch `RVK_GiOn`; knob |
+| `RVK_GiSky` | Indirect light, AMD's: the sky's light on rays that hit nothing (0 = bounce light only: the game's ambient is the sky's) | 0 .. 1 | 0 | no cost | window; switch `RVK_GiOn`; knob |
+| `RVK_RtDebug` | Ray tracing: a view of what its rays hit, coloured by object (0 = off, 1 = on; GPUs with ray tracing only) | 0 / 1 | 0 |  | ini only; knob |
+| `RVK_VrsCutoff` | Variable rate shading: how much a block's brightness may vary and still be shaded once (higher: more blocks, blurrier) | 0.01 .. 0.2 | 0.05 | saves GPU: more with the value | window; switch `RVK_Vrs`; knob |
+| `RVK_MBlurOn` | Motion blur | on / off | off | GPU: low | window |
+| `RVK_MBlurObj` | Per-object (off = camera only) | on / off | on | GPU: low | window; switch `RVK_MBlurOn` |
+| `RVK_MBlur` | Motion blur: amount | 0.05 .. 2 | 0.15 | no cost | window; switch `RVK_MBlurOn`; game value 0; was env `RANDYVK_MOTION_BLUR` |
+| `RVK_MBlurNear` | Camera blur: sharp nearer than (world units) | 2 .. 20 | 8 |  | ini only; switch `RVK_MBlurOn`; was env `RANDYVK_MOTION_BLUR_NEAR` |
 
 ## Tone mapping
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_Knee` | Tone mapping knee (1 = only clip) | 0.5 .. 1 | 0.85 | ini only; was env `RANDYVK_TONEMAP_KNEE` |
-| `RVK_HdrRoom` | Local light headroom | 1 .. 4 | 1.5 | ini only; was env `RANDYVK_HDR_HEADROOM` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_Knee` | Tone mapping knee (1 = only clip) | 0.5 .. 1 | 0.85 |  | ini only; was env `RANDYVK_TONEMAP_KNEE` |
+| `RVK_HdrRoom` | Local light headroom | 1 .. 4 | 1.5 |  | ini only; was env `RANDYVK_HDR_HEADROOM` |
 
 ## Anti-aliasing
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_Taa` | Temporal anti-aliasing | on / off | on | window; game value off |
-| `RVK_Sharpen` | Temporal anti-aliasing: sharpening (0 = none) | 0 .. 1 | 0.4 | window; switch `RVK_Taa` |
-| `RVK_RenderScale` | Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster) | 100 / 85 / 75 / 67 / 50 | 100 | window; switch `RVK_Taa`; game value 100 |
-| `RVK_FrameGen` | Frame generation (AMD FSR 3.1): a frame interpolated between each two - about twice the frames shown, a little more latency | on / off | off | window; switch `RVK_Taa` |
-| `RVK_Upscaler` | Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2, 2: AMD FSR 3.1) | 0 / 1 / 2 | 0 | window; switch `RVK_Taa` |
-| `RVK_Fxaa` | FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer) | on / off | off | window; game value off; knob |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_Taa` | Temporal anti-aliasing | on / off | on | GPU: low (FSR: medium) - and it lets Render scale save | window; game value off |
+| `RVK_Sharpen` | Temporal anti-aliasing: sharpening (0 = none) | 0 .. 1 | 0.4 | no cost | window; switch `RVK_Taa` |
+| `RVK_RenderScale` | Render scale: the 3D world drawn at this % of the screen's size, the TAA bringing it up to full size (lower is faster) | 100 / 85 / 75 / 67 / 50 | 100 | saves GPU: the biggest saving - lower is much faster | window; switch `RVK_Taa`; game value 100 |
+| `RVK_FrameGen` | Frame generation (AMD FSR 3.1): a frame interpolated between each two - about twice the frames shown, a little more latency | on / off | off | GPU: medium - about twice the frames shown | window; switch `RVK_Taa` |
+| `RVK_Upscaler` | Upscaler for the render scale (0: ao-vk's own TAA, 1: AMD FSR 2.2, 2: AMD FSR 3.1) | 0 (ao-vk's TAA) / 1 (AMD FSR 2.2) / 2 (AMD FSR 3.1) | 0 | GPU: FSR about 0.5 ms more than ao-vk's own | window; switch `RVK_Taa` |
+| `RVK_Fxaa` | FXAA: fast anti-aliasing, used when TAA is off (no smearing, a little softer) | on / off | off | GPU: low | window; game value off; knob |
 
 ## Colour grading
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_GradeOn` | Colour grading | on / off | on | window |
-| `RVK_Saturation` | Colour grading: saturation | 0 .. 2 | 1 | window; switch `RVK_GradeOn`; game value 1 |
-| `RVK_Contrast` | Colour grading: contrast | 0.5 .. 1.5 | 1 | window; switch `RVK_GradeOn`; game value 1 |
-| `RVK_Warmth` | Warmth (- cooler, + warmer) | -1 .. 1 | 0.75 | window; switch `RVK_GradeOn`; game value 0 |
-| `RVK_NightTint` | Colour grading: night tint (cooler, paler) | 0 .. 1 | 0.25 | window; switch `RVK_GradeOn`; game value 0 |
-| `RVK_Vignette` | Colour grading: vignette (darker corners) | 0 .. 1 | 0 | window; switch `RVK_GradeOn`; game value 0 |
-| `RVK_LutAmount` | Colour grading: look-up tables (Ctrl+Shift+L) | 0 .. 1 | 1 | ini only; switch `RVK_GradeOn`; game value 0 |
-| `RVK_GoldenHour` | Golden hour: round sunrise and sunset the light warmer, the shade a little cooler, a touch more contrast | 0 .. 1 | 0.5 | window; switch `RVK_GradeOn`; game value 0; knob |
-| `RVK_NeonNight` | Neon nights: teal shadows, lights keep their colour (in place of randy-vk-night.cube) | on / off | off | window; switch `RVK_GradeOn` |
-| `RVK_Exposure` | Brightness | 0.5 .. 2 | 1 | window; was env `RANDYVK_EXPOSURE` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_GradeOn` | Colour grading | on / off | on | no cost | window |
+| `RVK_Saturation` | Colour grading: saturation | 0 .. 2 | 1 | no cost | window; switch `RVK_GradeOn`; game value 1 |
+| `RVK_Contrast` | Colour grading: contrast | 0.5 .. 1.5 | 1 | no cost | window; switch `RVK_GradeOn`; game value 1 |
+| `RVK_Warmth` | Warmth (- cooler, + warmer) | -1 .. 1 | 0.75 | no cost | window; switch `RVK_GradeOn`; game value 0 |
+| `RVK_NightTint` | Colour grading: night tint (cooler, paler) | 0 .. 1 | 0.25 | no cost | window; switch `RVK_GradeOn`; game value 0 |
+| `RVK_Vignette` | Colour grading: vignette (darker corners) | 0 .. 1 | 0 | no cost | window; switch `RVK_GradeOn`; game value 0 |
+| `RVK_LutAmount` | Colour grading: look-up tables (Ctrl+Shift+L) | 0 .. 1 | 1 |  | ini only; switch `RVK_GradeOn`; game value 0 |
+| `RVK_GoldenHour` | Golden hour: round sunrise and sunset the light warmer, the shade a little cooler, a touch more contrast | 0 .. 1 | 0.5 | no cost | window; switch `RVK_GradeOn`; game value 0; knob |
+| `RVK_NeonNight` | Neon nights: teal shadows, lights keep their colour (in place of randy-vk-night.cube) | on / off | off | no cost | window; switch `RVK_GradeOn` |
+| `RVK_Exposure` | Brightness | 0.5 .. 2 | 1 | no cost | window; was env `RANDYVK_EXPOSURE` |
 
 ## Depth of field
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_Dof` | Depth of field | on / off | off | window; game value off |
-| `RVK_DofBokeh` | Bokeh (hexagonal highlights; off = smooth blur) | on / off | on | window; switch `RVK_Dof` |
-| `RVK_DofNear` | Blur in front of the focus | on / off | on | window; switch `RVK_Dof` |
-| `RVK_DofFar` | Blur behind the focus (always) | on / off | off | window; switch `RVK_Dof` |
-| `RVK_DofMacro` | Depth of field: close focus distance | 0 .. 10 | 3 | ini only; switch `RVK_Dof` |
-| `RVK_DofAmount` | Depth of field: blur strength | 0 .. 2 | 0.6 | window; switch `RVK_Dof` |
-| `RVK_DofRadius` | Largest blur (pixels at 1440 lines) | 4 .. 48 | 17 | ini only; switch `RVK_Dof` |
-| `RVK_DofFocus` | Focus distance (m; 0 = your character) | 0 .. 200 | 0 | window; switch `RVK_Dof` |
-| `RVK_DofRange` | Depth of field: in-focus band around it | 0 .. 0.9 | 0.15 | ini only; switch `RVK_Dof` |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_Dof` | Depth of field | on / off | off | GPU: low | window; game value off |
+| `RVK_DofBokeh` | Bokeh (hexagonal highlights; off = smooth blur) | on / off | on | GPU: low | window; switch `RVK_Dof` |
+| `RVK_DofNear` | Blur in front of the focus | on / off | on | GPU: low | window; switch `RVK_Dof` |
+| `RVK_DofFar` | Blur behind the focus (always) | on / off | off | no cost | window; switch `RVK_Dof` |
+| `RVK_DofMacro` | Depth of field: close focus distance | 0 .. 10 | 3 |  | ini only; switch `RVK_Dof` |
+| `RVK_DofAmount` | Depth of field: blur strength | 0 .. 2 | 0.6 | no cost | window; switch `RVK_Dof` |
+| `RVK_DofRadius` | Largest blur (pixels at 1440 lines) | 4 .. 48 | 17 |  | ini only; switch `RVK_Dof` |
+| `RVK_DofFocus` | Focus distance (m; 0 = your character) | 0 .. 200 | 0 | no cost | window; switch `RVK_Dof` |
+| `RVK_DofRange` | Depth of field: in-focus band around it | 0 .. 0.9 | 0.15 |  | ini only; switch `RVK_Dof` |
 
 ## Particles
 
-| Setting | What it does | Values | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `RVK_Particles` | GPU particles on effects | on / off | on | window; game value off |
-| `RVK_PartCount` | GPU particles on effects: amount (particles per sprite) | 1 .. 32 | 20 | window; switch `RVK_Particles` |
-| `RVK_PartUniform` | GPU particles on effects: uniform particle size | 0 .. 1 | 1 | ini only; switch `RVK_Particles` |
-| `RVK_PartAbsSize` | Particle size, same for every effect (world units) | 0.005 .. 0.3 | 0.02 | ini only; switch `RVK_Particles` |
-| `RVK_PartSize` | GPU particles on effects: particle size by sprite | 0.01 .. 0.6 | 0.03 | ini only; switch `RVK_Particles` |
-| `RVK_PartBright` | GPU particles on effects: brightness | 0.25 .. 8 | 8 | window; switch `RVK_Particles` |
-| `RVK_PartTrail` | Trail length (0 = off) | 0 .. 0.3 | 0.05 | window; switch `RVK_Particles` |
-| `RVK_PartTrailMx` | GPU particles on effects: longest trail (particle sizes) | 1 .. 20 | 6 | ini only; switch `RVK_Particles` |
-| `RVK_PartLife` | GPU particles on effects: particle life (seconds) | 0.25 .. 5 | 0.85 | ini only; switch `RVK_Particles` |
-| `RVK_PartCurl` | GPU particles on effects: flow (curl noise) speed | 0 .. 5 | 1.5 | ini only; switch `RVK_Particles` |
-| `RVK_PartScale` | Flow feature size (world units) | 0.25 .. 5 | 1.5 | ini only; switch `RVK_Particles` |
-| `RVK_PartSwirl` | GPU particles on effects: swirl around the effect | 0 .. 5 | 3.7 | ini only; switch `RVK_Particles` |
-| `RVK_PartPull` | Pull back towards the effect | 0 .. 3 | 0.6 | ini only; switch `RVK_Particles` |
-| `RVK_PartDrag` | How quickly particles follow the flow | 0.25 .. 10 | 2.5 | ini only; switch `RVK_Particles` |
-| `RVK_PartSpeed` | GPU particles on effects: launch speed | 0 .. 4 | 0.6 | ini only; switch `RVK_Particles` |
-| `RVK_PartAdapt` | Adapt to each effect's own motion (0 = all alike) | 0 .. 1 | 1 | ini only; switch `RVK_Particles` |
-| `RVK_PartFollow` | Young particles follow their sprite | 0 .. 1 | 0.7 | ini only; switch `RVK_Particles` |
-| `RVK_PartCore` | Brightness of the game's sprites | 0 .. 1 | 0.1 | ini only; switch `RVK_Particles`; game value 1 |
+| Setting | What it does | Values | Default | Cost | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `RVK_Particles` | GPU particles on effects | on / off | on | GPU: low | window; game value off |
+| `RVK_PartCount` | GPU particles on effects: amount (particles per sprite) | 1 .. 32 | 20 | GPU: more with the value | window; switch `RVK_Particles` |
+| `RVK_PartUniform` | GPU particles on effects: uniform particle size | 0 .. 1 | 1 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartAbsSize` | Particle size, same for every effect (world units) | 0.005 .. 0.3 | 0.02 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartSize` | GPU particles on effects: particle size by sprite | 0.01 .. 0.6 | 0.03 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartBright` | GPU particles on effects: brightness | 0.25 .. 8 | 8 | no cost | window; switch `RVK_Particles` |
+| `RVK_PartTrail` | Trail length (0 = off) | 0 .. 0.3 | 0.05 | GPU: low | window; switch `RVK_Particles` |
+| `RVK_PartTrailMx` | GPU particles on effects: longest trail (particle sizes) | 1 .. 20 | 6 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartLife` | GPU particles on effects: particle life (seconds) | 0.25 .. 5 | 0.85 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartCurl` | GPU particles on effects: flow (curl noise) speed | 0 .. 5 | 1.5 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartScale` | Flow feature size (world units) | 0.25 .. 5 | 1.5 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartSwirl` | GPU particles on effects: swirl around the effect | 0 .. 5 | 3.7 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartPull` | Pull back towards the effect | 0 .. 3 | 0.6 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartDrag` | How quickly particles follow the flow | 0.25 .. 10 | 2.5 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartSpeed` | GPU particles on effects: launch speed | 0 .. 4 | 0.6 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartAdapt` | Adapt to each effect's own motion (0 = all alike) | 0 .. 1 | 1 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartFollow` | Young particles follow their sprite | 0 .. 1 | 0.7 |  | ini only; switch `RVK_Particles` |
+| `RVK_PartCore` | Brightness of the game's sprites | 0 .. 1 | 0.1 |  | ini only; switch `RVK_Particles`; game value 1 |
+| `RVK_Fx` | Our own effects in place of the game's (randy-vk\\fx\\*.rvkfx in the client folder) | on / off | on | GPU: low, while an effect plays | window; game value off |
+| `RVK_FxLog` | Log every effect the game makes: template, anchor, who asked (randy-vk.log) | on / off | off | no cost | ini only |

@@ -91,6 +91,12 @@ void Device::SetSkyPlayfield(uint32_t playfield)
     if (playfield == m_skyPlayfield)
         return;
     m_skyPlayfield = playfield;
+    // The sun forgotten: held for 5 s through frames without it (SunKnown), a shop entered from the street took the
+    // street's for its first 5 s - lit as outdoors by night (the tone mapping's night darkening, the light rig) and
+    // then lighting up (the user, 2026-10-26). An outdoor zone's own is seen again at its first lit frame.
+    m_sunLightClock = -1.0;
+    PortalDiagPlayfield(playfield);              // (shop portals' phase 0: portal_diag.cpp)
+    PortalCapturePlayfield(playfield);           // (shop portals: portal_capture.cpp)
     m_skyZoneLean = 0.0f;
     for (const ZoneSky& z : kZoneSkies)
         if (z.playfield == playfield)
@@ -233,6 +239,7 @@ void Device::UpdateEnvironment(VkCommandBuffer cmd)
     UpdateMoon();
     UpdateMist();
     UpdateSkyModel();                            // (the sky's twilight and glow)
+    UpdateLightRig();                            // (the frame's light, day and night alike: light_rig.cpp)
     UpdateAtmosphere(cmd);                       // (our own sky's tables, for the next frame: atmosphere.cpp)
     UpdateTerrainSun(cmd);                       // (the terrain's shade from a low sun: terrain_sun.cpp)
 }
@@ -561,11 +568,17 @@ void Device::UpdateRainbow()
 
 // The sky's twilight and glow drawn over the game's sky (sky_glow.frag): once a frame, after its dome, before the
 // moons, the suns, the game's cloud sheets and the cloud layer.
-void Device::DrawSkyGlow()
+void Device::DrawSkyGlow(const VkRect2D* box)
 {
-    if (m_skyGlowFrame == m_frameNumber)
+    // (Once a frame - and again into a street portal's opening, `box`: there only where the depth is at the far
+    // plane, behind the street drawn into it - portal.cpp.)
+    if (!box) {
+        if (m_skyGlowFrame == m_frameNumber)
+            return;
+        m_skyGlowFrame = m_frameNumber;
+    }
+    if (box && !m_skyGlowFarPipeline)
         return;
-    m_skyGlowFrame = m_frameNumber;
     const bool ours = ProcSkyReady();
     if (!m_skyGlowPipeline || !m_rendering || m_target != m_scene || !m_glow || !m_localFraction || !m_motionVectors ||
         !m_albedo || m_external || (!ours && m_skyModel[3] <= 0.0f && m_skyModel[7] <= 0.0f))
@@ -575,7 +588,8 @@ void Device::DrawSkyGlow()
         float view[4], sky[16], star[3][4], night[4], meteor[2][4], aurora[4];
     } push{};
     static_assert(sizeof(Push) == 256, "sky_glow.frag's push constants");
-    if (!InvertMatrix(MulMatrix(m_view, m_proj), &push.invViewProj))
+    // (Into a street portal, at the scene's end: the world camera's - the last view set may be another's.)
+    if (!InvertMatrix(box ? MulMatrix(m_aoView, m_aoProj) : MulMatrix(m_view, m_proj), &push.invViewProj))
         return;
     push.view[0] = float(m_scene->m_width);
     push.view[1] = float(m_scene->m_height);
@@ -612,10 +626,10 @@ void Device::DrawSkyGlow()
     FlushGroup();
     VkCommandBuffer cmd = m_frames[m_frameIndex].main;
     const VkViewport full{0.0f, 0.0f, float(m_scene->m_width), float(m_scene->m_height), 0.0f, 1.0f};
-    const VkRect2D area{{0, 0}, {m_scene->m_width, m_scene->m_height}};
+    const VkRect2D area = box ? *box : VkRect2D{{0, 0}, {m_scene->m_width, m_scene->m_height}};
     vkCmdSetViewport(cmd, 0, 1, &full);
     vkCmdSetScissor(cmd, 0, 1, &area);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_skyGlowPipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, box ? m_skyGlowFarPipeline : m_skyGlowPipeline);
     VkDescriptorImageInfo view{m_linearSampler, ours ? m_atmosView->m_view : m_blackTexture->m_view,
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};

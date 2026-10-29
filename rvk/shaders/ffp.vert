@@ -471,11 +471,23 @@ void main()
             vSmoothN = dot(s, s) > 0.0 ? normalize(s) * smoothstep(0.85, 0.97, length(m)) : vec3(0.0);
         }
 #endif
+        // RVK_CrownSky: a crown's ambient light as the sky gives it to a round mass - more on its top, less under it (by
+        // the leaf's direction from the crown's centre; none near the centre, where it has none): 1.45 .. 0.55, its mean
+        // over the sphere 1, so the tree is no brighter overall. The game's ambient alone came from every side alike,
+        // and was about four fifths of a crown's light at noon: its shape went (docs/sss-plan.md).
+        float crownSky = 1.0;
+        if (D.leaf.w > 0.0 && FL.foliage.x > 0.0) {
+            vec3 o = mat3(D.world) * (inPos.xyz - D.leaf.xyz);
+            float lo = length(o), r = clamp(length(inPos.xyz - D.leaf.xyz) / D.leaf.w, 0.0, 1.0);
+            float up = lo > 1e-5 ? o.y / lo * smoothstep(0.05, 0.5, r) : 0.0;
+            crownSky = mix(1.0, 1.0 + 0.45 * up, FL.foliage.x);
+        }
         if ((C.flags.x & F_LIGHTING) != 0u) {
             vec4 mDiffuse = MaterialColor(C.matSources.x, C.matDiffuse, diffuse, specular, hasDiffuse, hasSpecular);
             vec4 mAmbient = MaterialColor(C.matSources.y, C.matAmbient, diffuse, specular, hasDiffuse, hasSpecular);
             vec4 mSpecular = MaterialColor(C.matSources.z, C.matSpecular, diffuse, specular, hasDiffuse, hasSpecular);
             vec4 mEmissive = MaterialColor(C.matSources.w, C.matEmissive, diffuse, specular, hasDiffuse, hasSpecular);
+            mAmbient.rgb *= crownSky;
             if ((C.flags.x & F_PERPIXEL) != 0u) {
                 vMatAmbient = mAmbient.rgb;
                 vMatEmissive = mEmissive.rgb;
@@ -496,6 +508,11 @@ void main()
                 diff += diffL;
                 spec += specL;
                 diffuse = vec4(mEmissive.rgb + mAmbient.rgb * ambient + mDiffuse.rgb * diff, mDiffuse.a);
+                // (RVK_CrownSky: rolling off towards 1, not clamped there - ffp_main.glsl, per pixel, the same.)
+                if (D.leaf.w > 0.0 && FL.foliage.x > 0.0) {
+                    vec3 over = max(diffuse.rgb - 0.6, vec3(0.0));
+                    diffuse.rgb = mix(diffuse.rgb, min(diffuse.rgb, 0.6) + 0.4 * (1.0 - exp(-over / 0.4)), FL.foliage.x);
+                }
                 specular = vec4(mSpecular.rgb * spec, specular.a);
             }
         }

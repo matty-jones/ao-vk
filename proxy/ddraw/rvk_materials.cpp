@@ -10,11 +10,16 @@
 //   <type>_<id>_leaves.png, _leaves_n.png   a tree canopy's own leaf art (rvk leaves.cpp): an atlas of 4 x 4 sprigs drawn
 //                        in place of this canopy texture's cards, and its normal map (ao-assets leaf-art --install)
 //   <id>_<suffix>        any of these for any type (fallback)
+// A static mesh (1010001 / 1010026) can have them too, named after the mesh: its atlas, a texture of its own drawn on
+// every sub-mesh of it instead of their materials' textures (ao-assets' own UVs); and <type>_<id>_mesh.rvkm: geometry
+// drawn instead of its sub-meshes (docs/live-meshes-plan.md; an authored pack's remodels). RVK_LiveMeshes.
 // ao-assets writes these names (python -m aoassets material-template / import).
 //
 // Texture packs: <client>\randy-vk\packs\<name>\ hold the same names (a released pack is one such folder). A
-// texture's maps all come from one place: live\ (preview), else materials\ if it has any file for it, else the first
-// pack (by folder name) that has. Packs are read once at startup (not hot reloaded).
+// texture's maps all come from one place: live\ (preview), else the first folder that has any file for it, in the
+// order packs\order.txt gives (folder names, one a line; "materials" is materials\; '#' starts a comment), the
+// folders it doesn't name after it - materials\ first, then packs by folder name. So a hand-made pack listed before
+// "materials" wins over the maps applied there. Packs are read once at startup (not hot reloaded).
 //
 // Hot reload (RANDYVK_HOTRELOAD=1): both materials\ and live\ (the ao-assets workbench's previews of checked-out
 // assets) are watched; when a texture's files change, its maps are decoded again and replace what every surface of it
@@ -33,6 +38,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
@@ -50,7 +56,12 @@
 #include <vector>
 
 #include "rvk_backend.h"
+#include "native/device.h"
+#include "native/mesh.h"
+#include "native/mesh_data.h"
 #include "native/native.h"
+#include "native/orig_api.gen.h"
+#include "native/vc10.h"
 
 #include "material_maps.h"
 
@@ -143,6 +154,7 @@ struct Folder {
 };
 Folder g_mat, g_live;                         // materials\ (applied maps), live\ (workbench previews, hot reload only)
 std::vector<Folder> g_packs;                  // packs\<name>\ (released texture packs), by name
+std::vector<const Folder*> g_order;           // materials\ and the packs, in the order they are searched (Scan)
 std::unordered_set<uint64_t> g_liveKeys;      // texture ids with any file in live\ (their maps come from there only)
 bool g_scanned = false;
 bool g_hot = false;                           // RANDYVK_HOTRELOAD=1
@@ -156,16 +168,18 @@ std::string Lower(std::string s)
 void ScanFolder(Folder& f)
 {
     f.files.clear();
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA((f.dir + "*.png").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE)
-        return;
-    do {
-        uint64_t stamp = (uint64_t(fd.ftLastWriteTime.dwHighDateTime) << 32 | fd.ftLastWriteTime.dwLowDateTime)
-                         ^ (uint64_t(fd.nFileSizeHigh) << 32 | fd.nFileSizeLow);
-        f.files.emplace(Lower(fd.cFileName), stamp);
-    } while (FindNextFileA(h, &fd));
-    FindClose(h);
+    for (const char* pattern : {"*.png", "*.rvkm"}) {
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA((f.dir + pattern).c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE)
+            continue;
+        do {
+            uint64_t stamp = (uint64_t(fd.ftLastWriteTime.dwHighDateTime) << 32 | fd.ftLastWriteTime.dwLowDateTime)
+                             ^ (uint64_t(fd.nFileSizeHigh) << 32 | fd.nFileSizeLow);
+            f.files.emplace(Lower(fd.cFileName), stamp);
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
 }
 
 // "<type>_<id>_..." -> its texture key (0 for other names).
@@ -199,13 +213,47 @@ void ScanPacks(const std::string& root)
     } while (FindNextFileA(h, &fd));
     FindClose(h);
     std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return Lower(a) < Lower(b); });
+    std::vector<std::string> kept;
     for (const std::string& name : names) {
         Folder f;
         f.dir = root + name + "\\";
         ScanFolder(f);
         RvkLog("materials: pack '%s', %u files", name.c_str(), unsigned(f.files.size()));
-        if (!f.files.empty())
+        if (!f.files.empty()) {
             g_packs.push_back(std::move(f));
+            kept.push_back(Lower(name));
+        }
+    }
+    // The search order: order.txt's names first (as written), then materials\ and the packs it leaves out.
+    std::vector<std::string> listed;
+    if (FILE* f = std::fopen((root + "order.txt").c_str(), "r")) {
+        char line[256];
+        while (std::fgets(line, sizeof(line), f)) {
+            std::string name(line);
+            name = name.substr(0, name.find('#'));
+            while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+            while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) name.erase(0, 1);
+            if (!name.empty()) listed.push_back(Lower(name));
+        }
+        std::fclose(f);
+    }
+    auto folderNamed = [&](const std::string& name) -> const Folder* {
+        if (name == "materials") return &g_mat;
+        for (size_t i = 0; i < kept.size(); ++i)
+            if (kept[i] == name) return &g_packs[i];
+        return nullptr;
+    };
+    g_order.clear();
+    auto add = [](const Folder* f) {
+        if (f && std::find(g_order.begin(), g_order.end(), f) == g_order.end()) g_order.push_back(f);
+    };
+    for (const std::string& name : listed) add(folderNamed(name));
+    add(&g_mat);
+    for (const Folder& pack : g_packs) add(&pack);
+    if (!listed.empty() || !g_packs.empty()) {
+        std::string order;
+        for (const Folder* f : g_order) order += (order.empty() ? "" : ", ") + (f == &g_mat ? std::string("materials") : f->dir);
+        RvkLog("materials: searched in this order: %s%s", order.c_str(), listed.empty() ? "" : " (packs\\order.txt)");
     }
 }
 
@@ -250,12 +298,14 @@ std::string FindIn(const Folder& f, uint32_t type, uint32_t id, const char* suff
     return {};
 }
 
+bool IsMeshType(uint32_t type);
+
 bool HasAny(const Folder& f, uint32_t type, uint32_t id)
 {
     for (const char* suffix : kSuffixes)
         if (!FindIn(f, type, id, suffix).empty())
             return true;
-    return false;
+    return IsMeshType(type) && !FindIn(f, type, id, "_mesh.rvkm").empty();
 }
 
 // Where a texture's maps come from (see the top of the file).
@@ -264,10 +314,10 @@ const Folder& FolderFor(uint32_t type, uint32_t id)
     Scan();
     if (g_liveKeys.count(KeyOf(type, id)))
         return g_live;
-    if (!g_packs.empty() && !HasAny(g_mat, type, id))
-        for (const Folder& pack : g_packs)
-            if (HasAny(pack, type, id))
-                return pack;
+    if (!g_packs.empty())
+        for (const Folder* f : g_order)
+            if (HasAny(*f, type, id))
+                return *f;
     return g_mat;
 }
 
@@ -332,8 +382,9 @@ void WorkerLoop(Worker* w)
 
 // Game thread only from here.
 struct Waiter {
-    RSurface* top;
+    RSurface* top;                                 // null: a mesh atlas (AtlasUploaded)
     rvk::Texture* texture;                         // the texture it asked for (a re-created one asks again)
+    uint64_t key;
 };
 std::unordered_map<uint64_t, std::vector<Waiter>> g_waiting;   // by texture id, until its maps are decoded
 std::list<std::pair<uint64_t, DecodedPtr>> g_cache;            // most recently used first
@@ -377,8 +428,14 @@ void CachePut(uint64_t key, DecodedPtr d)
 
 unsigned g_attached = 0;
 
+bool AtlasUploaded(const Waiter& w, const rvk::maps::Decoded& d);   // (mesh atlases, below)
+
 void Upload(const Waiter& w, const rvk::maps::Decoded& d)
 {
+    if (!w.top) {
+        AtlasUploaded(w, d);
+        return;
+    }
     if (w.top->texture != w.texture || !g_rvk.device)
         return;                                    // made again since: that one asks for itself
     RSurface* top = w.top;
@@ -395,9 +452,12 @@ void Upload(const Waiter& w, const rvk::maps::Decoded& d)
 
 void HotReload();
 
+void PollMeshes();                                 // mesh atlases (below)
+
 void PollMaterialMaps()
 {
     HotReload();
+    PollMeshes();
     if (g_worker) {
         std::vector<Worker::Done> done;
         {
@@ -450,6 +510,10 @@ void ForgetMaterialMaps(RSurface* top)
                                    [top](const auto& u) { return u.first.top == top; }),
                     g_uploads.end());
 }
+
+namespace {
+void RequestMaps(const Waiter& waiter, uint32_t type, uint32_t id);
+}  // namespace
 
 namespace {
 
@@ -509,6 +573,8 @@ F Original(const char* mangled)
 
 }  // namespace
 
+uint64_t AtlasOf(const rvk::Texture* texture);      // mesh atlases (below)
+
 std::string DescribeTexture(const rvk::Texture* texture, std::string* reference)
 {
     if (!texture)
@@ -534,6 +600,16 @@ std::string DescribeTexture(const rvk::Texture* texture, std::string* reference)
         }
         return buf;
     }
+    if (const uint64_t mesh = AtlasOf(texture)) {
+        std::snprintf(buf, sizeof(buf), "the atlas of RDB mesh %u:%u (its own texture)", unsigned(mesh >> 32),
+                      unsigned(mesh));
+        if (reference) {
+            char ref[32];
+            std::snprintf(ref, sizeof(ref), "%u:%u", unsigned(mesh >> 32), unsigned(mesh));
+            *reference = ref;
+        }
+        return buf;
+    }
     std::snprintf(buf, sizeof(buf), "a texture that isn't an RDB texture (%ux%u; made by the game itself)",
                   texture->Width(), texture->Height());
     return buf;
@@ -545,8 +621,14 @@ void AttachMaterialMaps(RSurface* top)
         return;
     top->materialsFor = top->texture;
     g_rvk.device->SetTextureRdbId(top->texture, top->rdbId);   // (the renderer tells the game's textures apart: clouds)
-    uint64_t key = KeyOf(top->rdbType, top->rdbId);
-    Waiter waiter{top, top->texture};
+    RequestMaps(Waiter{top, top->texture, KeyOf(top->rdbType, top->rdbId)}, top->rdbType, top->rdbId);
+}
+
+namespace {
+// A texture's maps for `waiter`: from the cache, else with the decode already under way, else decoded on the worker.
+void RequestMaps(const Waiter& waiter, uint32_t type, uint32_t id)
+{
+    const uint64_t key = waiter.key;
     if (DecodedPtr cached = CacheGet(key)) {
         g_uploads.emplace_back(waiter, cached);
         return;
@@ -556,7 +638,7 @@ void AttachMaterialMaps(RSurface* top)
         it->second.push_back(waiter);
         return;
     }
-    rvk::maps::MaterialFiles files = FilesFor(top->rdbType, top->rdbId);
+    rvk::maps::MaterialFiles files = FilesFor(type, id);
     if (!files.Any())
         return;
     g_waiting[key].push_back(waiter);
@@ -570,9 +652,13 @@ void AttachMaterialMaps(RSurface* top)
     }
     g_worker->wake.notify_one();
 }
+}  // namespace
 
 // ---------------------------------------------------------------- hot reload
 namespace {
+bool IsMeshType(uint32_t type) { return type == 1010001 || type == 1010026; }
+void ReloadMesh(uint64_t key);                    // (mesh atlases, below)
+
 HANDLE g_watch[2] = {};
 bool g_watchTried = false;
 DWORD g_lastCheck = 0, g_changedAt = 0;
@@ -597,9 +683,13 @@ void Reload(uint64_t key)
     CacheErase(key);
     g_waiting.erase(key);
     g_uploads.erase(std::remove_if(g_uploads.begin(), g_uploads.end(),
-                                   [key](const auto& u) { return KeyOf(u.first.top->rdbType, u.first.top->rdbId) == key; }),
+                                   [key](const auto& u) { return u.first.key == key; }),
                     g_uploads.end());
     const uint32_t type = uint32_t(key >> 32), id = uint32_t(key);
+    if (IsMeshType(type)) {
+        ReloadMesh(key);
+        return;
+    }
     const bool any = FilesFor(type, id).Any();
     unsigned surfaces = 0;
     for (RSurface* top : g_identified) {
@@ -664,8 +754,8 @@ void HotReload()
 // +0x0C id; the hooks below find the one being loaded on the caller's stack (as RTextureFromCreator finds an
 // RDBGroundTexture_t).
 // - Characters: DisplaySystem builds them with randy's exported RCATMesh_t(parent) constructor: the visual is known.
-// - Static meshes are read from the .abiff's object archive; DisplaySystem's mesh classes call the exported base
-//   RTriMesh_t::Archive on each mesh there. The meshes placed in the world are clones of those (their virtual Clone,
+// - Static meshes are read from the .abiff's object archive through the RTriMesh_t(archive) constructor (the native
+//   one: MeshRead, its read hook). The meshes placed in the world are clones of those (their virtual Clone,
 //   no export), which share the loaded mesh's data (RTriMesh_t +0x184, RVisualData_t; CloneMeshData un-shares it):
 //   the loaded mesh's data is remembered, and a picked mesh is looked up by its data.
 namespace {
@@ -806,12 +896,286 @@ std::string DescribeMesh(uint32_t visual, uint32_t owner, uint32_t kind, std::st
     return buf;
 }
 
+
+// ---------------------------------------------------------------- mesh atlases and live geometry
+// docs/live-meshes-plan.md. A static mesh's own maps (<type>_<id>_d.png ... named after the mesh: ao-assets' own
+// UVs) make its atlas: an rvk texture of one pixel with those maps attached (the albedo drawn instead of the pixel),
+// drawn on every sub-mesh of the mesh in place of their materials' textures. <type>_<id>_mesh.rvkm (live\ - hot
+// reloaded - materials\ or a pack, as the maps) holds geometry drawn instead of its sub-meshes. Both find the sub-mesh
+// by its tag: the loaded mesh's SimpleMeshes are tagged as it is read (MeshRead -> TagMeshes; the native SimpleMesh copy keeps the tag), a tag naming
+// {mesh, piece (its RTriMeshData_t's name), sub-mesh index}.
+namespace {
+
+bool g_liveMeshesOn = true;                        // RVK_LiveMeshes
+
+struct TagInfo {
+    uint64_t key;
+    std::string piece;
+    uint32_t index;
+};
+std::vector<TagInfo> g_tagInfo;                    // by tag - 1
+std::map<std::tuple<uint64_t, std::string, uint32_t>, uint32_t> g_tagOf;
+
+struct MeshEntry {
+    rvk::Texture* atlas = nullptr;                 // the atlas texture (made with renderer atlasDevice)
+    uint64_t atlasDevice = 0;
+    bool atlasReady = false;                       // its maps are on it (an albedo among them)
+    std::map<std::pair<std::string, uint32_t>, std::vector<LivePiece>> pieces;   // live geometry by piece, sub-mesh
+};
+std::unordered_map<uint64_t, MeshEntry> g_meshes;  // meshes with files of their own
+bool g_meshesScanned = false;
+uint64_t g_meshesDevice = 0;                       // the renderer the atlases were last asked for with
+
+constexpr uint32_t kMeshesOfData = 0x4C;           // RVisualData_t: std::vector<SimpleMesh*>
+
+void UpdateOverrides()
+{
+    bool any = false;
+    if (g_liveMeshesOn)
+        for (auto& [key, e] : g_meshes)
+            if (e.atlasReady || !e.pieces.empty()) {
+                any = true;
+                break;
+            }
+    rnative::device::SetMeshOverrides(any);
+}
+
+// <type>_<id>_mesh.rvkm (ao-assets livemesh.py writes it): "RVKM", u32 version 1, u32 pieces; each piece u16 name
+// length, name, u32 sub-mesh index, fvf, vertex count, index count, the vertices, u16 indices.
+bool LoadLiveGeometry(MeshEntry& e, uint32_t type, uint32_t id)
+{
+    e.pieces.clear();
+    const std::string path = FindMap(type, id, "_mesh.rvkm");   // (live\, else materials\ / the packs: FolderFor)
+    if (path.empty())
+        return false;
+    std::vector<uint8_t> data;
+    if (FILE* f = std::fopen(path.c_str(), "rb")) {
+        std::fseek(f, 0, SEEK_END);
+        const long size = std::ftell(f);
+        std::fseek(f, 0, SEEK_SET);
+        data.resize(size > 0 ? size_t(size) : 0);
+        if (!data.empty() && std::fread(data.data(), 1, data.size(), f) != data.size())
+            data.clear();
+        std::fclose(f);
+    }
+    size_t at = 0;
+    auto take = [&](void* out, size_t n) {
+        if (at + n > data.size()) return false;
+        std::memcpy(out, data.data() + at, n);
+        at += n;
+        return true;
+    };
+    uint32_t head[3] = {};
+    if (!take(head, 12) || std::memcmp(head, "RVKM", 4) != 0 || head[1] != 1) {
+        RvkLog("live meshes: %s isn't an .rvkm file of version 1", path.c_str());
+        return false;
+    }
+    unsigned draws = 0;
+    for (uint32_t i = 0; i < head[2]; ++i) {
+        uint16_t length = 0;
+        if (!take(&length, 2) || at + length > data.size()) break;
+        std::string name(reinterpret_cast<const char*>(data.data() + at), length);
+        at += length;
+        uint32_t f[4] = {};                        // index, fvf, vertices, indices
+        if (!take(f, 16)) break;
+        LivePiece piece;
+        piece.fvf = f[1];
+        piece.stride = rvk::ThreadedDevice::FvfStride(f[1]);
+        piece.vertexCount = f[2];
+        piece.vertices.resize(size_t(f[2]) * piece.stride);
+        piece.indices.resize(f[3]);
+        if (!take(piece.vertices.data(), piece.vertices.size()) || !take(piece.indices.data(), size_t(f[3]) * 2)) break;
+        bool inRange = true;
+        for (uint16_t index : piece.indices) inRange &= index < piece.vertexCount;
+        if (!inRange) {
+            RvkLog("live meshes: %s: piece '%s' #%u has indices past its vertices; left out", path.c_str(),
+                   name.c_str(), f[0]);
+            continue;
+        }
+        e.pieces[{name, f[0]}].push_back(std::move(piece));
+        ++draws;
+    }
+    RvkLog("live meshes: RDB mesh %u:%u from %s: %u sub-mesh draw(s)", type, id, path.c_str(), draws);
+    return true;
+}
+
+void RequestAtlas(uint64_t key, MeshEntry& e)
+{
+    if (!g_rvk.device)
+        return;
+    if (!e.atlas || e.atlasDevice != g_rvk.deviceSerial) {
+        const uint32_t grey = 0xFF808080;
+        e.atlas = g_rvk.device->CreateTexture(1, 1, &grey);
+        e.atlasDevice = g_rvk.deviceSerial;
+        e.atlasReady = false;
+    }
+    RequestMaps(Waiter{nullptr, e.atlas, key}, uint32_t(key >> 32), uint32_t(key));
+}
+
+// A mesh's files read again (first scan, hot reload): its live geometry, its atlas asked for.
+void PrepareMesh(uint64_t key)
+{
+    const uint32_t type = uint32_t(key >> 32), id = uint32_t(key);
+    MeshEntry& e = g_meshes[key];
+    const bool live = LoadLiveGeometry(e, type, id);
+    if (!FindMap(type, id, "_d.png").empty()) {
+        RequestAtlas(key, e);
+    } else {
+        if (e.atlas && e.atlasDevice == g_rvk.deviceSerial && g_rvk.device)
+            g_rvk.device->DestroyTexture(e.atlas);
+        e.atlas = nullptr;
+        e.atlasReady = false;
+        if (!live)
+            g_meshes.erase(key);
+    }
+    UpdateOverrides();
+}
+
+bool AtlasUploaded(const Waiter& w, const rvk::maps::Decoded& d)
+{
+    auto it = g_meshes.find(w.key);
+    if (it == g_meshes.end() || it->second.atlas != w.texture || it->second.atlasDevice != g_rvk.deviceSerial ||
+        !g_rvk.device)
+        return false;                              // made again since, or gone
+    rvk::maps::Replace(*g_rvk.device, w.texture, d);
+    it->second.atlasReady = !d.albedo.Empty();
+    RvkLog("live meshes: RDB mesh %u:%u has its atlas%s%s%s%s", unsigned(w.key >> 32), unsigned(w.key),
+           d.albedo.Empty() ? " (no albedo: not drawn)" : "", d.normal.Empty() ? "" : " [normal map]",
+           d.orm.Empty() ? "" : " [PBR material]", d.emissive.Empty() ? "" : " [emissive map]");
+    UpdateOverrides();
+    return true;
+}
+
+void ReloadMesh(uint64_t key) { PrepareMesh(key); }
+
+}  // namespace
+
+uint64_t AtlasOf(const rvk::Texture* texture)
+{
+    for (auto& [key, e] : g_meshes)
+        if (texture && e.atlas == texture) return key;
+    return 0;
+}
+
+// Each present: the meshes with files found once there is a renderer; their atlases made again for a new one.
+void PollMeshes()
+{
+    if (!g_rvk.device)
+        return;
+    if (!g_meshesScanned) {
+        g_meshesScanned = true;
+        g_meshesDevice = g_rvk.deviceSerial;
+        std::unordered_set<uint64_t> keys;
+        auto collect = [&keys](const Folder& f) {
+            for (auto& [name, stamp] : f.files)
+                if (uint64_t key = KeyOfName(name); key && IsMeshType(uint32_t(key >> 32)))
+                    keys.insert(key);
+        };
+        collect(g_mat);
+        if (g_hot) collect(g_live);
+        for (const Folder& pack : g_packs) collect(pack);
+        for (uint64_t key : keys) PrepareMesh(key);
+        if (!keys.empty())
+            RvkLog("live meshes: %u mesh(es) with an atlas or live geometry", unsigned(keys.size()));
+        return;
+    }
+    if (g_meshesDevice != g_rvk.deviceSerial) {
+        g_meshesDevice = g_rvk.deviceSerial;
+        for (auto& [key, e] : g_meshes) {
+            e.atlas = nullptr;                     // (went with the old renderer)
+            e.atlasReady = false;
+            RequestAtlas(key, e);
+        }
+        UpdateOverrides();
+    }
+}
+
+// The loaded static mesh `id`'s RTriMeshData_t: each of its SimpleMeshes tagged {mesh, piece name, index}.
+void TagMeshes(void* data, uint64_t id)
+{
+    if (!g_liveMeshesOn || !Readable(static_cast<uint8_t*>(data) + kMeshesOfData, 12))
+        return;
+    const char* name = rnative::orig::RResource_t_GetName(data);
+    std::string piece = name && Readable(name, 1) ? std::string(name, strnlen(name, 128)) : std::string();
+    auto& meshes = *reinterpret_cast<rnative::vc10::Vector<void*>*>(static_cast<uint8_t*>(data) + kMeshesOfData);
+    uint32_t index = 0;
+    for (void** m = meshes.first; m != meshes.last; ++m, ++index) {
+        auto [it, added] = g_tagOf.try_emplace({id, piece, index}, uint32_t(g_tagInfo.size() + 1));
+        if (added) g_tagInfo.push_back({id, piece, index});
+        rnative::meshdata::SetTag(*m, it->second);
+    }
+}
+
+bool FindMeshOverride(uint32_t tag, MeshOverride* out)
+{
+    if (!g_liveMeshesOn || !tag || tag > g_tagInfo.size())
+        return false;
+    const TagInfo& t = g_tagInfo[tag - 1];
+    auto it = g_meshes.find(t.key);
+    if (it == g_meshes.end())
+        return false;
+    MeshEntry& e = it->second;
+    out->atlas = e.atlasReady && e.atlasDevice == g_rvk.deviceSerial ? e.atlas : nullptr;
+    auto p = e.pieces.find({t.piece, t.index});
+    out->pieces = p == e.pieces.end() ? nullptr : &p->second;
+    return out->atlas || out->pieces;
+}
+
+void SetLiveMeshes(bool on)
+{
+    if (g_liveMeshesOn == on)
+        return;
+    g_liveMeshesOn = on;
+    RvkLog("live meshes: %s (meshes loaded while off have no tags until they are loaded again)", on ? "on" : "off");
+    UpdateOverrides();
+}
+
 }  // namespace rvkproxy
 
 using namespace rvkproxy;
 
-// RTriMesh_t::Archive(ObjectArchive_c*) const - a static mesh read from its .abiff - and RCATMesh_t::RCATMesh_t(RRefFrame_t*)
-// - a character being built: mesh identity (above).
+// The native RTriMesh_t(archive) constructor's read hook - a static mesh read from its .abiff - and
+// RCATMesh_t::RCATMesh_t(RRefFrame_t*) - a character being built: mesh identity (above).
+namespace {
+// Every static mesh the game reads goes through the native RTriMesh_t(archive) constructor ([Native] Scene on): the
+// RDBMesh_t being loaded is on the stack there. (The exported RTriMesh_t::Archive hooked below is the const one - it
+// writes a mesh out - and never runs in the game: statics went unidentified, so their live geometry, atlases and
+// Ctrl+Shift+J names never showed.) RANDYVK_STATIC_ID=T:ID names every mesh read that one instead (randy_harness
+// --static: no DisplaySystem, so nothing on the stack to find).
+__declspec(noinline) void MeshRead(void* triMesh)
+{
+    static const uint64_t testId = [] {
+        char v[32] = {};
+        unsigned t = 0, i = 0;
+        return GetEnvironmentVariableA("RANDYVK_STATIC_ID", v, sizeof(v)) && std::sscanf(v, "%u:%u", &t, &i) == 2
+                   ? uint64_t(t) << 32 | i : uint64_t(0);
+    }();
+    // (Its cost, in the log's lines at 1, 2, 4, ... meshes: the stack search reads through ReadProcessMemory.)
+    static LARGE_INTEGER freq;
+    static double totalMs;
+    static unsigned reads;
+    LARGE_INTEGER t0, t1;
+    QueryPerformanceCounter(&t0);
+    const uint64_t id = testId ? testId : FindLoading(_AddressOfReturnAddress(), false);
+    QueryPerformanceCounter(&t1);
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    totalMs += double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(freq.QuadPart);
+    if ((++reads & (reads - 1)) == 0)
+        RvkLog("meshes: %u static meshes read, %.1f ms finding their ids in all", reads, totalMs);
+    uint32_t data = 0;
+    SafeCopy(static_cast<const uint8_t*>(triMesh) + kVisualData, &data, 4);
+    static const unsigned index = ComIndex("rvk::Meshes");
+    ComScope scope(index);
+    Remember(triMesh, data, id, testId ? "static (RANDYVK_STATIC_ID)" : "static");
+    if (id && data) TagMeshes(reinterpret_cast<void*>(uintptr_t(data)), id);
+}
+}  // namespace
+
+void rvkproxy::InstallMeshIds()
+{
+    rnative::mesh::SetReadHook(&MeshRead);
+}
+
 extern "C" void __fastcall rvk_RTriMeshArchive(const void* self, void*, void* archive)
 {
     const uint64_t id = FindLoading(_AddressOfReturnAddress(), false);
@@ -824,6 +1188,7 @@ extern "C" void __fastcall rvk_RTriMeshArchive(const void* self, void*, void* ar
     static const unsigned index = ComIndex("rvk::Meshes");
     ComScope scope(index);
     Remember(self, data, id, "static");
+    if (id && data) TagMeshes(reinterpret_cast<void*>(uintptr_t(data)), id);
 }
 
 extern "C" void* __fastcall rvk_RCATMeshCtor(void* self, void*, void* parent)

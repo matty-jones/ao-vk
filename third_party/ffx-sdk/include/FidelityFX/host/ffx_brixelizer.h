@@ -32,7 +32,11 @@
 /// The size of the update description specified in 32bit values.
 ///
 /// @ingroup ffxBrixelizer
+#if defined(_WIN64) || defined(__LP64__)
 #define FFX_BRIXELIZER_UPDATE_DESCRIPTION_SIZE 2099376
+#else   // ao-vk: a 32-bit build's private description (three pointers of 4 bytes)
+#define FFX_BRIXELIZER_UPDATE_DESCRIPTION_SIZE 2099370
+#endif
 
 #ifdef __cplusplus
 extern "C" {

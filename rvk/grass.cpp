@@ -424,6 +424,8 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                 }
                 uint8_t* ranks = lightPass ? tile->lightRank : tile->rank;
                 bool changed = false;
+                Texture* tileTexs[4] = {};       // the native ground's tile textures its cells read (bases, below)
+                bool tileTexsOverflow = false;
                 for (int cz = cz0; cz <= cz1; ++cz)
                     for (int cx = cx0; cx <= cx1; ++cx) {
                         const int idx = cz * kGroundN + cx;
@@ -438,6 +440,30 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                             continue;
                         const float u = l0 * ua[0] + l1 * ub[0] + l2 * uc[0];
                         const float v = l0 * ua[1] + l1 * ub[1] + l2 * uc[1];
+                        // The native ground's colour from its cell's tile texture - which the game streams in and fills
+                        // again later: until its picture can be read the cell stays unknown (taken as bare for good, a
+                        // lawn grew nothing), and the tile is noted so that a new picture captures the ground again
+                        // (the grass kept the pictures it first saw: blades on paving, a lawn bare beside it - the
+                        // user, 2026-10-26).
+                        uint8_t rgb[3] = {0x3C, 0x6A, 0x2A};      // a default grass green (no filter, or no texel read)
+                        bool have = false;
+                        if (!lightPass && filter && native) {
+                            Texture* tt = nullptr;
+                            have = NativeGroundRgb(u, v, rgb, &tt);
+                            if (tt) {
+                                bool known = false;
+                                for (Texture* p : tileTexs)
+                                    known = known || p == tt;
+                                for (Texture*& p : tileTexs)
+                                    if (!known && !p) {
+                                        p = tt;
+                                        known = true;
+                                    }
+                                tileTexsOverflow = tileTexsOverflow || !known;
+                            }
+                            if (!have)
+                                continue;
+                        }
                         ranks[idx] = rank;
                         if (lightPass) {
                             uint8_t l[3] = {0, 0, 0};
@@ -452,10 +478,8 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                             continue;
                         }
                         const float y = l0 * pa[1] + l1 * pb[1] + l2 * pc[1];
-                        uint8_t rgb[3] = {0x3C, 0x6A, 0x2A};      // a default grass green (no filter, or no texel read)
-                        bool have = false;
-                        if (filter)
-                            have = native ? NativeGroundRgb(u, v, rgb) : tex->TexelRgbAt(u, v, rgb);
+                        if (filter && !native)
+                            have = tex->TexelRgbAt(u, v, rgb);
                         const bool grass = !filter || (have && GreenRgb(rgb));
                         const uint32_t colour = uint32_t(rgb[0]) << 16 | uint32_t(rgb[1]) << 8 | rgb[2] |
                                                 (grass ? 1u << 24 : 0u);
@@ -484,18 +508,25 @@ void Device::CaptureTerrain(uint32_t primitive, const FvfLayout& layout, const v
                     ++tile->version;
                     tile->lastChange = m_frameNumber;
                 }
-                if (!lightPass && filter && !native) {   // which base textures it holds (a re-upload recaptures the ground)
+                // Which base textures it holds (a re-upload recaptures the ground): the draw's, or the native ground's
+                // tiles.
+                auto noteBase = [&](Texture* b) {
                     bool known = false;
                     for (const void* p : tile->bases)
-                        known = known || p == tex;
+                        known = known || p == b;
                     for (const void*& p : tile->bases)
                         if (!known && !p) {
-                            p = tex;
+                            p = b;
                             known = true;
                         }
                     tile->basesOverflow = tile->basesOverflow || !known;
-                    tex->m_groundBase = true;
-                }
+                    b->m_groundBase = true;
+                };
+                if (!lightPass && filter && !native)
+                    noteBase(tex);
+                for (Texture* b : tileTexs)
+                    if (b) noteBase(b);
+                tile->basesOverflow = tile->basesOverflow || tileTexsOverflow;
                 if (lightPass) {                 // which lightmaps it holds (a re-upload recaptures the light)
                     bool known = false;
                     for (const void* p : tile->lightmaps)
@@ -923,6 +954,7 @@ bool Device::CreateGrassResources(std::string* error)
         VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        ci.flags = m_sceneRateFlag;   // (RVK_Vrs: drawn in the scene's rendering, vrs.cpp)
         ci.pNext = &rendering;
         ci.stageCount = 2;
         ci.pStages = stages;
@@ -985,6 +1017,7 @@ bool Device::CreateGrassResources(std::string* error)
         VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
         rendering.depthAttachmentFormat = kDepthFormat;
         VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        ci.flags = m_sceneRateFlag;   // (RVK_Vrs: drawn in the scene's rendering, vrs.cpp)
         ci.pNext = &rendering;
         ci.stageCount = 1;
         ci.pStages = &stage;
@@ -1895,8 +1928,19 @@ void Device::DrawGrassTiles(VkCommandBuffer cmd)
     }
     if (!m_grassPool || !m_grassIndex)
         return;
+    // The world's camera (the scene's first depth-writing 3D draw's, as the post passes and last frame's motion take
+    // it), not the last one set: by night the game draws its blob shadows last, with a projection of their own nudged
+    // towards the camera - the grass drawn with it came out nearer than it is, and blades just behind a tree trunk
+    // showed over it (the user: only by night, only next to the trunk).
+    const d3d::Matrix& view = m_aoProjValid ? m_aoView : m_view;
+    const d3d::Matrix& proj = m_aoProjValid ? m_aoProj : m_proj;
+    if (m_aoProjValid && m_frameNumber % 600 == 53 &&
+        (std::memcmp(&m_proj, &m_aoProj, sizeof(m_proj)) != 0 || std::memcmp(&m_view, &m_aoView, sizeof(m_view)) != 0))
+        Log("ground grass: the camera last set is not the world's (projection m22 %.6f m32 %.6f, the world's %.6f %.6f): "
+            "drawn with the world's", double(m_proj.m[2][2]), double(m_proj.m[3][2]), double(m_aoProj.m[2][2]),
+            double(m_aoProj.m[3][2]));
     // The visible tiles: in range and in the view frustum (the box of the roots, raised by the tallest blade).
-    const d3d::Matrix viewProj = MulMatrix(m_view, m_proj);
+    const d3d::Matrix viewProj = MulMatrix(view, proj);
     const auto& m = viewProj.m;
     float planes[5][4];                          // left, right, bottom, top, far: column 3 +- columns 0, 1, 2
     for (int j = 0; j < 4; ++j) {
@@ -1970,7 +2014,7 @@ void Device::DrawGrassTiles(VkCommandBuffer cmd)
     std::memcpy(gf.sunColour, m_terrainSun, sizeof(gf.sunColour) + sizeof(gf.sunDir));
     gf.look[2] = std::max(m_grassGlow, 0.0f);
     gf.look[3] = Gusts();
-    gf.lod[0] = float(m_scene->m_height) * 0.5f * m_proj.m[1][1];   // pixels per world unit at view depth 1
+    gf.lod[0] = float(m_scene->m_height) * 0.5f * proj.m[1][1];   // pixels per world unit at view depth 1
     gf.lod[1] = 1.0f;                            // blades at least a pixel wide
     // The frame lights (the sun, its cascades, the lights, the pushers) as of now, in this ring: the scene writes them
     // lazily, and an offset from an earlier ring would be another frame's data.
@@ -2060,14 +2104,10 @@ void Device::DrawGrassTiles(VkCommandBuffer cmd)
             const float x1 = x0 + kGrassTileSize, z1 = z0 + kGrassTileSize;
             const float y0 = t.minY - 1.0f, y1 = t.maxY + tall;
             const size_t n = std::min<size_t>(m_frameLightSpheres.size(), 64);
-            for (size_t i = 0; i < n; ++i) {
-                const LightSphere& s = m_frameLightSpheres[i];
-                const float dx = std::max({x0 - s.x, 0.0f, s.x - x1});
-                const float dz = std::max({z0 - s.z, 0.0f, s.z - z1});
-                const float dy = std::max({y0 - s.y, 0.0f, s.y - y1});
-                if (dx * dx + dy * dy + dz * dz <= s.r2)
+            const float lo[3] = {x0, y0, z0}, hi[3] = {x1, y1, z1};
+            for (size_t i = 0; i < n; ++i)
+                if (LightReachesBox(m_frameLightSpheres[i], lo, hi))   // (a spot light: only where its cone reaches)
                     mask |= uint64_t(1) << i;
-            }
         }
         const uint32_t mask2[2] = {uint32_t(mask), uint32_t(mask >> 32)};
         if (mask2[0] != lastMask[0] || mask2[1] != lastMask[1]) {
@@ -2153,7 +2193,7 @@ void Device::DrawGrassShadow(VkCommandBuffer cmd, const d3d::Matrix& lightViewPr
 // rendering open): the tiles within the light's range that reach the face, each blade square to the light
 // (grass_shadow.vert's point mode). Tiles further than a few units from the light through their sparse quarter.
 // Returns whether anything was drawn (the caller then rebinds the shadow pipelines' state).
-bool Device::GrassNearLight(const float light[3], float range) const
+bool Device::GrassNearLight(const float light[3], float range, const Cone* cone) const
 {
     if (!m_grassOn || !m_grassShadows || !m_grassShadowPipeline || !m_grassPool || !m_grassIndex || !m_frameEyeValid)
         return false;
@@ -2163,16 +2203,19 @@ bool Device::GrassNearLight(const float light[3], float range) const
         if (!t.built || !t.blades)
             continue;
         const float x0 = float(t.tx) * kGrassTileSize, z0 = float(t.tz) * kGrassTileSize;
-        const float nx = std::max({x0 - 1.0f - light[0], 0.0f, light[0] - (x0 + kGrassTileSize + 1.0f)});
-        const float ny = std::max({t.minY - 1.0f - light[1], 0.0f, light[1] - (t.maxY + tall)});
-        const float nz = std::max({z0 - 1.0f - light[2], 0.0f, light[2] - (z0 + kGrassTileSize + 1.0f)});
-        if (nx * nx + ny * ny + nz * nz <= range * range)
+        const float lo[3] = {x0 - 1.0f, t.minY - 1.0f, z0 - 1.0f};
+        const float hi[3] = {x0 + kGrassTileSize + 1.0f, t.maxY + tall, z0 + kGrassTileSize + 1.0f};
+        const float nx = std::max({lo[0] - light[0], 0.0f, light[0] - hi[0]});
+        const float ny = std::max({lo[1] - light[1], 0.0f, light[1] - hi[1]});
+        const float nz = std::max({lo[2] - light[2], 0.0f, light[2] - hi[2]});
+        if (nx * nx + ny * ny + nz * nz <= range * range && (!cone || BoxInCone(lo, hi, light, *cone)))
             return true;
     }
     return false;
 }
 
-bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range)
+bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceViewProj, const float light[3], float range,
+                                  const Cone* cone)
 {
     if (!m_grassOn || !m_grassShadows || !m_grassShadowPipeline || !m_grassPool || !m_grassIndex || !m_frameEyeValid ||
         m_grassTiles.empty())
@@ -2190,7 +2233,8 @@ bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceVi
         const float ny = std::max({lo[1] - light[1], 0.0f, light[1] - hi[1]});
         const float nz = std::max({lo[2] - light[2], 0.0f, light[2] - hi[2]});
         const float near2 = nx * nx + ny * ny + nz * nz;
-        if (near2 > range * range || BoxInClip(lo, hi, faceViewProj, false) == -1)
+        if (near2 > range * range || BoxInClip(lo, hi, faceViewProj, false) == -1 ||
+            (cone && !BoxInCone(lo, hi, light, *cone)))   // (a spot light's: only the tiles its cone reaches)
             continue;
         if (!bound) {
             bound = true;
@@ -2233,7 +2277,7 @@ bool Device::DrawGrassPointShadow(VkCommandBuffer cmd, const d3d::Matrix& faceVi
 }
 
 // Whether all the grass within `range` of the light is below it (the cube's upward face then needs none).
-bool Device::GrassBelow(const float light[3], float range) const
+bool Device::GrassBelow(const float light[3], float range, const Cone* cone) const
 {
     const float tall = m_grassHeight * 1.7f + 1.0f;
     for (const auto& [key, tp] : m_grassTiles) {
@@ -2243,7 +2287,11 @@ bool Device::GrassBelow(const float light[3], float range) const
         const float x0 = float(t.tx) * kGrassTileSize, z0 = float(t.tz) * kGrassTileSize;
         const float nx = std::max({x0 - light[0], 0.0f, light[0] - x0 - kGrassTileSize});
         const float nz = std::max({z0 - light[2], 0.0f, light[2] - z0 - kGrassTileSize});
-        if (nx * nx + nz * nz <= range * range)
+        if (nx * nx + nz * nz > range * range)
+            continue;
+        const float lo[3] = {x0 - 1.0f, t.minY - 1.0f, z0 - 1.0f};
+        const float hi[3] = {x0 + kGrassTileSize + 1.0f, t.maxY + tall, z0 + kGrassTileSize + 1.0f};
+        if (!cone || BoxInCone(lo, hi, light, *cone))
             return false;
     }
     return true;

@@ -104,10 +104,12 @@ std::shared_ptr<NativeGround> ReadGround(const uint8_t* ground, const uint8_t* d
     g->heights.assign(size_t(mw) * mh, 0.0f);
     g->codes.assign(size_t(g->cellsX) * g->cellsZ, 0);
     std::vector<uint8_t> raw;
+    int wideCount = 0;
     for (int pz = 0; pz < ph; ++pz)
         for (int px = 0; px < pw; ++px) {
             const uint8_t* p = patches + size_t(pz * pw + px) * 0x54;
             const bool wide = p[8] != 0;
+            wideCount += wide;
             const int n = P + 1;
             if (!Inflate(At<const void*>(p, 0x14), At<int>(p, 0x10), &raw, size_t(n) * n * (wide ? 2 : 1))) {
                 RvkLog("native ground: patch %d, %d's heights unreadable - the game's", px, pz);
@@ -135,6 +137,11 @@ std::shared_ptr<NativeGround> ReadGround(const uint8_t* ground, const uint8_t* d
                     g->codes[size_t(pz * P + r) * g->cellsX + (px * P + c)] = uint16_t((code & mask & 0x3FFFu) | (code & 0xC000u));
                 }
         }
+    // (The far field lays the planet's grounds out side by side, and some neighbours' heights differ by just the
+    // ratio of their headers' height steps (docs/horizon-plan.md): the scale the game draws with, per playfield.)
+    RvkLog("native ground: heights - a byte step of %.4f units (the game's height unit %.6f), %d of %d patches 16-bit, "
+           "%.1f..%.1f", unit * 256.0f, unit, wideCount, pw * ph,
+           *std::min_element(g->heights.begin(), g->heights.end()), *std::max_element(g->heights.begin(), g->heights.end()));
     return g;
 }
 

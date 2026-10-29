@@ -263,7 +263,7 @@ std::shared_ptr<const Device::PebbleTable> Device::MakePebbleTable()
             for (int k = 0; k < 256; ++k) of += table->mask[i * 256 + size_t(k)];
             table->sand[i] = float(of) / 256.0f;
         }
-        table->density[i] = v.density;
+        table->density[i] = NativeTileHole(tex) ? 0.0f : v.density;   // (a hole: the void)
         table->size[i] = v.size;
         ++kept;
     }

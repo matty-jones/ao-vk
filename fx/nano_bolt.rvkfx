@@ -1,0 +1,76 @@
+{
+  // The cast of most nanos (Spell1 46133: 712 of them - Change Form, Calia's forms, ...): a bolt of light from the
+  // caster's hands to the target. ao-vk's own effect (docs/fx-plan.md); copy into <client>\randy-vk\fx.
+  "format": 1,
+  "name": "Nano bolt",
+  "templates": [46133],
+  "mode": "replace",
+  "emitters": [
+    {
+      "name": "gather", "at": "source", "during": ["charge"],
+      "shape": "shell", "radius": 0.45, "rate": 160, "count": 256,
+      "life": [0.25, 0.45], "speed": [0.0, 0.1], "pull": 9.0, "drag": 2.0, "curl": 0.4, "curlScale": 0.3,
+      "size": [[0, 0.02], [0.6, 0.05], [1, 0.0]],
+      "colour": [[0, "#80C0FF", 0.0], [0.4, "#B0E0FF", 1.0], [1, "#FFFFFF", 1.0]],
+      "intensity": 3.0, "sprite": "dot", "blend": "add"
+    },
+    {
+      "name": "hand glow", "at": "source", "during": ["charge"],
+      "shape": "point", "rate": 40, "count": 32,
+      "life": [0.12, 0.2], "speed": [0, 0],
+      "size": [[0, 0.15], [1, 0.4]],
+      "colour": [[0, "#D0F0FF", 0.9], [1, "#4080FF", 0.0]],
+      "intensity": 4.0, "sprite": "flare", "blend": "add"
+    },
+    {
+      "name": "core", "at": "head", "during": ["flight"],
+      "shape": "point", "rate": 90, "count": 64,
+      "life": [0.08, 0.14], "speed": [0, 0],
+      "size": [[0, 0.45], [1, 0.25]],
+      "colour": [[0, "#FFFFFF", 1.0], [1, "#80D0FF", 0.0]],
+      "intensity": 5.0, "sprite": "flare", "blend": "add"
+    },
+    {
+      "name": "trail", "at": "head", "during": ["flight"],
+      "shape": "sphere", "radius": 0.06, "rate": 420, "count": 512,
+      "life": [0.35, 0.8], "speed": [0.05, 0.25], "drag": 1.5, "curl": 0.6, "curlScale": 0.4,
+      "size": [[0, 0.09], [1, 0.0]],
+      "colour": [[0, "#C0F0FF", 0.9], [0.5, "#4090FF", 0.6], [1, "#1030C0", 0.0]],
+      "intensity": 3.0, "sprite": "dot", "blend": "add"
+    },
+    {
+      "name": "sparks", "at": "head", "during": ["flight"],
+      "shape": "point", "rate": 120, "count": 256,
+      "life": [0.15, 0.35], "speed": [1.0, 3.0], "forward": true, "direction": [0, 0, -1], "spread": 45,
+      "gravity": [0, -3, 0], "drag": 1.0,
+      "size": [[0, 0.04], [1, 0.01]],
+      "colour": [[0, "#FFFFFF", 1.0], [1, "#60A0FF", 0.0]],
+      "intensity": 4.0, "sprite": "spark", "blend": "add", "stretch": 0.05
+    },
+    {
+      "name": "burst", "at": "target", "during": ["impact"],
+      "shape": "sphere", "radius": 0.15, "rate": 0, "burst": 140, "count": 256,
+      "life": [0.3, 0.7], "speed": [1.5, 4.5], "spread": 180,
+      "gravity": [0, -5, 0], "drag": 1.2,
+      "size": [[0, 0.05], [1, 0.01]],
+      "colour": [[0, "#FFFFFF", 1.0], [0.3, "#A0D8FF", 0.9], [1, "#2050FF", 0.0]],
+      "intensity": 4.0, "sprite": "spark", "blend": "add", "stretch": 0.04
+    },
+    {
+      "name": "shock", "at": "target", "during": ["impact"],
+      "shape": "point", "rate": 0, "burst": 1, "count": 4,
+      "life": [0.45, 0.45], "speed": [0, 0],
+      "size": [[0, 0.2], [1, 2.4]],
+      "colour": [[0, "#E0F4FF", 0.9], [1, "#3070FF", 0.0]],
+      "intensity": 2.5, "sprite": "ring", "blend": "add"
+    },
+    {
+      "name": "motes", "at": "target", "during": ["impact"],
+      "shape": "sphere", "radius": 0.5, "rate": 60, "burst": 30, "count": 128,
+      "life": [0.6, 1.2], "speed": [0.0, 0.2], "gravity": [0, 0.6, 0], "drag": 1.0, "curl": 0.5, "curlScale": 0.5,
+      "size": [[0, 0.0], [0.2, 0.05], [1, 0.0]],
+      "colour": [[0, "#C0E8FF", 1.0], [1, "#3060FF", 0.0]],
+      "intensity": 3.0, "sprite": "dot", "blend": "add"
+    }
+  ]
+}

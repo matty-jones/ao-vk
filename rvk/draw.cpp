@@ -60,10 +60,6 @@ float AsFloat(uint32_t v)
     return f;
 }
 
-// How much of the sun's direct light a thunderstorm's deck takes at its fullest (StormOvercast 1): lighting.glsl,
-// ffp_main.glsl kStormSunTaken the same.
-constexpr float kStormSunTaken = 0.9f;
-
 constexpr uint32_t kBlendOverbright2x = 0x10000;   // pseudo D3D blend value: see Device::Overbright2x
 
 VkBlendFactor BlendFactor(uint32_t b)
@@ -458,10 +454,30 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     const float phase[4] = {m_cond.golden, m_cond.afterglow, m_cond.blueHour, m_cond.night};   // (the dusk's phases)
     std::memcpy(fl->phase, phase, sizeof(fl->phase));
     fl->cond[0] = m_cond.cloudNight;             // (cloud_light.glsl Night())
-    fl->cond[1] = fl->cond[2] = fl->cond[3] = 0.0f;
+    fl->cond[1] = m_rig.sunShare;                // (ffp_main RigOn, FlatShade; grass.vert)
+    fl->cond[2] = m_rig.on ? 1.0f : 0.0f;
+    for (int i = 0; i < 3; ++i) fl->rigSky[i] = m_rig.on ? m_rig.groundSky[i] : 0.0f;
+    fl->rigSky[3] = 0.0f;
+    fl->cond[3] = 0.0f;
     fl->screen[0] = SceneScaleX();
     fl->screen[1] = SceneScaleY();
-    fl->screen[2] = fl->screen[3] = 0.0f;
+    fl->screen[2] = SceneNormalsWanted() ? 1.0f : 0.0f;
+    fl->screen[3] = 0.0f;
+    {
+        const uint32_t mask = RtShadowMaskBits();
+        std::memcpy(&fl->rtShadow[0], &mask, 4);
+        fl->rtShadow[1] = m_aoProjValid ? m_aoProj.m[2][2] : 0.0f;
+        fl->rtShadow[2] = m_aoProjValid ? m_aoProj.m[3][2] : 0.0f;
+        fl->rtShadow[3] = 0.0f;
+    }
+    fl->volume2[0] = std::clamp(m_volLamps, 0.0f, 4.0f);
+    // A lamp's light in the air at RVK_PtLight, indoors too: in a room the lamps light things at the game's strength
+    // (LampScale), but a shop's big ceiling lamps at that strength filled it with a glowing haze.
+    fl->volume2[1] = LampScale() > 0.0f ? m_pointLightScale / LampScale() : 1.0f;
+    fl->volume2[2] = fl->volume2[3] = 0.0f;
+    fl->foliage[0] = std::clamp(m_crownSky, 0.0f, 1.0f);
+    fl->foliage[1] = std::clamp(m_crownDepth, 0.0f, 1.0f);
+    fl->foliage[2] = fl->foliage[3] = 0.0f;
     std::memcpy(fl->skyRing, m_skyRing, sizeof(fl->skyRing));
     std::memcpy(fl->skyUp, m_skyUp, sizeof(fl->skyUp));
     if (!OwnSkyFog()) {                          // (indoors too: the zone's fog colour, not our sky's horizon)
@@ -566,12 +582,21 @@ void Device::FillFrameLights(FrameLights* fl, bool dump)
     fl->prevProj = m_prevProj;
     m_frameLightIndices.clear();
     m_frameLightSpheres.clear();
+    // (RANDYVK_SPOT_CONE=0: spot lights by their range alone, as for their cubes - comparisons.)
+    static const bool spotConeOff = [] { const char* v = std::getenv("RANDYVK_SPOT_CONE"); return v && *v == '0'; }();
     for (uint32_t k = 0; k < used; ++k) {
         const CapturedLight& c = m_lightsPrev[candidates[k].index];
         m_frameLightIndices.push_back(candidates[k].index);
-        m_frameLightSpheres.push_back({c.light.position.x, c.light.position.y, c.light.position.z, c.light.range * c.light.range});
+        LightSphere sphere{c.light.position.x, c.light.position.y, c.light.position.z, c.light.range * c.light.range};
+        if (const Cone cone = SpotCone(c.light); cone.on && !spotConeOff) {
+            std::memcpy(sphere.axis, cone.axis, sizeof(sphere.axis));
+            sphere.cosHalf = cone.cosHalf;
+            sphere.sinHalf = cone.sinHalf;
+            sphere.spot = true;
+        }
+        m_frameLightSpheres.push_back(sphere);
         FillGpuLight(c.light, c.cosHalfTheta, c.cosHalfPhi, fl->lights[k],
-                     m_pointLightScale + (m_charLightScale - m_pointLightScale) * c.carried);
+                     LampScale() + (m_charLightScale - LampScale()) * c.carried);
         fl->lights[k].ambient[3] = c.carried > 0.5f ? 1.0f : 0.0f;   // carried by a character (F_CHARACTER draws)
         uint32_t cube = PointShadowLayer(c.light);
         fl->lights[k].spot[2] = float(cube);                        // its cube shadow map + 1, 0 = none
@@ -836,20 +861,22 @@ bool Device::SwayParams(uint32_t primitive, uint32_t fvf, uint32_t stride, const
 // whose vertices are new this frame. A static mesh is new on the frame it first appears too, so a candidate counts
 // only if its fingerprint isn't drawn again the next frame (UpdatePushTrail) - the feet lag two frames.
 // A game light's intensity setting: directional ones as they are; a point / spot light carried by a character
-// (the captured lights' carriers, matched by position and range) at m_charLightScale, others at m_pointLightScale.
+// (the captured lights' carriers, matched by position and range) at m_charLightScale, others at LampScale (a room's
+// lamps at the game's strength: a shop's props had a quarter of the light its walls and floor have baked in).
 float Device::LightScale(const d3d::Light& l) const
 {
     if (l.type == d3d::LIGHT_DIRECTIONAL)
         return 1.0f;
-    if (m_charLightScale != m_pointLightScale)
+    const float lamp = LampScale();
+    if (m_charLightScale != lamp)
         for (const CapturedLight& c : m_lightsPrev) {
             if (c.carried <= 0.0f || c.light.range != l.range) continue;
             float dx = c.light.position.x - l.position.x, dy = c.light.position.y - l.position.y,
                   dz = c.light.position.z - l.position.z;
             if (dx * dx + dy * dy + dz * dz < 1.0f)
-                return m_pointLightScale + (m_charLightScale - m_pointLightScale) * c.carried;
+                return lamp + (m_charLightScale - lamp) * c.carried;
         }
-    return m_pointLightScale;
+    return lamp;
 }
 
 // Phong tessellation of characters (RVK_Tess): the level for this draw, 0 for none. Characters are drawn as
@@ -1217,9 +1244,13 @@ void Device::FillPushers(detail::FrameLights* fl, const float eye[3])
     struct Item { float key; const PushPoint* p; };
     std::vector<Item> items;
     items.reserve(m_pushTrail.size());
+    // The characters where they are now (heads seen this frame) first, nearest the camera first; then the trail points,
+    // fresher and nearer first. Ranked together, a few walkers near the camera dropped enough trail points to take
+    // every slot from the player's own character a dozen units away (zoomed out): the grass stood up through it.
     for (const PushPoint& t : m_pushTrail) {
         float dx = t.x - eye[0], dy = t.y - eye[1], dz = t.z - eye[2];
-        items.push_back({std::sqrt(dx * dx + dy * dy + dz * dz) + 4.0f * float(now - t.time), &t});
+        const bool here = t.head && now - t.time < 0.1;
+        items.push_back({(here ? 0.0f : 1e4f) + std::sqrt(dx * dx + dy * dy + dz * dz) + 4.0f * float(now - t.time), &t});
     }
     uint32_t used = std::min<uint32_t>(uint32_t(items.size()), detail::kPushers);
     std::partial_sort(items.begin(), items.begin() + used, items.end(),
@@ -1421,12 +1452,33 @@ void Device::BuildLightGrid()
     }
 }
 
+// Whether a frame light reaches a world box: its sphere does, and a spot light's cone does too (a floodlight's range -
+// 1,041 units over Borealis's bridges - reached every draw: every pixel tried it, and no draw got the shader build
+// without the lights' loop).
+bool Device::LightReachesBox(const LightSphere& l, const float mn[3], const float mx[3]) const
+{
+    const float dx = std::max(std::max(mn[0] - l.x, l.x - mx[0]), 0.0f);
+    const float dy = std::max(std::max(mn[1] - l.y, l.y - mx[1]), 0.0f);
+    const float dz = std::max(std::max(mn[2] - l.z, l.z - mx[2]), 0.0f);
+    if (dx * dx + dy * dy + dz * dz > l.r2)
+        return false;
+    if (!l.spot)
+        return true;
+    Cone cone{};
+    std::memcpy(cone.axis, l.axis, sizeof(cone.axis));
+    cone.cosHalf = l.cosHalf;
+    cone.sinHalf = l.sinHalf;
+    cone.on = true;
+    const float at[3] = {l.x, l.y, l.z};
+    return BoxInCone(mn, mx, at, cone);
+}
+
 // The frame lights (light override) whose sphere reaches the draw's world bounding box, as a 64-bit mask for the
 // shader - instead of every pixel trying all of them. All set when the box is unknown (external geometry).
 void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices, uint32_t vertexCount, uint32_t out[4])
 {
     out[0] = out[1] = out[2] = out[3] = 0;
-    if (!m_lightOverride || !m_pixelLighting || !m_rs[d3d::RS_LIGHTING] ||
+    if (m_drawingPortal || !m_lightOverride || !m_pixelLighting || !m_rs[d3d::RS_LIGHTING] ||
         (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW || m_frameLightIndices.empty())
         return;
     uint32_t count = std::min<uint32_t>(uint32_t(m_frameLightIndices.size()), 64);
@@ -1468,11 +1520,7 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
     auto Test = [&](uint32_t k) {
         if (hits >> k & 1)
             return;
-        const LightSphere& l = spheres[k];
-        float dx = std::max(std::max(wmn[0] - l.x, l.x - wmx[0]), 0.0f);
-        float dy = std::max(std::max(wmn[1] - l.y, l.y - wmx[1]), 0.0f);
-        float dz = std::max(std::max(wmn[2] - l.z, l.z - wmx[2]), 0.0f);
-        if (dx * dx + dy * dy + dz * dz <= l.r2)
+        if (LightReachesBox(spheres[k], wmn, wmx))
             hits |= uint64_t(1) << k;
     };
     // The candidates: the lights of the grid cells the box covers (clipped to the grid), plus the ones too large for
@@ -1510,15 +1558,38 @@ void Device::FrameLightMask(uint32_t fvf, uint32_t stride, const void* vertices,
     }
     if (m_lightMaskVerify) {                     // the same mask from every light: a check while bringing the grid up
         uint64_t brute = 0;
-        for (uint32_t k = 0; k < count; ++k) {
-            const LightSphere& l = spheres[k];
-            float dx = std::max(std::max(wmn[0] - l.x, l.x - wmx[0]), 0.0f);
-            float dy = std::max(std::max(wmn[1] - l.y, l.y - wmx[1]), 0.0f);
-            float dz = std::max(std::max(wmn[2] - l.z, l.z - wmx[2]), 0.0f);
-            if (dx * dx + dy * dy + dz * dz <= l.r2) brute |= uint64_t(1) << k;
-        }
+        for (uint32_t k = 0; k < count; ++k)
+            if (LightReachesBox(spheres[k], wmn, wmx)) brute |= uint64_t(1) << k;
         if (brute != hits) ++m_lightMaskDiff;
         hits = brute;
+    }
+    // A dungeon room (a shop, a mission's rooms): only the lights the game lit it with. Its lamps are baked into its
+    // lightmap (stage 1), so the game leaves them out and lights it with moving ones (a character's own light); with
+    // every lamp in reach its walls and floor had them twice - a shop's room washed out once lamps indoors were at the
+    // game's strength (LampScale).
+    // A character's light isn't baked, though: it lights the room in its reach whichever of the room's sections the
+    // game gave it to - the game gives it to the section the character stands in alone, and stepping through a door
+    // the walls and floor beside it on the side just left went dark at once (the user, 2026-10-26).
+    if (hits && VisualKind(m_drawVisualKind) == VisualKind::Room) {
+        uint64_t kept = 0;
+        for (uint64_t rest = hits; rest; rest &= rest - 1) {
+            const uint32_t k = uint32_t(std::countr_zero(rest));
+            if (m_lightsPrev[m_frameLightIndices[k]].carried > 0.5f) {
+                kept |= uint64_t(1) << k;
+                continue;
+            }
+            const d3d::Light& l = m_lightsPrev[m_frameLightIndices[k]].light;
+            for (const LightSlot& slot : m_lights) {
+                if (!slot.enabled || slot.light.type == d3d::LIGHT_DIRECTIONAL || slot.light.range != l.range) continue;
+                const float dx = slot.light.position.x - l.position.x, dy = slot.light.position.y - l.position.y,
+                            dz = slot.light.position.z - l.position.z;
+                if (dx * dx + dy * dy + dz * dz < 1.0f) {
+                    kept |= uint64_t(1) << k;
+                    break;
+                }
+            }
+        }
+        hits = kept;
     }
     out[0] = uint32_t(hits);
     out[1] = uint32_t(hits >> 32);
@@ -1969,6 +2040,20 @@ void Device::DrawIndexedPrimitiveVB(uint32_t primitive, VertexBuffer* vb, uint32
 // centres. The scissor is the viewport within the target.
 void Device::ViewportState(VkViewport* vp, VkRect2D* scissor) const
 {
+    ViewportStateOf(vp, scissor);
+    if (m_drawingPortal) {                       // (a shop's room: kept to its doorway's box - portal.cpp)
+        const int32_t x0 = std::max(scissor->offset.x, m_portalScissor.offset.x);
+        const int32_t y0 = std::max(scissor->offset.y, m_portalScissor.offset.y);
+        const int32_t x1 = std::min(scissor->offset.x + int32_t(scissor->extent.width),
+                                    m_portalScissor.offset.x + int32_t(m_portalScissor.extent.width));
+        const int32_t y1 = std::min(scissor->offset.y + int32_t(scissor->extent.height),
+                                    m_portalScissor.offset.y + int32_t(m_portalScissor.extent.height));
+        *scissor = {{x0, y0}, {uint32_t(std::max(x1 - x0, 0)), uint32_t(std::max(y1 - y0, 0))}};
+    }
+}
+
+void Device::ViewportStateOf(VkViewport* vp, VkRect2D* scissor) const
+{
     // RVK_RenderScale: the game's viewport is in back-buffer pixels; the scene is smaller (the half-pixel shift of
     // D3D's pixel centres stays half a scene pixel, as in the passes that draw into the scene themselves).
     const bool scaled = m_target == m_scene && SceneScaled();
@@ -2032,17 +2117,31 @@ void Device::ApplyDynamicState(uint32_t primitive, uint32_t fvf, uint32_t stride
     uint32_t topoClass = TopologyClass(primitive);
     bool hdrTarget = m_target->m_format == Format::RGBA16F;
     // Pipeline classes: 0-2 points / lines / triangles, 3-5 the same for the float target, 6 / 7 tessellated; +12
-    // for the no-discard variant (a draw that never cuts out keeps early-Z).
+    // for the no-discard variant (a draw that never cuts out keeps early-Z); +24 for the ground's (the shader's build
+    // with the ground's code: m_drawGround), +48 for the draws no frame light reaches (the build without their loop);
+    // 72-74 (+12) the interface's lean shader (m_drawLite: 8-bit targets only).
+    const uint32_t build = m_drawGround ? 1u : m_drawNoFrameLights ? 2u : 0u;
+    const bool lite = m_drawLite && !m_drawTess && !hdrTarget;
     uint32_t colorClass = m_drawTess ? 6u + (hdrTarget ? 1u : 0u) : topoClass + (hdrTarget ? 3u : 0u);
-    uint32_t pipelineClass = colorClass + (m_drawMayDiscard ? 0u : 12u);
+    uint32_t pipelineClass = lite ? 72u + topoClass + (m_drawMayDiscard ? 0u : 12u)
+                                  : colorClass + (m_drawMayDiscard ? 0u : 12u) + 24u * build;
     if (c.topologyClass != pipelineClass) {
         VkPipeline pipeline;
-        if (m_drawTess)
-            pipeline = m_drawMayDiscard ? m_tessPipelines[hdrTarget ? 1 : 0] : m_tessPipelinesNoCut[hdrTarget ? 1 : 0];
-        else if (hdrTarget)
-            pipeline = m_drawMayDiscard ? m_pipelinesHdr[topoClass] : m_pipelinesHdrNoCut[topoClass];
-        else
-            pipeline = m_drawMayDiscard ? m_pipelines[topoClass] : m_pipelinesNoCut[topoClass];
+        const uint32_t h = hdrTarget ? 1u : 0u, nc = m_drawMayDiscard ? 0u : 1u;
+        if (lite) {
+            pipeline = nc ? m_pipelinesLiteNoCut[topoClass] : m_pipelinesLite[topoClass];
+        } else if (m_drawTess) {
+            VkPipeline* const tess[3][2] = {{m_tessPipelines, m_tessPipelinesNoCut},
+                                            {m_groundTessPipelines, m_groundTessPipelinesNoCut},
+                                            {m_noFrameTessPipelines, m_noFrameTessPipelinesNoCut}};
+            pipeline = tess[build][nc][h];
+        } else {
+            VkPipeline* const sets[3][2][2] = {
+                {{m_pipelines.data(), m_pipelinesNoCut}, {m_pipelinesHdr, m_pipelinesHdrNoCut}},
+                {{m_groundPipelines, m_groundPipelinesNoCut}, {m_groundPipelinesHdr, m_groundPipelinesHdrNoCut}},
+                {{m_noFramePipelines, m_noFramePipelinesNoCut}, {m_noFramePipelinesHdr, m_noFramePipelinesHdrNoCut}}};
+            pipeline = sets[build][h][nc][topoClass];
+        }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
         c.topologyClass = pipelineClass;
     }
@@ -2394,9 +2493,11 @@ void Device::FlushEdges()
     const d3d::Viewport savedViewport = m_viewport;
     const bool mayDiscard = m_drawMayDiscard, tess = m_drawTess, label = m_drawIsLabel, prepassed = m_drawPrepassed,
                backdrop = m_drawBackdrop, overbright = m_drawOverbright2x, terrainBase = m_drawTerrainBase,
-               terrainLight = m_drawTerrainLight;
+               terrainLight = m_drawTerrainLight, lite = m_drawLite;
     m_drawMayDiscard = true;
+    m_drawLite = false;                          // (3D foliage: the full shader)
     m_drawTess = m_drawIsLabel = m_drawBackdrop = m_drawOverbright2x = m_drawTerrainBase = m_drawTerrainLight = false;
+    m_drawGround = m_drawNoFrameLights = false;
     // Depth compared strictly (LESS, whatever the draw had): where the plant's own core wrote its depth the edge has
     // nothing to draw (alpha from the core up), and fails there before its shader runs rather than after.
     m_drawPrepassed = false;
@@ -2416,9 +2517,9 @@ void Device::FlushEdges()
         PushDrawSet(cmd, e.frameLights, e.prevBuffer, e.prevOffset, e.prevBytes, e.smoothBuffer, e.smoothOffset,
                     e.smoothBytes);
         if (e.indexCount)
-            vkCmdDrawIndexed(cmd, e.indexCount, 1, uint32_t(e.ibOffset / 2), int32_t(e.vbOffset / e.stride), e.record);
+            vkCmdDrawIndexed(cmd, e.indexCount, 1, uint32_t(e.ibOffset / 2), int32_t(uint32_t(e.vbOffset) / e.stride), e.record);
         else
-            vkCmdDraw(cmd, e.vertexCount, 1, uint32_t(e.vbOffset / e.stride), e.record);
+            vkCmdDraw(cmd, e.vertexCount, 1, uint32_t(e.vbOffset) / e.stride, e.record);
     }
     ++m_edgeFlushes;
     m_edgeDraws += uint32_t(m_edges.size());
@@ -2433,6 +2534,7 @@ void Device::FlushEdges()
     m_drawOverbright2x = overbright;
     m_drawTerrainBase = terrainBase;
     m_drawTerrainLight = terrainLight;
+    m_drawLite = lite;
 }
 
 // A fingerprint of everything an instanced batch must share (geometry, format, textures, state); 0 = not mergeable.
@@ -2461,7 +2563,8 @@ void Device::RecordIndirect(uint32_t indexCount, VkDeviceSize ibOffset, VkDevice
     c.indexCount = indexCount;
     c.instanceCount = 1;
     c.firstIndex = uint32_t(ibOffset / 2);
-    c.vertexOffset = int32_t(vbOffset / stride);
+    c.vertexOffset = int32_t(uint32_t(vbOffset) / stride);   // (32-bit: the buffers are far below 4 GB, and a
+                                                             // 64-bit division is a library call in 32-bit code)
     c.firstInstance = recordIndex;
     if (m_group.active && m_group.key == key) {
         ++m_group.count;
@@ -2509,6 +2612,12 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
 {
     if (!m_inFrame || !vertexCount)
         return;
+    // A shop's room behind a doorway drawn this frame (portal.cpp): before the first draw that writes no depth - the
+    // effects and particles, which then go over it (drawn at the scene's end, it covered them). Not sooner: solid
+    // things drawn after the doorway, behind its plane (the building's own insides), showed in it over the room.
+    if (m_portalArmed && !m_drawingPortal && m_scenePhase && m_target == m_scene &&
+        (m_external || !m_rs[d3d::RS_ZENABLE] || !m_rs[d3d::RS_ZWRITEENABLE]))
+        DrawPortals();
     // The game's ground, drawn by rvk from the playfield's data instead (native_ground.cpp): its own draws skipped.
     // (Its base pass deferred to the lighting pass - RVK_GroundOne - but something else came first: drawn now.)
     if (m_native.basePending && !m_native.drawing &&
@@ -2516,6 +2625,32 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         DrawPendingGroundBase();
     if (m_native.ground && NativeGroundReplaces(fvf))
         return;
+    // The black texture's panel in a shop's entrance (1010004:6014), while the street is drawn through it
+    // (portal.cpp DrawStreetPortal, the frame before): it stands in the door's plane, so the opening, set behind the
+    // door's leaf to keep a shut door shut, would find it in front and stay black.
+    if (m_streetShownFrame + 1 >= m_frameNumber && m_indoors && !m_drawingPortal && m_textures[0] &&
+        m_textures[0]->m_rdbId == 6014 && (fvf & 0x00E) != 0x004) {   // (not a 2D draw)
+        // (All of it in the entrance's plane, across the entrance's middle, from its base to a door's height. Not its
+        // first corner near the entrance: in a last_ditch_building_medium3 the panel spans much of the wall, the door's
+        // opening only a part of it - the user's dump, 2026-10-26.)
+        const auto& w = m_world.m;
+        const float* e = m_streetRoom.entrance;
+        const float in[2] = {m_streetRoom.inward[0], m_streetRoom.inward[2]}, across[2] = {-in[1], in[0]};
+        const uint32_t stride = FvfStride(fvf);
+        float o0 = 1e30f, o1 = -1e30f, a0 = 1e30f, a1 = -1e30f, u0 = 1e30f, u1 = -1e30f;
+        for (uint32_t v = 0; vertices && v < std::min(vertexCount, 64u); ++v) {
+            float p[3], at[3];
+            std::memcpy(p, static_cast<const uint8_t*>(vertices) + size_t(v) * stride, 12);
+            for (int j = 0; j < 3; ++j) at[j] = p[0] * w[0][j] + p[1] * w[1][j] + p[2] * w[2][j] + w[3][j];
+            const float dx = at[0] - e[0], dz = at[2] - e[2];
+            const float o = dx * in[0] + dz * in[1], a = dx * across[0] + dz * across[1], u = at[1] - e[1];
+            o0 = std::min(o0, o); o1 = std::max(o1, o);
+            a0 = std::min(a0, a); a1 = std::max(a1, a);
+            u0 = std::min(u0, u); u1 = std::max(u1, u);
+        }
+        if (o0 > -0.5f && o1 < 0.5f && a0 < 0.0f && a1 > 0.0f && a1 - a0 < 16.0f && u0 < 2.5f && u1 > 0.2f)
+            return;
+    }
     // Late 2D draws, including the cursor, go above the interface and console.
     if (m_target == m_main && !m_overlayTopActive && !m_uiLayerActive && !m_external &&
         m_interfaceEndFrame == m_frameNumber && IsInterfaceDraw(fvf))
@@ -2664,6 +2799,12 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             EndScene();
         }
     }
+    // RVK_FrameGen: a 2D draw on the frame between the 3D scene and the interface (AOReloaded's cast bars, the text
+    // after zoning) goes into the labels' layer, under the interface - in the frame it was interpolated, smearing.
+    if (m_fg && !m_scenePhase && m_target == m_main && !m_overlayUnder && !m_overlayLabelsActive && !m_overlayTopActive &&
+        !m_uiLayerActive && !m_uiLayerOpen && !m_external && m_sceneSaw3D && m_interfaceEndFrame != m_frameNumber &&
+        IsInterfaceDraw(fvf))
+        OverlayUnderBegin();
     // The sky's twilight and glow (sky.cpp): drawn before the sky's second draw - after its dome, before the moons,
     // the suns and the clouds - or, a sky of one draw, at its end.
     if (m_scenePhase && m_target == m_scene && !m_external && (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW) {
@@ -2758,7 +2899,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // The interface hidden (screenshots): its draws - pre-transformed, onto the frame or into the interface layer,
     // not while the 3D scene is still being drawn - and the names over characters.
     if (m_hideInterface && !m_external &&
-        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer || m_target == m_overlayTop) &&
+        (m_drawIsLabel || (IsInterfaceDraw(fvf) && (m_target == m_main || m_target == m_uiLayer || m_target == m_overlayTop ||
+                                                  m_target == m_overlayLabels) &&
                            !(m_scenePhase && m_target == m_scene))))
         return;
     // A name label in the scene: held back, drawn after the post passes (DrawHeldLabels).
@@ -2810,17 +2952,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         if (!m_gameSun)
             return;                              // (RVK_GameSun off: our disc alone)
     }
-    if (IsTerrain(fvf) && IsMultiplyPass())
+    if (IsTerrain(fvf) && IsMultiplyPass() && !m_drawingPortal)
         m_terrainLitPassCur = true;
     // (The terrain's base pass: its light pass multiplies, its fog white - not the scene's fog colour.)
     // (Not the native ground's rocks: the ground's heights are the ground's.)
     const bool groundHeights = IsTerrain(fvf) && !m_native.clutter && (!IsMultiplyPass() || m_groundOne) && m_scenePhase &&
-                               m_target == m_scene && !m_external && !m_drawGpu;
+                               m_target == m_scene && !m_external && !m_drawGpu && !m_drawingPortal;
     if (groundHeights)
         NoteTerrainHeights(fvf, vertices, vertexCount);   // (the valley mist's low ground: mist.cpp)
     if (groundHeights)
         NoteTerrainSun(fvf, vertices, vertexCount);   // (the terrain's shade from a low sun: terrain_sun.cpp)
-    if (IsTerrain(fvf) && !IsMultiplyPass() && m_scenePhase && m_target == m_scene && !m_external)
+    if (IsTerrain(fvf) && !IsMultiplyPass() && m_scenePhase && m_target == m_scene && !m_external && !m_drawingPortal)
         NoteSceneFog();
     Frame& f = m_frames[m_frameIndex];
     VkCommandBuffer cmd = f.main;
@@ -2850,26 +2992,43 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // RVK_GrassOn: the terrain's ground heights feed the procedural grass (grass.cpp CaptureTerrain / RenderGrassField).
     // The native ground in one pass (RVK_GroundOne) is its base pass too: the grass takes its heights and colours from
     // it as well - with no base pass drawn, no tile was ever given its ground, and no grass grew (user, 2026-10-20).
-    if (m_grassOn && !m_external && vertices && IsTerrain(fvf) && !m_native.clutter) {   // (not the rocks on it)
+    if (m_grassOn && !m_external && !m_drawingPortal && vertices && IsTerrain(fvf) && !m_native.clutter) {   // (not the rocks on it)
         CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount);
         if (m_groundOne && m_native.drawing)
             CaptureTerrain(primitive, layout, vertices, vertexCount, indices, indexCount, true);
     }
     DrawMeshInfo(fvf, layout.stride, vertices, vertexCount, indices, indexCount);
+    // (A shop's room drawn into its doorway, or its door drawn again over the street: none of the scene's notes.)
+    if (!m_drawingPortal && !m_redrawingDoor) {
+        PortalDiagDraw(fvf, vertexCount, indexCount);   // (shop portals' phase 0: portal_diag.cpp)
+        PortalStreetDiagDraw(fvf, vertexCount, indexCount, layout.stride);   // (the reverse's phase 0: portal_diag.cpp)
+        StreetCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_street.cpp)
+        PortalCaptureDraw(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);   // (portal_capture.cpp)
+        PortalNoteBlack(primitive, fvf, layout.stride, vertices, vertexCount, indices, indexCount);     // (portal_links.cpp)
+        // The room's door at the entrance, while the street shows through it: kept to be drawn again over the street
+        // (portal.cpp). Here, after DrawMeshInfo: m_drawMesh is this draw's - before it, the previous draw's, and the
+        // door's planks were passed over while the draw after them (its iron straps) was taken (the user, 2026-10-26).
+        // Every frame indoors, not only after one the street was drawn in: a frame without it (no world camera, say)
+        // left the next without the door - gone for a frame as it opened (the user, 2026-10-26).
+        if (m_streetViewOn && m_portalsOn && m_indoors && m_enteredValid && m_streetRoom.known && vertices &&
+            m_scenePhase && m_target == m_scene && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ)
+            NoteStreetDoorDraw(primitive, fvf, vertices, vertexCount, indices, indexCount);
+    }
     ProfileDrawSection("draw: setup (mesh info)", since);
-    NoteMeshPiece();                             // (mesh ids: which mesh the object drawing is)
+    if (!m_drawingPortal && !m_redrawingDoor)
+        NoteMeshPiece();                         // (mesh ids: which mesh the object drawing is)
     // The object's entry in the per-object cache (objects.cpp): a static mesh at its world matrix.
     if (m_objectCache && m_drawMesh && m_drawMeshStatic && !m_external && !m_drawSkin && !m_drawGpu)
         m_drawObject = FindObject();
     ProfileDrawSection("draw: setup (mesh ids)", since);
     // (A GPU-skinned character has no vertices here: DrawSkinned hands the pick its CPU-skinned ones.)
-    if (m_pickActive && !m_external && (vertices || m_pickSkinned) && (m_textures[0] || m_drawVisual) &&
+    if (m_pickActive && !m_external && !m_drawingPortal && !m_redrawingDoor && (vertices || m_pickSkinned) && (m_textures[0] || m_drawVisual) &&
         (m_target == m_scene || m_target == m_main) && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ &&
         m_rs[d3d::RS_ZENABLE])
         PickDraw(primitive, layout, vertices ? vertices : m_pickSkinned, vertexCount, indices, indexCount, IsTerrain(fvf));
     // ... and solid objects lying on the ground keep it off where they are (not characters, effects, the sky, plants
     // or anything see-through; grass.cpp CaptureCover).
-    if (m_grassOn && !m_external && vertices && !IsTerrain(fvf) && m_target == m_scene &&
+    if (m_grassOn && !m_external && !m_drawingPortal && vertices && !IsTerrain(fvf) && m_target == m_scene &&
         (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ && m_rs[d3d::RS_ZENABLE] && m_rs[d3d::RS_ZWRITEENABLE] &&
         m_rs[d3d::RS_ZFUNC] != d3d::CMP_ALWAYS && !IsMultiplyPass() && !m_drawSkin && !m_drawIsLabel &&
         (!m_textures[0] || m_textures[0]->m_opaque) && !m_rs[d3d::RS_ALPHATESTENABLE]) {
@@ -2878,12 +3037,13 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             !CharacterDraw(fvf, vertexCount))
             CaptureCover(primitive, layout, vertices, vertexCount, indices, indexCount);
     }
-    PushCandidateDraw(fvf);
+    if (!m_drawingPortal && !m_redrawingDoor)
+        PushCandidateDraw(fvf);
     ProfileDrawSection("draw: setup (pick, grass cover)", since);
     // A canopy (leaves.cpp): its leaves, baked the first time it is seen, drawn just before it (DrawLeaves). A solid
     // draw may be a tree's trunk (where its fallen leaves lie).
     CanopyParams(primitive, fvf, layout, vertices, vertexCount, indices, indexCount);
-    if (!m_drawLeaves && !m_external)
+    if (!m_drawLeaves && !m_external && !m_drawingPortal && !m_redrawingDoor)
         NoteSolidDraw(fvf);
     // A swaying plant: its big quads split into small ones (cached), so they bend rather than tilt as a whole.
     float sway[4] = {};
@@ -2921,6 +3081,37 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     }
     // Retained indices only with the retained vertices (one static draw path).
     const VkBuffer staticIb = m_drawStaticBuffer && indices ? m_drawStaticIndexBuffer : VK_NULL_HANDLE;
+    // An opaque static mesh kept on the GPU, as part of the models of the static world - AMD's distance field
+    // (RVK_GiMode 1, brixelizer.cpp), the ray tracing's structures (raytrace.cpp): the native ground's patches, solid
+    // statics and rooms; not plants, glass, characters or effects.
+    m_drawRtPlace = 0;
+    if ((m_brix || m_rt) && staticIb && m_target == m_scene && !m_external && !m_drawingPortal && !m_drawGpu && !m_drawLeaves && !m_drawSkin &&
+        !m_drawIsLabel && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZ && m_rs[d3d::RS_ZENABLE] &&
+        m_rs[d3d::RS_ZWRITEENABLE]) {
+        const auto kind = VisualKind(m_drawVisualKind);
+        // (The ground: the native ground's patches, either pass - the same mesh at the same place.)
+        const bool solid = IsTerrain(fvf) ? m_native.drawing :
+                           ((kind == VisualKind::Static || kind == VisualKind::Room || kind == VisualKind::Unknown) &&
+                            !m_rs[d3d::RS_ALPHABLENDENABLE] && !m_rs[d3d::RS_ALPHATESTENABLE] &&
+                            (!m_textures[0] || m_textures[0]->m_opaque) && !CharacterDraw(fvf, vertexCount));
+        if (solid && m_brix)
+            BrixNoteDraw(primitive, fvf, vertices, layout.stride, vertexCount, staticIb, indexCount);
+        // A still cut-out (a fence's wire, a grille, a still plant): alpha-tested against its texture - the rays test
+        // its texture's alpha at their hits (raytrace.cpp). Not one that sways (its vertex shader moves it).
+        const uint32_t alphaFunc = m_rs[d3d::RS_ALPHAFUNC];
+        const bool cutout = !solid && !IsTerrain(fvf) &&
+                            (kind == VisualKind::Static || kind == VisualKind::Room || kind == VisualKind::Unknown) &&
+                            m_rs[d3d::RS_ALPHATESTENABLE] && !m_rs[d3d::RS_ALPHABLENDENABLE] && m_textures[0] &&
+                            !(m_drawSway[3] > 0.5f) && layout.offset[4] >= 0 && m_tss[0][d3d::TSS_TEXCOORDINDEX] == 0 &&
+                            (alphaFunc == d3d::CMP_GREATER || alphaFunc == d3d::CMP_GREATEREQUAL) &&
+                            !CharacterDraw(fvf, vertexCount);
+        // (Its shadow caster: drawn into the untraced layers only if the rays lack it. A piece of a placed object the
+        // rays already hold from the playfield's list - raytrace.cpp RtSyncStatels - isn't taken twice.)
+        if ((solid || cutout) && m_rt && !(kind == VisualKind::Static && DrawStatelCasting(vertexCount, indexCount)))
+            m_drawRtPlace = RtNoteDraw(primitive, vertices, layout.stride, vertexCount, staticIb, indexCount, IsTerrain(fvf),
+                                       cutout ? m_textures[0] : nullptr, float(m_rs[d3d::RS_ALPHAREF] & 0xFF) / 255.0f,
+                                       uint32_t(layout.offset[4]));
+    }
 
     // Two-pass foliage: the queued edges go before a draw that writes no depth (the effects drawn over the scene came
     // after the foliage, edges included, before).
@@ -2992,6 +3183,8 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // Per-draw world matrix: written into this draw's record.
     void* cpu;
     DrawTransform dt{};
+    if (m_drawingPortal)
+        std::memcpy(dt.clip, m_portalClip, sizeof(dt.clip));   // (portal.cpp)
     if (m_drawLeaves) {                          // a canopy with leaves: its branches sway (ffp.vert BranchSway)
         dt.leaf[0] = m_drawLeaves->centre[0];
         dt.leaf[1] = m_drawLeaves->centre[1];
@@ -3295,9 +3488,14 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         // (Lit things - buildings, rocks, characters - a quarter of it under a full storm, as the ground keeps a quarter
         // of its light (FlatShade: half its sun's share, its sky's halved): at a half, with the storm's soft sunlight -
         // lighting.glsl - over it, they stood out light against the dark land - user, 2026-10-19.)
+        // (By night the ground's share: no sun for the storm to spread over them, the ambient is nearly all their light,
+        // and at a quarter of it the buildings and rocks stood near black on land lit by its lightmap and half its
+        // ambient - user dumps rvk-frame-183522, -183647, a night storm in the desert.)
         const bool sky_ = VisualKind(m_drawVisualKind) == VisualKind::Sky;
         const bool groundLight = IsTerrain(fvf) && IsMultiplyPass();
-        const float sky = groundLight || sky_ ? StormSkyLight() : 1.0f - 0.75f * StormOvercast();
+        const float sky = groundLight || sky_ ? StormSkyLight()
+                                              : 1.0f - 0.75f * StormOvercast() +
+                                                    (StormSkyLight() - (1.0f - 0.75f * StormOvercast())) * m_cond.moonNight;
         for (int i = 0; i < 3; ++i) c.ambient[i] *= sky * (sky_ || groundLight ? 1.0f : m_dawnTint[1][i]);
     }
     ArgbToFloat(m_rs[d3d::RS_FOGCOLOR], c.fogColor);
@@ -3385,8 +3583,9 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_rs[d3d::RS_LIGHTING] && (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZRHW) flags |= F_LIGHTING;
     if ((flags & F_LIGHTING) && m_pixelLighting) flags |= F_PERPIXEL;
     if (m_lightingDebug) flags |= F_DEBUGLIGHT;
-    bool override = (flags & F_PERPIXEL) && m_lightOverride && !SurfaceSheen(fvf);
+    bool override = (flags & F_PERPIXEL) && m_lightOverride && !SurfaceSheen(fvf) && !m_drawingPortal;
     if (override) flags |= F_LIGHTOVERRIDE;
+    m_constLightOverride = override;             // (the block's: kept while later draws reuse it)
     bool hdrTarget = m_target->m_format == Format::RGBA16F;
     if (hdrTarget) flags |= F_HDR;
     // Generated normals: per-pixel lit 3D drawn with a texture in stage 0 as its surface (not the ground's
@@ -3457,6 +3656,15 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     if (m_drawIsCharacter) flags |= F_CHARACTER;
     if (m_drawTerrainLight) flags |= F_NOALBEDO;   // its albedo write is masked (the base pass wrote it)
     c.flags[0] = flags;
+    // The lean shader (RVK_LiteShader, ffp_lite.frag): a pre-transformed 2D draw on an 8-bit target - the interface -
+    // unlit, unfogged, unshadowed, with no material maps. All the full shader does for such a draw is in its lean
+    // main(); anything that would take the full one elsewhere keeps it.
+    m_drawLite = m_liteShader && !hdrTarget && (fvf & d3d::FVF_POSITION_MASK) == d3d::FVF_XYZRHW &&
+                 (flags & (F_LIGHTING | F_PERPIXEL | F_FOG | F_SHADOW | F_SHADOWCOMP | F_SHADOWTEX | F_GLOW |
+                           F_GLOWALPHA | F_OVERBRIGHT2X | F_FOLIAGE | F_NOALBEDO | F_EMISSIVE | F_BUMP | F_BUMPBASE |
+                           F_NORMALMAP | F_VERTEXSUN | F_CHARACTER)) == 0u &&
+                 !m_drawOrm && !m_drawEmissive && !m_drawIsCloudPuff && !m_drawLeaves && !m_drawTerrainBase &&
+                 !m_drawTerrainLight;   // (two-pass foliage, its dither and the ground are 3D: decided below, never 2D)
     c.flags[1] = m_rs[d3d::RS_FOGVERTEXMODE];
     c.flags[2] = m_rs[d3d::RS_FOGTABLEMODE];
     // The sky's scenery (mesh ids: the ships over the cities, kilometres out): hazed as the far sky - exponentially, in
@@ -3538,14 +3746,17 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             if (terrain && slot.light.type == d3d::LIGHT_DIRECTIONAL)
                 continue;
             // By night the game's light from under the ground fades out as the moon's comes in (night.cpp).
+            // (With the light rig: gone, and the sun faded over its last degrees - light_rig.cpp RigGameLight.)
             d3d::Light scaled;
-            const bool night = override && slot.light.type == d3d::LIGHT_DIRECTIONAL &&
-                               VisualKind(m_drawVisualKind) != VisualKind::Sky && MoonScaledGameLight(slot.light, &scaled);
+            const bool sky = VisualKind(m_drawVisualKind) == VisualKind::Sky;
+            const bool rigLit = override && !sky && RigGameLight(slot.light, &scaled);
+            const bool night = rigLit || (override && slot.light.type == d3d::LIGHT_DIRECTIONAL && !sky &&
+                                          !m_rig.on && MoonScaledGameLight(slot.light, &scaled));
             FillGpuLight(night ? scaled : slot.light, slot.cosHalfTheta, slot.cosHalfPhi, c.lights[lightCount++],
                          LightScale(slot.light));
             // The sun's light low in the sky warm (sky.cpp RVK_DawnLight): the game's directional light along the
             // sun's way - not other directional lights (effects' coloured ones), not the sky's own.
-            if (!night && slot.light.type == d3d::LIGHT_DIRECTIONAL && m_dawnTint[0][3] > 0.0f &&
+            if ((!night || rigLit) && slot.light.type == d3d::LIGHT_DIRECTIONAL && m_dawnTint[0][3] > 0.0f &&
                 VisualKind(m_drawVisualKind) != VisualKind::Sky) {
                 const d3d::Vector& d = slot.light.direction;
                 const float l = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) *
@@ -3577,7 +3788,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
     // state set and set back, a light set again) keeps the last one: fewer blocks, and the draw can still join the
     // pending indirect batch (its key includes the block's index).
     size_t constBytes = offsetof(DrawConstants, lights) + size_t(lightCount) * sizeof(GpuLight);
-    if (sameArena && m_lastConstants.size() == constBytes && std::memcmp(m_lastConstants.data(), &c, constBytes) == 0) {
+    if (sameArena && m_lastConstants.size() == constBytes && SameBytes(m_lastConstants.data(), &c, constBytes)) {
         ++m_constantsReused;
     } else {
         constIndex = AppendConstant(c, constBytes);
@@ -3639,14 +3850,21 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         // Skinned on the GPU: the vertices in the frame's skin arena, the indices in the mesh's buffer.
         vbOffset = m_drawGpu->vertexOffset;
         ibOffset = m_drawGpu->mesh->indexOffset;
-        dt.motion[2] = float(vbOffset / layout.stride);
+        dt.motion[2] = float(uint32_t(vbOffset) / layout.stride);
+        // A character's solid piece into the ray tracing (raytrace.cpp RtNoteSkinned; its shadow caster then only in
+        // the map's untraced layers if the rays lack it). Cut-out pieces (hair, fringes) stay the map's.
+        if (m_rt && m_drawSkin && primitive == d3d::TriangleList && indices && m_target == m_scene && !m_external &&
+            m_rs[d3d::RS_ZENABLE] && m_rs[d3d::RS_ZWRITEENABLE] && !m_rs[d3d::RS_ALPHABLENDENABLE] &&
+            (!m_rs[d3d::RS_ALPHATESTENABLE] || !m_textures[0] || m_textures[0]->m_opaque))
+            m_drawRtPlace = RtNoteSkinned(m_drawSkin, m_frames[m_frameIndex].skinArena, vbOffset, vertexCount,
+                                          m_drawGpu->mesh->buffer, ibOffset, indexCount);
         RecordShadowCaster(primitive, fvf, layout.stride, nullptr, vertexCount, vbOffset, indices, indices ? indexCount : 0,
                            ibOffset, m_frames[m_frameIndex].skinArena, m_drawGpu->mesh->buffer);
     } else if (m_drawStaticBuffer) {
         // Static geometry on the GPU: the vertices stay where they are; the indices are retained there too
         // (DrawSharedIndexed) or come through the ring.
         vbOffset = m_drawStaticOffset;
-        dt.motion[2] = float(vbOffset / layout.stride);
+        dt.motion[2] = float(uint32_t(vbOffset) / layout.stride);
         if (staticIb) {
             ibOffset = m_drawStaticIndexOffset;
         } else if (indices) {
@@ -3659,7 +3877,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         VkDeviceSize vbBytes = VkDeviceSize(layout.stride) * vertexCount;
         vbOffset = Allocate(vbBytes, layout.stride, &cpu);
         std::memcpy(cpu, vertices, vbBytes);
-        dt.motion[2] = float(vbOffset / layout.stride);   // the base vertex: gl_VertexIndex - it = vertex
+        dt.motion[2] = float(uint32_t(vbOffset) / layout.stride);   // the base vertex: gl_VertexIndex - it = vertex
         if (indices) {
             ibOffset = Allocate(VkDeviceSize(indexCount) * 2, 2, &cpu);
             std::memcpy(cpu, indices, size_t(indexCount) * 2);
@@ -3678,7 +3896,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
             smoothBytes = VkDeviceSize(vertexCount) * 12;
             dt.tess[0] = tessLevel;
             dt.tess[1] = m_tessShape;
-            dt.tess[2] = float(vbOffset / layout.stride);
+            dt.tess[2] = float(uint32_t(vbOffset) / layout.stride);
             m_drawTess = true;
         }
     } else if (tessLevel > 0.0f &&
@@ -3691,7 +3909,7 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         std::memcpy(smoothCpu, m_smoothNormals.data(), smoothBytes);
         dt.tess[0] = tessLevel;
         dt.tess[1] = m_tessShape;
-        dt.tess[2] = float(vbOffset / layout.stride);
+        dt.tess[2] = float(uint32_t(vbOffset) / layout.stride);
         m_drawTess = true;
     } else if (m_native.drawing && !m_native.clutter && m_native.tessPatch && m_tessSupported && primitive == d3d::TriangleList &&
                (m_terrainSettings.round > 0.0f || (m_terrainSettings.depth > 0.0f && TerrainRockOn()))) {
@@ -3736,10 +3954,18 @@ void Device::Draw(uint32_t primitive, uint32_t fvf, const void* vertices, uint32
         ShadeClass(shade);
     }
     uint64_t groupKey = 0;
+    // The shader's build with the ground's code for the ground's draws (ApplyDynamicState). RANDYVK_FULL_SHADER=1: for
+    // every draw, as before the builds were split (comparisons).
+    static const bool fullShader = [] { const char* v = std::getenv("RANDYVK_FULL_SHADER"); return v && *v == '1'; }();
+    m_drawGround = fullShader || dt.terrainAt[3] > 0.5f;
+    // ... and the build without the frame lights' loop for the draws none reaches (lighting.glsl): the override off
+    // (the loop's test), or none in the draw's mask.
+    m_drawNoFrameLights = !m_drawGround && (!m_constLightOverride || (dt.lightMask[0] | dt.lightMask[1]) == 0u);
     if (m_groupIndirect && indices && !m_external && !(m_particlePending && fvf == kParticleFvf) && !m_drawLeafCount) {
         bool hdr = m_target->m_format == Format::RGBA16F;
-        uint32_t pipelineClass = m_drawTess ? 6u + (hdr ? 1u : 0u)
-                                            : TopologyClass(primitive) + (hdr ? 3u : 0u);
+        uint32_t pipelineClass = (m_drawTess ? 6u + (hdr ? 1u : 0u)
+                                             : TopologyClass(primitive) + (hdr ? 3u : 0u)) +
+                                 24u * (m_drawGround ? 1u : m_drawNoFrameLights ? 2u : 0u);
         VkBuffer vb = m_drawGpu ? m_frames[m_frameIndex].skinArena
                                 : (m_drawStaticBuffer ? m_drawStaticBuffer : f.ring);
         VkBuffer ib = m_drawGpu ? m_drawGpu->mesh->buffer : (staticIb ? staticIb : f.ring);
@@ -3973,7 +4199,11 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
     if ((primitive != d3d::TriangleList && primitive != d3d::TriangleStrip && primitive != d3d::TriangleFan) ||
         layout.offset[0] < 0 || !m_target || !m_viewport.width || !m_viewport.height)
         return;
-    const float tx = m_pickX * float(m_target->m_width), ty = m_pickY * float(m_target->m_height);
+    // The cursor in the viewport's pixels: the game's viewport is in back-buffer pixels, also on a scaled scene
+    // (RVK_RenderScale) - the scene's own size put the pick up and left of the cursor, on whatever was there.
+    const bool scaled = m_target == m_scene && SceneScaled();
+    const float tx = m_pickX * float(m_target->m_width) / (scaled ? SceneScaleX() : 1.0f);
+    const float ty = m_pickY * float(m_target->m_height) / (scaled ? SceneScaleY() : 1.0f);
     const float px = (tx - float(m_viewport.x)) / float(m_viewport.width) * 2.0f - 1.0f;
     const float py = 1.0f - (ty - float(m_viewport.y)) / float(m_viewport.height) * 2.0f;
     if (std::fabs(px) > 1.0f || std::fabs(py) > 1.0f)
@@ -4044,7 +4274,11 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
     }
     // A dungeon room hit (VisualKind::Room): the hit triangle and those joined to it by shared vertices - the room's
     // vertices aren't shared between the tile pieces placed in it, so that is the piece's sub-mesh as placed.
-    if (hit == ~0u || VisualKind(m_drawVisualKind) != VisualKind::Room || primitive != d3d::TriangleList || !indices)
+    // The same for a draw of the black texture behind shop doorways (1010004:6014, shop portals' phase 0): the doorway
+    // quad, logged in the world (portal_diag.cpp's numbers' counterpart outdoors).
+    const bool doorway = m_textures[0] && m_textures[0]->m_rdbId == 6014;
+    if (hit == ~0u || (VisualKind(m_drawVisualKind) != VisualKind::Room && !doorway) ||
+        primitive != d3d::TriangleList || !indices)
         return;
     auto corner = [&](uint32_t tri, int j) { return uint32_t(indices[tri * 3 + j]); };
     auto put = [&](uint32_t tri) {
@@ -4078,6 +4312,38 @@ void Device::PickDraw(uint32_t primitive, const detail::FvfLayout& layout, const
                 if (std::find(vertices_.begin(), vertices_.end(), v) == vertices_.end()) vertices_.push_back(v);
         }
     }
+    if (!doorway)
+        return;
+    const auto& w = m_world.m;
+    auto world = [&](uint32_t v, float out[3]) {
+        float p[3];
+        std::memcpy(p, base + size_t(v) * layout.stride + layout.offset[0], 12);
+        for (int j = 0; j < 3; ++j)
+            out[j] = p[0] * w[0][j] + p[1] * w[1][j] + p[2] * w[2][j] + w[3][j];
+    };
+    float mn[3] = {1e30f, 1e30f, 1e30f}, mx[3] = {-1e30f, -1e30f, -1e30f};
+    std::string corners;
+    for (uint32_t v : vertices_) {
+        float p[3];
+        world(v, p);
+        for (int j = 0; j < 3; ++j) { mn[j] = std::min(mn[j], p[j]); mx[j] = std::max(mx[j], p[j]); }
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), " (%.2f %.2f %.2f)", double(p[0]), double(p[1]), double(p[2]));
+        corners += buf;
+    }
+    float a[3], b[3], c[3];
+    world(corner(hit, 0), a);
+    world(corner(hit, 1), b);
+    world(corner(hit, 2), c);
+    const float u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, t[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+    float nrm[3] = {u[1] * t[2] - u[2] * t[1], u[2] * t[0] - u[0] * t[2], u[0] * t[1] - u[1] * t[0]};
+    const float len = std::sqrt(nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]);
+    for (float& x : nrm) x = len > 0.0f ? x / len : 0.0f;
+    Log("portal diag: picked a black doorway piece: %u triangles of %u in the draw (%u vertices), centre (%.2f %.2f %.2f), "
+        "size (%.2f %.2f %.2f), normal (%.3f %.3f %.3f), corners%s",
+        m_pickBestTriangleCount, triangles, vertexCount, double(0.5f * (mn[0] + mx[0])), double(0.5f * (mn[1] + mx[1])),
+        double(0.5f * (mn[2] + mx[2])), double(mx[0] - mn[0]), double(mx[1] - mn[1]), double(mx[2] - mn[2]),
+        double(nrm[0]), double(nrm[1]), double(nrm[2]), corners.c_str());
 }
 
 }  // namespace rvk

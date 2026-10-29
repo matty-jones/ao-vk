@@ -183,7 +183,7 @@ bool Device::CreateShadowMap(std::string* error)
     ci.format = kDepthFormat;
     ci.extent = {m_shadowSize, m_shadowSize, 1};
     ci.mipLevels = 1;
-    ci.arrayLayers = kShadowLayers;
+    ci.arrayLayers = m_shadowLayerCount;
     ci.samples = VK_SAMPLE_COUNT_1_BIT;
     ci.tiling = VK_IMAGE_TILING_OPTIMAL;
     ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -196,16 +196,17 @@ bool Device::CreateShadowMap(std::string* error)
     vi.image = m_shadowImage;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     vi.format = kDepthFormat;
-    vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, kShadowLayers};
+    vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, m_shadowLayerCount};
     if (!Check(vkCreateImageView(m_device, &vi, nullptr, &m_shadowView), "shadow map view", error))
         return false;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    for (uint32_t i = 0; i < kShadowLayers; ++i) {
+    for (uint32_t i = 0; i < m_shadowLayerCount; ++i) {
         vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, i, 1};
         if (!Check(vkCreateImageView(m_device, &vi, nullptr, &m_shadowLayerViews[i]), "shadow cascade view", error))
             return false;
     }
     m_shadowImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_shadowUntraced = false;
     return true;
 }
 
@@ -220,18 +221,21 @@ void Device::DestroyShadowMap()
     m_shadowImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
-// Shadow map sizes changed (SetShadowResolution): wait for the GPU, recreate the maps (cleared to lit when first
-// used). The sun's shadow is invalid until drawn again; the point lights' cubes are all redrawn.
+// Shadow map sizes changed (SetShadowResolution), or its layers (the untraced ones come and go with RVK_RtShadow):
+// wait for the GPU, recreate the maps (cleared to lit when first used). The sun's shadow is invalid until drawn again;
+// the point lights' cubes are all redrawn.
 void Device::ApplyShadowResolution()
 {
+    const uint32_t layers = RtShadowWanted() ? kShadowLayers : kShadowCascades + 1;
     if (m_shadowSizeWanted == m_shadowSize && m_pointShadowSizeWanted == m_pointShadowSize &&
-        m_cubeCountWanted == m_cubeCount)
+        m_cubeCountWanted == m_cubeCount && layers == m_shadowLayerCount)
         return;
     WaitIdle();
     std::string error;
-    if (m_shadowSizeWanted != m_shadowSize) {
+    if (m_shadowSizeWanted != m_shadowSize || layers != m_shadowLayerCount) {
         DestroyShadowMap();
         m_shadowSize = m_shadowSizeWanted;
+        m_shadowLayerCount = layers;
         if (!CreateShadowMap(&error))
             Log("rvk: sun shadow map %u: %s", m_shadowSize, error.c_str());
         m_shadowValid = false;
@@ -245,7 +249,8 @@ void Device::ApplyShadowResolution()
         for (PointShadowLight& l : m_pointShadowLights) l = {};
         m_pointShadowCount = 0;
     }
-    Log("rvk: shadow maps: sun %u, point lights %u x %u cubes", m_shadowSize, m_pointShadowSize, m_cubeCount);
+    Log("rvk: shadow maps: sun %u (%u layers), point lights %u x %u cubes", m_shadowSize, m_shadowLayerCount,
+        m_pointShadowSize, m_cubeCount);
 }
 
 bool Device::CreateShadowResources(std::string* error)
@@ -265,6 +270,22 @@ bool Device::CreateShadowResources(std::string* error)
     si.magFilter = si.minFilter = VK_FILTER_NEAREST;              // depths as stored (soft shadows' blocker search)
     si.compareEnable = VK_FALSE;
     if (!Check(vkCreateSampler(m_device, &si, nullptr, &m_shadowDepthSampler), "shadow depth sampler", error))
+        return false;
+    // The cut-outs' textures, as the scene samples a tiled fence or leaf card: repeating, filtered, anisotropic (seen
+    // edge-on from the sun). Not the game's stage 0 sampler (SamplerFor): the passes run at the frame's end, after
+    // the interface, so they took the interface's clamped one on frames that redrew it - a chain-link fence's tiles
+    // all read its edge, and its shadow went solid every other frame while the mouse pointer was hidden (user,
+    // 2026-10-21).
+    VkSamplerCreateInfo ci{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    ci.magFilter = ci.minFilter = VK_FILTER_LINEAR;
+    ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    ci.addressModeU = ci.addressModeV = ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    ci.maxLod = VK_LOD_CLAMP_NONE;
+    if (m_maxAnisotropy > 1.0f) {
+        ci.anisotropyEnable = VK_TRUE;
+        ci.maxAnisotropy = std::min(m_maxAnisotropy, 16.0f);
+    }
+    if (!Check(vkCreateSampler(m_device, &ci, nullptr, &m_cutoutSampler), "cut-out sampler", error))
         return false;
 
     // Pass pipelines: depth only (opaque casters) and with an alpha-testing fragment shader.
@@ -386,6 +407,8 @@ void Device::DestroyShadowResources()
     if (m_shadowSampler) vkDestroySampler(m_device, m_shadowSampler, nullptr);
     if (m_shadowDepthSampler) vkDestroySampler(m_device, m_shadowDepthSampler, nullptr);
     m_shadowDepthSampler = VK_NULL_HANDLE;
+    if (m_cutoutSampler) vkDestroySampler(m_device, m_cutoutSampler, nullptr);
+    m_cutoutSampler = VK_NULL_HANDLE;
     DestroyShadowMap();
     m_shadowPipelineLayout = VK_NULL_HANDLE;
     m_shadowSetLayout = VK_NULL_HANDLE;
@@ -401,7 +424,7 @@ void Device::PrepareShadowMap(VkCommandBuffer cmd)
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
                  VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     VkClearDepthStencilValue clear{1.0f, 0};
-    VkImageSubresourceRange range{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, kShadowLayers};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, m_shadowLayerCount};
     vkCmdClearDepthStencilImage(cmd, m_shadowImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
     ImageBarrier(cmd, m_shadowImage, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -416,6 +439,8 @@ bool Device::IsTerrain(uint32_t fvf) const
 {
     if (fvf != (d3d::FVF_XYZ | d3d::FVF_NORMAL | (2u << 8)))
         return false;
+    if (m_streetGround)                          // (a street's ground seen from a shop: moved to its door)
+        return true;
     const auto& w = m_world.m;
     return w[3][0] == 0.0f && w[3][1] == 0.0f && w[3][2] == 0.0f && w[0][0] == 1.0f && w[1][1] == 1.0f && w[2][2] == 1.0f;
 }
@@ -458,6 +483,9 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
                                 uint32_t vertexCount, VkDeviceSize vbOffset, const uint16_t* indices, uint32_t indexCount,
                                 VkDeviceSize ibOffset, VkBuffer vb, VkBuffer ib)
 {
+    if (m_drawingPortal || m_redrawingDoor)
+        return;                                  // (a shop's room in its doorway: not in this playfield's light; a door
+                                                 // drawn again over the street: cast once already)
     if (!IsShadowCaster(primitive, fvf))
         return;
     // (Profiling: its share of "draw: geometry + casters", sampled as the per-draw sections are.)
@@ -554,17 +582,17 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
     c.owner = m_drawOwner;
     c.kind = m_drawVisualKind;
     c.leafKey = m_drawLeaves ? m_drawLeafKey : 0;
+    c.rtPlace = m_drawRtPlace;
     m_casters.push_back(c);
     if (VisualKind(c.kind) == VisualKind::Static) {
-        if (m_statelVerified[0] == 0 || m_statelVerified[1] == 0)
+        if ((m_statelVerified[0] == 0 || m_statelVerified[1] == 0) && m_statelMode < 2)   // (mode 2 casts unconfirmed)
             CheckStatelDraw(m_world, vertexCount, indexCount);   // (statels.cpp: is our placement the game's?)
         // A piece of a placed object, which casts from the playfield's list wherever it is: not remembered (one
         // remembered under another's key is what made the wall's shadow come and go - sun42).
         if (DrawStatelCasting(vertexCount, indexCount)) {
             ++m_statelCoveredThisFrame;
-            auto stale = m_casterCache.find(key);
-            if (stale != m_casterCache.end())
-                ForgetCachedCaster(stale);
+            if (m_casterCache.count(key))
+                ForgetCachedCaster(key);
             return;
         }
     }
@@ -573,9 +601,8 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
     if (object && object->cached && object->cachedEpoch == m_casterCacheEpoch && !m_objectVerify) {
         remembered = object->cached;
     } else {
-        auto cached = m_casterCache.find(key);
-        if (cached != m_casterCache.end()) {
-            remembered = &cached->second;
+        if (CachedCaster* cached = m_casterCache.find(key)) {
+            remembered = cached;
             if (object && object->cached && object->cachedEpoch == m_casterCacheEpoch && object->cached != remembered &&
                 m_objectMismatches++ < 20)
                 Log("object cache: remembered caster %016llx kept at another entry", (unsigned long long)key);
@@ -590,7 +617,7 @@ void Device::RecordShadowCaster(uint32_t primitive, uint32_t fvf, uint32_t strid
         double now = m_frameClock;               // per frame: a clock read per caster costs more than it buys
         e.lastSeen = m_frameNumber;
         e.lastSeenTime = now;
-        if (std::memcmp(&e.world, &m_world, sizeof(m_world)) != 0) {
+        if (!SameBytes(&e.world, &m_world, sizeof(m_world))) {
             // Only what can sway records its sway: plants (marked) and cut-out casters (crowns, leaves, fronds - the
             // game sways its trees by tilting their matrices). A solid caster's matrix changing is the game's
             // rounding, or another piece taken for it: a wall's segments recorded "sway" and played it back out of
@@ -776,6 +803,7 @@ void Device::CacheCaster(uint64_t key, const ShadowCaster& c, const void* vertic
     e.alphaRef = c.alphaRef;
     e.kind = c.kind;
     e.leafKey = c.leafKey;
+    e.rtPlace = c.rtPlace;
     std::memcpy(e.plantSway, c.sway, sizeof(e.plantSway));
     e.lastSeen = m_frameNumber;
     e.lastSeenTime = m_frameClock;
@@ -819,7 +847,8 @@ void Device::CacheCaster(uint64_t key, const ShadowCaster& c, const void* vertic
     std::memcpy(dst, vertices, vbBytes);
     if (c.indexCount)
         std::memcpy(dst + indexAt, indices, size_t(c.indexCount) * 2);
-    m_casterCache.emplace(key, e);
+    if (m_casterCache.emplace(key, e))
+        ++m_casterCacheEpoch;                    // (the entries moved: the objects' pointers to them go)
     AddCoverMesh(key, e, vertices, indices);
     if (m_cacheTraceLines < 300 && m_frameNumber > 600) {   // (churn: see UpdateCasterCache)
         ++m_cacheTraceLines;
@@ -829,16 +858,18 @@ void Device::CacheCaster(uint64_t key, const ShadowCaster& c, const void* vertic
     }
 }
 
-void Device::ForgetCachedCaster(std::unordered_map<uint64_t, CachedCaster>::iterator it)
+void Device::ForgetCachedCaster(uint64_t key)
 {
-    ArenaFree(it->second.chunk, it->second.slot, it->second.slotBytes);   // reused once the GPU is done with it
-    auto cover = m_coverMeshes.find(it->first);
+    CachedCaster* e = m_casterCache.find(key);
+    if (!e) return;
+    ArenaFree(e->chunk, e->slot, e->slotBytes);  // reused once the GPU is done with it
+    auto cover = m_coverMeshes.find(key);
     if (cover != m_coverMeshes.end()) {
         m_coverTriangles -= cover->second.tri.size() / 9;
         m_coverMeshes.erase(cover);
         ++m_coverMeshGen;
     }
-    m_casterCache.erase(it);
+    m_casterCache.erase(key);                    // (the last entry moved into its place)
     ++m_casterCacheEpoch;                        // (the objects' pointers to remembered casters: ObjectEntry::cached)
 }
 
@@ -872,7 +903,14 @@ void Device::UpdateCasterCache()
 {
     m_characterSpotsPrev.swap(m_characterSpots);   // (this frame's the last's; the next frame's anew)
     m_characterSpots.clear();
+    if (m_casterViews.size() > 1) ++m_logViewSplitFrames;
+    m_logOtherViewCasters += m_casterOtherView;
+    if (m_shadowProjChanged) ++m_logProjChanges;
     if (m_frameNumber % 300 == 0) {
+        Log("shadow cameras (last 300 frames): %u frames with casters under more than one camera, %u casters left out "
+            "as another camera's; the world camera's projection changed on %u frames (their draws took no sun shadow)",
+            m_logViewSplitFrames, m_logOtherViewCasters, m_logProjChanges);
+        m_logViewSplitFrames = m_logOtherViewCasters = m_logProjChanges = 0;
         Log("caster cache: %zu remembered, %zu streaks; this frame %u streaks started, refused %u far (last %.0f from the "
             "eye (%.1f %.1f %.1f)), %u full, %u without vertices, %u moving or a character's; %u kept "
             "solid when the game let their texture go",
@@ -889,9 +927,11 @@ void Device::UpdateCasterCache()
         it = it->second.lastFrame == m_frameNumber ? std::next(it) : m_casterStreaks.erase(it);
     if (!m_frameEyeValid)
         return;
-    for (auto it = m_casterCache.begin(); it != m_casterCache.end();) {
-        CachedCaster& e = it->second;
-        auto next = std::next(it);
+    // (By index: forgetting one moves the last into its place, which is looked at next.)
+    for (size_t i = 0; i < m_casterCache.size();) {
+        const uint64_t key = m_casterCache.entries[i].first;
+        CachedCaster& e = m_casterCache.entries[i].second;
+        bool forgot = false;
         if (e.lastSeen != m_frameNumber) {
             float d2 = 0.0f;
             for (int j = 0; j < 3; ++j) {
@@ -906,7 +946,8 @@ void Device::UpdateCasterCache()
             const float forget = CasterKeepRange() * (4.0f / 3.0f);
             if (d2 > forget * forget) {
                 ++m_forgottenFar;
-                ForgetCachedCaster(it);
+                ForgetCachedCaster(key);
+                forgot = true;
             } else if (m_frameViewProjValid && d2 < 20.0f * 20.0f && m_frameNumber - e.lastSeen >= 60 &&
                        BoxInClip(centre, centre, m_frameViewProj, true) == 1) {
                 // (Gone only when near - within 20 units - and unseen in view a second: the game doesn't draw all it
@@ -916,15 +957,16 @@ void Device::UpdateCasterCache()
                 if (m_cacheTraceLines < 300) {   // (churn: forgotten as unseen in view, remembered again later)
                     ++m_cacheTraceLines;
                     Log("caster cache frame %llu: forgot %016llx (in view, not drawn) box (%.1f %.1f %.1f)..(%.1f %.1f %.1f) "
-                        "v %u, unseen %llu frames", (unsigned long long)m_frameNumber, (unsigned long long)it->first,
+                        "v %u, unseen %llu frames", (unsigned long long)m_frameNumber, (unsigned long long)key,
                         double(e.boundsMin[0]), double(e.boundsMin[1]), double(e.boundsMin[2]), double(e.boundsMax[0]),
                         double(e.boundsMax[1]), double(e.boundsMax[2]), e.vertexCount,
                         (unsigned long long)(m_frameNumber - e.lastSeen));
                 }
-                ForgetCachedCaster(it);
+                ForgetCachedCaster(key);
+                forgot = true;
             }
         }
-        it = next;
+        if (!forgot) ++i;
     }
 }
 
@@ -942,7 +984,7 @@ bool Device::WorldCamera() const
 
 bool Device::ShadowReceiver(uint32_t fvf) const
 {
-    if (m_drawIsLabel || !WorldCamera() || !m_shadows || !ShadingOn() || m_target != m_main || (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZ ||
+    if (m_drawIsLabel || m_drawingPortal || !WorldCamera() || !m_shadows || !ShadingOn() || m_target != m_main || (fvf & d3d::FVF_POSITION_MASK) != d3d::FVF_XYZ ||
         !m_rs[d3d::RS_ZENABLE] || VisualKind(m_drawVisualKind) == VisualKind::Sky)   // the sky: no shadows on it
         return false;
     if (!m_rs[d3d::RS_ALPHABLENDENABLE])
@@ -1063,9 +1105,12 @@ void Device::CollectShadowItems()
         if (m_casterViews[i].count > m_casterViews[world].count) world = i;
     std::vector<uint64_t> staleKeys;
     std::vector<uint32_t> drawOf;                // per item: its draw number
+    const bool untraced = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();   // (the rays' casters marked)
     for (const ShadowCaster& c : m_casters) {
-        if (c.view != world)
+        if (c.view != world) {
+            ++m_casterOtherView;
             continue;
+        }
         bool ringData = !c.vb || c.ib == m_frames[m_frameIndex].ring;
         if (ringData && c.generation != m_ringGeneration) {   // the ring restarted since (mid-frame flush): overwritten
             staleKeys.push_back(c.key);          // drawn from the caster cache instead, if remembered
@@ -1091,6 +1136,7 @@ void Device::CollectShadowItems()
         it.owner = c.owner;
         it.kind = c.kind;
         it.leafKey = c.leafKey;
+        it.traced = untraced && RtTraced(c.rtPlace);
         std::memcpy(it.sway, c.sway, sizeof(it.sway));
         it.cacheKey = c.key;
         m_shadowItems.push_back(it);
@@ -1123,6 +1169,7 @@ void Device::CollectShadowItems()
         it.group = ~0u;
         it.kind = e.kind;
         it.leafKey = e.leafKey;
+        it.traced = untraced && RtTraced(e.rtPlace);
         std::memcpy(it.sway, e.plantSway, sizeof(it.sway));
         it.cacheKey = key;
         if (!e.itemKey || e.itemKeyTexture != it.texture) {   // (made again when its texture went: solid now)
@@ -1279,7 +1326,7 @@ void Device::BindShadowItem(VkCommandBuffer cmd, ShadowBind& bind, const ShadowI
     // Every caster binds a texture: the vertex shader may read it (sway.glsl); casters without one get a stand-in.
     Texture* texture = item.texture ? (item.texture->m_albedoMap && m_pbr.albedoMaps ? item.texture->m_albedoMap : item.texture) : m_blackTexture;
     if (texture != bind.texture) {
-        VkDescriptorImageInfo image{SamplerFor(0), texture->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo image{m_cutoutSampler, texture->m_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         w.dstBinding = 0;
         w.descriptorCount = 1;
@@ -1334,12 +1381,12 @@ void Device::ShadowCommand(VkCommandBuffer cmd, const ShadowItem& item, uint32_t
         c.indexCount = item.indexCount;
         c.instanceCount = 1;
         c.firstIndex = (item.buffer && !item.ibBuffer) ? 0 : uint32_t(item.ibOffset / 2);
-        c.vertexOffset = int32_t(item.vbOffset / item.stride);
+        c.vertexOffset = int32_t(uint32_t(item.vbOffset) / item.stride);   // (32-bit: a 64-bit division is a call)
         c.firstInstance = recordIndex;
     } else {
         c.indexCount = item.vertexCount;
         c.instanceCount = 1;
-        c.firstIndex = uint32_t(item.vbOffset / item.stride);
+        c.firstIndex = uint32_t(item.vbOffset) / item.stride;
         c.vertexOffset = int32_t(recordIndex);    // VkDrawIndirectCommand.firstInstance is at offset 12
         c.firstInstance = 0;
     }
@@ -1485,6 +1532,7 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     const bool moon = !haveSun && !lowSun && MoonOn();
     const float* lightDir = haveSun || lowSun ? m_sunDir : m_moonDir;
     m_shadowValid = false;
+    m_shadowUntraced = false;
     m_shadowItemsCount = m_shadowStaticItems = m_shadowAnimatedItems = 0;
     m_shadowDrawn = m_shadowCulled = m_shadowStaticDrawn = m_shadowAnimatedDrawn = 0;
     m_shadowCollectMs = m_shadowCullMs = m_shadowDrawMs = 0.0;
@@ -1511,7 +1559,11 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
         if (m_casterViews[i].count > m_casterViews[world].count) world = i;
     float eye[3], forward[3];
     m_frameViewProjValid = !m_casterViews.empty();
+    m_casterOtherView = 0;
+    m_shadowProjChanged = false;
     if (m_frameViewProjValid) {
+        m_shadowProjBefore = m_shadowWorldProj;
+        m_shadowProjChanged = std::memcmp(&m_shadowWorldProj, &m_casterViews[world].proj, sizeof(d3d::Matrix)) != 0;
         const auto& v = m_casterViews[world].view.m;
         for (int i = 0; i < 3; ++i) {
             eye[i] = -(v[3][0] * v[i][0] + v[3][1] * v[i][1] + v[3][2] * v[i][2]);
@@ -1554,6 +1606,12 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     uint32_t count = m_shadowCascades;
     if (count != m_cascadeCount)                 // cascades changed: draw them all this frame
         sunMoved = true;
+    // ... and so after a frame without the map (none drawn: what it holds is from before), on a new map (its contents
+    // undefined), and when the rays' layers come or go (they hold nothing yet).
+    const bool untracedNow = m_shadowLayerCount > kUntracedLayer && RtShadowWanted();
+    if (m_cascadeDrawnFrame + 1 != m_frameNumber || m_shadowImageLayout == VK_IMAGE_LAYOUT_UNDEFINED ||
+        untracedNow != m_cascadeUntraced)
+        sunMoved = true;
 
     ImageBarrier(cmd, m_shadowImage, VK_IMAGE_ASPECT_DEPTH_BIT, m_shadowImageLayout,
                  VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
@@ -1564,14 +1622,38 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
     m_cachedCastersDrawn = 0;
     ++m_cascadeFrame;
     BindShadowRecords(cmd);
+    // RVK_RtShadow: each cascade again with only the casters the rays lack (kUntracedLayer + c), for the pixels the
+    // rays' mask covers - its shadows times theirs (the others take the whole map, as without).
+    const bool untraced = untracedNow;
+    std::vector<uint32_t> traceless;
+    static const bool everyFrame = [] { const char* v = std::getenv("RANDYVK_CASCADE_TURNS"); return v && *v == '0'; }();
     for (uint32_t c = 0; c < count; ++c) {
-        // The two widest cascades take turns (their shadows are far away, a frame's lag doesn't show).
-        bool alternate = count >= 3 && c >= count - 2;
-        if (alternate && !sunMoved && ((m_cascadeFrame & 1) != ((count - 1 - c) & 1)))
-            continue;
         float range = m_shadowRange / std::pow(3.0f, float(count - 1 - c));   // half the cascade's width
+        // Beyond the nearest, the cascades take turns: of four, the second every other frame and the two widest every
+        // fourth (of three, the two widest every other) - their shadows are further off, where a frame or three's
+        // lag of a moving caster doesn't show, and each is read with the matrix it was drawn with, so still things'
+        // shadows stay exact. Any whose centre has moved a good way across since it was drawn (the eye moving, or turning)
+        // is drawn again.
+        // RANDYVK_CASCADE_TURNS=0: every cascade every frame (comparisons).
         float center[3];
         for (int i = 0; i < 3; ++i) center[i] = eye[i] + forward[i] * range * 0.4f;
+        bool turn = true;
+        if (!sunMoved && !everyFrame && c > 0) {
+            if (count >= 4 && c == count - 3)
+                turn = (m_cascadeFrame & 1) == 0;
+            else if (count >= 4 && c >= count - 2)
+                turn = (m_cascadeFrame & 3) == (c == count - 2 ? 1u : 3u);
+            else if (count == 3)
+                turn = (m_cascadeFrame & 1) != ((count - 1 - c) & 1);
+            if (!turn) {                         // (its centre: where the eye is and which way it looks)
+                float moved2 = 0.0f;
+                for (int i = 0; i < 3; ++i) moved2 += (center[i] - m_cascadeCenter[c][i]) * (center[i] - m_cascadeCenter[c][i]);
+                turn = moved2 > (0.05f * range) * (0.05f * range);
+            }
+        }
+        if (!turn)
+            continue;
+        std::memcpy(m_cascadeCenter[c], center, sizeof(center));
         float texel = 2.0f * range / float(m_shadowSize);
         float cx = std::round(Dot(x, center) / texel) * texel, cy = std::round(Dot(y, center) / texel) * texel;
         float cz = Dot(z, center);
@@ -1647,9 +1729,27 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
         }
         FlushShadowGroup(cmd);                   // the cascade's last batch (M4)
         DrawLeafShadows(cmd);                    // the canopies' leaves (leaves.cpp)
+        vkCmdEndRendering(cmd);
+        if (untraced) {
+            traceless.clear();
+            for (uint32_t i : m_cascadeVisible)
+                if (!m_shadowItems[i].traced) traceless.push_back(i);
+            depthAtt.imageView = m_shadowLayerViews[kUntracedLayer + c];
+            vkCmdBeginRendering(cmd, &ri);
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            vkCmdSetDepthBias(cmd, 2.0f * 600.0f / depth, 0.0f, 2.5f);
+            ShadowPassMatrix(cmd, lightViewProj);
+            ShadowBind untracedBind;
+            for (uint32_t i : traceless) DrawShadowItem(cmd, untracedBind, m_shadowItems[i]);
+            FlushShadowGroup(cmd);
+            std::swap(m_cascadeVisible, traceless);   // (the leaves: of these)
+            DrawLeafShadows(cmd);
+            std::swap(m_cascadeVisible, traceless);
+            vkCmdEndRendering(cmd);
+        }
         m_shadowDrawMs += ProfileCpu() - drawStart;
         ProfileCpuAdd("shadow draw", drawStart);
-        vkCmdEndRendering(cmd);
         m_cascadeViewProj[c] = lightViewProj;
         m_cascadeTexel[c] = texel;
         m_cascadeDepth[c] = 2.0f * depth;
@@ -1683,10 +1783,13 @@ void Device::RenderShadowMap(VkCommandBuffer cmd)
                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
     m_shadowImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     m_cascadeCount = count;
+    m_cascadeDrawnFrame = m_frameNumber;
+    m_cascadeUntraced = untraced;
     std::memcpy(m_shadowSunDir, lightDir, sizeof(m_shadowSunDir));
     for (int i = 0; i < 3; ++i) m_shadowSunColor[i] = haveSun ? m_frameSunColor[i] : 0.0f;   // (the moon: FrameLights moon)
     m_shadowIsMoon = !haveSun;
     m_shadowValid = true;
+    m_shadowUntraced = untraced;
 }
 
 // After all shadow passes of the frame.

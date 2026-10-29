@@ -101,6 +101,9 @@ void Device::BeginSkinFrame()
         VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bi.size = m_skinArenaWanted;
         bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        if (m_rayQuery)                          // (the ray tracing's characters are built from it: raytrace.cpp)
+            bi.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
         VmaAllocationCreateInfo ac{};
         ac.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
         if (vmaCreateBuffer(m_allocator, &bi, &ac, &f.skinArena, &f.skinArenaAllocation, nullptr) == VK_SUCCESS) {
@@ -177,6 +180,9 @@ Device::SkinMesh* Device::SkinMeshFor(const std::shared_ptr<const skin::Source>&
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = bytes;
     bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (m_rayQuery)                              // (its indices: the ray tracing's characters - raytrace.cpp)
+        bi.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     VmaAllocationCreateInfo ac{};
     ac.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     if (vmaCreateBuffer(m_allocator, &bi, &ac, &m.buffer, &m.allocation, nullptr) != VK_SUCCESS) {

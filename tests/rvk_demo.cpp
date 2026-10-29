@@ -7,8 +7,11 @@
 #include "rvk.h"
 #include "threaded.h"
 #include "material_maps.h"
+#include "portal_file.h"
 
 #include <chrono>
+#include <memory>
+#include <utility>
 #include <thread>
 #include <cmath>
 #include <cstdio>
@@ -1278,6 +1281,8 @@ bool g_grassBenchWalker = false;  // --grass-bench-walker: a "character" walking
 bool g_grassBenchCross = false;   // --grass-bench-cross: ... crossing the view from left to right over the run (with
                                   // --grass-bench-still: the trail it leaves lies across the screenshot)
 bool g_grassBenchLamp = false;    // --grass-bench-lamp: a lamp just over the grass ahead (point light shadows)
+float g_spotDegrees = 0.0f;       // --point-shadow-spot DEG: the point shadow test's lamp a spot light looking down
+                                  // (with --grass-bench-lamp: a floodlight high over the grass, its cone DEG across)
 bool g_grassBenchNight = false;   // --grass-bench-night: a dim lightmap and ambient, a faint bluish moon
 float g_sunDir[3] = {}, g_sunColour[3] = {};   // --sun-dir X Y Z, --sun-colour R G B: the water scenes' and the grass
 bool g_sunDirSet = false, g_sunColourSet = false;   // bench's sun
@@ -1312,6 +1317,10 @@ bool g_terrainPbr = false;        // --terrain-pbr: the bench's ground texture g
                                   // rough grass), per-pixel lighting, no grass field: the ground's PBR (MAT_BASE) path
 int g_grassBenchFilm = 0;         // --grass-bench-film N: ~60 frames a second, a screenshot every N (film_NNN.bmp)
 float g_grassBenchRise = 0.0f;    // --grass-bench-rise H: the camera H units higher
+float g_grassBenchLampAt = 3.0f; // --grass-bench-lamp-at D: the lamp D units ahead (5: behind the walker, which then
+                                  // shades the grass between it and the camera)
+float g_grassBenchBack = 0.0f;    // --grass-bench-back D: the camera D units back along its view (zoomed out: the
+                                  // walker, the target and the grass round them stay where they are)
 int g_grassBenchZoomAt = 0;        // --grass-bench-zoom F H: from frame F the camera H units higher instead
 float g_grassBenchZoomRise = 0.0f;
 float g_grassBenchPitch = -1.0f;  // --grass-bench-pitch R: the camera looking R radians down, raised to match (top-down)
@@ -1821,7 +1830,62 @@ float g_groundFog = 0.0f;           // --ground-fog END: the native ground scene
                                     // Newland Desert: 1276), its colour the desert's, our sky over it; 0 none
 float g_heatShimmer = 0.5f;         // --heat-shimmer X: RVK_HeatShimmer
 bool g_tileOrm = false;             // --tile-orm: every other tile a shiny material map (PBR, pixel lighting on)
+bool g_statelSkinned = false;   // (--statel-skinned: also the native ground's, RunGroundFile)
+int g_shotRun = 0;   // --shot-run K: the last K frames each saved (<shot>-0.bmp ...), to see what changes frame to frame
+
+// A stand-in character skinned on the GPU (--statel-skinned): an 8-sided column 1.8 high on one bone.
+std::shared_ptr<rvk::skin::Source> MakeColumn()
+{
+    auto column = std::make_shared<rvk::skin::Source>();
+    for (int k = 0; k < 8; ++k)
+        for (int e = 0; e < 2; ++e) {
+            const float a = float(k) * kPi / 4.0f, cx = 0.4f * std::cos(a), cz = 0.4f * std::sin(a), cy = e ? 1.8f : 0.0f;
+            rvk::skin::TriVertex v{};
+            v.posA[0] = v.posB[0] = v.bind[0] = cx;
+            v.posA[1] = v.posB[1] = v.bind[1] = cy;
+            v.posA[2] = v.posB[2] = v.bind[2] = cz;
+            v.normal[0] = std::cos(a);
+            v.normal[2] = std::sin(a);
+            v.boneA = v.boneB = 0;
+            v.weightA = 1.0f;
+            column->vertices.push_back(v);
+        }
+    for (int k = 0; k < 8; ++k) {
+        const uint16_t a = uint16_t(2 * k), b = uint16_t(2 * ((k + 1) % 8));
+        const uint16_t q[6] = {a, uint16_t(a + 1), b, b, uint16_t(a + 1), uint16_t(b + 1)};
+        column->indices.insert(column->indices.end(), q, q + 6);
+    }
+    column->Finish();
+    column->gameIndices = column->indices.data();
+    return column;
+}
+
+// The column standing at (x, y, z) this frame: a new job, as the game makes one each frame it skins a character.
+template <typename D>
+void DrawColumn(D& dev, const std::shared_ptr<rvk::skin::Source>& column, float x, float y, float z, uint32_t owner)
+{
+    if constexpr (requires { dev.DrawSkinned(0u, 0u, std::declval<rvk::skin::Job&>(), 0u, 0u, nullptr, 0u); }) {
+        rvk::skin::Bone bone{{1, 0, 0, 0, 1, 0, 0, 0, 1, x, y, z}};
+        auto palette = std::make_shared<rvk::skin::Palette>();
+        palette->Set(&bone, 1);
+        rvk::skin::Job job;
+        job.source = column;
+        job.bones = palette;
+        job.ComputeBounds();
+        dev.SetTexture(0, nullptr);
+        dev.SetDrawVisual(uint32_t(VisualKind::Character), "column", owner);
+        dev.DrawSkinned(TriangleList, rvk::skin::kVertexFvf, job, 0, uint32_t(column->vertices.size()),
+                        column->indices.data(), uint32_t(column->indices.size()));
+        dev.SetDrawVisual(0, nullptr);
+    }
+}
+
 float g_eye[3] = {1355.87f, 42.36f, 2861.39f}, g_viewYaw = 1.5708f, g_viewPitch = 0.15f;
+uint32_t g_tileSwap[3] = {};   // --tile-swap N A B (RunGroundFile)
+float g_walkFrom[3] = {};   // --walk-from X Z N: the eye walks in a straight line from (X, Z) to --eye over the first N
+                            // frames (the grass's tiles coming and going as in game), then stays
+int g_lookRound = 0;   // --look-round N: the camera turns once round, level, over the first N frames (the environment
+                       // probe sees all round: RVK_RtReflect's hits off the screen), then the given view
 template <typename D>
 void RunGroundFile(D& dev, int frames, const std::string& shot)
 {
@@ -1857,19 +1921,21 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     std::memcpy(ground->codes.data(), d.data() + p, nc * 2);
     p += nc * 2;
     const uint32_t tiles = u32();
+    std::vector<maps::MipChain> chains(tiles);
     for (uint32_t t = 0; t < tiles; ++t) {
         const uint32_t n = u32();
         maps::Image img;
         std::string error;
-        Texture* tex = nullptr;
-        if (n && maps::LoadImageFromMemory(d.data() + p, n, &img, &error)) {
-            maps::MipChain chain;
-            maps::MakeAlbedoChain(img, &chain);
-            tex = maps::Upload(dev, chain);
-        }
-        ground->tiles.push_back(tex);
+        if (n && maps::LoadImageFromMemory(d.data() + p, n, &img, &error))
+            maps::MakeAlbedoChain(img, &chains[t]);
         p += n;
     }
+    // (--tile-swap N A B: tile A shows tile B's picture until frame N, then its own - as the game fills a ground
+    // texture again after the grass first saw it.)
+    const bool swap = g_tileSwap[0] > 0 && g_tileSwap[1] < tiles && g_tileSwap[2] < tiles &&
+                      chains[g_tileSwap[1]].w == chains[g_tileSwap[2]].w && chains[g_tileSwap[1]].h == chains[g_tileSwap[2]].h;
+    for (uint32_t t = 0; t < tiles; ++t)
+        ground->tiles.push_back(maps::Upload(dev, chains[swap && t == g_tileSwap[1] ? g_tileSwap[2] : t]));
     if (g_tileOrm) {
         const std::vector<uint32_t> shiny(16, 0xFFFF3000u);   // (occlusion 1, roughness 0.19, metal 0)
         for (size_t t = 0; t < ground->tiles.size(); t += 2)
@@ -1919,7 +1985,33 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
     const uint32_t kFvfTerrain = FVF_XYZ | FVF_NORMAL | (2 << 8);
     const VtxTerrain standIn[3] = {{0, -1000, 0, 0, 1, 0, 0, 0, 0, 0}, {1, -1000, 0, 0, 1, 0, 1, 0, 1, 0},
                                    {0, -1000, 1, 0, 1, 0, 0, 1, 0, 1}};
+    // (--statel-skinned: two stand-in characters 8 units ahead of the eye on the ground, one still, one walking a
+    // circle - what AMD's indirect light makes of characters, which its model of the world lacks.)
+    auto column = MakeColumn();
+    auto groundY = [&](float x, float z) {
+        const float fc = std::clamp(x / ground->cellX, 0.0f, float(ground->cellsX) - 0.001f);
+        const float fr = std::clamp(z / ground->cellZ, 0.0f, float(ground->cellsZ) - 0.001f);
+        const uint32_t c = uint32_t(fc), r = uint32_t(fr), w = ground->cellsX + 1;
+        const float u = fc - float(c), v = fr - float(r);
+        const float* h = ground->heights.data();
+        return (h[r * w + c] * (1 - u) + h[r * w + c + 1] * u) * (1 - v) + (h[(r + 1) * w + c] * (1 - u) + h[(r + 1) * w + c + 1] * u) * v;
+    };
     for (int frame = 0; frame < frames; ++frame) {
+        if (swap && frame == int(g_tileSwap[0]) && ground->tiles[g_tileSwap[1]]) {
+            const maps::MipChain& own = chains[g_tileSwap[1]];
+            uint32_t w = own.w, h = own.h;
+            for (uint32_t level = 0; level < own.levels.size(); ++level) {
+                dev.UpdateTexture(ground->tiles[g_tileSwap[1]], level, 0, 0, w, h, own.levels[level].data(), w * 4);
+                w = std::max(w / 2, 1u);
+                h = std::max(h / 2, 1u);
+            }
+            std::printf("tile %u: its own picture from frame %d\n", g_tileSwap[1], frame);
+        }
+        if (g_shotRun > 0 && frame >= frames - g_shotRun) {
+            std::string name = shot;
+            name.insert(name.size() - 4, "-" + std::to_string(frame - (frames - g_shotRun)));
+            dev.RequestScreenshot(name);
+        }
         if (g_grassFieldOn && g_grassLate > 0 && frame == g_grassLate)   // (--grass-late N: switched on at frame N,
             dev.SetGrassField(true, g_grassFieldDist, 5.0f, 0.5f, true); // as after zoning: its tiles come later)
         // (The last 300 frames' GPU and CPU times logged - "ground bench:" - once the rocks and pebbles are made.)
@@ -1953,9 +2045,14 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
             std::memcpy(&bits, &fogStart, 4); dev.SetRenderState(RS_FOGSTART, bits);
             std::memcpy(&bits, &fogEnd, 4); dev.SetRenderState(RS_FOGEND, bits);
         }
-        const Vector eye{g_eye[0], g_eye[1], g_eye[2]};
-        const Vector at{eye.x + std::cos(g_viewYaw) * std::cos(g_viewPitch), eye.y - std::sin(g_viewPitch),
-                        eye.z + std::sin(g_viewYaw) * std::cos(g_viewPitch)};
+        const float walk = g_walkFrom[2] > 0.0f ? std::min(float(frame) / g_walkFrom[2], 1.0f) : 1.0f;
+        const Vector eye{g_walkFrom[0] + (g_eye[0] - g_walkFrom[0]) * walk, g_eye[1],
+                         g_walkFrom[1] + (g_eye[2] - g_walkFrom[1]) * walk};
+        const bool round = frame < g_lookRound;
+        const float yaw = round ? g_viewYaw + 2.0f * kPi * float(frame) / float(g_lookRound) : g_viewYaw;
+        const float pitch = round ? 0.05f : g_viewPitch;
+        const Vector at{eye.x + std::cos(yaw) * std::cos(pitch), eye.y - std::sin(pitch),
+                        eye.z + std::sin(yaw) * std::cos(pitch)};
         dev.SetTransform(View, LookAtLH(eye, at, {0, 1, 0}));
         dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.5f, 2000.0f));
         dev.SetTransform(World, Identity());
@@ -2049,6 +2146,16 @@ void RunGroundFile(D& dev, int frames, const std::string& shot)
         dev.SetMaterial(mat);
         dev.SetDrawVisual(0, nullptr);
         dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+        if (g_statelSkinned) {
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            const float ax = g_eye[0] + 8.0f * std::cos(g_viewYaw), az = g_eye[2] + 8.0f * std::sin(g_viewYaw);
+            DrawColumn(dev, column, ax - 1.5f, groundY(ax - 1.5f, az), az, 7);
+            const float t = float(frame) * 2.0f * kPi / 240.0f;
+            const float wx = ax + 1.5f + std::cos(t), wz = az + std::sin(t);
+            DrawColumn(dev, column, wx, groundY(wx, wz), wz, 8);
+        }
         dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
         dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
         dev.EndFrame();
@@ -2177,7 +2284,10 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
         const float rise = g_grassBenchZoomAt > 0 && frame >= g_grassBenchZoomAt ? g_grassBenchZoomRise : g_grassBenchRise;
         const float ey = height(ex, ez) + 1.0f + 6.0f * std::sin(pitch) + rise;
         const float fwd = 6.0f * std::cos(pitch);
-        dev.SetTransform(View, LookAtLH({ex, ey, ez}, {ex + fwd * std::cos(yaw), ey - 6.0f * std::sin(pitch), ez + fwd * std::sin(yaw)},
+        const float bx = -g_grassBenchBack * std::cos(pitch) * std::cos(yaw), bz = -g_grassBenchBack * std::cos(pitch) * std::sin(yaw);
+        const float by = g_grassBenchBack * std::sin(pitch);
+        dev.SetTransform(View, LookAtLH({ex + bx, ey + by, ez + bz},
+                                        {ex + fwd * std::cos(yaw), ey - 6.0f * std::sin(pitch), ez + fwd * std::sin(yaw)},
                                         {0, 1, 0}));
         dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.3f, 300.0f));
         dev.SetTransform(World, Identity());
@@ -2209,7 +2319,8 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         if (g_grassBenchLamp) {    // a warm lamp just over the grass, 3 units ahead, a little left (its shadows in view)
-            const float lx = ex + 3.0f * std::cos(yaw) + 0.8f * std::sin(yaw), lz = ez + 3.0f * std::sin(yaw) - 0.8f * std::cos(yaw);
+            const float at = g_grassBenchLampAt, off = at == 3.0f ? 0.8f : 0.0f;   // (behind the walker: in line)
+            const float lx = ex + at * std::cos(yaw) + off * std::sin(yaw), lz = ez + at * std::sin(yaw) - off * std::cos(yaw);
             Light lamp{};
             lamp.type = LIGHT_POINT;
             lamp.diffuse = {1.6f, 1.1f, 0.6f, 1};
@@ -2217,6 +2328,18 @@ void RunGrassBench(D& dev, int frames, const std::string& shot)
             lamp.range = 8;
             lamp.attenuation0 = 0.3f;
             lamp.attenuation1 = 0.2f;
+            if (g_spotDegrees > 0.0f) {        // a floodlight, as over Borealis's bridges: high, far-reaching, down
+                lamp.type = LIGHT_SPOT;
+                lamp.direction = {0.05f, -1.0f, 0.03f};
+                lamp.phi = g_spotDegrees * kPi / 180.0f;
+                lamp.theta = 0.7f * lamp.phi;
+                lamp.falloff = 1.0f;
+                lamp.position.y += 12.0f;
+                lamp.range = 1041.0f;
+                lamp.attenuation0 = 0.2f;
+                lamp.attenuation1 = 0.0f;
+                lamp.attenuation2 = 0.0009f;
+            }
             dev.SetLight(1, lamp);
             dev.LightEnable(1, true);
         }
@@ -2375,6 +2498,8 @@ bool g_cityNoGrass = false;       // --city-no-grass: without the ground grass (
 bool g_cityNoCull = false;        // --city-no-cull: every object drawn every frame (the game draws what is in view)
 std::string g_cityStatels;        // --city-statels PACK: playfield 790's placed objects (their shadows), the scene moved
                                   // to West Bank's city (1380, 0, 2950) where they stand
+int g_cityMovers = 0;             // --city-movers N: the first N objects sway to and fro a little each frame (moving
+                                  // pieces of meshes placed many times: placements.h's young places)
 int g_cityLamps = 0;              // --city-lamps N: N lamps more (a lamp-lit outpost has ~90), set each frame as the game
                                   // sets lights, and handed over as its scene lights: on a jittered grid, 3 to 6 units
                                   // up, ranges 12-28 (the frame lights' per-pixel cost, docs/render-perf-plan.md)
@@ -2737,6 +2862,19 @@ void RunCityBench(D& dev, int frames, const std::string& shot, const std::string
                     l.range = 12.0f + 16.0f * Rand(uint32_t(i), 46);
                     l.attenuation0 = 1.0f;
                     l.attenuation1 = 0.1f;
+                    if (g_spotDegrees > 0.0f && i < 3) {   // --point-shadow-spot DEG: three floodlights, as Borealis's
+                        l.type = LIGHT_SPOT;
+                        l.diffuse = {1, 1, 1, 1};
+                        l.position.y = 16.0f;
+                        l.direction = {0.03f, -1.0f, 0.02f};
+                        l.phi = g_spotDegrees * kPi / 180.0f;
+                        l.theta = 0.7f * l.phi;
+                        l.falloff = 1.0f;
+                        l.range = 1041.0f;
+                        l.attenuation0 = 0.2f;
+                        l.attenuation1 = 0.0f;
+                        l.attenuation2 = 0.00009f;
+                    }
                     lamps.push_back({l, 0});
                 }
             }
@@ -2813,7 +2951,13 @@ void RunCityBench(D& dev, int frames, const std::string& shot, const std::string
                 ++draws;
             }
         };
-        for (const Object& o : objects) if (inView(o)) drawObject(o);
+        for (size_t i = 0; i < objects.size(); ++i) {
+            if (!inView(objects[i])) continue;
+            if (int(i) >= g_cityMovers) { drawObject(objects[i]); continue; }
+            Object o = objects[i];
+            o.x += 1.5f * std::sin(float(frame) * 0.05f + float(i));
+            drawObject(o);
+        }
         for (const Object& o : panes) if (inView(o)) drawObject(o);
         dev.SetRenderState(RS_ZWRITEENABLE, 1);
         dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
@@ -2858,6 +3002,17 @@ float g_waterWaves = 1.0f;        // --water-waves W
 int g_waterQuality = 2;           // --water-quality 1..3
 bool g_waterOff = false;          // --water-off: the game's way instead (no DrawWater: a flat blended quad)
 bool g_waterNight = false;        // --water-night
+// --game-day (the water scenes): the game's own light by the sun's height, as its dusk log has it - the hour's lightmap
+// from the day's ~0.72 grey down to the night's dark blue 303040 between ~6 degrees up and ~3 under, its ambient from
+// 0.37 to 0.29, its directional light white at every height (pointing up once the sun is under: the game's night
+// light). Without it the sweep kept the day's lightmap and ambient and only dimmed the sun: no real night to measure.
+bool g_gameDay = false;
+// --rig-props: a static (RTriMesh_t, lit, textured with the ground's own texture) on dry ground near the camera, and
+// rig-props.txt beside the shots with the screen rects of its front face, its top and a patch of ground beside it:
+// the same albedo, so their brightness ratio is the lighting's (tools/sun-sweep.py: statics vs ground).
+bool g_rigProps = false;
+// --indoor: a room's playfield - no directional light at all (the renderer sees no sun), a dim ambient, two lamps.
+bool g_indoor = false;
 float g_waterZ = -1e6f;           // --water-z Z: the camera's z (default per scene)
 bool g_waterNoPrepass = false;    // --water-noprepass
 bool g_hudSprite = false;         // --hud-sprite: after the 3D, a screen sprite as the game's timer bars draw it (the
@@ -2914,6 +3069,7 @@ bool g_waterWalker = false;       // --water-walker: a "character" standing in t
                                   // bobbing along: the surface ripples around it (RVK_WaterSwim)
 bool g_waterJump = false;         // --water-jump: the walker jumps out of the water and lands (RVK_WakeSplash)
 float g_waterSwim = 1.0f;         // --water-swim S: strength of those ripples (RVK_WaterSwim)
+bool g_waterGrid = false;        // --water-grid: the older water surface (a grid over the water map; RVK_WaterMesh off)
 std::string g_waterMesh;          // --water-mesh FILE: the water mesh from a dump of the game's (count, index count, the
                                   // vertices as Device::WaterVertex, the 16-bit indices), the part within 150 units of
                                   // --water-mesh-at X Y Z moved to the lake's far side (that point to 0 0 60)
@@ -3054,6 +3210,19 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
     Texture* ground = dev.CreateTexture(64, 64, groundPixels.data());
     std::vector<uint32_t> lightmapPixels(64 * 64, g_waterNight ? 0xFF303040u : 0xFFB8B8B8u);
     Texture* lightmap = dev.CreateTexture(64, 64, lightmapPixels.data());
+    // --game-day: the hour's lightmap by the sun's height (gameDayW: 0 night .. 1 day), 16 steps of it.
+    auto gameDayW = [](float hs) {
+        const float t = std::clamp((hs + 0.05f) / 0.15f, 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    };
+    Texture* dayLightmaps[16] = {};
+    if (g_gameDay)
+        for (int k = 0; k < 16; ++k) {
+            const float w = float(k) / 15.0f;
+            const uint32_t rg = uint32_t(0x30 + (0xB8 - 0x30) * w + 0.5f), b = uint32_t(0x40 + (0xB8 - 0x40) * w + 0.5f);
+            std::vector<uint32_t> px(64 * 64, 0xFF000000u | rg << 16 | rg << 8 | b);
+            dayLightmaps[k] = dev.CreateTexture(64, 64, px.data());
+        }
     // The game's water texture stand-in (water5.png: a pale blue mottled pattern).
     std::vector<uint32_t> waterPixels(64 * 64);
     for (int y = 0; y < 64; ++y)
@@ -3131,6 +3300,28 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         box(25.0f, -2.0f, 70.0f, 8.0f, 6.0f, 3.0f, 0xFF606060);
         box(-6.0f, 1.2f, 15.0f, 1.0f, 1.0f, 1.0f, 0xFFC04030);                                         // a red crate
     }
+    // --rig-props: a static box on the dry slope 11 units ahead, a little left (its shadow falls to +x, away from the
+    // ground patch measured on its left), textured with the ground's texture at the same scale (world units / 6).
+    std::vector<VtxMesh> rigBox;
+    const float rigC[3] = {-4.0f, height(-4.0f, -14.0f) + 1.25f, -14.0f}, rigE[3] = {1.5f, 1.25f, 0.75f};
+    if (g_rigProps)
+        for (int axis = 0; axis < 3; ++axis)
+            for (int sign = -1; sign <= 1; sign += 2) {
+                const int a = (axis + 1) % 3, b = (axis + 2) % 3;
+                float n[3] = {0, 0, 0};
+                n[axis] = float(sign);
+                auto corner = [&](float ua, float ub) {
+                    float p[3];
+                    p[axis] = rigC[axis] + float(sign) * rigE[axis];
+                    p[a] = rigC[a] + ua * rigE[a];
+                    p[b] = rigC[b] + ub * rigE[b];
+                    // (u, v across the face: x / z on the top, x or z with y on the sides)
+                    const float u = axis == 0 ? p[2] : p[0], v = axis == 1 ? p[2] : p[1];
+                    return VtxMesh{p[0], p[1], p[2], n[0], n[1], n[2], 0xFFFFFFFFu, u / 6.0f, v / 6.0f};
+                };
+                VtxMesh q[6] = {corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, -1), corner(1, 1), corner(-1, 1)};
+                rigBox.insert(rigBox.end(), q, q + 6);
+            }
     // The water, as the game has it: big flat triangles (the lake one square; the sea out to the horizon).
     const uint32_t tint = 0xCC00186A;
     std::vector<Device::WaterVertex> water;
@@ -3207,6 +3398,7 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
     wp.waves = g_waterWaves;
     wp.swimRipples = g_waterSwim;
     wp.quality = uint32_t(g_waterQuality);
+    wp.mesh = !g_waterGrid;
     dev.SetWaterParams(wp);
     if (g_waterNoPrepass)
         dev.SetKnob(rvk::Knob::Prepass, false);
@@ -3286,11 +3478,37 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};
         if (g_sweepSteps > 0) sun.direction = {sweepDir[0], sweepDir[1], sweepDir[2]};
         if (g_sunColourSet) sun.diffuse = {g_sunColour[0], g_sunColour[1], g_sunColour[2], 1};
-        if (g_sweepSteps > 0)
+        if (g_gameDay)
+            sun.diffuse = {1, 1, 1, 1};                  // (the game's: white at every height, the dusk log)
+        else if (g_sweepSteps > 0)
             sun.diffuse = {sun.diffuse.r * std::max(sweepDim, 0.15f), sun.diffuse.g * std::max(sweepDim, 0.2f),
                            sun.diffuse.b * std::max(sweepDim, 0.3f), 1};
         dev.SetLight(0, sun);
-        dev.LightEnable(0, true);
+        dev.LightEnable(0, !g_indoor);
+        // The sun's height as the game's light has it (the sine of its elevation: under the horizon, negative).
+        const float sunLen = std::max(std::sqrt(sun.direction.x * sun.direction.x + sun.direction.y * sun.direction.y +
+                                                sun.direction.z * sun.direction.z), 1e-6f);
+        const float sunHs = -sun.direction.y / sunLen, dayW = gameDayW(sunHs);
+        uint32_t ambient = g_waterNight ? 0xFF181C28u : 0xFF606468u;
+        if (g_gameDay) {
+            const float t = std::clamp((sunHs + 0.3f) / 0.6f, 0.0f, 1.0f);
+            const uint32_t a = uint32_t(255.0f * (0.29f + 0.08f * t * t * (3.0f - 2.0f * t)) + 0.5f);
+            ambient = 0xFF000000u | a << 16 | a << 8 | a;
+        }
+        if (g_indoor) {
+            ambient = 0xFF404040u;
+            for (int k = 0; k < 2; ++k) {
+                Light lamp{};
+                lamp.type = LIGHT_POINT;
+                lamp.diffuse = {1.0f, 0.85f, 0.6f, 1};
+                lamp.position = {eye.x + (k ? 5.0f : -5.0f), eye.y + 1.0f, eye.z + 10.0f};
+                lamp.range = 25.0f;
+                lamp.attenuation0 = 0.4f;
+                lamp.attenuation1 = 0.08f;
+                dev.SetLight(2 + k, lamp);
+                dev.LightEnable(2 + k, true);
+            }
+        }
         if (g_waterLamp) {
             Light lamp{};
             lamp.type = LIGHT_POINT;
@@ -3374,12 +3592,12 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
             dev.DrawPrimitive(TriangleList, kFvfTerrain, terrain.data() + at,
                               uint32_t(std::min<size_t>(kChunkVerts, terrain.size() - at)));
         dev.SetRenderState(RS_LIGHTING, 1);
-        dev.SetRenderState(RS_AMBIENT, g_waterNight ? 0xFF181C28 : 0xFF606468);
+        dev.SetRenderState(RS_AMBIENT, ambient);
         dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
         dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
         dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
         dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
-        dev.SetTexture(0, lightmap);
+        dev.SetTexture(0, g_gameDay ? dayLightmaps[std::clamp(int(dayW * 15.0f + 0.5f), 0, 15)] : lightmap);
         dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
         for (size_t at = 0; at < terrain.size(); at += kChunkVerts)
@@ -3396,6 +3614,65 @@ void RunWaterScene(D& dev, int frames, const std::string& shot)
         dev.SetTexture(0, nullptr);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
         dev.DrawPrimitive(TriangleList, kFvfMesh, props.data(), uint32_t(props.size()));
+        if (g_rigProps) {
+            // Lit as the game's statics: white material, texture x lit colour (stage 0 MODULATE), a static visual.
+            dev.SetRenderState(RS_COLORVERTEX, 0);
+            dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_MATERIAL);
+            dev.SetRenderState(RS_AMBIENTMATERIALSOURCE, MCS_MATERIAL);
+            dev.SetMaterial(mat);
+            dev.SetTexture(0, ground);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t", 0, 0x2000u);
+            dev.DrawPrimitive(TriangleList, kFvfMesh, rigBox.data(), uint32_t(rigBox.size()));
+            dev.SetDrawVisual(0, nullptr);
+            dev.SetTexture(0, nullptr);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.SetRenderState(RS_COLORVERTEX, 1);
+            dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_COLOR1);
+            dev.SetRenderState(RS_AMBIENTMATERIALSOURCE, MCS_COLOR1);
+            if (frame == 0) {
+                // Where they are on the screen (0..1, x right, y down), each shrunk to its middle 60%.
+                const Matrix view = LookAtLH(eye, at, {0, 1, 0});
+                const Matrix proj = PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.3f, 2000.0f);
+                auto rect = [&](const float (*pts)[3], int count, float out[4]) {
+                    float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+                    for (int k = 0; k < count; ++k) {
+                        float v[4], c[4];
+                        for (int j = 0; j < 4; ++j)
+                            v[j] = pts[k][0] * view.m[0][j] + pts[k][1] * view.m[1][j] + pts[k][2] * view.m[2][j] + view.m[3][j];
+                        for (int j = 0; j < 4; ++j)
+                            c[j] = v[0] * proj.m[0][j] + v[1] * proj.m[1][j] + v[2] * proj.m[2][j] + v[3] * proj.m[3][j];
+                        const float sx = 0.5f * (c[0] / c[3] + 1.0f), sy = 0.5f * (1.0f - c[1] / c[3]);
+                        lo[0] = std::min(lo[0], sx); lo[1] = std::min(lo[1], sy);
+                        hi[0] = std::max(hi[0], sx); hi[1] = std::max(hi[1], sy);
+                    }
+                    for (int j = 0; j < 2; ++j) {
+                        const float m = 0.5f * (lo[j] + hi[j]), h = 0.3f * (hi[j] - lo[j]);
+                        out[j] = std::clamp(m - h, 0.0f, 1.0f);
+                        out[2 + j] = std::clamp(m + h, 0.0f, 1.0f);
+                    }
+                };
+                const float x0 = rigC[0] - rigE[0], x1 = rigC[0] + rigE[0], y0 = rigC[1] - rigE[1], y1 = rigC[1] + rigE[1];
+                const float z0 = rigC[2] - rigE[2], z1 = rigC[2] + rigE[2];
+                const float face[4][3] = {{x0, y0, z0}, {x1, y0, z0}, {x0, y1, z0}, {x1, y1, z0}};
+                const float top[4][3] = {{x0, y1, z0}, {x1, y1, z0}, {x0, y1, z1}, {x1, y1, z1}};
+                // (The ground just in front of it, nearer the camera: its shadow falls away from the camera.)
+                const float gx0 = rigC[0] - 0.5f, gx1 = rigC[0] + 1.5f, gz0 = z0 - 3.0f, gz1 = z0 - 1.0f;
+                const float patch[4][3] = {{gx0, height(gx0, gz0), gz0}, {gx1, height(gx1, gz0), gz0},
+                                           {gx0, height(gx0, gz1), gz1}, {gx1, height(gx1, gz1), gz1}};
+                float r[3][4];
+                rect(face, 4, r[0]);
+                rect(top, 4, r[1]);
+                rect(patch, 4, r[2]);
+                if (FILE* f = std::fopen("rig-props.txt", "w")) {
+                    const char* names[3] = {"face", "top", "ground"};
+                    for (int k = 0; k < 3; ++k)
+                        std::fprintf(f, "%s %.4f %.4f %.4f %.4f\n", names[k], double(r[k][0]), double(r[k][1]),
+                                     double(r[k][2]), double(r[k][3]));
+                    std::fclose(f);
+                }
+            }
+        }
         // A "character" swimming (--water-walker): a tall body in the lake, its feet under the surface, bobbing along.
         // Flagged a character (SetDrawVisual), so the renderer knows where it is - and ripples the water around it.
         if (g_waterWalker) {
@@ -3990,10 +4267,38 @@ void RunShadowTest(D& dev, int frames, const std::string& shot, int cacheTest, i
             dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
             dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
             dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+            // A bar drawn before the interface (AOReloaded's cast bars, the text after zoning): with frame generation
+            // into the labels' layer, under the window.
+            VtxRhwDiffuse bar[4] = {{250, 420, 0, 1, 0xF020C040}, {650, 420, 0, 1, 0xF020C040},
+                                    {250, 440, 0, 1, 0xF020C040}, {650, 440, 0, 1, 0xF020C040}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, bar, 4);
             dev.InterfaceBegin(true);
             VtxRhwDiffuse window[4] = {{300, 200, 0, 1, 0xE0304060}, {700, 200, 0, 1, 0xE0304060},
                                        {300, 450, 0, 1, 0xE0304060}, {700, 450, 0, 1, 0xE0304060}};
             dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, window, 4);
+            // Textured pieces, as the game's windows have (the lean shader's A/B, RVK_LiteShader): a grille alpha-tested
+            // through its texture's holes, and a panel blended with its texture tinted by the vertex colour.
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+            dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+            dev.SetTexture(0, fence);
+            dev.SetRenderState(RS_ALPHATESTENABLE, 1);
+            dev.SetRenderState(RS_ALPHAREF, 0x80);
+            dev.SetRenderState(RS_ALPHAFUNC, CMP_GREATEREQUAL);
+            VtxRhwDiffuseTex grille[4] = {{320, 220, 0, 1, 0xFFFFE0A0, 0, 0}, {460, 220, 0, 1, 0xFFFFE0A0, 2, 0},
+                                          {320, 360, 0, 1, 0xFFFFE0A0, 0, 2}, {460, 360, 0, 1, 0xFFFFE0A0, 2, 2}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, grille, 4);
+            dev.SetRenderState(RS_ALPHATESTENABLE, 0);
+            dev.SetTexture(0, ground);
+            VtxRhwDiffuseTex panel[4] = {{540, 230, 0, 1, 0xC060A0FF, 0, 0}, {680, 230, 0, 1, 0xC0FF8040, 1, 0},
+                                         {540, 420, 0, 1, 0x8040FF80, 0, 1}, {680, 420, 0, 1, 0x80FFFFFF, 1, 1}};
+            dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuseTex, panel, 4);
+            dev.SetTexture(0, nullptr);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
             dev.InterfaceEnd();
             VtxRhwDiffuse pointer[4] = {{480, 300, 0, 1, 0xFFFF2020}, {520, 300, 0, 1, 0xFFFF2020},
                                         {480, 340, 0, 1, 0xFFFF2020}, {520, 340, 0, 1, 0xFFFF2020}};
@@ -4029,7 +4334,12 @@ Matrix Offset()
 // statels) loaded as in the game, the camera above (X, Y, Z), a flat lit ground at Y and one cube of the "game's"
 // (shadows need a caster drawn) - the placed objects' shadows fall on the ground though nothing draws them.
 // Mode 2 (the default here: the demo draws none of them to confirm the placement), 0 for the scene without them.
+// --statel-skinned: a "character" skinned on the GPU (DrawSkinned, as the game's) walking round the cube - an 8-sided
+// column on one bone, the bone moved each frame (a new job each frame, as the game makes them).
+// --statel-movers: the cube twice more through a world matrix, one standing and one circling - one mesh at two places
+// a frame, one of them new each frame (the ray tracing's and Brixelizer's instances must not pile up: placements.h).
 std::string g_statelPack;
+bool g_statelMovers = false;
 uint32_t g_statelPlayfield = 0, g_statelMode = 2;
 float g_statelAt[3] = {};
 
@@ -4044,7 +4354,13 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
     std::vector<VtxMesh> cube;
     std::vector<uint16_t> cubeIdx;
     AddCube(cube, cubeIdx, x - 6.0f, y + 0.5f, z - 6.0f, 0.5f);
+    auto column = MakeColumn();
     for (int frame = 0; frame < frames; ++frame) {
+        if (g_shotRun > 0 && frame >= frames - g_shotRun) {
+            std::string name = shot;
+            name.insert(name.size() - 4, "-" + std::to_string(frame - (frames - g_shotRun)));
+            dev.RequestScreenshot(name);
+        }
         if (frame == frames - 1) {
             dev.RequestScreenshot(shot);
             if (!dump.empty()) dev.RequestFrameDump(dump);
@@ -4069,6 +4385,7 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
         sun.type = LIGHT_DIRECTIONAL;
         sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
         sun.direction = {0.55f, -0.7f, 0.45f};
+        if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};   // (--sun-dir)
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
@@ -4084,8 +4401,511 @@ void RunStatelTest(D& dev, int frames, const std::string& shot, const std::strin
         dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
         dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cube.data(), uint32_t(cube.size()), cubeIdx.data(),
                                  uint32_t(cubeIdx.size()));
+        if (g_statelMovers) {
+            const float t = float(frame) * 2.0f * kPi / 300.0f;
+            const float at[2][2] = {{8.0f, 4.0f}, {4.0f * std::cos(t), 4.0f * std::sin(t)}};
+            for (const auto& a : at) {
+                Matrix w = Identity();
+                w.m[3][0] = a[0];
+                w.m[3][2] = a[1];
+                dev.SetTransform(World, w);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cube.data(), uint32_t(cube.size()), cubeIdx.data(),
+                                         uint32_t(cubeIdx.size()));
+            }
+            dev.SetTransform(World, Identity());
+        }
+        if constexpr (requires { dev.DrawSkinned(0u, 0u, std::declval<rvk::skin::Job&>(), 0u, 0u, nullptr, 0u); }) {
+            if (g_statelSkinned) {               // the column walking round the cube, a turn in 240 frames
+                const float t = float(frame) * 2.0f * kPi / 240.0f;
+                DrawColumn(dev, column, x - 6.0f + 3.0f * std::cos(t), y, z - 6.0f + 3.0f * std::sin(t), 7);
+            }
+        }
         dev.EndFrame();
     }
+}
+
+
+// A captured interior on its own (--portal-view FILE; shop portals, docs/shop-portal-plan.md): its pieces replayed as
+// the game drew them - their textures, material, render and stage states and lights - from just inside its entrance
+// looking in, or from --portal-cam R U I YAW: R units to the right, U up and I into the room from the entrance's bottom
+// centre, turned YAW degrees (positive: to the right). Checks a capture without the game.
+std::string g_portalView;
+float g_portalCam[4] = {0.0f, 1.8f, 0.5f, 0.0f};
+
+template <typename D>
+void RunPortalView(D& dev, int frames, const std::string& shot)
+{
+    portal::Capture capture;
+    if (!portal::Load(g_portalView.c_str(), capture)) {
+        std::printf("portal view: %s isn't a capture\n", g_portalView.c_str());
+        return;
+    }
+    std::vector<Texture*> textures;
+    for (const portal::CapturedTexture& t : capture.textures) {
+        Texture* tex = dev.CreateTexture(t.width, t.height, t.format, 1);
+        if (tex) dev.UpdateTexture(tex, 0, 0, 0, t.width, t.height, t.level0.data(), FormatRowBytes(t.format, t.width));
+        textures.push_back(tex);
+    }
+    // The view: from the entrance (or the pieces' middle), along its way in.
+    float base[3] = {}, in[3] = {0.0f, 0.0f, 1.0f};
+    if (capture.entranceKnown) {
+        std::memcpy(base, capture.entrance, sizeof(base));
+        std::memcpy(in, capture.inward, sizeof(in));
+    } else if (!capture.pieces.empty()) {
+        for (const auto& p : capture.pieces)
+            for (int j = 0; j < 3; ++j) base[j] += p.world.m[3][j] / float(capture.pieces.size());
+    }
+    const float right[3] = {in[2], 0.0f, -in[0]};
+    const float yaw = g_portalCam[3] * kPi / 180.0f;
+    const float look[3] = {in[0] * std::cos(yaw) + right[0] * std::sin(yaw), 0.0f,
+                           in[2] * std::cos(yaw) + right[2] * std::sin(yaw)};
+    const Vector eye{base[0] + right[0] * g_portalCam[0] + in[0] * g_portalCam[2], base[1] + g_portalCam[1],
+                     base[2] + right[2] * g_portalCam[0] + in[2] * g_portalCam[2]};
+    const Vector at{eye.x + look[0], eye.y - 0.15f, eye.z + look[2]};
+    std::printf("portal view: playfield %u, %zu pieces, %zu textures, entrance %s (%.2f %.2f %.2f) in (%.2f %.2f)\n",
+                capture.playfield, capture.pieces.size(), capture.textures.size(), capture.entranceKnown ? "known" : "not known",
+                base[0], base[1], base[2], in[0], in[2]);
+    // The states the replay sets (the rest stay the device's): what the pieces' look depends on.
+    static const uint32_t kStates[] = {RS_LIGHTING, RS_AMBIENT, RS_ALPHABLENDENABLE, RS_SRCBLEND, RS_DESTBLEND,
+                                       RS_ALPHATESTENABLE, RS_ALPHAREF, RS_ALPHAFUNC, RS_CULLMODE, RS_ZENABLE,
+                                       RS_ZWRITEENABLE, RS_ZFUNC, RS_COLORVERTEX, RS_DIFFUSEMATERIALSOURCE,
+                                       RS_AMBIENTMATERIALSOURCE, RS_SPECULARMATERIALSOURCE, RS_EMISSIVEMATERIALSOURCE,
+                                       RS_SPECULARENABLE, RS_NORMALIZENORMALS, RS_TEXTUREFACTOR, RS_ZBIAS};
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1)
+            dev.RequestScreenshot(shot);
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF000000, 1.0f);
+        dev.SetTransform(View, LookAtLH(eye, at, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
+        uint32_t lit = 0;
+        for (const portal::CapturedPiece& p : capture.pieces) {
+            dev.SetTransform(World, p.world);
+            dev.SetMaterial(p.material);
+            for (uint32_t st : kStates)
+                dev.SetRenderState(st, p.rs[st]);
+            for (uint32_t stage = 0; stage < 2; ++stage) {
+                for (uint32_t t = 1; t < TSS_COUNT; ++t)
+                    dev.SetTextureStageState(stage, t, p.tss[stage][t]);
+                dev.SetTexture(stage, p.texture[stage] >= 0 ? textures[size_t(p.texture[stage])] : nullptr);
+            }
+            for (uint32_t i = 0; i < p.lights.size(); ++i) {
+                dev.SetLight(i, p.lights[i]);
+                dev.LightEnable(i, true);
+            }
+            for (uint32_t i = uint32_t(p.lights.size()); i < lit; ++i)
+                dev.LightEnable(i, false);
+            lit = uint32_t(p.lights.size());
+            dev.SetDrawVisual(p.kind, p.kind == uint32_t(VisualKind::Room) ? "VisualRoom_t" : "RTriMesh_t");
+            if (p.indices.empty())
+                dev.DrawPrimitive(p.primitive, p.fvf, p.vertices.data(), p.vertexCount);
+            else
+                dev.DrawIndexedPrimitive(p.primitive, p.fvf, p.vertices.data(), p.vertexCount, p.indices.data(),
+                                         uint32_t(p.indices.size()));
+        }
+        dev.SetDrawVisual(0, nullptr);
+        dev.EndFrame();
+    }
+    for (Texture* t : textures) dev.DestroyTexture(t);
+}
+
+// The capture's and the links' side (--portal-capture-test DIR): a walk into a shop and out. A street (playfield 4100)
+// with a wall and a black doorway quad (the black texture, 1010004:6014) and a native ground, the camera in front of it; a teleport after
+// 0.4 s; then a small room as the game draws a shop's - walls and floor tagged as rooms, boxes as props - in a playfield
+// of its own (4242), left after 0.8 s (before the capture's quiet spell: it saves on leaving); then the street again.
+// The capture writes DIR\4242.rvkp (which --portal-view draws) and the link DIR\links.tsv; back in the street the
+// doorway is known, shows the room, and its street is recorded (DIR\street-4100-200-203.rvkp); then into the shop again,
+// looking back at its entrance: the street through it (the street portal). Shots: -street, -room, -portal, -inside.
+std::string g_portalCaptureDir;
+std::string g_portalDump;          // (--dump with --portal-capture-test: the last frame's dump, the portal in view)
+
+template <typename D>
+void RunPortalCaptureTest(D& dev, int frames, const std::string& shot)
+{
+    rvk::SetPortalDir(g_portalCaptureDir.c_str());
+    dev.SetSkyPlayfield(4100);
+    const uint32_t blackPixel[16] = {0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000,
+                                     0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000,
+                                     0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000};
+    Texture* black = dev.CreateTexture(4, 4, blackPixel);
+    dev.SetTextureRdbId(black, 6014);
+    // The street's wall (z = 3) and its doorway (2.5 wide, 2.9 tall, from the ground), facing the camera (-z).
+    const VtxMesh wallQuad[4] = {{-6, 0, 3, 0, 0, -1, 0xFFFFFFFF, 0, 0}, {6, 0, 3, 0, 0, -1, 0xFFFFFFFF, 4, 0},
+                                 {6, 5, 3, 0, 0, -1, 0xFFFFFFFF, 4, 2}, {-6, 5, 3, 0, 0, -1, 0xFFFFFFFF, 0, 2}};
+    const VtxMesh door[4] = {{-1.25f, 0, 2.99f, 0, 0, -1, 0xFFFFFFFF, 0, 0}, {1.25f, 0, 2.99f, 0, 0, -1, 0xFFFFFFFF, 1, 0},
+                             {1.25f, 2.9f, 2.99f, 0, 0, -1, 0xFFFFFFFF, 1, 1}, {-1.25f, 2.9f, 2.99f, 0, 0, -1, 0xFFFFFFFF, 0, 1}};
+    const uint16_t quadIdx[6] = {0, 1, 2, 0, 2, 3};
+    auto wallPixels = Checker(64, 4, 0xFFB09070, 0xFF806050);
+    auto boxPixels = Checker(64, 8, 0xFF60A0D0, 0xFF305070);
+    Texture* wall = dev.CreateTexture(64, 64, wallPixels.data());
+    Texture* box = dev.CreateTexture(64, 64, boxPixels.data());
+    std::vector<VtxMesh> room, props;
+    std::vector<uint16_t> roomIdx, propIdx;
+    AddCube(room, roomIdx, 0.0f, 3.0f, 8.0f, 8.0f);   // (the room: seen from inside)
+    for (int i = 0; i < 4; ++i)
+        AddCube(props, propIdx, -4.5f + 3.0f * float(i), 0.0f, 12.0f - 2.0f * float(i % 2), 0.8f);
+    std::vector<VtxMesh> pillar;
+    std::vector<uint16_t> pillarIdx;
+    AddCube(pillar, pillarIdx, 0.7f, -3.5f, 4.0f, 0.7f);
+    std::vector<VtxMesh> streetBoxes;
+    std::vector<uint16_t> streetBoxIdx;
+    for (int i = 0; i < 3; ++i)
+        AddCube(streetBoxes, streetBoxIdx, -4.0f + 4.0f * float(i), 1.0f, -6.0f - 3.0f * float(i % 2), 1.0f);
+    // The street's native ground (the street stands at x, z 200, the ground's cells from 0): 128 x 128 cells of 4,
+    // four tiles, flat at the doorway and rolling further out, a lightmap of bands - its cut-out recorded with the
+    // street and drawn through the shop's entrance.
+    constexpr float kOx = 200.0f, kOz = 200.0f;
+    constexpr uint32_t kCells = 128;
+    std::shared_ptr<NativeGround> ground;
+    std::shared_ptr<std::vector<uint8_t>> packed;
+    {
+        const uint32_t colours[4] = {0xFF6E8C3Cu, 0xFF8C9A5Au, 0xFF9C8C7Cu, 0xFFB09060u};
+        std::vector<Texture*> tiles;
+        for (uint32_t t = 0; t < 4; ++t) {
+            std::vector<uint32_t> px(64 * 64);
+            for (uint32_t y = 0; y < 64; ++y)
+                for (uint32_t x = 0; x < 64; ++x)
+                    px[size_t(y) * 64 + x] = (x < 20 && y < 12) ? 0xFF303030u : ((x ^ y) & 8u) ? colours[t] : colours[t] - 0x00101010u;
+            tiles.push_back(dev.CreateTexture(64, 64, px.data()));
+        }
+        auto height = [&](float x, float z) {
+            const float d = std::sqrt((x - kOx) * (x - kOx) + (z - kOz) * (z - kOz));
+            const float t = std::clamp((d - 12.0f) / 30.0f, 0.0f, 1.0f);
+            return -0.02f + t * t * (3.0f * std::sin(x * 0.06f) * std::cos(z * 0.045f) + 2.0f);
+        };
+        ground = std::make_shared<NativeGround>();
+        ground->id = 4100;
+        ground->cellsX = ground->cellsZ = kCells;
+        ground->patch = 64;
+        ground->heights.resize(size_t(kCells + 1) * (kCells + 1));
+        for (uint32_t r = 0; r <= kCells; ++r)
+            for (uint32_t c = 0; c <= kCells; ++c) ground->heights[size_t(r) * (kCells + 1) + c] = height(c * 4.0f, r * 4.0f);
+        ground->codes.resize(size_t(kCells) * kCells);
+        for (uint32_t r = 0; r < kCells; ++r)
+            for (uint32_t c = 0; c < kCells; ++c)
+                ground->codes[size_t(r) * kCells + c] = uint16_t(((c / 3 + r / 5) % 4) | ((c * 7 + r) % 4) << 14);
+        ground->tiles = tiles;
+        packed = std::make_shared<std::vector<uint8_t>>(size_t(kCells / 2) * kCells);
+        for (uint32_t r = 0; r < kCells; ++r)
+            for (uint32_t c = 0; c < kCells; c += 2) {
+                const uint8_t v = uint8_t(8 + (r / 4 % 2) * 6);
+                (*packed)[size_t(r) * (kCells / 2) + c / 2] = uint8_t(v << 4 | v);
+            }
+    }
+    auto packedEvening = std::make_shared<std::vector<uint8_t>>(*packed);
+    bool groundSet = false;
+    Matrix streetWorld = Identity();
+    streetWorld.m[3][0] = kOx;
+    streetWorld.m[3][2] = kOz;
+    frames = std::max(frames, 330);
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == frames - 1 && !g_portalDump.empty())
+            dev.RequestFrameDump(g_portalDump);
+        if (frame == 20 || frame == 70 || frame == 199 || frame == frames - 1) {
+            std::string name = shot;
+            name.insert(name.size() - 4, frame == 20 ? "-street" : frame == 70 ? "-room" : frame == 199 ? "-portal" : "-inside");
+            dev.RequestScreenshot(name);
+        }
+        if (frame == 25 || frame == 205)
+            dev.ZoneSignal(rvk::kZoneTeleport);  // (at the doorway: StartTeleport)
+        if (frame == 30 || frame == 80 || frame == 210)
+            dev.SetSkyPlayfield(0);              // (a zone change's blank frames)
+        if (frame == 35 || frame == 215)
+            dev.SetSkyPlayfield(4242);           // (the shop)
+        if (frame == 100)
+            dev.SetSkyPlayfield(4100);           // (the street again: its doorway's street recorded)
+        const bool street = frame < 30 || (frame >= 100 && frame < 210);
+        const bool blank = (frame >= 30 && frame < 35) || (frame >= 80 && frame < 100) || (frame >= 210 && frame < 215);
+        const bool lookingBack = frame >= 215;   // (in the shop again, looking at its entrance: the street through it)
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF000000, 1.0f);
+        if (blank) {
+            dev.EndFrame();
+            Sleep(16);
+            continue;
+        }
+        if (street != groundSet) {               // (the street's ground: the game hands it over on arriving)
+            groundSet = street;
+            dev.SetNativeGround(street ? ground : nullptr);
+            if (street) dev.SetNativeGroundLightmap(packed, kCells, kCells, 0.45f);
+        }
+        // The street's hour: day while its street is recorded, evening from frame 150 (its light, ambient and
+        // lightmap): seen from inside the shop afterwards it is the evening's, not the day it was recorded in.
+        const bool evening = frame >= 150;
+        Light sun{};
+        sun.type = LIGHT_DIRECTIONAL;
+        sun.diffuse = evening ? Color{0.9f, 0.45f, 0.25f, 1} : Color{0.9f, 0.85f, 0.75f, 1};
+        sun.direction = evening ? Vector{0.9f, -0.25f, 0.3f} : Vector{0.55f, -0.7f, 0.45f};
+        if (frame == 150)
+            dev.SetNativeGroundLightmap(packedEvening, kCells, kCells, 0.75f);
+        if (street) {
+            dev.SetTransform(View, LookAtLH({kOx, 1.8f, kOz}, {kOx, 1.6f, kOz + 3.0f}, {0, 1, 0}));
+            dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
+            dev.SetTransform(World, Identity());
+            dev.SetRenderState(RS_ZENABLE, 1);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+            {
+                // The game's ground passes (one chunk each: the native ground draws its own in their place).
+                struct VtxT { float x, y, z, nx, ny, nz, u0, v0, u1, v1; };
+                const VtxT chunk[4] = {{kOx - 4, 0, kOz - 4, 0, 1, 0, 0, 0, 0, 0}, {kOx + 4, 0, kOz - 4, 0, 1, 0, 1, 0, 0, 0},
+                                       {kOx + 4, 0, kOz + 4, 0, 1, 0, 1, 1, 0, 0}, {kOx - 4, 0, kOz + 4, 0, 1, 0, 0, 1, 0, 0}};
+                const uint32_t kFvfT = FVF_XYZ | FVF_NORMAL | (2 << 8);
+                Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+                dev.SetMaterial(mat);
+                dev.SetLight(0, sun);
+                dev.LightEnable(0, true);
+                dev.SetDrawVisual(uint32_t(VisualKind::Terrain), "AnarchyGround_t");
+                dev.SetTexture(0, ground->tiles[0]);
+                dev.SetRenderState(RS_LIGHTING, 0);
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+                dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+                dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfT, chunk, 4, quadIdx, 6);
+                dev.SetRenderState(RS_LIGHTING, 1);
+                dev.SetRenderState(RS_AMBIENT, evening ? 0xFF282430 : 0xFF515151);
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+                dev.SetRenderState(RS_SRCBLEND, BLEND_ZERO);
+                dev.SetRenderState(RS_DESTBLEND, BLEND_SRCCOLOR);
+                dev.SetRenderState(RS_ZFUNC, CMP_EQUAL);
+                dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 1);
+                dev.SetTextureStageState(0, TSS_COLOROP, TOP_ADD);
+                dev.DrawIndexedPrimitive(TriangleList, kFvfT, chunk, 4, quadIdx, 6);
+                dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+                dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+                dev.SetTextureStageState(0, TSS_TEXCOORDINDEX, 0);
+                dev.LightEnable(0, false);
+            }
+            dev.SetTransform(World, streetWorld);
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+            dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t");
+            dev.SetTexture(0, wall);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, wallQuad, 4, quadIdx, 6);
+            dev.SetTexture(0, black);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, door, 4, quadIdx, 6);
+            // The street in front of the doorway (behind the camera): boxes the street's capture records, lit by the sun.
+            dev.SetTexture(0, box);
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_AMBIENT, evening ? 0xFF282430 : 0xFF606060);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetLight(0, sun);
+            dev.LightEnable(0, true);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, streetBoxes.data(), uint32_t(streetBoxes.size()), streetBoxIdx.data(),
+                                     uint32_t(streetBoxIdx.size()));
+            dev.LightEnable(0, false);
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+            // A solid wall behind the doorway's plane drawn after it (as the building's own insides): hidden by the room.
+            const VtxMesh inside[4] = {{-3, 0, 5, 0, 0, -1, 0xFF808080, 0, 0}, {3, 0, 5, 0, 0, -1, 0xFF808080, 1, 0},
+                                       {3, 4, 5, 0, 0, -1, 0xFF808080, 1, 1}, {-3, 4, 5, 0, 0, -1, 0xFF808080, 0, 1}};
+            dev.SetTexture(0, wall);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, inside, 4, quadIdx, 6);
+            // An effect after it, in front of the doorway (as the game's sparks): over the room drawn behind it.
+            struct VtxC { float x, y, z; uint32_t argb; };
+            const VtxC spark[4] = {{-0.4f, 0.8f, 2.5f, 0x80FF4020}, {0.4f, 0.8f, 2.5f, 0x80FF4020},
+                                   {-0.4f, 1.6f, 2.5f, 0x80FF4020}, {0.4f, 1.6f, 2.5f, 0x80FF4020}};
+            dev.SetDrawVisual(uint32_t(VisualKind::Effect), "effect");
+            dev.SetTexture(0, nullptr);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+            dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+            dev.SetRenderState(RS_ZWRITEENABLE, 0);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
+            dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+            dev.DrawPrimitive(TriangleStrip, FVF_XYZ | FVF_DIFFUSE, spark, 4);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetDrawVisual(0, nullptr);
+            dev.EndFrame();
+            Sleep(16);
+            continue;
+        }
+        if (lookingBack)
+            dev.SetTransform(View, LookAtLH({0.0f, -3.0f, 8.0f}, {0.0f, -3.3f, 0.0f}, {0, 1, 0}));
+        else
+            dev.SetTransform(View, LookAtLH({0.0f, 1.8f, 0.5f}, {0.0f, 1.65f, 1.5f}, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.2f, 400.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_LIGHTING, 1);
+        dev.SetRenderState(RS_AMBIENT, 0xFF909090);
+        dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_MATERIAL);
+        Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+        dev.SetMaterial(mat);
+        Light lamp{};
+        lamp.type = LIGHT_POINT;
+        lamp.diffuse = {1.0f, 0.9f, 0.7f, 1};
+        lamp.position = {0.0f, 5.0f, 9.0f};
+        lamp.range = 20.0f;
+        lamp.attenuation0 = 1.0f;
+        dev.SetLight(0, lamp);
+        dev.LightEnable(0, true);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+        dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+        dev.SetDrawVisual(uint32_t(VisualKind::Room), "VisualRoom_t");
+        dev.SetTexture(0, wall);
+        dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, room.data(), uint32_t(room.size()), roomIdx.data(),
+                                 uint32_t(roomIdx.size()));
+        dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t");
+        dev.SetTexture(0, box);
+        dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, props.data(), uint32_t(props.size()), propIdx.data(),
+                                 uint32_t(propIdx.size()));
+        // A door in the room's back wall, away from its entrance: recorded with the room and seen from the street.
+        {
+            const VtxMesh backDoor[4] = {{3.0f, -5.0f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 0, 0}, {5.4f, -5.0f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 1, 0},
+                                         {5.4f, -1.8f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 1, 2}, {3.0f, -1.8f, 15.9f, 0, 0, -1, 0xFFFFFFFF, 0, 2}};
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "door_inner");
+            dev.SetTexture(0, box);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, backDoor, 4, quadIdx, 6);
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "RTriMesh_t");
+            dev.SetTexture(0, box);
+        }
+        if (lookingBack) {                       // a pillar between the camera and the entrance: the street behind it hidden
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, pillar.data(), uint32_t(pillar.size()), pillarIdx.data(),
+                                     uint32_t(pillarIdx.size()));
+            // The black texture's panel in the entrance's plane (as a shop's, in game): left out while the street shows.
+            // As wide as last_ditch_building_medium3's, much more than the door: its corners far from the entrance.
+            const VtxMesh panel[4] = {{-6.0f, -5.0f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 0, 0}, {6.0f, -5.0f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 1, 0},
+                                      {6.0f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 1, 1}, {-6.0f, -1.5f, 0.5f, 0, 0, 1, 0xFFFFFFFF, 0, 1}};
+            dev.SetTexture(0, black);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, panel, 4, quadIdx, 6);
+            // The door's leaf, swung 70 degrees open out of the room (hinged at the doorway's right): behind the
+            // opening, it stays in front of the street.
+            const VtxMesh leaf[4] = {{1.2f, -5.0f, 0.5f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 0, 0},
+                                     {0.38f, -5.0f, -1.75f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 2, 0},
+                                     {0.38f, -1.9f, -1.75f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 2, 3},
+                                     {1.2f, -1.9f, 0.5f, -0.94f, 0, -0.34f, 0xFFFFFFFF, 0, 3}};
+            dev.SetDrawVisual(uint32_t(VisualKind::Static), "door_leaf");
+            dev.SetTexture(0, wall);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, leaf, 4, quadIdx, 6);
+        }
+        dev.SetDrawVisual(0, nullptr);
+        dev.LightEnable(0, false);
+        dev.EndFrame();
+        Sleep(16);
+    }
+    dev.DestroyTexture(wall);
+    dev.DestroyTexture(box);
+    dev.DestroyTexture(black);
+}
+
+// The zone hand-over (--handover-test; handover.cpp, RVK_ZoneFade): a zone change as the game makes one at 60 frames a
+// second. 18 frames of a warm scene, 2 of the world already stopped (black, the cubes only - n3EngineClient_t::
+// StartTeleport's; its signal comes after the first of them), 40 frames without 3D (a window of the interface only),
+// then a blue scene seen from elsewhere (a camera jump). The old scene's picture must stay up over the blank frames and
+// the new scene's first ones, then fade into it. Shots (<shot>-<name>.bmp): before (the old zone), hold (the blank
+// frames), hidden (the new zone drawn under the held picture), fade, after (the new zone).
+bool g_handoverTest = false;
+
+template <typename D>
+void RunHandoverTest(D& dev, int frames, const std::string& shot)
+{
+    auto warmPixels = Checker(64, 8, 0xFFD0A070, 0xFF906040);
+    auto bluePixels = Checker(64, 8, 0xFF7090D0, 0xFF405080);
+    Texture* warm = dev.CreateTexture(64, 64, warmPixels.data());
+    Texture* blue = dev.CreateTexture(64, 64, bluePixels.data());
+    std::vector<VtxMesh> cubes;
+    std::vector<uint16_t> cubeIdx;
+    for (int i = 0; i < 5; ++i)
+        AddCube(cubes, cubeIdx, -8.0f + 4.0f * float(i), 1.0f, float(i % 2) * 3.0f, 1.0f);
+    frames = std::max(frames, 200);
+    const struct { int frame; const char* name; } kShots[] = {{15, "before"}, {45, "hold"}, {70, "hidden"},
+                                                               {frames - 1, "after"}};
+    int fadeShot = -1;
+    for (int frame = 0; frame < frames; ++frame) {
+        for (const auto& s : kShots)
+            if (frame == s.frame) {
+                std::string name = shot;
+                name.insert(name.size() - 4, std::string("-") + s.name);
+                dev.RequestScreenshot(name);
+            }
+        if (frame == fadeShot) {
+            std::string name = shot;
+            name.insert(name.size() - 4, "-fade");
+            dev.RequestScreenshot(name);
+        }
+        if (frame == frames - 1)
+            dev.RequestScreenshot(shot);
+        if (frame == 19)
+            dev.ZoneSignal(rvk::kZoneTeleport);
+        const bool stopped = frame >= 18 && frame < 20;
+        const bool blank = frame >= 20 && frame < 60;
+        const bool second = frame >= 60;
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, stopped ? 0xFF000000 : second ? 0xFF203050 : 0xFF806040, 1.0f);
+        if (!blank) {
+            const Vector eye = second ? Vector{14.0f, 9.0f, -16.0f} : Vector{-14.0f, 7.0f, -18.0f};
+            dev.SetTransform(View, LookAtLH(eye, {0, 0, 0}, {0, 1, 0}));
+            dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.5f, 600.0f));
+            dev.SetTransform(World, Identity());
+            dev.SetRenderState(RS_ZENABLE, 1);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
+            dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+            dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_AMBIENT, 0xFF606060);
+            dev.SetRenderState(RS_DIFFUSEMATERIALSOURCE, MCS_MATERIAL);
+            Material mat{{1, 1, 1, 1}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, 0.0f};
+            dev.SetMaterial(mat);
+            Light sun{};
+            sun.type = LIGHT_DIRECTIONAL;
+            sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
+            sun.direction = {0.55f, -0.7f, 0.45f};
+            dev.SetLight(0, sun);
+            dev.LightEnable(0, true);
+            dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
+            dev.SetTextureStageState(0, TSS_COLORARG1, TA_TEXTURE);
+            dev.SetTextureStageState(0, TSS_COLORARG2, TA_DIFFUSE);
+            dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+            dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_TEXTURE);
+            dev.SetTexture(0, second ? blue : warm);
+            dev.SetRenderState(RS_LIGHTING, 1);
+            const float r = 60.0f;
+            VtxMesh q[4] = {{-r, 0, -r, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {r, 0, -r, 0, 1, 0, 0xFFFFFFFF, 30, 0},
+                            {r, 0, r, 0, 1, 0, 0xFFFFFFFF, 30, 30}, {-r, 0, r, 0, 1, 0, 0xFFFFFFFF, 0, 30}};
+            if (!stopped)
+                dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
+            dev.DrawIndexedPrimitive(TriangleList, kFvfMesh, cubes.data(), uint32_t(cubes.size()), cubeIdx.data(),
+                                     uint32_t(cubeIdx.size()));
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.LightEnable(0, false);
+        }
+        // The interface, every frame: a window (its layer), as the game's.
+        dev.SetRenderState(RS_ZENABLE, 0);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+        dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+        dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+        dev.SetTexture(0, nullptr);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG2);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG2);
+        dev.SetTextureStageState(0, TSS_ALPHAARG2, TA_DIFFUSE);
+        dev.InterfaceBegin(true);
+        VtxRhwDiffuse window[4] = {{20, 20, 0, 1, 0xE0304060}, {220, 20, 0, 1, 0xE0304060},
+                                   {20, 90, 0, 1, 0xE0304060}, {220, 90, 0, 1, 0xE0304060}};
+        dev.DrawPrimitive(TriangleStrip, kFvfRhwDiffuse, window, 4);
+        dev.InterfaceEnd();
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.EndFrame();
+        if (fadeShot < 0 && dev.HandoverFading())
+            fadeShot = frame + 15;               // (about half way through the half-second fade)
+        Sleep(16);
+    }
+    dev.DestroyTexture(warm);
+    dev.DestroyTexture(blue);
 }
 
 // Point light shadow test (--point-shadow-test): night, a lamp among cubes. Left half: lit ground (per-pixel); right
@@ -4151,6 +4971,14 @@ void RunPointShadowTest(D& dev, int frames, const std::string& shot, const std::
             lamp.range = 6.13f;
             lamp.attenuation0 = 0.0f;
             lamp.attenuation1 = 0.1631f;
+        }
+        if (g_spotDegrees > 0.0f) {            // --point-shadow-spot DEG: a spot light looking down, its cone DEG across
+            lamp.type = LIGHT_SPOT;
+            lamp.direction = {0.05f, -1.0f, 0.03f};
+            lamp.phi = g_spotDegrees * kPi / 180.0f;
+            lamp.theta = 0.7f * lamp.phi;
+            lamp.falloff = 1.0f;
+            lamp.position.y += 1.5f;
         }
         lamp.position = {lamp.position.x + g_off[0], lamp.position.y + g_off[1], lamp.position.z + g_off[2]};
         // --lamp-wobble: the position moves in its last bits from frame to frame, as the game's lamps do.
@@ -4291,6 +5119,8 @@ float g_folDither = -1.0f;         // --fol-dither D: RVK_FolDither, soft edges 
 float g_leafCamDist = -1.0f;       // --leaf-cam-dist D: the camera this far from the row (default: from the trees' size)
 float g_leafCamHeight = -1.0f;     // --leaf-cam-height H: ... this high (default: a third of the tallest tree)
 float g_leafCamYaw = 0.0f;         // --leaf-cam-yaw R: ... turned R radians about the row's middle
+float g_leafCamTurn = 0.0f;        // --leaf-cam-turn R: ... looking to and fro, R radians either way (a turn in 2 s)
+float g_leafCamOrbit = 0.0f;       // --leaf-cam-orbit R: ... going round the row's middle to and fro, R radians either way
 int g_leafFilm = 0;                // --leaf-film N: ~60 frames a second, a screenshot every N frames (film_NNN.bmp)
 int g_frameGenToggle = 0;          // --frame-gen-toggle N: frame generation off at frame N, on again at 2N (the leaf
                                    // scenes; the swapchain made again each time)
@@ -4298,6 +5128,8 @@ int g_fgBlankFrom = 0, g_fgHudAt = 0, g_fgHudEnd = 0;   // --fg-loading A H E: f
                                         // frames H to E the perf readout's image, redrawn every 15 frames (the leaf
                                         // scenes, with --window --frame-gen: the readout switched on at a loading screen
                                         // hung FSR 3's swapchain)
+bool g_leafPond = false;           // --leaf-pond: a pond in front of the trees, drawn before them (as the game draws a
+                                   // pond's water before most of a forest: the depth pre-pass's second segment)
 int g_leafForest = 0;              // --leaf-forest N: an N x N grid of the trees (12 units apart), seen from eye height
 float g_crownShade = 1.0f;         // --crown-shade X: RVK_CrownShade
 bool g_freeCam = false;            // --free-cam: the free camera on from frame 10, turning and moving ahead (Device::SetFreeCam)
@@ -4423,6 +5255,12 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
     if (g_folEdges >= 0) dev.SetKnob(rvk::Knob::FolEdges, float(g_folEdges));
     if (g_folDither >= 0.0f) dev.SetKnob(rvk::Knob::FolDither, g_folDither);
     if (g_prepassEq >= 0) dev.SetKnob(rvk::Knob::PrepassEq, float(g_prepassEq));
+    if (g_pbrDebug) {                            // (--pbr-debug 10: the two-pass foliage's parts in colour)
+        Device::PbrSettings pbr;
+        pbr.enabled = true;
+        pbr.debug = g_pbrDebug;
+        dev.SetPbr(pbr);
+    }
     for (int frame = 0; frame < frames; ++frame) {
         if (g_frameGenToggle > 0 && (frame == g_frameGenToggle || frame == 2 * g_frameGenToggle))
             dev.SetFrameGen(frame == 2 * g_frameGenToggle);
@@ -4450,10 +5288,17 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
             if (frame % 30 == 0) std::printf("fg-loading: frame %d\n", frame);
             continue;
         }
-        const float ex = mid + dist * std::sin(g_leafCamYaw), ez = -dist * std::cos(g_leafCamYaw);
+        const float yaw = g_leafCamYaw + g_leafCamOrbit * std::sin(float(frame) * kPi / 60.0f);
+        const float ex = mid + dist * std::sin(yaw), ez = -dist * std::cos(yaw);
         const float lookY = g_leafForest > 0 ? camY + 3.0f : tallest * 0.45f;
         const float lookZ = g_leafForest > 0 ? 30.0f : 0.0f;
-        dev.SetTransform(View, LookAtLH({ex, camY, ez}, {mid, lookY, lookZ}, {0, 1, 0}));
+        if (g_leafCamTurn != 0.0f) {             // (turning in place: the look's point swung round the eye)
+            const float a = g_leafCamTurn * std::sin(float(frame) * kPi / 60.0f), dx = mid - ex, dz = lookZ - ez;
+            dev.SetTransform(View, LookAtLH({ex, camY, ez}, {ex + dx * std::cos(a) - dz * std::sin(a), lookY,
+                                                             ez + dx * std::sin(a) + dz * std::cos(a)}, {0, 1, 0}));
+        } else {
+            dev.SetTransform(View, LookAtLH({ex, camY, ez}, {mid, lookY, lookZ}, {0, 1, 0}));
+        }
         if (g_freeCam && frame >= 10) {
             Device::FreeCamInput in;
             in.on = true;
@@ -4480,6 +5325,7 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
         sun.type = LIGHT_DIRECTIONAL;
         sun.diffuse = {0.9f, 0.85f, 0.75f, 1};
         sun.direction = {0.45f, -0.75f, 0.5f};
+        if (g_sunDirSet) sun.direction = {g_sunDir[0], g_sunDir[1], g_sunDir[2]};   // (--sun-dir)
         dev.SetLight(0, sun);
         dev.LightEnable(0, true);
         dev.SetTextureStageState(0, TSS_COLOROP, TOP_MODULATE);
@@ -4493,6 +5339,22 @@ void RunLeafScene(D& dev, int frames, const std::string& shot, const std::string
             VtxMesh q[4] = {{-r + mid, 0, -r, 0, 1, 0, 0xFFFFFFFF, 0, 0}, {r + mid, 0, -r, 0, 1, 0, 0xFFFFFFFF, 40, 0},
                             {r + mid, 0, r, 0, 1, 0, 0xFFFFFFFF, 40, 40}, {-r + mid, 0, r, 0, 1, 0, 0xFFFFFFFF, 0, 40}};
             dev.DrawPrimitive(TriangleFan, kFvfMesh, q, 4);
+        }
+        if (g_leafPond) {
+            const uint32_t tint = 0xCC00186A;
+            const Device::WaterVertex pond[4] = {{{mid - 12, 0.2f, -11}, tint}, {{mid + 12, 0.2f, -11}, tint},
+                                                 {{mid + 12, 0.2f, -2}, tint}, {{mid - 12, 0.2f, -2}, tint}};
+            const uint16_t pondIdx[6] = {0, 1, 2, 0, 2, 3};
+            dev.SetRenderState(RS_LIGHTING, 0);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 1);
+            dev.SetRenderState(RS_SRCBLEND, BLEND_SRCALPHA);
+            dev.SetRenderState(RS_DESTBLEND, BLEND_INVSRCALPHA);
+            dev.SetRenderState(RS_ZWRITEENABLE, 0);
+            dev.SetTexture(0, nullptr);
+            dev.DrawWater(pond, 4, pondIdx, 6);
+            dev.SetRenderState(RS_LIGHTING, 1);
+            dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+            dev.SetRenderState(RS_ZWRITEENABLE, 1);
         }
         const uint32_t kFvfTree = FVF_XYZ | FVF_NORMAL | (1 << 8);   // 0x112, as the game's statics
         for (const Placed& pl : placed) {
@@ -4543,6 +5405,107 @@ float g_spriteScale = 1.0f;              // --sprite-scale X: the effect's sprit
 bool g_particleWater = false;            // --particle-water: water the game's way (ProcessVertices output, FVF 0x1C4) mid-scene
 
 // Particle test (--particle-test): an effect like the game's sparkle auras - a ring of soft additive sprites (FVF 0x142,
+// Our own effects (--fx FILE.rvkfx; rvk fx.cpp): a cast played over and over - charged at the caster's hand for 0.5 s,
+// flying to the target in an arc for 0.8 s, its impact for 0.7 s, then 0.6 s of nothing (its particles living out) -
+// the effect announced every frame as the proxy does for the game's Spell1. Shots of the first cast: -charge (0.3 s),
+// -flight (0.9 s), -impact (1.5 s), and the last frame's as --shot. --fx-still: an effect on a character instead (a
+// sparkle: its one phase, "play", for 2 s at the middle post's top, then 0.6 s of nothing).
+bool g_fxStill = false;
+
+template <typename D>
+void RunFxTest(D& dev, int frames, const std::string& file, const std::string& shot)
+{
+    std::string text;
+    if (FILE* f = std::fopen(file.c_str(), "rb")) {
+        char buf[4096];
+        for (size_t n; (n = std::fread(buf, 1, sizeof(buf), f)) > 0;) text.append(buf, n);
+        std::fclose(f);
+    }
+    auto effect = std::make_shared<rvk::fx::Effect>();
+    std::string error;
+    if (!rvk::fx::Parse(text, *effect, &error)) {
+        std::printf("fx: %s: %s\n", file.c_str(), text.empty() ? "can't read it" : error.c_str());
+        return;
+    }
+    std::printf("fx: %s: \"%s\", %zu emitters\n", file.c_str(), effect->name.c_str(), effect->emitters.size());
+    dev.FxSetEffect(1, effect);
+    struct VtxGround { float x, y, z; uint32_t color; };
+    const float hand[3] = {-3.0f, 1.4f, 0.0f}, chest[3] = {3.0f, 1.1f, 0.0f};
+    auto named = [&](const char* tag) {
+        std::string n = shot;
+        n.insert(n.size() > 4 ? n.size() - 4 : n.size(), tag);
+        return n;
+    };
+    for (int frame = 0; frame < frames; ++frame) {
+        if (frame == 19) dev.RequestScreenshot(named("-charge"));
+        if (frame == 56) dev.RequestScreenshot(named("-flight"));
+        if (frame == 94) dev.RequestScreenshot(named("-impact"));
+        if (frame == frames - 1) dev.RequestScreenshot(shot);
+        dev.BeginFrame();
+        dev.SetViewport({0, 0, g_width, g_height, 0.0f, 1.0f});
+        dev.Clear(CLEAR_TARGET | CLEAR_ZBUFFER, 0xFF0A0E16, 1.0f);
+        dev.SetTransform(View, LookAtLH({0, 2.6f, -7.5f}, {0, 1.0f, 0}, {0, 1, 0}));
+        dev.SetTransform(Projection, PerspectiveLH(kPi / 3, float(g_width) / g_height, 0.1f, 100.0f));
+        dev.SetTransform(World, Identity());
+        dev.SetRenderState(RS_LIGHTING, 0);
+        dev.SetRenderState(RS_CULLMODE, CULL_NONE);
+        dev.SetRenderState(RS_ZENABLE, 1);
+        dev.SetRenderState(RS_ZWRITEENABLE, 1);
+        dev.SetRenderState(RS_ZFUNC, CMP_LESSEQUAL);
+        dev.SetRenderState(RS_ALPHABLENDENABLE, 0);
+        dev.SetTexture(0, nullptr);
+        dev.SetTextureStageState(0, TSS_COLOROP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_COLORARG1, TA_DIFFUSE);
+        dev.SetTextureStageState(0, TSS_ALPHAOP, TOP_SELECTARG1);
+        dev.SetTextureStageState(0, TSS_ALPHAARG1, TA_DIFFUSE);
+        // The ground, and a post for each of the caster and the target.
+        std::vector<VtxGround> v = {{-8, 0, -4, 0xFF2A2E38}, {8, 0, -4, 0xFF2A2E38}, {-8, 0, 6, 0xFF1C2028}, {8, 0, 6, 0xFF1C2028}};
+        std::vector<uint16_t> idx = {0, 1, 2, 1, 2, 3};
+        for (float x : {hand[0], chest[0], 0.0f}) {
+            if (x == 0.0f && !g_fxStill) continue;
+            const uint16_t b = uint16_t(v.size());
+            v.push_back({x - 0.25f, 0.0f, 0.0f, 0xFF505868});
+            v.push_back({x + 0.25f, 0.0f, 0.0f, 0xFF505868});
+            v.push_back({x - 0.25f, 1.8f, 0.0f, 0xFF606878});
+            v.push_back({x + 0.25f, 1.8f, 0.0f, 0xFF606878});
+            for (uint16_t k : {0, 1, 2, 1, 2, 3}) idx.push_back(uint16_t(b + k));
+        }
+        dev.DrawIndexedPrimitive(TriangleList, FVF_XYZ | FVF_DIFFUSE, v.data(), uint32_t(v.size()), idx.data(),
+                                 uint32_t(idx.size()));
+        // The cast: where its head is, and which phase it is in.
+        const float t = std::fmod(float(frame) * 0.016f, 2.6f);
+        const uint64_t key = uint64_t(float(frame) * 0.016f / 2.6f) + 1;
+        if (t < 2.0f && g_fxStill) {
+            Device::FxAnchors a;
+            const float at[3] = {0.0f, 1.0f, 0.0f};
+            std::memcpy(a.head, at, sizeof(at));
+            std::memcpy(a.source, at, sizeof(at));
+            std::memcpy(a.target, at, sizeof(at));
+            a.phase = rvk::fx::kFlight;
+            dev.FxInstance(key, 1, a);
+        } else if (t < 2.0f) {
+            Device::FxAnchors a;
+            std::memcpy(a.source, hand, sizeof(hand));
+            std::memcpy(a.target, chest, sizeof(chest));
+            if (t < 0.5f) {
+                a.phase = rvk::fx::kCharge;
+                std::memcpy(a.head, hand, sizeof(hand));
+            } else if (t < 1.3f) {
+                a.phase = rvk::fx::kFlight;
+                const float s = (t - 0.5f) / 0.8f;
+                for (int i = 0; i < 3; ++i) a.head[i] = hand[i] + (chest[i] - hand[i]) * s;
+                a.head[1] += std::sin(s * kPi) * 0.6f;
+            } else {
+                a.phase = rvk::fx::kImpact;
+                std::memcpy(a.head, chest, sizeof(chest));
+            }
+            dev.FxInstance(key, 1, a);
+        }
+        dev.EndFrame();
+        Sleep(16);
+    }
+}
+
 // drawn the way GfxVisualDiaBill draws them) that twinkle on and off - announced with ParticleEmitter, so each live
 // sprite sheds GPU particles. --particles-off draws the sprites alone for comparison. --particle-end F: the effect ends
 // at frame F (no longer announced or drawn); its particles must fade out on their own. An interface quad follows the 3D.
@@ -5124,12 +6087,14 @@ int main(int argc, char** argv)
     bool windowed = false, stress = false, threaded = false, pixelLighting = false, lightingDebug = false, lightOverride = false, shadows = false, shadowTest = false, pointShadowTest = false, pointShadowSun = false;
     int cacheTest = 0, frameMs = 0;
     bool particleTest = false, particlesOff = false;
+    std::string fxFile;
     int particleEnd = -1, particleEffects = 1;
     uint32_t pointShadows = 4;
     float headroom = 1.0f;
     double fadeIn = 0.0;
     bool hdr = false;
     float bloom = 0.0f, effectGlow = 1.0f, ao = 0.0f, aoRadius = 1.5f, gi = 0.0f, giRadius = 4.0f, volume = 0.0f, volHaze = 1.0f, volShafts = 1.0f, ssr = 0.0f, ssrWet = 0.0f, bloomOcc = 0.15f, neonSat = 0.0f, bloomWide = 0.0f, sunSoft = 0.0f, leaf = 0.0f, nightGlow = 0.0f, contact = 0.0f, sway = 0.0f, bump = 0.0f, grassPush = 1.0f, plantDetail = 1.0f, foliageLod = 35.0f;
+    std::vector<std::pair<rvk::Knob, float>> knobs;   // --knob
     int sunRes = 4096, ptRes = 1024;
     float ptLight = 1.0f, tess = 0.0f;
     int tessLevel = 4;
@@ -5158,6 +6123,10 @@ int main(int argc, char** argv)
         else if (a == "--pixel-lighting") pixelLighting = true;
         else if (a == "--lighting-debug") lightingDebug = true;
         else if (a == "--hide-ui") g_hideUi = true;
+        else if (a == "--handover-test") { g_handoverTest = true; hdr = true; }
+        else if (a == "--portal-view" && i + 1 < argc) { g_portalView = argv[++i]; hdr = true; }
+        else if (a == "--portal-capture-test" && i + 1 < argc) { g_portalCaptureDir = argv[++i]; hdr = true; }
+        else if (a == "--portal-cam" && i + 4 < argc) { for (float& x : g_portalCam) x = float(std::atof(argv[++i])); }
         else if (a == "--light-override") lightOverride = true;
         else if (a == "--shadows") shadows = true;
         else if (a == "--shadow-test") shadowTest = shadows = true;
@@ -5169,7 +6138,11 @@ int main(int argc, char** argv)
             shadows = true;
         }
         else if (a == "--statel-mode" && i + 1 < argc) g_statelMode = uint32_t(std::atoi(argv[++i]));
+        else if (a == "--statel-skinned") g_statelSkinned = true;
+        else if (a == "--statel-movers") g_statelMovers = true;
+        else if (a == "--shot-run" && i + 1 < argc) g_shotRun = std::atoi(argv[++i]);
         else if (a == "--point-shadow-test") pointShadowTest = true;
+        else if (a == "--point-shadow-spot" && i + 1 < argc) g_spotDegrees = float(std::atof(argv[++i]));
         else if (a == "--world-offset" && i + 3 < argc) { for (int k = 0; k < 3; ++k) g_off[k] = float(std::atof(argv[++i])); }
         else if (a == "--point-shadow-slab") g_slabTest = pointShadowTest = pointShadowSun = shadows = true;
         else if (a == "--point-shadow-sun") pointShadowTest = pointShadowSun = shadows = true;
@@ -5208,6 +6181,7 @@ int main(int argc, char** argv)
         else if (a == "--city-bench") { cityBench = true; hdr = shadows = g_grassFieldOn = true; }
         else if (a == "--city-warm" && i + 1 < argc) g_cityWarm = std::atoi(argv[++i]);
         else if (a == "--city-lamps" && i + 1 < argc) g_cityLamps = std::atoi(argv[++i]);
+        else if (a == "--city-movers" && i + 1 < argc) g_cityMovers = std::atoi(argv[++i]);
         else if (a == "--city-no-grass") g_cityNoGrass = true;
         else if (a == "--city-no-cull") g_cityNoCull = true;
         else if (a == "--city-statels" && i + 1 < argc) g_cityStatels = argv[++i];
@@ -5282,7 +6256,10 @@ int main(int argc, char** argv)
         else if (a == "--fol-dither" && i + 1 < argc) g_folDither = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-height" && i + 1 < argc) g_leafCamHeight = float(std::atof(argv[++i]));
         else if (a == "--leaf-cam-yaw" && i + 1 < argc) g_leafCamYaw = float(std::atof(argv[++i]));
+        else if (a == "--leaf-cam-turn" && i + 1 < argc) g_leafCamTurn = float(std::atof(argv[++i]));
+        else if (a == "--leaf-cam-orbit" && i + 1 < argc) g_leafCamOrbit = float(std::atof(argv[++i]));
         else if (a == "--leaf-film" && i + 1 < argc) g_leafFilm = std::atoi(argv[++i]);
+        else if (a == "--leaf-pond") g_leafPond = true;
         else if (a == "--leaf-forest" && i + 1 < argc) g_leafForest = std::atoi(argv[++i]);
         else if (a == "--water-lake") { g_waterScene = 1; hdr = true; }
         else if (a == "--water-coast") { g_waterScene = 2; hdr = true; }
@@ -5325,12 +6302,19 @@ int main(int argc, char** argv)
         else if (a == "--water-style" && i + 1 < argc) g_waterStyle = float(std::atof(argv[++i]));
         else if (a == "--water-yaw" && i + 1 < argc) g_waterYaw = float(std::atof(argv[++i]));
         else if (a == "--water-turn" && i + 1 < argc) g_waterTurn = float(std::atof(argv[++i]));
+        else if (a == "--tile-swap" && i + 3 < argc) { for (uint32_t& x : g_tileSwap) x = uint32_t(std::atoi(argv[++i])); }
+        else if (a == "--walk-from" && i + 3 < argc) { for (float& x : g_walkFrom) x = float(std::atof(argv[++i])); }
+        else if (a == "--look-round" && i + 1 < argc) g_lookRound = std::atoi(argv[++i]);
         else if (a == "--water-pitch" && i + 1 < argc) g_waterPitch = float(std::atof(argv[++i]));
         else if (a == "--water-height" && i + 1 < argc) g_waterHeight = float(std::atof(argv[++i]));
         else if (a == "--water-waves" && i + 1 < argc) g_waterWaves = float(std::atof(argv[++i]));
         else if (a == "--water-quality" && i + 1 < argc) g_waterQuality = std::atoi(argv[++i]);
+        else if (a == "--water-grid") g_waterGrid = true;
         else if (a == "--water-off") g_waterOff = true;
         else if (a == "--water-night") g_waterNight = true;
+        else if (a == "--game-day") g_gameDay = true;
+        else if (a == "--rig-props") g_rigProps = true;
+        else if (a == "--indoor") g_indoor = true;
         else if (a == "--moon-light" && i + 1 < argc) g_moonLight = float(std::atof(argv[++i]));
         else if ((a == "--darkness" || a == "--night-dark") && i + 1 < argc) g_darkness = float(std::atof(argv[++i]));
         else if (a == "--dark-floor" && i + 1 < argc) g_darkFloor = float(std::atof(argv[++i]));
@@ -5374,6 +6358,8 @@ int main(int argc, char** argv)
         else if (a == "--grass-bench-lamp") g_grassBenchLamp = true;
         else if (a == "--grass-bench-still") g_grassBenchStill = true;
         else if (a == "--grass-bench-rise" && i + 1 < argc) g_grassBenchRise = float(std::atof(argv[++i]));
+        else if (a == "--grass-bench-back" && i + 1 < argc) g_grassBenchBack = float(std::atof(argv[++i]));
+        else if (a == "--grass-bench-lamp-at" && i + 1 < argc) g_grassBenchLampAt = float(std::atof(argv[++i]));
         else if (a == "--grass-bench-zoom" && i + 2 < argc) {
             g_grassBenchZoomAt = std::atoi(argv[++i]);
             g_grassBenchZoomRise = float(std::atof(argv[++i]));
@@ -5457,6 +6443,13 @@ int main(int argc, char** argv)
         else if (a == "--vol-shafts" && i + 1 < argc) volShafts = float(std::atof(argv[++i]));
         else if (a == "--ssr" && i + 1 < argc) { ssr = float(std::atof(argv[++i])); hdr = true; }
         else if (a == "--ssr-wet" && i + 1 < argc) ssrWet = float(std::atof(argv[++i]));
+        else if (a == "--knob" && i + 1 < argc) {   // RVK_Name=value: any plain setting (rvk.h RVK_*_KNOBS)
+            std::string kv = argv[++i];
+            size_t eq = kv.find('=');
+            int k = eq == std::string::npos ? -1 : rvk::KnobByName(kv.substr(0, eq).c_str());
+            if (k < 0) { std::fprintf(stderr, "--knob %s: not a knob\n", kv.c_str()); return 2; }
+            knobs.emplace_back(rvk::Knob(k), float(std::atof(kv.c_str() + eq + 1)));
+        }
         else if (a == "--bloom-occ" && i + 1 < argc) bloomOcc = float(std::atof(argv[++i]));
         else if (a == "--neon-sat" && i + 1 < argc) neonSat = float(std::atof(argv[++i]));
         else if (a == "--bloom-wide" && i + 1 < argc) bloomWide = float(std::atof(argv[++i]));
@@ -5498,6 +6491,8 @@ int main(int argc, char** argv)
         else if (a == "--point-shadows" && i + 1 < argc) pointShadows = uint32_t(std::atoi(argv[++i]));
         else if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--particle-test") particleTest = true;
+        else if (a == "--fx" && i + 1 < argc) { fxFile = argv[++i]; hdr = true; }
+        else if (a == "--fx-still") g_fxStill = true;
         else if (a == "--particles-off") particlesOff = true;
         else if (a == "--particle-end" && i + 1 < argc) particleEnd = std::atoi(argv[++i]);
         else if (a == "--particle-effects" && i + 1 < argc) particleEffects = std::atoi(argv[++i]);
@@ -5621,6 +6616,7 @@ int main(int argc, char** argv)
     dev.SetKnob(rvk::Knob::Atmos, g_atmos);
     dev.SetTwilight(g_twilight, g_skyGlow);
     dev.SetKnob(rvk::Knob::DuskRays, g_duskRays);
+    for (const auto& [k, value] : knobs) dev.SetKnob(k, value);
     dev.SetProcSky(g_procSky, g_skyZoneHint, 1.0f);
     dev.SetSkyColours(g_skyColours);
     dev.SetNightSky(g_nightSky);
@@ -5702,6 +6698,20 @@ int main(int argc, char** argv)
         std::printf("rendered; screenshot %s\n", shot.c_str());
         return 0;
     }
+    if (!fxFile.empty()) {
+        if (threaded) {
+            ThreadedDevice tdev;
+            if (!tdev.Init(nullptr, g_width, g_height, &error)) { std::printf("init failed: %s\n", error.c_str()); return 1; }
+            tdev.SetHdr(hdr);
+            tdev.SetBloom(bloom, 1.0f);
+            RunFxTest(tdev, frames, fxFile, shot);
+            tdev.Sync();
+        } else {
+            RunFxTest(dev, frames, fxFile, shot);
+        }
+        std::printf("rendered; screenshot %s\n", shot.c_str());
+        return 0;
+    }
     if (particleTest) {
         if (threaded) {
             ThreadedDevice tdev;
@@ -5731,6 +6741,7 @@ int main(int argc, char** argv)
         tdev.SetShadows(shadows);
         tdev.SetHdr(hdr);
         tdev.SetBloom(bloom, 1.0f);
+        for (const auto& [k, value] : knobs) tdev.SetKnob(k, value);
         // (Only as asked: the bench's baselines were made without.)
         if (lightOverride) {
             tdev.SetLightOverride(true);
@@ -5784,6 +6795,13 @@ int main(int argc, char** argv)
         RunReadbackTest(dev);
     } else if (!g_statelPack.empty()) {
         RunStatelTest(dev, frames, shot, dump);
+    } else if (g_handoverTest) {
+        RunHandoverTest(dev, frames, shot);
+    } else if (!g_portalView.empty()) {
+        RunPortalView(dev, frames, shot);
+    } else if (!g_portalCaptureDir.empty()) {
+        g_portalDump = dump;
+        RunPortalCaptureTest(dev, frames, shot);
     } else if (!g_leafTrees.empty()) {
         RunLeafScene(dev, frames, shot, dump);
     } else if (g_grassBench) {

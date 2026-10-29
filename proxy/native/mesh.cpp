@@ -216,14 +216,22 @@ uint32_t __fastcall DrawIndexed(uint8_t* indices, void*, void* vb, uint32_t vert
 }
 
 // SimpleMesh::Render. (Its retry and lost-device paths only follow a failed draw, which FUN_1001fdba never reports.)
+// A sub-mesh the backend has something for (a mesh atlas, live geometry: docs/live-meshes-plan.md) is drawn through
+// it (device::MeshBegin).
 void __fastcall MeshRender(uint8_t* m, void*, void*)
 {
     uint8_t* d = Field<uint8_t*>(m, kMeshData);
     void* vb = Field<void*>(d, kVertexBuffer);
     if (!vb) vb = Field<void*>(d, kHardware);
     if (!(m[kMeshFlags] & 1) && !vb) vb = RestoreHardware(d);
-    DrawIndexed(Field<uint8_t*>(d, kIndices), nullptr, vb, Field<uint32_t>(d, kVertexCount),
-                Field<uint32_t>(d, kTriangleCount), 0, 0);
+    uint32_t over = 0;
+    if (device::MeshOverrides())
+        if (const uint32_t tag = meshdata::Tag(m))
+            over = device::MeshBegin(Render(), tag, vb, Field<uint32_t>(d, kVertexCount));
+    if (over != 2)
+        DrawIndexed(Field<uint8_t*>(d, kIndices), nullptr, vb, Field<uint32_t>(d, kVertexCount),
+                    Field<uint32_t>(d, kTriangleCount), 0, 0);
+    if (over) device::MeshEnd(Render());
 }
 
 bool __fastcall DataIsTransparent(uint8_t* data)    // RVisualData_t::IsTransparent
@@ -627,6 +635,8 @@ int32_t FindTriMeshData(void* stream, uint8_t** out)
     return 0;
 }
 
+void (*g_readHook)(void*);                          // SetReadHook
+
 void* __fastcall TriMeshConstructFrom(Visual* v, void*, void* archive)   // FUN_1004927a
 {
     Internal<void*(__fastcall*)(void*, void*, void*)>(0x4D6D3)(v, nullptr, archive);   // RVisual_t's part
@@ -641,6 +651,7 @@ void* __fastcall TriMeshConstructFrom(Visual* v, void*, void* archive)   // FUN_
     if (Field<uint8_t*>(v, kData) && data) PlaceFromData(v, data);
     v[kRegistered] = v[kIsOccluder] = 0;
     v[kCullByVolume] = 1;
+    if (g_readHook) g_readHook(v);
     return v;
 }
 
@@ -740,6 +751,8 @@ void* __fastcall TriMeshSubjectDelete(void* self, void*, uint8_t flags)
 }
 
 }  // namespace
+
+void SetReadHook(void (*hook)(void* triMesh)) { g_readHook = hook; }
 
 void Install(HMODULE orig)
 {

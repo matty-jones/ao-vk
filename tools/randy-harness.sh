@@ -3,6 +3,7 @@
 # it loads the same randy31.dll proxy, randy31_orig.dll and ddraw.dll as the game), run there, removed.
 # Usage: tools/randy-harness.sh [out-dir] [harness args...]     (default out-dir: build/randy-harness)
 cd "$(dirname "$0")/.." || exit 1
+hidden=$PWD/tools/wine-hidden.sh                 # (no windows on the desktop: RVK_DEMO_VISIBLE=1 to see them)
 repo=$PWD
 out=${1:-build/randy-harness}
 [ $# -gt 0 ] && shift
@@ -26,7 +27,7 @@ rm -f ../logs/randy-vk-harness.log
 WINEPREFIX=${WINEPREFIX:-$HOME/.wine-prk} WINEDEBUG=${HARNESS_WINEDEBUG:--all} WINEDLLOVERRIDES="msvcr100,msvcp100=n,b" \
 DXVK_CONFIG_FILE="$client/../dxvk.conf" DXVK_LOG_LEVEL=warn RANDYVK_CAPTURE_FRAME=${RANDYVK_CAPTURE_FRAME:-3} \
 RANDYVK_LOG="C:\\linux\\logs\\randy-vk-harness.log" \
-    timeout 120 wine randy_harness.exe --shot randy_harness.bmp "$@" > "$out/wine-output.txt" 2>&1
+    timeout 120 "$hidden" wine randy_harness.exe --shot randy_harness.bmp "$@" > "$out/wine-output.txt" 2>&1
 # (to a file, not a pipe: Wine's services, still running for the next launch, keep their copy of it open)
 grep -v -iE 'pci id|EGL' "$out/wine-output.txt"
 rm -f "$client/randy_harness.exe"

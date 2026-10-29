@@ -303,13 +303,20 @@ void __fastcall Render(uint8_t* visual, void*, void* viewport)
                 void* ds = At<void*>(viewport, 8);
                 void*& saved = *Internal<void**>(0x1E2390);                  // the stage's texture, put back after
                 saved = At<void*>(ds, 0x1128);
+                // Held while the light's texture takes its place (the original doesn't): when the stage's texture
+                // was already freed by the game (zoning), the DeviceState's was its last user - setting the light's
+                // freed the surface, putting it back counted a user on freed memory, and the next texture change
+                // freed it again: heap corruption on Windows, in crash reports from zoning near characters (#19).
+                void* keep = saved;
+                if (keep) orig::surface_t_AddRefDXSurface(keep);
                 void* lightSurface = At<void*>(orig::RandyShadowlandsData_s_GetCATLightTexture(), 0x30);
                 orig::surface_t_AddRefDXSurface(lightSurface);
                 orig::DeviceState_SetTexture(ds, lightSurface, 0, 10);
                 orig::DeviceState_UpdateDevice(ds);
                 ForEachPiece(mesh, [&](uint8_t* piece, void* buffer) { DrawPiece(piece, buffer); });
-                orig::DeviceState_SetTexture(ds, saved, 0, 10);
+                orig::DeviceState_SetTexture(ds, keep, 0, 10);
                 orig::DeviceState_UpdateDevice(ds);
+                if (keep) orig::surface_t_ReleaseDXSurface(keep);
                 orig::surface_t_ReleaseDXSurface(lightSurface);
                 orig::StateBlob_c_Reset(visual + kCatLightBlob);
             }

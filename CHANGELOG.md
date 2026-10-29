@@ -52,6 +52,214 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 - The interface stays in its own layer with `RVK_UiRate` 0 (every frame) and Native Direct or Device off,
   including with frame generation enabled.
 
+## 0.8.0 - 2026-10-29
+
+### New
+- ao-vk's own effects: an effect file in `randy-vk\fx` (in the client folder) can stand in for one of the game's
+  effects, drawn with ao-vk's particles - glowing, trailing, sparking - in place of the game's sprites. The first one,
+  `nano_bolt.rvkfx`, replaces the bolt most nanos cast (Change Form, the Calia forms and some 700 others): light
+  gathering at your hand, a bright bolt with a trail of motes and sparks, and a burst with a shock ring on the target.
+  `rage_bolt.rvkfx` does the same in fire for Lesser Controlled Rage's cast (and four other nanos').
+  `nano_recharge.rvkfx` replaces a nano recharger's burst: violet and cyan energy swirling in round you.
+  ao-assets' workbench has an effect editor for them (Effects): every change shows in the running game within a
+  second, and *Play in game* plays the effect on your character without casting. *Record the game's* has the game
+  play its own effect on you and record it, and the editor's preview then shows the game's beside yours, in a split
+  view or both in one scene (Compare). Each emitter's *Size scale* makes all its particles bigger or smaller at once.
+  The console's `fx <template> cast` plays a cast at yourself (`capture` records it).
+  Edited files show at once; the console's `fx reload` reads them again. `RVK_Fx` (Particles) switches them off.
+- Shops' insides can be seen through their open doors from the street, in 3D, instead of a black doorway. A shop
+  shows once you have been in one of its kind: going in records the room, and walking through a door remembers where
+  it leads (every Fair Trade of the same building then shows it too, until its own door says otherwise). By day the
+  room is a little dimmer than the street (`RVK_PortalDim`). The room's other doors show in it too (a shop seen
+  before this needs one more visit for them). `RVK_Portals` (General) switches it off. The records stay
+  in `randy-vk\portals` in the client folder.
+- And the reverse: from inside a shop, its open door shows the street outside, with the sky behind it. The street
+  shows once you have stood at that door outside (the buildings and props in front of it are recorded then).
+  `RVK_StreetView` (General) switches it off. The ground in front of the door shows too, as ao-vk's ground draws
+  it; a street recorded before this needs another stand at its door to get its ground. The street is lit as it was
+  when you walked in (the hour's sun, ambient light and fog), not as when it was recorded (`RVK_StreetNow`, ini only). A shut
+  door stays shut: the street no longer shows through its panel, and the open door shows the street, not black,
+  with the door itself still there as it swings open. Your own head and light bar no longer appear in the
+  street seen from inside (recorded while you stood in its doorway).
+  No clouds through the door yet.
+- Zone changes no longer freeze on a blank picture: the last view of the zone you leave stays up, slowly drifting
+  and dimming, while the next one loads, then fades into the new zone once it has settled, its ground and lighting
+  already in place. The interface stays up throughout, and moving the camera ends the wait at once. `RVK_ZoneFade`
+  (General) switches it off.
+- A character's own light (a lamp or glowing item it wears) can be kept from casting that character's shadow on the
+  ground and walls around it: switch off `RVK_OwnShadow` (Shadows, under point light shadows). Everything else still
+  casts in that light, the other characters near it included, and lamps still shadow everyone.
+- Meshes from the ao-assets workbench can have a texture of their own: a building or prop unwrapped again and painted
+  in Blender or Substance Painter shows its own texture (with its normal, roughness / metal and glow maps) instead
+  of the shared game textures it used. A mesh you are editing also shows its new shape in the running game within a
+  second of each save, before it is applied (live preview, hot reload on). `RVK_LiveMeshes` (Materials, on).
+- Texture packs can hold remodelled meshes: a pack folder in `randy-vk\packs\` with a mesh's new shape and its own
+  texture shows them without any change to the game's files (ao-assets authored packs install themselves there).
+  `randy-vk\packs\order.txt` decides which pack wins where two change the same texture or mesh ("materials" stands
+  for `randy-vk\materials`); without it nothing changes. `RVK_LiveMeshes` switches the meshes off.
+- The water's surface is now built from the game's own water: rivers, lakes and pools sit exactly where the game puts
+  them, at every level, instead of being redrawn from a map that lost some of them (dry riverbeds, water under the
+  ground, walls of water) in places it hadn't seen before. The waves calm down towards the shores and the falls, and
+  each body of water gets waves for its size. `RVK_WaterMesh` (Water, on) switches back to the older surface.
+- Tree crowns look round: `RVK_CrownSky` (Lighting, 0 to 1) lights them as the sky does - their tops brighter,
+  their undersides and insides darker - and lets the leaves facing the sun keep their shading instead of all reaching
+  the same flat brightness. A tree is about as bright overall as before.
+- Sunlight through tree crowns follows their depth: `RVK_CrownDepth` (Lighting, under Sunlight through leaves, 0 to 1).
+  With the sun behind a tree, its thin edges and gaps glow and its dense middle stays dark, in the deeper yellow-green
+  of light through leaves; leaves under another tree's crown or behind a wall get none.
+- AMD's reflections to try: `RVK_SsrMode 1` (Effects, under Reflections) swaps our screen-space reflections for
+  AMD's FidelityFX SSSR - glossy surfaces get blurred reflections instead of none, and they are denoised over frames.
+  Off by default (0: ours).
+- AMD's ambient occlusion to compare with ours: `RVK_AoMode 1` (Effects, under Ambient occlusion) uses FidelityFX
+  CACAO. `RVK_Ao` and `RVK_AoRadius` still set its strength and reach.
+- Ray-traced ambient occlusion on GPUs with ray tracing (NVIDIA RTX, AMD RX 6000 and later): `RVK_AoMode 2`. It sees
+  what the screen can't - the underside of a bridge, the inside of a doorway, walls behind the camera - and reaches
+  three times `RVK_AoRadius`. Buildings and the ground occlude; characters and plants don't yet.
+- Ray-traced sun shadows on GPUs with ray tracing: `RVK_RtShadow 1` (Shadows). Buildings, walls and rocks cast exact
+  shadows that are sharp where they touch the ground and soften with distance, with no shadow-map blockiness, and
+  every placed object of the playfield casts, seen or not. Characters cast traced shadows too, and so do cut-outs -
+  fences, grilles, trees' and still plants' leaves, through their textures' holes. Swaying plants, canopies' leaves
+  and characters' hair still cast from the shadow map, and grass, water and glass still take the map's shadows.
+  Ray-traced ambient occlusion (`RVK_AoMode 2`) sees characters and cut-outs as well. Needs the sun's shadows and
+  the depth pre-pass on.
+- Ray-traced reflections on GPUs with ray tracing: `RVK_RtReflect 1` (Effects, under Reflections). Where the
+  screen-space reflections find nothing - what stands off the screen's edge, behind a wall, behind the camera -
+  a ray finds it: wet ground and glossy floors reflect cliffs and buildings that were cut off before. Things the
+  camera hasn't looked at lately reflect as the sky around them.
+- Lamps light the air: `RVK_VolLamps` (Effects, under Volumetric light; 0 = off, up to 2) gives every point and spot
+  light a glow in the air round it, thicker in fog banks; a lamp with a shadow cube casts shafts through it - dark
+  where a crate or a wall blocks its light.
+- Variable rate shading: `RVK_Vrs 1` (Effects) shades flat and fast-moving parts of the scene in 2 x 2 blocks, for
+  more frames per second on GPUs that support it (AMD's FidelityFX VRS). `RVK_VrsCutoff` (ini) sets how readily.
+  Leaves, fences and grilles are always shaded in full, so their holes stay sharp.
+- AMD's indirect light to try: `RVK_GiMode 1` (Effects, under Indirect light) traces bounce light through a model of
+  the world's buildings and ground (FidelityFX Brixelizer GI), so light reflects off walls and slopes that are off
+  screen or hidden too. `RVK_Gi` still sets its strength. In randy-vk.ini, `RVK_GiDebug` 1 shows that model and 2 the
+  light alone; `RVK_GiSky` adds the sky's light to it.
+- The settings window (AOReloaded's Renderer and Advanced tabs) says what every setting costs: a tag after each one,
+  such as [GPU: high] or [no cost], from GPU time measured at 1920 x 1080. A note under the frame rate cap explains a
+  graphics card at 100% (normal while the frame rate is under the cap) and what lowers it. The choices show names
+  instead of numbers (ours / AMD CACAO / ray traced, FSR 2.2 / FSR 3.1, off / 16x, ...), and AMD's tuning moved from
+  randy-vk.ini into the Advanced tab: `RVK_SssrThick`, `RVK_GiSky` and `RVK_VrsCutoff`. The console shows the cost
+  too. Needs the matching AOReloaded.
+
+### Changed
+- Open windows (inventory, chat, the map) cost far less of the graphics card: the interface is drawn with a lean
+  shader of its own instead of the full scene shader, the same picture (about 1.5 ms less a frame with a few
+  windows open on an RX 6600 XT). `RVK_LiteShader` (randy-vk.ini, on) switches it off. Contributed by gorg (#21).
+- Day and night share one light (`RVK_LightRig`, on; off brings back the old night lighting). At sunset buildings and
+  rocks no longer light up and then drop to a third of their light as the moon rises; ground in a hill's shade no
+  longer brightens in the last minutes of daylight, the difference between sun and shade fading out as the sun goes
+  down; in a storm at night the ground and what stands on it darken alike; and by night buildings, rocks and
+  characters are lit by the same night sky as the ground around them, no longer at about half its brightness. How
+  dark the land gets now follows the light of the hour, as eyes adapt: a moonlit night is lighter than a moonless
+  one, and the darkness floor's slow brightening is gone (`RVK_Darkness` still sets how dark).
+- The land, sky and clouds share one exposure, metered like a camera's: when the view holds much more bright sky
+  than the zone's daytime balance (looking into a sunset), the whole picture comes down a little together. It only
+  ever darkens, never below 0.4 of the exposure; a zone not yet seen by day is metered against a usual day.
+  `RVK_Metering` (Lighting) sets how strongly (0 turns it off).
+- Faster on the GPU wherever buildings, characters and plants fill the view: they no longer share the ground's heavy
+  shader build, and those no lamp reaches skip the lamps' code as well, so the graphics card works on more of their
+  pixels at once (a city's scene by day about half the GPU time).
+- The ground draws faster on the GPU too (~14% less of its time): its shader no longer holds the ground's texture
+  layout through the lighting, so the graphics card keeps a third more of its pixels in flight.
+- Floodlights and other spot lights cost much less for their shadows: only the part of their shadow map their beam
+  can reach is drawn, not all six sides with everything in range (Borealis's bridge lights reach over 1,000 units).
+  Grass outside their beam no longer goes into their shadows either, and with no swaying grass in the beam their
+  shadows are kept between frames instead of redrawn. Their light in the air (`RVK_VolLamps`) skips the work for the
+  view's rays the beam doesn't reach, and buildings and the ground outside the beam no longer work out its light.
+- Sun shadows cost less: beyond the nearest of the four shadow areas round the camera, they are redrawn in turns -
+  the second every other frame, the two widest every fourth - instead of the second every frame and the widest every
+  other (about a third less GPU time for sun shadows over a city). Still things' shadows are exactly as before;
+  moving the camera far, a new sun angle or a change of shadow settings redraws them all at once.
+- The rocks ao-vk scatters at the feet of cliffs cost less: they are now skipped in blocks that are out of view,
+  and only the blocks a sun shadow's or a lamp's shadow map covers are drawn into it, instead of a whole stretch of
+  land's rocks every time (the rocks you see are the same). Around Borealis's bridges the rocks were most of what the
+  nearby sun shadows drew.
+
+### Fixed
+- Shadowlands: the void around the floating land (the gardens, the drop below Adonis and other zones) no longer
+  shows a black plain tiled with the word "Brink". That is the game's marker for the void, a see-through ground tile;
+  the ground drawn by ao-vk (`RVK_GroundOn`) now leaves those cells out as the game does (#18).
+- Crashes on zoning or in doorways (Windows: "heap corruption"), more frequent since 0.7.1: the Shadowlands
+  special light on characters, and any object drawn with a set of its own textures, could free a texture the game
+  had already let go and then free it again (#19).
+- At night near shops, bright slanted sheets and white streaks no longer hang over the street. They were the soft
+  edges of a shop room's glass and light beams, seen through its doorway (`RVK_Portals`), drawn outside the doorway.
+- With frame generation on (`RVK_FrameGen`), AOReloaded's cast and reload bars and the text shown after zoning
+  (the suppression field notice) no longer smear: they were drawn into the picture frame generation fills in.
+- In storms, water no longer jerks about: the waves follow a slow swell instead of every swing of the storm's wind,
+  and the small ripples no longer jump when the wind veers.
+- A shop's room no longer shows from behind its doorway, floating in the street as a pale window with its lamp beams
+  (Newland City's midtech shop, from the arcade beside it). The room also no longer sticks out round the doorway:
+  through a wide doorway its walls showed past the frame, and with the camera in the doorway the screen filled with
+  broken triangles.
+- A shop's room seen through its doorway is no longer turned at an angle to the building (30 degrees at Newland City's
+  midtech shop, whose doorway is a pointed recess rather than a flat panel), and no longer shows over the walls just
+  inside the doorway: it shows only where the doorway's black is.
+- Forests next to water no longer cost far more than other forests: the trees drawn after a pond or river were
+  shaded once for every layer of leaves (about 46 fps under a Newland tree, where a forest without water stays fast).
+  `RVK_PrepassMore` (ini only) switches the fix off for comparison.
+- Ground grass grows on the grass again, not beside it: in a busy town (the Borealis lawns) blades stood on the
+  paving while patches of lawn next to them stayed bare. The grass took the ground's look while its textures were still
+  loading and kept it; it now waits for them, and looks again whenever one changes.
+- Walking into a shop or other room from outside no longer leaves it dark for its first five seconds (it was lit as
+  the street by night until then).
+- Your character's own light keeps lighting the walls and floor around you as you step through a door between two
+  parts of a room, instead of going out on the side you just left.
+- Inside shops and other rooms, the props and characters were much darker than the walls and floor around them.
+  Lamp brightness (`RVK_PtLight`) now only applies outdoors: in a room the lamps are its light, at the game's strength.
+  A room's walls and floor take only the lights the game gives them (their lamps are already in their baked light), so
+  the room isn't washed out, and the lamps' glow in the air (`RVK_VolLamps`) stays at `RVK_PtLight` indoors too, so a
+  shop no longer fills with haze.
+- A ceiling lamp over a shop terminal or other prop could be taken for a light a character carries, dimmed to
+  `RVK_CharLight`, and with `RVK_OwnShadow` off the prop under it cast no shadow.
+- At night in open zones, a lit strip ran round the whole horizon just under the sky, with a hard top edge and the
+  far hills dark against it: the game's cloud sheets that sit below eye level, far off, showed there. They're no
+  longer drawn under the horizon.
+- With ray-traced ambient occlusion (`RVK_AoMode` 2), the shading slid a few pixels behind walls and corners while
+  strafing, and slid back once the camera stopped.
+- By night, grass growing right behind a tree trunk (or anything else solid) showed in front of it. The grass was drawn
+  with the camera the game had set last for its night effects, not the world's.
+- With depth of field on (`RVK_Dof`), the glow a lamp makes in the air (a character's own light at night, in rain or
+  mist) was dimmed by the haze of whatever lay behind it: trees behind your character stood out as dark, sharp-edged
+  shapes in its glow, and the sky lost most of it.
+- In a thunderstorm at night, buildings, rocks, pillars and characters went near black against the ground around
+  them: the storm took three quarters of their light where it takes half of the ground's. By night they now dim as
+  the ground does.
+- Standing in grass with the camera zoomed out, the grass could stand up through your character instead of bending
+  away from it, when other characters were walking nearer the camera (their footsteps took every place the grass
+  keeps for what pushes it). Characters where they stand now always come first.
+- Static meshes are now recognised in the game: live geometry and own-UV atlases from the ao-assets workbench didn't
+  show on them, and Ctrl+Shift+J on a static mesh couldn't name it (it gave its texture and counts instead).
+- Texture and mesh picking (Ctrl+Shift+I / Ctrl+Shift+J) picked whatever was up and to the left of the cursor when
+  `RVK_RenderScale` is below 100 (75 by default), often an object behind the one pointed at; it now picks what is under
+  the cursor.
+- Sunlight through leaves (`RVK_LeafLight`) did little or nothing on dense tree crowns: their textures were taken
+  for walls drawn the same way. Every tree crown now lets the light through.
+- Chain-link fences' sun shadows flickered between the mesh pattern and solid panels while the mouse pointer was
+  hidden (after turning the camera with the mouse), on the frames that redrew the interface. Fences, grilles and
+  leaves now keep the holes in their shadows every frame.
+- Rivers missing in Borealis: the canyons under the bridges showed dry sand where the game has water. The playfield
+  keeps a second sheet of water hidden under the land, and the river was put at its height, under the ground.
+
+### Diagnostics
+- The frame timing in randy-vk.log (`cpu ms` lines) splits the time spent presenting a frame into acquiring the
+  next picture, handing the frame to the GPU and presenting it, so a log of a session that slows down over time
+  shows which step grows (#20).
+- randy-vk.log lists, at startup, how the graphics driver compiled each version of ao-vk's main shader: the
+  registers each needs and what spills to memory (`shader stats:` lines). They show how much of the GPU each kind
+  of draw can use at once; please include them when reporting performance on a GPU of your own.
+- `RVK_FxLog 1` (randy-vk.ini) writes every effect the game starts to randy-vk.log: its template number and kind,
+  what it is attached to (a spot, a character, a pair for a projectile) and when it ends. The console's
+  `fx <template>` plays one of the game's effects on your character. The groundwork for ao-vk's own effects.
+- Inside a shop, when its open door shows black instead of the street, randy-vk.log now says why (no street
+  recorded for that door, the room's entrance not known yet, ...).
+- Frame dumps also save AMD's indirect light (`-brixgi.bmp`, with `RVK_GiMode 1`) and the surfaces AMD's effects read
+  (`-surface.bmp`: normals, characters' marked twice as bright); `-gi.bmp` stays ours.
+- `RVK_RtDebug 1` (randy-vk.ini) shows what ray tracing sees on GPUs that have it: each building, rock and patch of
+  ground in its own colour (red: a surface seen from behind). The ray-traced effects are built on it.
+
 ## 0.7.1 - 2026-10-26
 
 ### Fixed

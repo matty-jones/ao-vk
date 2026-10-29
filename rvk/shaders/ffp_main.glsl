@@ -1,6 +1,10 @@
 // Direct3D 7 fixed-function pixel processing: two texture stages, specular add, fog, alpha test.
 #extension GL_KHR_shader_subgroup_quad : require
 #extension GL_EXT_nonuniform_qualifier : require
+// RVK_NO_FRAME_LIGHTS: the build for draws no frame light reaches (lighting.glsl) - not the ground's either.
+#ifdef RVK_NO_FRAME_LIGHTS
+#define RVK_NO_GROUND
+#endif
 #include "constants.glsl"
 
 // tex0 / tex1 / bumpBase / normalMap are bindless now (TEX0 / TEX1 / BUMPTEX / NORMALTEX in constants.glsl).
@@ -78,6 +82,16 @@ float gSunShare = 0.0;                          // how much of the colour is dir
 bool gPbrOn = false, gPbrBase = false;
 vec3 gPbrAlbedo = vec3(0.0), gPbrNormal = vec3(0.0, 0.0, 1.0), gPbrSpec = vec3(0.0);
 float gPbrAo = 1.0, gPbrRough = 1.0, gPbrMetal = 0.0;
+// The normal the surface was lit with per pixel (world space; its normal or bump map's detail in it), for the scene's
+// normals (outMotion.zw). Zero: not lit per pixel.
+vec3 gShadeNormal = vec3(0.0);
+
+// A unit normal as two numbers, octahedral (-1 .. 1): the scene's normals (outMotion.zw; ssr.frag, gbuffer.frag).
+vec2 OctNormal(vec3 n)
+{
+    vec2 o = n.xy / (abs(n.x) + abs(n.y) + abs(n.z));
+    return n.z < 0.0 ? (1.0 - abs(o.yx)) * vec2(o.x >= 0.0 ? 1.0 : -1.0, o.y >= 0.0 ? 1.0 : -1.0) : o;
+}
 
 #ifndef RVK_PREPASS_CUTOUT                       // (the pre-pass: depth only, no colour attachment)
 layout(location = 0) out vec4 outColor;
@@ -150,7 +164,9 @@ vec2 Vogel(int i, int n, float rotation)
 // the cascade's border (0 = centre, >= 1 = outside). Soft (FL.effects.z > 0): the penumbra grows with the distance
 // between the blocker and the receiver, as under a sun of some size - sharp where a trunk meets the ground, soft at
 // the far edge of a canopy's shadow (blocker search, then a filter that wide). Hard: 3x3 taps of 2x2 filtering.
-float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
+// (base: the map's first layer of the set read - 0 every caster, kUntracedLayer those the rays lack.)
+const int kUntracedLayer = 5;                    // rvk.h kUntracedLayer
+float CascadeVisibility(int c, int base, vec3 posW, vec3 n, float nl, out float edge)
 {
     if (nl >= 0.0)
         posW += n * FL.cascadeTexel[c] * (1.5 + 2.0 * (1.0 - nl));   // normal offset against self-shadowing
@@ -160,24 +176,25 @@ float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
     if (edge >= 1.0 || ndc.z <= 0.0 || ndc.z >= 1.0) { edge = 2.0; return 1.0; }
     vec2 uv = ndc.xy * 0.5 + 0.5;
     vec2 ts = 1.0 / vec2(textureSize(shadowMap, 0).xy);
+    float layer = float(c + base);
     float soft = FL.effects.z;
     if (soft <= 0.0) {
         float sum = 0.0;
         for (int y = -1; y <= 1; ++y)
             for (int x = -1; x <= 1; ++x)
-                sum += texture(shadowMap, vec4(uv + vec2(x, y) * ts, float(c), ndc.z));
+                sum += texture(shadowMap, vec4(uv + vec2(x, y) * ts, layer, ndc.z));
         return sum / 9.0;
     }
     float texel = FL.cascadeTexel[c];
     if ((C.flags.x & F_SHADOWCHEAP) != 0u)              // far foliage: one filtered tap
-        return texture(shadowMap, vec4(uv, float(c), ndc.z));
+        return texture(shadowMap, vec4(uv, layer, ndc.z));
     float rotation = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + FL.taa.z);
     // Far cascades (distance level of detail): a texel there is wider than most penumbrae, so a small fixed filter
     // instead of the blocker search and the wide one - a quarter of the taps.
     if (c >= 2) {
         float sum = 0.0;
         for (int i = 0; i < 4; ++i)
-            sum += texture(shadowMap, vec4(uv + Vogel(i, 4, rotation) * 1.5 * ts, float(c), ndc.z));
+            sum += texture(shadowMap, vec4(uv + Vogel(i, 4, rotation) * 1.5 * ts, layer, ndc.z));
         return sum / 4.0;
     }
     float k = 0.02 * soft;                       // penumbra width per world unit from blocker to receiver
@@ -188,7 +205,7 @@ float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
     const int kSearch = 5;                       // the centre plus four blockers (a thin shadow still hits the centre)
     for (int i = 0; i < kSearch; ++i) {
         vec2 o = i == kSearch - 1 ? vec2(0.0) : Vogel(i, kSearch - 1, rotation) * searchTexels * ts;
-        float d = texture(shadowDepths, vec3(uv + o, float(c))).r;
+        float d = texture(shadowDepths, vec3(uv + o, layer)).r;
         if (d < ndc.z) { blockerSum += d; blockers += 1.0; }
     }
     if (blockers == 0.0) return 1.0;
@@ -196,10 +213,10 @@ float CascadeVisibility(int c, vec3 posW, vec3 n, float nl, out float edge)
     float distance = (ndc.z - blockerSum / blockers) * FL.cascadeDepth[c];
     float radius = clamp(distance * k / texel, 1.0, 24.0);
     if (radius < 2.0)                            // a sharp penumbra: the wide filter would only re-read the same texels
-        return texture(shadowMap, vec4(uv, float(c), ndc.z));
+        return texture(shadowMap, vec4(uv, layer, ndc.z));
     float sum = 0.0;
     for (int i = 0; i < 12; ++i)
-        sum += texture(shadowMap, vec4(uv + Vogel(i, 12, rotation) * radius * ts, float(c), ndc.z));
+        sum += texture(shadowMap, vec4(uv + Vogel(i, 12, rotation) * radius * ts, layer, ndc.z));
     return sum / 12.0;
 }
 
@@ -336,20 +353,49 @@ vec3 DawnTint(vec3 n, float lit)
     return mix(FL.dawn[1].rgb, FL.dawn[0].rgb, reached);
 }
 
+// The light rig (rvk light_rig.cpp, docs/light-rig-plan.md): FL.cond.z 1 when on; FL.cond.y the sun's share of the
+// land's light (1 at noon, ~0.5 at 5 degrees up, none at the horizon: rvk LightRig sunShare). Off, the old day / night
+// switches.
+bool RigOn() { return FL.cond.z > 0.5; }
+
 float FlatShade()
 {
     // (A thunderstorm - FL.rainNear.y: the sun hidden as by cloud everywhere, more than a cloud's shadow takes - its
     // share of the land's light gone, so the shadows of things with it; and the sky's share halved, a storm's sky far
     // dimmer than the clear one the lightmap holds - rvk Device::StormSkyLight: a quarter of the light left.)
     float o = FL.rainNear.y;
-    return min(1.0 - (1.0 - gCasterVisibility) * ShadowStrength(length(vPosW - C.eyePos.xyz)) * (1.0 - o),
-               mix(TerrainShade(), 1.0, o)) *
-           (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o)) * (1.0 - 0.5 * o);
+    float things = min(1.0 - (1.0 - gCasterVisibility) * ShadowStrength(length(vPosW - C.eyePos.xyz)) * (1.0 - o),
+                       mix(TerrainShade(), 1.0, o));
+    if (!RigOn())
+        return things * (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o)) * (1.0 - 0.5 * o);
+    // With the rig: the sun's parts (things' shadows, the clouds', the storm taking the sun) by the sun's share of the
+    // light, the storm's dimmer sky whatever the hour - by night the moon's map's shadows are the moon's alone (the
+    // ground pass's moonShade), and the stormy land no longer brightens as the moon takes over at dusk.
+    float sun = FL.cond.y;
+    if (FL.moon.w > 0.5) things = 1.0;
+    return mix(1.0, things, sun) * (1.0 - kCloudSunShare * max(1.0 - gCloudVisibility, o) * sun) * (1.0 - 0.5 * o);
 }
 
 int gShadowCascade = -1;                         // the cascade SunVisibilityCasters read (RVK_ShadowView)
 
-float SunVisibilityMap(vec3 posW, vec3 n, float nl);
+float SunVisibilityMap(vec3 posW, vec3 n, float nl, int base);
+
+#ifdef RVK_GLOW
+// The rays' sun visibility at this pixel (rvk raytrace.cpp, RVK_RtShadow: traced from the pre-pass's depth, before the
+// scene is shaded) - where this fragment is the surface they were traced from (its view depth the mask's); else -1.
+float RtShadowMask()
+{
+    uint bits = floatBitsToUint(FL.rtShadow.x);
+    if ((bits & 0xFFFFFu) == 0u)
+        return -1.0;
+    uint img = (bits & 0xFFFFFu) - 1u, smp = (bits >> 20) & 0xFFu;
+    vec2 m = texelFetch(sampler2D(texImages[img], bindlessSamplers[smp]), ivec2(gl_FragCoord.xy), 0).rg;
+    float z = FL.rtShadow.z / (gl_FragCoord.z - FL.rtShadow.y);
+    // (The pre-pass's own surfaces match to the mask's half-float depth, ~0.05 %; a thing in front of one - a character's
+    // foot on the ground - by more.)
+    return abs(m.g - z) < 0.002 * z + 0.01 ? m.r : -1.0;
+}
+#endif
 
 // The native ground faced away from the sun is in its own shade (gGroundAway, taken with the terrain's shade in
 // TerrainShade), and the map's shadows are drawn there too, not left to the lightmap - the hour's bake is a 4-unit
@@ -369,15 +415,21 @@ float SunVisibilityCasters(vec3 posW, vec3 n)
         } else if (nl <= 0.0)
             return 1.0;                                    // faces away: the light equation handles it
     }
-    return SunVisibilityMap(posW, n, nl);
+#ifdef RVK_GLOW
+    // Ray traced (RVK_RtShadow): the rays' mask, times the map's casters they lack (characters, plants, cut-outs).
+    float traced = RtShadowMask();
+    if (traced >= 0.0)
+        return traced * SunVisibilityMap(posW, n, nl, kUntracedLayer);
+#endif
+    return SunVisibilityMap(posW, n, nl, 0);
 }
 
-float SunVisibilityMap(vec3 posW, vec3 n, float nl)
+float SunVisibilityMap(vec3 posW, vec3 n, float nl, int base)
 {
     int count = int(FL.shadowParams.z);
     for (int c = 0; c < count; ++c) {
         float edge;
-        float v = CascadeVisibility(c, posW, n, nl, edge);
+        float v = CascadeVisibility(c, base, posW, n, nl, edge);
         if (edge >= 1.0) continue;
         gShadowCascade = c;
         float blend = (C.flags.x & F_SHADOWCHEAP) != 0u ? 0.0 : smoothstep(0.8, 1.0, edge);
@@ -385,7 +437,7 @@ float SunVisibilityMap(vec3 posW, vec3 n, float nl)
         float next = 1.0;
         if (c + 1 < count) {
             float e2;
-            next = CascadeVisibility(c + 1, posW, n, nl, e2);
+            next = CascadeVisibility(c + 1, base, posW, n, nl, e2);
         }
         return mix(v, next, blend);
     }
@@ -531,6 +583,22 @@ float CasterFade()
     return FL.shadowParams.y > 0.0 ? ShadowStrength(length(vPosW - C.eyePos.xyz)) / FL.shadowParams.y : 0.0;
 }
 
+// RVK_CrownDepth: how much of the sun's light gets through a crown to a point - by the stretch it crossed from the first
+// thing it hit over the point (the cascades' depths) to here, in world units: exp(-d / 1.5) - a leaf at a crown's thin
+// rim takes most of it, one deep inside little, one under another crown or a wall none. -1: no cascade covers it.
+float CrownThrough(vec3 posW)
+{
+    int count = int(FL.shadowParams.z);
+    for (int c = 0; c < count; ++c) {
+        vec4 sc = FL.shadowViewProj[c] * vec4(posW, 1.0);
+        vec3 ndc = sc.xyz / sc.w;
+        if (max(abs(ndc.x), abs(ndc.y)) >= 0.98 || ndc.z <= 0.0 || ndc.z >= 1.0) continue;
+        float d = texture(shadowDepths, vec3(ndc.xy * 0.5 + 0.5, float(c))).r;
+        return exp(-max(ndc.z - d, 0.0) * FL.cascadeDepth[c] / 1.5);
+    }
+    return -1.0;
+}
+
 float gSunVisibility = 1.0;          // SunVisibility(vPosW, vNormalW) when computed (main)
 bool gSunVisibilityValid = false;
 
@@ -645,6 +713,55 @@ vec3 CloudSheet(vec4 tex)
     return mix(S, AirColour(SkyAirAll(FL.cloudAir.rgb, dir, FL.sky[0], FL.sky[1], FL.sky[3], FL.skyRing), low), max(0.25, low));
 }
 
+#ifdef RVK_LITE
+// The lean build (ffp_lite.frag; rvk draw.cpp m_drawLite, RVK_LiteShader - after gorg's ao-vk #21): pre-transformed 2D
+// draws on 8-bit targets - the interface - unlit, unfogged, unshadowed, with no material maps. Of main() below only
+// this much ever runs for them; the full build is held at the GPU's register limit by the rest (128 a pixel on an RTX
+// 4070 Ti, 256 on an RX 6600 XT: its pixels few at a time, each waiting on its texture reads), and the interface paid
+// that too. The same output as the full path, step for step in its order - a change to those steps there belongs here
+// too (RVK_LiteShader 0 and rvk_demo --ui-window compare the two). (The debug views aside.)
+void main()
+{
+    gRecord = vRecord;
+    gDiffuse = vDiffuse;
+    gSpecular = vSpecular;
+    vec4 t0 = Sample(0u);
+    vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
+    vec4 current = Cascade(t0, t1, 1.0);
+    // (Unlit and unshadowed: the full path's flat shade is 1 - with the light rig off, by night a storm's dimming.)
+    if (!RigOn() && FL.moon.w > 0.5)
+        current.rgb *= (1.0 - kCloudSunShare * FL.rainNear.y) * (1.0 - 0.5 * FL.rainNear.y);
+    if (C.vtx.y != 0u) {                                  // (the per-draw colour scale: as the full path's)
+        float bright = uintBitsToFloat(C.vtx.y);
+        if (bright < 1.0) {
+            current.rgb *= bright;
+        } else {
+            float shape = clamp(min(t0.a, max(t0.r, max(t0.g, t0.b))), 0.0, 1.0);
+            float core = smoothstep(0.25, 0.9, shape);
+            current.rgb *= mix(1.0, bright, core);
+            float peak = max(current.r, max(current.g, current.b));
+            current.rgb = mix(current.rgb, vec3(peak), core * clamp((bright - 1.0) / 3.0, 0.0, 1.0));
+        }
+    }
+    if ((D.mat.z & MAT_PICKED) != 0u)
+        current.rgb = mix(current.rgb, vec3(1.0, 0.85, 0.1) * max(dot(current.rgb, vec3(0.3, 0.59, 0.11)), 0.35) * 2.0, 0.7);
+#ifndef RVK_NO_CUTOUT
+    if ((C.flags.x & F_ALPHATEST) != 0u && !AlphaPass(current.a))
+        discard;
+    if ((C.flags.x & F_CUTOUT) != 0u && current.a < vCutout)
+        discard;
+#endif
+    if ((C.flags.w & 512u) != 0u)
+        current = vec4(0.10, 0.32, 0.14, 1.0);
+    if ((C.flags.w & 256u) != 0u)
+        current.a = 1.0;
+    if (FL.terrainSun2.w > 0.5 && (C.flags.w & 256u) == 0u)   // (RVK_ShadowView: no shadow looked up here)
+        current.rgb = vec3(0.5) * mix(0.08, 1.0, 0.6);
+    if (any(isnan(current)) || any(isinf(current))) current = vec4(0.0, 0.0, 0.0, any(isnan(current.aaaa)) ? 1.0 : current.a);
+    current.rgb = max(current.rgb, vec3(0.0));
+    outColor = current;
+}
+#else
 void main()
 {
     gRecord = vRecord;
@@ -666,6 +783,10 @@ void main()
     // Cut-out pixels (alpha test, F_CUTOUT) dropped before the lighting and shadows, not after: most of a plant's quad
     // is see-through. The alpha doesn't depend on the lighting (the lit diffuse keeps the vertex alpha). A dropped
     // pixel is demoted (a helper: its neighbours' derivatives still need it); a 2x2 block all dropped stops here.
+    // A shop's room drawn into its doorway: nothing of it on the street's side of the doorway's plane (its entrance's
+    // own wall and frame stand there - they hid the opening).
+    if (dot(D.clip.xyz, D.clip.xyz) > 0.0 && dot(vPosW, D.clip.xyz) + D.clip.w < 0.0)
+        discard;
 #ifndef RVK_NO_CUTOUT
     bool drop = false;
     if ((C.flags.x & (F_ALPHATEST | F_CUTOUT)) != 0u) {
@@ -763,7 +884,8 @@ void main()
     if ((C.flags.x & F_SHADOWTEX) != 0u) {
         if (FL.moon.w > 0.5)
             moonShade = shade;
-        else
+        // (With the rig the lightmap takes the storm and the clouds by night too: FlatShade.)
+        if (FL.moon.w <= 0.5 || RigOn())
             texShade = flatShade;
         shade = 1.0;
     }
@@ -772,6 +894,70 @@ void main()
         gDiffuse.rgb = clamp(vDiffuse.rgb + vMatAmbient * shade, 0.0, 1.0);
         shadeSun = true;
     }
+    // The stage textures, the native ground's lightmap among them, ahead of the lighting: they don't need it, and done
+    // after it the ground's map and relief were held through it. (A rock takes its shade here: texShade 1 after it -
+    // the lighting takes the shade as it was, texShadeLit.)
+    const float texShadeLit = texShade;
+    // (The ground's base pass: its texture as terrain.glsl lays it.)
+    const bool terrainBasePass = terrainMapped && D.terrainAt.w < 1.5;
+#ifdef RVK_NO_GROUND
+    vec4 t0 = vec4(0.0);   // (sampled after the lighting: with no ground's map to let go first, held through it it cost registers)
+#else
+    vec4 t0 = terrainBasePass ? TerrainBase(D.texIdx.x, bindlessSamplers[D.sampIdx.x], terrain) : Sample(0u);
+#endif
+    // The native ground's lightmap read where the pixel is (its cell from world x, z), not where its triangle's corners
+    // say: a cliff's cells are split corner to corner and each half spread the light its own way - dark wedges up the
+    // face. Read so, a cliff's light runs evenly down it, as the baked texel says.
+    // On a cliff, blurred over the cells round it (by its steepness): one texel a cell stretched up a face of 40 units
+    // turned the cells' light into hard triangles where the face crosses from a dark cell to a lit one.
+    vec3 sandGlint = vec3(0.0), sandMean = vec3(1.0);   // (the glints and the sand's colour they shine against)
+    if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
+        const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
+        t0 = NativeLightmapAt(at);
+        if (terrain.side > 0.01 && !terrain.clutter) {   // (not the rocks on it: they stand on its flat)
+            vec4 blur = vec4(0.0);
+            for (int j = -1; j <= 1; ++j)
+                for (int i = -1; i <= 1; ++i) blur += NativeLightmapAt(at + vec2(i, j) * 1.5 / lmSize);
+            t0 = mix(t0, blur / 9.0, terrain.side);
+        }
+        // (The rocks on it: shaped by the sun now, its shadow on its part only - NativeRockLight.)
+        if (terrain.clutter) {
+            t0.rgb *= NativeRockLight(vNormalW.xyz, t0.g, texShade);
+            texShade = 1.0;
+        } else {
+            // (In its own relief's shadow - a ripple's lee, the gap between stones: the lightmap's sun share of it.)
+            // (The sand's glints: where the lightmap says the sun reaches - the shadow map's shade comes after. Added
+            // past the stages, which clip at 1: below.)
+            // (Whether the sun reaches it: on sand, our own shadows say - the map's, the ground turned from the sun, the
+            // terrain's - not the bake's cell: a low sun's bake has cells in shade where the sun now isn't hidden, and
+            // the ripples in them lost their troughs' shadows, square pale patches among shaded ripples - the user's
+            // rvk-frame-160817/160823, the sun 2 degrees up. Elsewhere, and without our shadows, the bake's.)
+            const float bakedSun = NativeSunShare(vNormalW.xyz, false, t0.g);
+            const float sunShare = gSunVisibilityValid
+                ? mix(bakedSun, gCasterVisibility * gGroundAway * gTerrainVisibility, NativeSand(terrain.uv[0])) : bakedSun;
+            sandGlint = FL.sunColor.rgb * (SandGlint(ground, terrain.uv[0], vPosW, vNormalW.xyz, terrain.px, terrain.py) *
+                                           gParallaxSun * sunShare);
+            sandMean = NativeMean(terrain.uv[0]);
+            const float dunes = NativeSand(terrain.uv[0]) * clamp(FL.sand.y, 0.0, 1.0);   // (on sand: NativeSandLight)
+            const vec3 turn = dunes > 0.0 ? mix(vec3(NativeSunTurn(vNormalW.xyz, t0.g)), NativeSandLight(vNormalW.xyz, t0.g), dunes)
+                                          : vec3(NativeSunTurn(vNormalW.xyz, t0.g));
+            // (Its relief's own shadow takes the sun's part of the light, not the sky's - kSandSun's share, as the
+            // dunes' light: taking it all, a footprint's floor and the ripples' troughs went near black.)
+            t0.rgb *= turn * mix(1.0, gParallaxSun, 0.75 * sunShare);
+        }
+    }
+    if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
+    if (terrainBasePass && TerrainNative()) {
+        // (The grit where the parallax met the ground: its cells' coordinates moved, the world point with them.)
+        const vec3 at = vPosW + vec3((terrain.uv[0] - ground.cell).x, 0.0, (terrain.uv[0] - ground.cell).y) / max(D.terrain.x, 1e-6);
+        t0.rgb = SandRippleTone(TerrainGrain(t0.rgb, terrain, ground.tiles || ground.sand > 0.0 ? at : vPosW), ground,
+                                terrain.uv[0]);
+    }
+    // (What the end needs of the ground's map, taken now: the map and the relief go before the lighting, which needs
+    // the most registers there are - the ground's build spilled while both were held through it.)
+    const bool pickedCell = FL.pick.x > 0.5 && terrainMapped && TerrainNative() && !terrain.clutter &&
+                            NativeCell(terrain.uv[0]).x + 1u == uint(FL.pick.x + 0.5);
+    const bool pebbleAlbedo = terrainMapped && terrain.pebble;
     if ((C.flags.x & F_PERPIXEL) != 0u) {
         // Interpolated normals shrink between vertices; restore the length the vertex path lights with
         // (1 with NORMALIZENORMALS, otherwise whatever the world matrix made of the vertex normal).
@@ -816,6 +1002,7 @@ void main()
                     gLightmapRelief = mix(1.0, gLightmapRelief, 0.3 + 0.7 * min(gCasterVisibility, gGroundAway));
             }
         }
+        if (len2 > 0.0) gShadeNormal = normalize(n);
         // PBR material: its maps, and the specular lobe the lights below use (lighting.glsl gPbr*). The ground's
         // lighting pass takes its chunk's base texture's material (MAT_BASE), read with the base's coordinates.
         gPbrOn = (D.mat.z & MAT_PBR) != 0u && FL.pbr2.y > 0.5 && (C.flags.x & F_SHADOWCHEAP) == 0u;
@@ -850,13 +1037,19 @@ void main()
         }
         vec3 ambient = vec3(0.0), diff = vec3(0.0), spec = vec3(0.0), diffL = vec3(0.0), specL = vec3(0.0);
         // Sunlight is shadowed: by the receiver's shade, or in the ground's lighting pass by the lightmap's.
-        float sunScale = ((C.flags.x & F_SHADOWTEX) != 0u ? texShade * moonShade : shadeSun ? shade : 1.0) * gParallaxSun;
+        float sunScale = ((C.flags.x & F_SHADOWTEX) != 0u ? texShadeLit * moonShade : shadeSun ? shade : 1.0) * gParallaxSun;
         AccumulateLights(vPosW, n, sunScale, localScale, ambient, diff, spec, diffL, specL);
+        // The light rig: lit things take the sky's light the ground's lightmap holds (FL.rigSky: all of it by night,
+        // what the sun leaves by day) - before, they had only the global ambient, the ground that and its lightmap, and
+        // by night buildings and characters stood at about half the ground's light. By how far they face up: a sky's.
+        // (Not the ground itself, nor the sky.)
+        if (RigOn() && (C.flags.x & F_SHADOWTEX) == 0u && !terrainMapped && (D.mat.z & MAT_SKY) == 0u && len2 > 0.0)
+            ambient += FL.rigSky.rgb * (0.5 + 0.5 * normalize(n).y);
         // PBR: metals have no diffuse light; the occlusion map takes ambient light away.
         float kd = gPbrOn ? 1.0 - gPbrMetal : 1.0, kAmb = gPbrOn ? kd * gPbrAo : 1.0;
         // The ground's lighting pass (F_SHADOWTEX): the shadow takes the global ambient and emissive part along
         // with the lightmap, leaving only the lights' own contribution: (lightmap + ambient) * shadow + lights.
-        vec3 base = (vMatEmissive + vMatAmbient * C.ambient.rgb * kAmb) * texShade;
+        vec3 base = (vMatEmissive + vMatAmbient * C.ambient.rgb * kAmb) * texShadeLit;
         vec3 lit = base + vMatAmbient * ambient * kAmb + vDiffuse.rgb * diff * kd, litSpec = vSpecular.rgb * spec;
         vec3 local = vDiffuse.rgb * diffL * kd, localSpec = vSpecular.rgb * specL;
         if (gPbrOn) {
@@ -883,12 +1076,19 @@ void main()
         if (dot(FL.sunColor.rgb, FL.sunColor.rgb) > 0.0 && len2 > 0.0) {
             float ndl = max(dot(normalize(n), -normalize(FL.sunDir.xyz)), 0.0);
             if ((C.flags.x & F_SHADOWTEX) != 0u) {
-                gSunShare = 0.6 * ndl * texShade * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y);
+                gSunShare = 0.6 * ndl * texShadeLit * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y);
             } else {
                 const vec3 kLuma = vec3(0.3, 0.59, 0.11);
                 float sunPart = dot(vDiffuse.rgb * FL.sunColor.rgb, kLuma) * ndl * sunScale;
                 gSunShare = clamp(sunPart * (1.0 - FL.windFrame.z) * (1.0 - kStormSunTaken * FL.rainNear.y) / max(dot(lit + local, kLuma), 1e-3), 0.0, 1.0);
             }
+        }
+        // RVK_CrownSky: a crown's light rolls off towards 1 from 0.6 rather than stopping dead there: the game's ambient
+        // (0.46 in a city) and the sun went past 1 on every leaf facing the sun more than halfway, and the clamp made the
+        // whole lit side of the crown one flat light (a noon dump: its leaves' light at 1.04 and below, little between).
+        if (D.leaf.w > 0.0 && FL.foliage.x > 0.0) {
+            vec3 over = max(lit - 0.6, vec3(0.0));
+            lit = mix(lit, min(lit, 0.6) + 0.4 * (1.0 - exp(-over / 0.4)), FL.foliage.x);
         }
         if ((C.flags.x & F_OVERBRIGHT) != 0u) {
             // The game's lighting is clamped as D3D does; the frame lights add on top, up to the headroom. Under a
@@ -903,57 +1103,10 @@ void main()
             gSpecular = clamp(vec4(litSpec + localSpec, vSpecular.a), 0.0, 1.0);
         }
     }
-    // (The ground's base pass: its texture as terrain.glsl lays it.)
-    const bool terrainBasePass = terrainMapped && D.terrainAt.w < 1.5;
-    vec4 t0 = terrainBasePass ? TerrainBase(D.texIdx.x, bindlessSamplers[D.sampIdx.x], terrain) : Sample(0u);
-    // The native ground's lightmap read where the pixel is (its cell from world x, z), not where its triangle's corners
-    // say: a cliff's cells are split corner to corner and each half spread the light its own way - dark wedges up the
-    // face. Read so, a cliff's light runs evenly down it, as the baked texel says.
-    // On a cliff, blurred over the cells round it (by its steepness): one texel a cell stretched up a face of 40 units
-    // turned the cells' light into hard triangles where the face crosses from a dark cell to a lit one.
-    vec3 sandGlint = vec3(0.0);
-    if (terrainMapped && D.terrainAt.w > 1.5 && TerrainNative()) {
-        const vec2 lmSize = vec2(textureSize(TEX0, 0)), at = vPosW.xz * D.terrain.x / lmSize;
-        t0 = NativeLightmapAt(at);
-        if (terrain.side > 0.01 && !terrain.clutter) {   // (not the rocks on it: they stand on its flat)
-            vec4 blur = vec4(0.0);
-            for (int j = -1; j <= 1; ++j)
-                for (int i = -1; i <= 1; ++i) blur += NativeLightmapAt(at + vec2(i, j) * 1.5 / lmSize);
-            t0 = mix(t0, blur / 9.0, terrain.side);
-        }
-        // (The rocks on it: shaped by the sun now, its shadow on its part only - NativeRockLight.)
-        if (terrain.clutter) {
-            t0.rgb *= NativeRockLight(vNormalW.xyz, t0.g, texShade);
-            texShade = 1.0;
-        } else {
-            // (In its own relief's shadow - a ripple's lee, the gap between stones: the lightmap's sun share of it.)
-            // (The sand's glints: where the lightmap says the sun reaches - the shadow map's shade comes after. Added
-            // past the stages, which clip at 1: below.)
-            // (Whether the sun reaches it: on sand, our own shadows say - the map's, the ground turned from the sun, the
-            // terrain's - not the bake's cell: a low sun's bake has cells in shade where the sun now isn't hidden, and
-            // the ripples in them lost their troughs' shadows, square pale patches among shaded ripples - the user's
-            // rvk-frame-160817/160823, the sun 2 degrees up. Elsewhere, and without our shadows, the bake's.)
-            const float bakedSun = NativeSunShare(vNormalW.xyz, false, t0.g);
-            const float sunShare = gSunVisibilityValid
-                ? mix(bakedSun, gCasterVisibility * gGroundAway * gTerrainVisibility, NativeSand(terrain.uv[0])) : bakedSun;
-            sandGlint = FL.sunColor.rgb * (SandGlint(ground, terrain.uv[0], vPosW, vNormalW.xyz, terrain.px, terrain.py) *
-                                           gParallaxSun * sunShare);
-            const float dunes = NativeSand(terrain.uv[0]) * clamp(FL.sand.y, 0.0, 1.0);   // (on sand: NativeSandLight)
-            const vec3 turn = dunes > 0.0 ? mix(vec3(NativeSunTurn(vNormalW.xyz, t0.g)), NativeSandLight(vNormalW.xyz, t0.g), dunes)
-                                          : vec3(NativeSunTurn(vNormalW.xyz, t0.g));
-            // (Its relief's own shadow takes the sun's part of the light, not the sky's - kSandSun's share, as the
-            // dunes' light: taking it all, a footprint's floor and the ripples' troughs went near black.)
-            t0.rgb *= turn * mix(1.0, gParallaxSun, 0.75 * sunShare);
-        }
-    }
+#ifdef RVK_NO_GROUND
+    t0 = Sample(0u);
+#endif
     vec4 t1 = C.stageA[0].x != 1u ? Sample(1u) : vec4(0.0);
-    if (terrainBasePass) t0.rgb = TerrainVariation(t0.rgb, vPosW, terrain);
-    if (terrainBasePass && TerrainNative()) {
-        // (The grit where the parallax met the ground: its cells' coordinates moved, the world point with them.)
-        const vec3 at = vPosW + vec3((terrain.uv[0] - ground.cell).x, 0.0, (terrain.uv[0] - ground.cell).y) / max(D.terrain.x, 1e-6);
-        t0.rgb = SandRippleTone(TerrainGrain(t0.rgb, terrain, ground.tiles || ground.sand > 0.0 ? at : vPosW), ground,
-                                terrain.uv[0]);
-    }
 #ifdef RVK_GLOW
     // The surface's own colour, for the indirect light it reflects: lit draws through the stages under white light,
     // unlit ones as they are (the ground's base pass is its bare texture; its lightmap pass keeps this). A
@@ -1012,20 +1165,24 @@ void main()
                                                 : 1.0) *
                            FL.sand3.y * (1.0 - FL.rainNear.y);
     if (glintSun > 0.0 && any(greaterThan(sandGlint, vec3(0.0)))) {
-        current.rgb += sandGlint * glintSun / max(NativeMean(terrain.uv[0]), vec3(0.08));
+        current.rgb += sandGlint * glintSun / max(sandMean, vec3(0.08));
         if ((C.flags.x & F_HDR) == 0u) current.rgb = min(current.rgb, vec3(1.0));
     }
     if (!shadeSun)
         // (By night the moon's: unlit, half of it - and a storm's dimming kept, as FlatShade has it by day: without,
         // the stormy land brightened the moment the moon took over at dusk.)
-        current.rgb *= FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) * (1.0 - kCloudSunShare * FL.rainNear.y) * (1.0 - 0.5 * FL.rainNear.y)
+        // (With the rig, FlatShade is the one formula day and night - by night the moon's shadow half again on it.)
+        current.rgb *= RigOn() ? flatShade * (FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) : 1.0)
+                     : FL.moon.w > 0.5 ? mix(1.0, shade, 0.5) * (1.0 - kCloudSunShare * FL.rainNear.y) * (1.0 - 0.5 * FL.rainNear.y)
                                        : flatShade;
     // Sunlight through leaves: where the sun is behind a leaf (seen from the camera), its light comes through tinted
     // by the leaf, most looking into the sun; other leaves' shadows still block it. Only textures with holes around
     // this point (their coarse mip's alpha) are leaves - not walls drawn the same way.
     bool sun = dot(FL.sunColor.rgb, FL.sunColor.rgb) > 0.0 && dot(FL.sunDir.xyz, FL.sunDir.xyz) > 0.0;
     if ((C.flags.x & F_FOLIAGE) != 0u && sun && FL.effects.x > 0.0 && dot(vNormalW.xyz, vNormalW.xyz) > 0.0) {
-        float holes = smoothstep(0.97, 0.75, NeighbourhoodAlpha(vTex0.xy));
+        // (A crown the leaves know - D.leaf - is a tree's whatever its texture: a dense canopy's coarse mip is nearly
+        // solid, and the test let next to none of its light through - user, 2026-10-21: RVK_LeafLight did nothing.)
+        float holes = D.leaf.w != 0.0 ? 1.0 : smoothstep(0.97, 0.75, NeighbourhoodAlpha(vTex0.xy));
         if (holes > 0.0) {
             vec3 L = -normalize(FL.sunDir.xyz), toEye = normalize(C.eyePos.xyz - vPosW);
             vec3 nf = normalize(vNormalW.xyz);
@@ -1034,9 +1191,18 @@ void main()
             if (through + glare > 0.0) {
                 // The sun's visibility on the lit side: the shadow already computed for the surface (a second,
                 // opposite-side search only darkened back-lit leaves and cost another few taps).
-                float visible = (FL.shadowParams.x <= 0.5 ? 1.0 : gSunVisibilityValid ? mix(1.0, gSunVisibility, CasterFade()) : 1.0) *
-                                TerrainSun(vPosW);   // (low sun: leaves under the mountains don't glow)
-                current.rgb += t0.rgb * FL.sunColor.rgb * ((0.5 * through + 0.7 * glare) * visible * holes * FL.effects.x);
+                float visible = FL.shadowParams.x <= 0.5 ? 1.0 : gSunVisibilityValid ? mix(1.0, gSunVisibility, CasterFade()) : 1.0;
+                // RVK_CrownDepth: rather by how much crown the light crossed to get here (the surface's own shadow
+                // let only the outermost leaves facing the sun glow), and deeper in colour - light through a leaf is
+                // its colour twice over (its colour squared, over its brightness: about as bright).
+                vec3 tint = t0.rgb;
+                if (FL.foliage.y > 0.0) {
+                    float t = FL.shadowParams.x > 0.5 ? CrownThrough(vPosW) : -1.0;
+                    if (t >= 0.0) visible = mix(visible, mix(1.0, t, CasterFade()), FL.foliage.y);
+                    tint = mix(tint, tint * tint / max(dot(tint, vec3(0.3, 0.59, 0.11)), 0.04), FL.foliage.y);
+                }
+                visible *= TerrainSun(vPosW);    // (low sun: leaves under the mountains don't glow)
+                current.rgb += tint * FL.sunColor.rgb * ((0.5 * through + 0.7 * glare) * visible * holes * FL.effects.x);
             }
         }
     }
@@ -1140,7 +1306,10 @@ void main()
     bool cloudSheet = (D.mat.z & MAT_CLOUDSHEET) != 0u;
     if (cloudSheet) {
         current.rgb = CloudSheet(Sample(0u));
-        current.a = clamp(current.a * FL.cloudSky.w, 0.0, 1.0);
+        // (None below the horizon: the game puts some sheets under the eye, far off - behind the far hills, a lit
+        // strip under the horizon all round with a hard top edge, brighter than the night sky: user's dump.)
+        float above = smoothstep(-0.004, 0.012, normalize(vPosW - C.eyePos.xyz).y);
+        current.a = clamp(current.a * FL.cloudSky.w * above, 0.0, 1.0);
     }
     float fogF = 1.0;                                     // (how much of the surface shows through the fog)
     if ((C.flags.x & F_FOG) != 0u && !cloudSheet) {
@@ -1183,8 +1352,7 @@ void main()
     }
     // Texture picking (Ctrl+Shift+I): the picked texture's draws in yellow for a few seconds.
     // (The ground drawn natively: the cells laid with the picked tile.)
-    if ((D.mat.z & MAT_PICKED) != 0u ||
-        (FL.pick.x > 0.5 && terrainMapped && TerrainNative() && !terrain.clutter && NativeCell(terrain.uv[0]).x + 1u == uint(FL.pick.x + 0.5)))
+    if ((D.mat.z & MAT_PICKED) != 0u || pickedCell)
         current.rgb = mix(current.rgb, vec3(1.0, 0.85, 0.1) * max(dot(current.rgb, vec3(0.3, 0.59, 0.11)), 0.35) * 2.0, 0.7);
     // PBR debug views (RVK_PbrDebug). 7: the scene, tinted where surfaces have maps - green a PBR material (lit with
     // it), blue only a normal map, magenta an albedo map (any draw), orange where an emissive map gives off light.
@@ -1241,21 +1409,34 @@ void main()
         outGlow = vec4(0.0, 0.0, 0.0, (C.flags.x & F_BLENDED) != 0u ? clamp(current.a, 0.0, 1.0) : 1.0);
     // Blended with this fragment's alpha like the colour (attachment 2's blend state follows the colour's).
     outLocal = vec4(gLocalFraction, clamp(reflectivity, 0.0, 1.0), gSunShare, current.a);
+    // A shop's room drawn into its doorway (D.clip): lit by its own lamps, none of it by the street's sun - the passes
+    // after the scene (traced sun shadows, ambient occlusion) leave it as it is - and no screen-space reflections of the
+    // street. Written whole whatever its alpha (blended by it, the mark was only part there, and the traced occlusion
+    // from the street's building around the doorway darkened a patch of its floor).
+    if (dot(D.clip.xyz, D.clip.xyz) > 0.0)
+        outLocal = vec4(1.0, 0.0, 0.0, 1.0);
     // Motion vectors (written by depth-writing draws only, see the blend state): where this point was last frame.
     vec2 now = vClip.xy / vClip.w, before = vPrevClip.xy / max(vPrevClip.w, 1e-6);
     outMotion = vec4(vPrevClip.w > 1e-6 ? (now - before) * 0.5 * C.viewport.zw * FL.screen.xy * vec2(1.0, -1.0) : vec2(0.0),
                      0.0, 1.0);   // (scene pixels: the game's viewport is in back-buffer pixels)
-    // PBR surfaces give the screen-space reflections their shading normal (view space, octahedral; w above 1.5 marks
-    // it): the depth buffer's normals are the triangles' own, which mirror faceted on curved low-poly meshes.
+    // PBR surfaces give the screen-space reflections their shading normal (view space, octahedral; w 2 .. 4 marks
+    // it): the depth buffer's normals are the triangles' own, which mirror faceted on curved low-poly meshes. Other
+    // surfaces with a normal give theirs too, for AMD's effects (w 6 .. 8; ssr.frag keeps the depth buffer's there):
+    // the per-pixel one, else the vertices'; facing the camera (two-sided leaves, the inside of a cloak). A character's
+    // 8 higher again (w 10 .. 12, 14 .. 16): brix_pack.frag steadies AMD's indirect light on characters with it.
+    const float marked = (C.flags.x & F_CHARACTER) != 0u ? 8.0 : 0.0;
     if (gPbrOn && reflectivity > 0.0) {
-        vec3 nv = normalize((C.view * vec4(gPbrNormal, 0.0)).xyz);
-        vec2 o = nv.xy / (abs(nv.x) + abs(nv.y) + abs(nv.z));
-        if (nv.z < 0.0) o = (1.0 - abs(o.yx)) * vec2(o.x >= 0.0 ? 1.0 : -1.0, o.y >= 0.0 ? 1.0 : -1.0);
-        outMotion.zw = vec2(o.x, o.y + 3.0);
+        outMotion.zw = OctNormal((C.view * vec4(gPbrNormal, 0.0)).xyz) + vec2(0.0, 3.0 + marked);
+    } else if (FL.screen.z > 0.5) {
+        vec3 n = dot(gShadeNormal, gShadeNormal) > 0.0 ? gShadeNormal : vNormalW.xyz;
+        if (dot(n, n) > 0.0) {
+            if (dot(n, C.eyePos.xyz - vPosW) < 0.0) n = -n;
+            outMotion.zw = OctNormal((C.view * vec4(n, 0.0)).xyz) + vec2(0.0, 7.0 + marked);
+        }
     }
     // Blended with this fragment's alpha like the colour (kept by multiplying and additive passes, see the blend state).
     // (Its alpha read by the indirect light only: the native ground's pebbles mark themselves 0.5 there - gi.frag.)
-    outAlbedo = vec4(clamp(albedo, 0.0, 1.0), terrainMapped && terrain.pebble ? 0.5 : current.a);
+    outAlbedo = vec4(clamp(albedo, 0.0, 1.0), pebbleAlbedo ? 0.5 : current.a);
     // The game's blob shadow (drawn: indoors, no sun shadows to replace it): a shade laid on the surface - its colour
     // darkened, nothing else of it changed (blended by alpha 0: kept). Its own lamp share, surface colour and glow
     // stamped the floor round every table and character with patches the later passes lit wrongly - coloured, hard-
@@ -1290,3 +1471,4 @@ void main()
     outColor = current;
 }
 #endif
+#endif   // RVK_LITE
