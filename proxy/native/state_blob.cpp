@@ -96,9 +96,13 @@ void __fastcall Reset(Blob* b)
             Identity(identity);
             orig::render_t_SetTransformMatrix(*g_render, int32_t(t->type), identity);
         }
-        if (b->texturesComplete)
-            for (Texture* t = b->textures.first; t != b->textures.last; ++t)
-                if (t->set) orig::DeviceState_SetTexture(ds, t->old, t->stage, 2);
+        // (The textures put back as the original does, while they are complete; the one each held let go either way.)
+        for (Texture* t = b->textures.first; t != b->textures.last; ++t)
+            if (t->set) {
+                if (b->texturesComplete) orig::DeviceState_SetTexture(ds, t->old, t->stage, 2);
+                if (t->old) orig::surface_t_ReleaseDXSurface(t->old);
+                t->set = 0;
+            }
         for (RenderState* r = b->renderStates.first; r != b->renderStates.last; ++r)
             if (r->set) orig::DeviceState_SetRenderState(ds, int32_t(r->state), r->old, 2);
         for (StageState* s = b->stageStates.first; s != b->stageStates.last; ++s)
@@ -125,8 +129,13 @@ void __fastcall Set(Blob* b)
         orig::render_t_SetTransformMatrix(*g_render, int32_t(t->type), t->matrix);
     if (b->texturesComplete)
         for (Texture* t = b->textures.first; t != b->textures.last; ++t) {
+            // The texture replaced, held till Reset puts it back (the original doesn't): when the DeviceState's was its
+            // last user - the game had freed it (zoning) - setting the blob's freed the surface, and putting it back
+            // counted a user on freed memory: freed twice, heap corruption on Windows (#19, as in cat_render.cpp).
             t->old = Field<void*>(ds, 0x1128 + t->stage * 4);
+            if (t->old) orig::surface_t_AddRefDXSurface(t->old);
             t->set = orig::DeviceState_SetTexture(ds, t->surface, t->stage, 10) ? 1 : 0;
+            if (!t->set && t->old) orig::surface_t_ReleaseDXSurface(t->old);
         }
     for (RenderState* r = b->renderStates.first; r != b->renderStates.last; ++r) {
         r->old = Field<uint32_t>(ds, 0x4C8 + r->state * 4);
