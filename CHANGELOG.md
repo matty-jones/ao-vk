@@ -5,6 +5,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 
 ## Unreleased
 
+## 0.8.0 - 2026-10-29
+
 ### New
 - ao-vk's own effects: an effect file in `randy-vk\fx` (in the client folder) can stand in for one of the game's
   effects, drawn with ao-vk's particles - glowing, trailing, sparking - in place of the game's sprites. The first one,
