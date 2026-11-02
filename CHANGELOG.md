@@ -22,6 +22,9 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- The PF map's player arrow follows the scaled map instead of drifting away or disappearing. City/building
+  map backgrounds and markers also share the map's scale.
+- The logout countdown stays centered when HUD size changes, with timer drawing and mouse regions aligned.
 - Enlarged chat and NPC text retain antialiased coverage in their own RGBA texture instead of sharing a legacy
   one-bit-alpha atlas.
 - Moved or resized floating windows retain their placement after relogging, including Inventory and Missions.

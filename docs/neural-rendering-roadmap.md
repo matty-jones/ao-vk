@@ -1,5 +1,8 @@
 # UI stabilization and DLSS 5 roadmap
 
+2026-11-02. DLSS 5 neural rendering was evaluated and dropped because it did not add enough value.
+The renderer and UI fixes remain in use. The DLSS milestones below are historical and are not active work.
+
 2026-10-28. Stages 1 (terrain quality, `93592f6`) and 2 (font metrics, `6fe876c`), including sidebar/PF map
 scaling (`aa9ee47`), have local gameplay confirmation. Text is clean and unclipped, performance is stable,
 terrain detail follows the requested radius, and scaled sidebar panels stack correctly.

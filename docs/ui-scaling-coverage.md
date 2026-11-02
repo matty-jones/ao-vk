@@ -8,10 +8,10 @@ clipping and inverse mouse mapping inherit the same transform. Native frames rem
 | --- | --- |
 | Floating windows, including Inventory, Missions, Programs, Friends, Perks, Research, Skills, chat and NPC dialogs | Window size through the common window/view path |
 | Pinned sidebar panels | HUD size through the shared rollup-column transform, including parent hit bounds |
-| PF map | Its window/rollup transform, with custom tile, outline and marker submission |
+| PF map and city/building map | Their window/rollup transform, including custom tiles, outlines, player arrows and other markers |
 | Health/XP bars, compass, shortcut bars, control-center panels and notifications | HUD size |
 | Mail indicator, help/tip buttons and raid bar | HUD size; these previously inherited Window size |
-| Attack, nanoprogram and other temporary timer bars, including camping | HUD size through their common `TimerBarBase_c` constructor and legacy sprite-window methods |
+| Attack, nanoprogram and other temporary timer bars, including logout/camping | HUD size through their common `TimerBarBase_c` constructor and legacy sprite-window methods; screen-centered bars retain their center |
 | Popups and context menus | Window size, physical cursor anchors, logical placement/clamping and displayed-frame click checks |
 | Login, character selection/management and progress/loading windows | Native screen coordinates and native size |
 | Hover tooltips and dragged item images | Their existing source-window mapping and cursor-anchor adapters |
@@ -19,9 +19,40 @@ clipping and inverse mouse mapping inherit the same transform. Native frames rem
 
 The timer adapter is limited to sprite windows created by the timer constructor. It stores the game's logical
 position and scale separately, reapplies HUD size when it changes, and refreshes the native mouse regions.
+Placement uses the same screen-edge/center anchoring as other HUD elements, rather than multiplying a
+screen-centered position about the top-left corner.
 Destroying the sprite window removes its record. Other legacy sprite windows keep their original behaviour.
 Timer captions remain on the older bitmap text path; browser content also retains its separate rasterizer.
 The display-resolution font replacement covers native `TextRenderer_c` controls.
+
+## Custom drawing and transient placement audit
+
+2026-11-02. The audit followed the supported GUI.dll's raw rendering imports, their callers and all direct
+legacy sprite-window construction/placement calls. The seven geometry submission sites use three vertex
+formats: untextured coloured vertices (`0x44`), textured coloured vertices (`0x144`), and textured vertices
+without a diffuse colour (`0x104`). The last format is the actual rotating player arrow; the original adapter
+handled only the other two, leaving the arrow in native screen coordinates while its map moved and scaled.
+
+| Submission path | Coordinate handling and check |
+| --- | --- |
+| Map sprite/tile fans, coloured fan and outlines (five sites, including the player arrow) | Map arithmetic and clipping stay logical; all three vertex formats receive the containing map transform once at submission. Native player-arrow geometry is checked alongside tiles. |
+| Building-map render override | Background, nested ground pass and building overlays share the same map scope. Previously only its nested ground pass entered the adapter. Native render checks compare all submissions across scale changes. |
+| Browser strip (one site) | Native code converts its complete destination rectangle to screen coordinates while deriving UVs from logical bounds. It needs no map adapter; native regression checks preserve that path and its UVs. |
+| ViewSurface batch (one site) | Existing ViewArea conversion handles the ordinary interface, text and bitmap controls. Existing atlas, clipping, input and font regressions cover this shared path. |
+
+The four legacy `RenderWindow_t` construction sites are in login/loading setup (two), the timer base (one),
+and a legacy text-window constructor (one). Login/loading retains native screen sizing. Timer construction,
+native scale changes, explicit repositioning, hotspot refresh and destruction are covered together. The logout
+caller centers a timer from the physical display size and logical bar size; scaling that position from the
+screen origin displaced it. The timer adapter now anchors the complete logical bar rectangle before applying
+HUD size. Ordinary non-timer sprite windows remain outside this adapter, including cursor-related rendering.
+The legacy text-window constructor is not exported, and no direct caller or static pointer reference was found
+in GUI.dll. No other client DLL or executable imports the legacy sprite-window methods.
+
+These checks use 75/100/125/150/176/200% factors, independent Window/HUD settings and return trips to 100%.
+They exercise the client implementation rather than substituting a synthetic quad for the player arrow.
+The audit accounts for the supported binary's shared drawing paths; it does not claim an authenticated
+gameplay visit to every control or every third-party skin.
 
 ## Text cache storage
 
@@ -59,5 +90,5 @@ complete bitmap-to-texture ink coverage, wrapping, resizing and unchanged pixel 
 compares a low-alpha bottom row in RGBA with the same row lost in a one-bit-alpha texture.
 
 This is coverage of the shared source paths, not a record of opening every skin-specific control in authenticated
-play. The prepared client provides native GUI and rendering checks; local gameplay review still verifies the exact
-reported NPC line, login transitions, fight-time bars and two consecutive relogs before Stage 3.
+play. Local gameplay review should confirm player-arrow alignment while moving, zooming and toggling map panels,
+plus logout centering at the user's saved scales. DLSS 5 work has been dropped; these are independent UI fixes.

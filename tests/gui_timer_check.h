@@ -96,6 +96,16 @@ inline int CheckGuiTimers(HMODULE module, void* controller)
                   hit[2] == hit[0] + int(100 * nativeX * factor) && hit[3] == hit[1] + int(10 * factor),
                   "native hotspot refresh follows scaled drawing");
         }
+        const float one = 1; scale(window, &one, &one);
+        const GuiTimerPoint centred{1870, 1075}; move(timer, &centred);
+        for (float percent : {150.0f, 200.0f, 75.0f, 100.0f, 176.0f, 150.0f}) {
+            SetScale(125, percent); BeginScaleFrame(controller);
+            const float factor = percent / 100;
+            const auto& sprite = g_guiTimerWindows.at(window)->sprite;
+            check(std::fabs(sprite.position.x + 50 * factor - 1920) <= 1 &&
+                  std::fabs(sprite.position.y + 5 * factor - 1080) <= 1,
+                  "screen-centred timers retain their physical centre across HUD scale changes");
+        }
         destroy(timer); g_guiTimerWindows.clear();
     }
     alignas(16) uint8_t ordinary[0x50]{};

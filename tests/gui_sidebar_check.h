@@ -6,22 +6,28 @@ struct GuiMapDraw {
     std::vector<uint32_t> vertices;
 };
 inline std::vector<GuiMapDraw> g_guiMapDraws;
+inline size_t GuiMapStride(uint32_t fvf) { return fvf == 0x144 ? 7 : fvf == 0x104 ? 6 : 5; }
 inline void __fastcall GuiMapCapture(void*, void*, uint32_t fvf, void* vertices, uint32_t count, uint32_t flags)
 {
-    const size_t words = size_t(count) * (fvf == 0x144 ? 7 : 5);
+    const size_t words = size_t(count) * GuiMapStride(fvf);
     const auto* data = static_cast<const uint32_t*>(vertices);
     g_guiMapDraws.push_back({fvf, count, flags, {data, data + words}});
 }
 inline bool __fastcall GuiMapTexture(void*, void*, void*, uint32_t, uint32_t) { return true; }
 inline void __fastcall GuiMapStates(void*, void*) {}
+inline bool __fastcall GuiMapValid(void*, void*) { return true; }
+inline void __fastcall GuiMapMaterial(void*, void*, const void*) {}
+inline uint16_t __fastcall GuiMapTextureSize(void*, void*) { return 256; }
 using GuiMapTile = void(__thiscall*)(void*, void*, void*, const rnative::gui::Rect*, const rnative::gui::Rect*, uint32_t);
 using GuiMapLine = void(__thiscall*)(void*, void*, const rnative::gui::Rect*, uint32_t);
 using GuiMapConvert = rnative::gui::Point*(__thiscall*)(void*, rnative::gui::Point*, const rnative::gui::Point*, uint32_t);
 using GuiMapPrimitive = void(__thiscall*)(void*, uint32_t, void*, uint32_t, uint32_t);
+using GuiMapPlayer = void(__thiscall*)(void*, void*, const float*, float, int);
 inline GuiMapTile g_guiMapTile;
 inline GuiMapLine g_guiMapLine;
 inline GuiMapConvert g_guiMapTo, g_guiMapFrom;
 inline GuiMapPrimitive g_guiMapStrip;
+inline GuiMapPlayer g_guiMapPlayer;
 inline rnative::gui::Point g_guiMapMouse, g_guiMapLocal, g_guiMapOrigin;
 inline bool g_guiMapSourceIntact;
 
@@ -43,6 +49,8 @@ inline void __fastcall GuiMapTiles(void* view, void*, void* viewport)
     Vertex original[4]; std::memcpy(original, strip, sizeof(strip));
     g_guiMapStrip(nullptr, 0x144, strip, 4, 3);
     g_guiMapSourceIntact = std::memcmp(original, strip, sizeof(strip)) == 0;
+    const float player[3]{37, 0, 123};
+    g_guiMapPlayer(view, viewport, player, 0, 0);
 }
 
 inline int CheckGuiSidebar(HMODULE module)
@@ -135,6 +143,7 @@ inline int CheckGuiSidebar(HMODULE module)
     g_guiMapTile = reinterpret_cast<GuiMapTile>(bytes + 0x46871);
     g_guiMapLine = reinterpret_cast<GuiMapLine>(bytes + 0x465B4);
     g_guiMapStrip = *reinterpret_cast<GuiMapPrimitive*>(bytes + 0x1A8680);
+    g_guiMapPlayer = reinterpret_cast<GuiMapPlayer>(bytes + 0xE92EF);
     HMODULE renderer = GetModuleHandleA("randy31.dll");
     GuiCheckPatch fan(reinterpret_cast<void*>(GetProcAddress(renderer, "?RenderTriangleFan@render_t@@QAEXKPAXKK@Z")),
                       reinterpret_cast<void*>(&GuiMapCapture));
@@ -151,6 +160,8 @@ inline int CheckGuiSidebar(HMODULE module)
     auto groundRender = reinterpret_cast<Render>(bytes + 0x478ED);
     auto mapRender = reinterpret_cast<Render>(bytes + 0xE9F73);
     link(map, 0x134, terrain); put(map, 0x130, uint8_t(1)); put(terrain, 8, uint32_t(1));
+    link(map, 0x468, terrain); put(map, 0x138, Point{1, 1});
+    put(terrain, 0x81, uint8_t(1)); put(terrain, 0xB4, Rect{0, 0, 179, 219});
     Object viewport;
     std::vector<GuiMapDraw> reference;
     for (float percent : {100.0f, 150.0f, 200.0f, 75.0f, 176.0f, 100.0f}) {
@@ -158,7 +169,7 @@ inline int CheckGuiSidebar(HMODULE module)
         const Point zero{}, input{17, 21}; Point origin;
         g_guiMapTo(map.bytes, &origin, &zero, 1); g_guiMapTo(map.bytes, &g_guiMapMouse, &input, 1);
         g_guiMapDraws.clear(); groundRender(map.bytes, viewport.bytes, 0, 0);
-        check(g_guiMapDraws.size() == 3, "native map submits its tile, outline and marker strip");
+        check(g_guiMapDraws.size() == 4, "native map submits its tile, outline, marker strip and real player triangle");
         check(g_guiMapSourceIntact, "custom drawing never modifies the game's vertex arrays");
         check(g_guiMapOrigin == Point{3650, 30}, "map tile arithmetic retains the native screen origin");
         check(std::fabs(g_guiMapLocal.x - input.x) < 0.001f && std::fabs(g_guiMapLocal.y - input.y) < 0.001f,
@@ -169,7 +180,7 @@ inline int CheckGuiSidebar(HMODULE module)
             const auto& actual = g_guiMapDraws[d]; const auto& native = reference[d];
             check(actual.fvf == native.fvf && actual.count == native.count && actual.flags == native.flags,
                   "map submission preserves primitive format, count and flags");
-            const size_t strideWords = actual.fvf == 0x144 ? 7 : 5;
+            const size_t strideWords = GuiMapStride(actual.fvf);
             for (size_t i = 0; i < actual.vertices.size(); i += strideWords) {
                 Point a, b; std::memcpy(&a, actual.vertices.data() + i, 8); std::memcpy(&b, native.vertices.data() + i, 8);
                 check(std::fabs(a.x - (origin.x + (b.x - 3650) * factor)) < 0.001f &&
@@ -183,11 +194,58 @@ inline int CheckGuiSidebar(HMODULE module)
         check(after == origin, "native custom drawing restores normal GUI coordinate conversion");
         mapRender(map.bytes, viewport.bytes, 0, 0); // Inactive main map, without engine state.
         g_guiMapDraws.clear(); GuiMapTiles(map.bytes, nullptr, viewport.bytes);
-        const auto& outside = g_guiMapDraws.back();
+        const auto& outside = g_guiMapDraws[2];
         for (size_t i = 0; i < 4; ++i) {
             Point point; std::memcpy(&point, outside.vertices.data() + i * 7, sizeof(point));
             check(point == Point{origin.x + i * 10.0f, origin.y + i * 20.0f},
                   "unscoped drawing passes through without scaling or an extra submission copy");
+        }
+    }
+    GuiCheckImport valid(reinterpret_cast<void**>(bytes + 0x1A8630), reinterpret_cast<void*>(&GuiMapValid));
+    GuiCheckImport setState(reinterpret_cast<void**>(bytes + 0x1A8628), reinterpret_cast<void*>(&GuiMapStates));
+    GuiCheckImport resetState(reinterpret_cast<void**>(bytes + 0x1A8638), reinterpret_cast<void*>(&GuiMapStates));
+    GuiCheckImport material(reinterpret_cast<void**>(bytes + 0x1A862C), reinterpret_cast<void*>(&GuiMapMaterial));
+    GuiCheckImport resetMaterial(reinterpret_cast<void**>(bytes + 0x1A8634), reinterpret_cast<void*>(&GuiMapStates));
+    GuiCheckImport textureWidth(reinterpret_cast<void**>(bytes + 0x1A8688), reinterpret_cast<void*>(&GuiMapTextureSize));
+    GuiCheckImport textureHeight(reinterpret_cast<void**>(bytes + 0x1A8684), reinterpret_cast<void*>(&GuiMapTextureSize));
+    for (uint32_t renderRva : {0xE32F4u, 0x10CE18u}) {
+        if (renderRva == 0x10CE18) {
+            put(map, 0x14C, static_cast<void*>(terrain.bytes)); put(map, 0x150, uint32_t(1));
+        }
+        const auto render = reinterpret_cast<Render>(bytes + renderRva);
+        reference.clear();
+        for (float percent : {100.0f, 150.0f, 200.0f, 75.0f, 176.0f, 100.0f}) {
+            SetScale(125, percent); BeginScaleFrame(controller.bytes);
+            const Point zero{}; Point origin; g_guiMapTo(map.bytes, &origin, &zero, 1);
+            g_guiMapDraws.clear(); render(map.bytes, viewport.bytes, 1, 0);
+            check(!g_guiMapDraws.empty(), "native building map and browser submit custom geometry");
+            if (reference.empty()) reference = g_guiMapDraws;
+            check(g_guiMapDraws.size() == reference.size(), "custom views retain their native submissions at every scale");
+            const float factor = percent / 100;
+            Rect browserFrame;
+            const Rect browserBounds{0, 0, 179, 219};
+            toRect(map.bytes, &browserFrame, &browserBounds, 1);
+            for (size_t d = 0; d < g_guiMapDraws.size() && d < reference.size(); ++d) {
+                const auto& actual = g_guiMapDraws[d]; const auto& native = reference[d];
+                check(actual.vertices.size() == native.vertices.size(), "custom view vertex layout is unchanged");
+                const size_t stride = GuiMapStride(actual.fvf);
+                for (size_t i = 0; i < actual.vertices.size(); i += stride) {
+                    Point a, b; std::memcpy(&a, actual.vertices.data() + i, 8); std::memcpy(&b, native.vertices.data() + i, 8);
+                    Point expected{origin.x + (b.x - 3650) * factor, origin.y + (b.y - 30) * factor};
+                    if (renderRva == 0x10CE18) {
+                        const size_t vertex = i / stride;
+                        expected = {(vertex % 2 == 0 ? browserFrame.right : browserFrame.left) - 0.5f,
+                                    (vertex < 2 ? browserFrame.bottom : browserFrame.top) - 0.5f};
+                    }
+                    const bool aligned = std::fabs(a.x - expected.x) < 0.01f && std::fabs(a.y - expected.y) < 0.01f;
+                    if (!aligned) std::printf("GUI custom %x %.0f%% draw %zu vertex %zu: %.3f,%.3f expected %.3f,%.3f\n",
+                                             renderRva, percent, d, i / stride, a.x, a.y, expected.x, expected.y);
+                    check(aligned,
+                          "building-map and browser geometry follows the displayed frame exactly once");
+                    check(std::memcmp(actual.vertices.data() + i + 2, native.vertices.data() + i + 2, (stride - 2) * 4) == 0,
+                          "building-map and browser scaling preserves depth, colour and texture coordinates");
+                }
+            }
         }
     }
     *instance = saved;

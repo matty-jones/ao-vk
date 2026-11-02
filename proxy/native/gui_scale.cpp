@@ -46,7 +46,7 @@ bool g_active;
 int g_coordinates;
 const Transform* g_mapDrawing;
 using MapRenderFn = void(__fastcall*)(void*, void*, void*, float, uint32_t);
-MapRenderFn g_mapRender, g_mapGroundRender;
+MapRenderFn g_mapRender, g_mapGroundRender, g_buildingMapRender;
 using PrimitiveFn = void(__fastcall*)(void*, void*, uint32_t, void*, uint32_t, uint32_t);
 PrimitiveFn g_fan, g_lines, g_strip;
 float g_placementScale, g_popupPlacementScale;
@@ -137,8 +137,15 @@ void __fastcall BorderFrameHook(void* view, void* edx, const Rect* frame)
 
 void ApplyTimer(void* window, const TimerWindow& logical)
 {
+    IPoint size;
+    std::memcpy(&size, static_cast<uint8_t*>(window) + 0x34, sizeof(size));
+    const Rect frame{float(logical.position.x), float(logical.position.y),
+                     logical.position.x + size.x * logical.scale.x - 1, logical.position.y + size.y * logical.scale.y - 1};
+    const Transform placement = Place(frame, g_screenSize, g_hudScale, true);
+    Point origin{float(logical.position.x), float(logical.position.y)};
+    placement.ToScreen(origin);
     const Point scale{logical.scale.x * g_hudScale, logical.scale.y * g_hudScale};
-    const IPoint position{int(std::lround(logical.position.x * g_hudScale)), int(std::lround(logical.position.y * g_hudScale))};
+    const IPoint position{int(std::lround(origin.x)), int(std::lround(origin.y))};
     g_spriteScale(window, nullptr, &scale.x, &scale.y);
     g_spriteMove(window, nullptr, &position);
 }
@@ -216,14 +223,19 @@ void __fastcall MapGroundRenderHook(void* view, void* edx, void* viewport, float
     DrawMap(g_mapGroundRender, view, edx, viewport, time, flags);
 }
 
+void __fastcall BuildingMapRenderHook(void* view, void* edx, void* viewport, float time, uint32_t flags)
+{
+    DrawMap(g_buildingMapRender, view, edx, viewport, time, flags);
+}
+
 void MapPrimitive(PrimitiveFn original, void* renderer, void* edx, uint32_t fvf, void* vertices,
                   uint32_t count, uint32_t flags)
 {
-    if (!g_mapDrawing || (fvf != 0x44 && fvf != 0x144)) {
+    if (!g_mapDrawing || (fvf != 0x44 && fvf != 0x104 && fvf != 0x144)) {
         original(renderer, edx, fvf, vertices, count, flags);
         return;
     }
-    const size_t stride = fvf == 0x144 ? 7 : 5;
+    const size_t stride = fvf == 0x144 ? 7 : fvf == 0x104 ? 6 : 5;
     uint32_t local[64 * 7];
     std::vector<uint32_t> large;
     if (count > 64) large.resize(size_t(count) * stride);
@@ -545,6 +557,8 @@ Hook g_hooks[] = {
       reinterpret_cast<void*>(&MapRenderHook), reinterpret_cast<void**>(&g_mapRender)},
     {"PFMapGroundRenderer_c::Render", 0x478ED, "", 10,
       reinterpret_cast<void*>(&MapGroundRenderHook), reinterpret_cast<void**>(&g_mapGroundRender)},
+    {"BuildingMapView_c::Render", 0xE32F4, "", 10,
+      reinterpret_cast<void*>(&BuildingMapRenderHook), reinterpret_cast<void**>(&g_buildingMapRender)},
     {"?DoSetFrame@WndBorder@@AAEXABVRect@@@Z", 0x159888, "", 10,
       reinterpret_cast<void*>(&BorderFrameHook), reinterpret_cast<void**>(&g_borderFrame)},
     {"?MouseDown@WndBorder@@UAEXABVPoint@@HH@Z", 0x1595F7, "\x55\x8B\xEC\x83\xEC\x20", 6,
@@ -648,7 +662,8 @@ void InstallScaling(HMODULE gui)
     }
     auto* base = reinterpret_cast<uint8_t*>(gui);
     if (*reinterpret_cast<const void* const*>(base + 0x1C0724 + 13 * 4) != base + 0xE9F73 ||
-        *reinterpret_cast<const void* const*>(base + 0x1B0A8C + 13 * 4) != base + 0x478ED) {
+        *reinterpret_cast<const void* const*>(base + 0x1B0A8C + 13 * 4) != base + 0x478ED ||
+        *reinterpret_cast<const void* const*>(base + 0x1BFCFC + 13 * 4) != base + 0xE32F4) {
         Log("interface scaling: map render entries changed, left at 100%%");
         return;
     }
@@ -744,7 +759,11 @@ bool BeginScaleFrame(void* controller)
         g_windowScale = g_wantedWindow;
         g_redraw = true;
     }
-    if (g_hudScale != g_wantedHud) {
+    Point screen;
+    g_screen(controller, &screen);
+    const bool resized = screen.x != g_screenSize.x || screen.y != g_screenSize.y;
+    g_screenSize = screen;
+    if (g_hudScale != g_wantedHud || resized) {
         g_hudScale = g_wantedHud;
         for (const auto& timer : g_timers) ApplyTimer(timer.first, timer.second);
         g_redraw = true;
@@ -759,11 +778,6 @@ bool BeginScaleFrame(void* controller)
         return g_redraw;
     }
     g_active = true;
-    Point screen;
-    g_screen(controller, &screen);
-    const bool resized = screen.x != g_screenSize.x || screen.y != g_screenSize.y;
-    g_screenSize = screen;
-    if (resized) g_redraw = true;
     std::unordered_map<void*, Window> current;
     std::unordered_map<void*, Transform> views;
     std::unordered_map<void*, Clip> clips;
