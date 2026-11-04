@@ -164,6 +164,8 @@ DWORD RawInputType(LPARAM lp)
 
 LRESULT CALLBACK InputWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if (msg == WM_ACTIVATEAPP || msg == WM_SIZE || msg == WM_EXITSIZEMOVE || msg == WM_POWERBROADCAST)
+        g_rvk.framePacer.Reset();
     if (ConsoleMessage(hwnd, msg, wp, lp))
         return 0;
     const unsigned keys = g_blockKeys, mouse = g_blockMouse;

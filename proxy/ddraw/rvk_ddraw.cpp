@@ -291,8 +291,11 @@ bool RunAction(const char* name)
 
 void RvkState::Frame()
 {
-    if (device && !device->InFrame())
+    if (device && !device->InFrame()) {
+        // One real game frame, before scene processing; generated presents do not enter here.
+        framePacer.Wait(uint32_t(rvk_settings::Get("RVK_FpsCap")), window);
         device->BeginFrame();
+    }
 }
 
 void RvkState::Present()

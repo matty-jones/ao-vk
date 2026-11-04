@@ -17,16 +17,21 @@ target_compile_options(randy_native PRIVATE /EHsc)
 
 # Drop-in randy31.dll. Exports not implemented here forward to the original, renamed randy31_orig.dll.
 add_library(randy31 SHARED proxy/dllmain.cpp proxy/trace.cpp proxy/ddraw/com_trace.cpp proxy/ddraw/com_trace_detail.cpp
+            proxy/ddraw/frame_pacer.cpp
             proxy/ddraw/rvk_ddraw.cpp proxy/ddraw/rvk_surface.cpp proxy/ddraw/rvk_device.cpp proxy/ddraw/rvk_settings.cpp proxy/ddraw/rvk_particles.cpp proxy/ddraw/rvk_weather.cpp proxy/ddraw/rvk_smoke.cpp proxy/ddraw/rvk_fx.cpp proxy/ddraw/rvk_time.cpp proxy/ddraw/rvk_statels.cpp proxy/ddraw/rvk_ground.cpp proxy/ddraw/rvk_freecam.cpp proxy/ddraw/rvk_input.cpp proxy/ddraw/rvk_console.cpp
             proxy/ddraw/rvk_materials.cpp proxy/exports.gen.cpp proxy/randy31.def)
 target_include_directories(randy31 PRIVATE proxy third_party)
 target_compile_definitions(randy31 PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(randy31 PRIVATE randy_native rvk user32)
+target_link_libraries(randy31 PRIVATE randy_native rvk user32 winmm)
 set_target_properties(randy31 PROPERTIES OUTPUT_NAME randy31 PREFIX "")
 target_link_options(randy31 PRIVATE "/MAP:${CMAKE_CURRENT_BINARY_DIR}/randy31.map")   # for profiling: function addresses
 
 # Wine-run check that every proxy export resolves to the original's address.
 add_executable(forward_check tests/forward_check.cpp)
+
+add_executable(fps_cap_check tests/fps_cap_check.cpp proxy/ddraw/frame_pacer.cpp)
+target_include_directories(fps_cap_check PRIVATE proxy)
+target_link_libraries(fps_cap_check PRIVATE user32 winmm)
 
 # ---- rvk: Vulkan renderer with a D3D7-shaped front end ----
 set(VULKAN_SDK_DIR "$ENV{HOME}/repos/vulkan-sdk/1.4.321.1/x86_64" CACHE PATH "Vulkan SDK (headers, VMA, glslc)")

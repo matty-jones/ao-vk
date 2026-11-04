@@ -17,11 +17,11 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-360 settings, 181 of them in the settings window.
+361 settings, 182 of them in the settings window.
 
 ## Sections
 
-- [General](#general) (19)
+- [General](#general) (20)
 - [Lighting](#lighting) (21)
 - [Materials](#materials) (15)
 - [Debug](#debug) (8)
@@ -44,6 +44,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | Setting | What it does | Values | Default | Cost | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `RVK_Enhance` | All enhancements (Ctrl+Shift+E) | on / off | on | GPU: all of the below (off: the cheapest) | window |
+| `RVK_FpsCap` | Game frame rate limit (0 = unlimited; before frame generation) | 0 .. 1000 | 0 | saves CPU and GPU below the uncapped frame rate | window |
 | `RVK_Prepass` | Depth pre-pass | on / off | on |  | ini only; knob |
 | `RVK_LiteShader` | The interface drawn with a lean shader of its own (the same picture, far less GPU time) | on / off | on |  | ini only; knob |
 | `RVK_PrepassEq` | Depth pre-pass: what it covers shaded only where it is seen | on / off | on |  | ini only; switch `RVK_Prepass`; knob |

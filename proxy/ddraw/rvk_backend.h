@@ -3,6 +3,7 @@
 #pragma once
 
 #include "com_trace.h"
+#include "frame_pacer.h"
 #include "rvk.h"
 #include "skin.h"
 #include "threaded.h"
@@ -194,6 +195,7 @@ struct RvkState {
     RSurface* mainSurface = nullptr;  // the back buffer the 3D device renders to (rvk main target)
     DWORD displayWidth = 0, displayHeight = 0;   // SetDisplayMode (0 = desktop)
     std::string gpuName = "Vulkan GPU";
+    FramePacer framePacer;
 
     bool EnsureDevice(uint32_t width, uint32_t height);   // creates or resizes the rvk device
     void SetWindow(HWND hwnd);                             // remember / attach the presentation window

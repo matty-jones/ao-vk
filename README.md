@@ -404,6 +404,19 @@ reopened). A few debugging switches are set in `randy-vk.ini` only and don't app
 So are minor switches and most of the clouds', weather's, smoke's, water's and leaves' tuning (`kHidden` in `proxy/ddraw/rvk_settings.cpp`):
 the window keeps one switch per feature and the sliders that matter; the rest still work from `randy-vk.ini`.
 
+To limit game frames, set this in `randy-vk.ini` next to `randy31.dll`:
+
+```ini
+[Renderer]
+RVK_FpsCap=60
+```
+
+`RVK_FpsCap` accepts 0 (unlimited, the default) or 1–1000 FPS. It sleeps on the game thread before scene
+processing, with fresh deadlines after stalls, pauses and window activation changes. It applies with enhancements
+on or off and with either native or original scene processing. Frame generation adds frames after this limit:
+a 60 FPS cap with 2x generation can display 120 FPS. VSync, slow rendering or a lower limit in the game's own
+settings can still reduce the rate; raise the game's limit above this one to let ao-vk control pacing.
+
 Some useful ones:
 
 | Setting | Default | |

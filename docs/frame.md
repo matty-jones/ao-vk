@@ -38,6 +38,20 @@ to the 3D passes is for the frame inspector to show.
 
 Presenting is separate: `DisplaySystem!FUN_10001cdb` → `Randy_t::Flip(false)`.
 
+With the rvk backend, `BeginScene` reaches `RvkState::Frame` before `RViewPort_t::Process`.
+`RVK_FpsCap` sleeps there once when opening a frame, before `ThreadedDevice::BeginFrame`. Clears, draws and
+present-only frames use the same entry; calls within an already open frame do not wait again. Native scene/device
+switches do not change this boundary. The render worker and the FSR frame-generation presenter do not run the
+limiter, so its FPS counts game frames. Queue backpressure and VSync consume the interval rather than adding a
+second fixed delay. Deadlines use `steady_clock` and relative waitable timers, with no spin phase; activation,
+window changes and missed deadlines start a fresh schedule. The limiter requests 1 ms timer resolution only
+while active, including on Wine and systems without high-resolution waitable timers.
+
+`fps_cap_check.exe` checks deadlines, sleeping cadence and CPU use, stalls, cap changes and window state resets.
+Run timing checks with CPU capacity available; a saturated build can delay timer wakeups. Its optional
+`--settings <path-to-dll>` checks the built DLL's settings interface and ini persistence; use a DLL copy in a
+temporary folder, where loading it creates `randy-vk.ini`.
+
 ## 2. Scene update: `RViewPort_t::Process`
 
 Sets the view (`D3DTRANSFORMSTATE_VIEW` = 2) and projection (3) from the camera, writes the static
