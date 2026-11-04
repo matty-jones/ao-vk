@@ -6,6 +6,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- `RVK_FpsCap` in `randy-vk.ini` limits game frames before scene processing using a sleeping timer. The default
+  is 0 (unlimited); stalls, pauses and focus changes reset pacing. Generated frames are additional to the cap.
 - Experimental `RVK_WinScale` and `RVK_HudScale` (General, 100% by default) resize windows and HUD independently, with matching
   layout, clipping and mouse input. World labels and floating text, the cursor, and the developer console/readout
   retain their sizes. Text is rendered at the requested size, and changes refresh cached UI immediately.

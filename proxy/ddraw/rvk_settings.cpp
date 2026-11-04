@@ -46,6 +46,7 @@ struct Setting {
 Setting g_settings[] = {
     // name               label                                                     section             type    min    max    step   default env                        value parent           choices
     {"RVK_Enhance",    "All enhancements (Ctrl+Shift+E)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
+    {"RVK_FpsCap", "Game frame rate limit (0 = unlimited; before frame generation)", "General", Int, 0, 1000, 1, 0, nullptr, 0},
     {"RVK_Prepass",    "Depth pre-pass", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_LiteShader", "The interface drawn with a lean shader of its own (the same picture, far less GPU time)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PrepassEq",  "Depth pre-pass: what it covers shaded only where it is seen", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
@@ -533,6 +534,7 @@ const Cost kCosts[] = {
     {"RVK_Enhance", "GPU: all of the below (off: the cheapest)"},
     {"RVK_WinScale", "no cost"},
     {"RVK_HudScale", "no cost"},
+    {"RVK_FpsCap", "saves CPU and GPU below the uncapped frame rate"},
     {"RVK_UiRate", "saves GPU and CPU: 30 or 60 cheaper than every frame"},
     {"RVK_ZoneFade", "no cost"},
     {"RVK_ZoneHoldMax", "no cost"},
