@@ -7,7 +7,10 @@ namespace rnative::gui {
 // Hooks GUI.dll once it is loaded (the first presented frames); later calls do nothing.
 void Install();
 
-// Percent of the game's window and HUD sizes; both default to 100.
+// The single player-facing UI percentage. Native 1080p uses a calibrated
+// window/HUD pair; 4K uses the same percentage for both.
+void SetUiScale(float percent);
+// Independent factors retained for native regression fixtures.
 void SetScale(float windows, float hud);
 bool TakeScaleRedraw();
 bool ScalingActive();

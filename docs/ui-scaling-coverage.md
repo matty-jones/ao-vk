@@ -1,8 +1,10 @@
 # UI scaling coverage
 
-The supported GUI.dll is checked by timestamp, image size, exports and hook entry bytes. Ordinary windows use
-Window size by default; HUD classes and the older timer system have explicit adapters. A control's drawing,
-clipping and inverse mouse mapping inherit the same transform. Native frames remain the layout workspace.
+The supported GUI.dll is checked by timestamp, image size, exports and hook entry bytes. The single visible
+UI size controls both window and HUD scale, with distinct internal factors at native 1080p: a 75% setting yields
+100% windows and 75% HUD. Ordinary windows use nearest-edge/centre anchoring; character and target HUD bars
+retain their original placement rule, while full-screen HUD groups and the older timer system retain specialised anchors. A control's drawing, clipping and inverse mouse mapping inherit the same
+transform. Native frames remain the layout workspace.
 
 | Elements | Scale and path |
 | --- | --- |

@@ -27,6 +27,17 @@ struct Scale {
     }
 };
 
+// One user-facing UI percentage; the 1080p client already sizes floating windows
+// appropriately at 100% when the HUD needs 75%. Preserve that observed 4:3
+// relationship, without changing native window frames or saved preferences.
+struct UiFactors { float windows; float hud; };
+inline UiFactors EffectiveUiScales(float percent, Point screen)
+{
+    const float hud = std::clamp(percent, 50.0f, 200.0f);
+    const bool native1080 = screen.x == 1920.0f && screen.y == 1080.0f;
+    return {native1080 ? std::clamp(hud * (4.0f / 3.0f), 50.0f, 200.0f) : hud, hud};
+}
+
 struct Transform {
     float value = 1.0f;
     Point offset{};

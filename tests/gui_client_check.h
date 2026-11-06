@@ -224,6 +224,20 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
         }
         *instance = saved; return 0;
     }
+    // The single user-facing slider maps to the two verified PRK profiles.
+    put(controller, 0x80, Point{1920, 1080});
+    SetUiScale(75); BeginScaleFrame(controller.bytes);
+    check(ScaleForView(child.bytes) == 1.0f && ScaleForView(hudChild.bytes) == 0.75f,
+          "unified 75% at 1080p preserves native window size and shrinks HUD");
+    Point barInput{3, 4}, barDisplay{};
+    to(hudChild.bytes, &barDisplay, &barInput, 1);
+    check(equal(barDisplay, {384.75f, 48.0f}),
+          "native 1080p character/target HUD bars retain unanchored scaled positions");
+    put(controller, 0x80, Point{3840, 2160});
+    SetUiScale(150); BeginScaleFrame(controller.bytes);
+    check(ScaleForView(child.bytes) == 1.5f && ScaleForView(hudChild.bytes) == 1.5f,
+          "unified 150% at 4K scales ordinary windows and HUD equally");
+    SetScale(100, 100); BeginScaleFrame(controller.bytes);
     SetScale(200, 150);
     Point pending;
     screen(&pending);

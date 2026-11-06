@@ -43,7 +43,20 @@ inline int CheckGuiScale()
     Point window{320, 120}, hud = window;
     Scale{2.0f}.ToScreen(window); Scale{1.5f}.ToScreen(hud);
     check(window.x == 640 && window.y == 240 && hud.x == 480 && hud.y == 180, "window and HUD factors are independent");
+    // PRK's actual two display modes: 150/150 at 4K, 100/75 at native 1080p.
+    const UiFactors fourK = EffectiveUiScales(150, {3840, 2160});
+    const UiFactors fullHD = EffectiveUiScales(75, {1920, 1080});
+    check(fourK.windows == 150 && fourK.hud == 150, "unified UI scale preserves the 4K profile");
+    check(fullHD.windows == 100 && fullHD.hud == 75, "unified UI scale preserves native 1080p window sizes");
+    check(EffectiveUiScales(100, {2560, 1440}).windows == 100, "other sizes do not acquire a 1080p calibration");
     const Rect model{3500, 1900, 3799, 2099};
+    const Transform rightAnchor = Place(model, {3840, 2160}, 1.5f, true);
+    Rect anchored = model;
+    rightAnchor.ToScreen(anchored);
+    check(anchored.right == 3779 && anchored.bottom == 2069,
+          "nearest-edge anchors keep right/bottom windows near their original screen edges");
+    rightAnchor.FromScreen(anchored);
+    check(std::memcmp(&anchored, &model, sizeof(model)) == 0, "anchored window transforms are reversible");
     for (float factor : {1.0f, 2.0f, 0.75f, 1.5f, 1.0f}) {
         Rect display = model;
         const Transform map = Place(model, {3840, 2160}, factor, false);

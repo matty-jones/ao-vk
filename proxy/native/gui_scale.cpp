@@ -41,6 +41,8 @@ struct Clip { Rect logical, screen; Point origin; };
 std::unordered_map<void*, Clip> g_clips;
 float g_windowScale = 1.0f, g_hudScale = 1.0f;
 float g_wantedWindow = 1.0f, g_wantedHud = 1.0f;
+float g_unifiedUiPercent = 100.0f;
+bool g_useUnifiedScale;
 bool g_installed, g_redraw;
 bool g_active;
 int g_coordinates;
@@ -110,15 +112,27 @@ void __fastcall BorderUpHook(void* view, void* edx, const Point* point, int butt
     auto window = g_windows.find(view);
     if (!g_active || window == g_windows.end()) return;
     Transform map = window->second.transform;
-    if (map.offset == Point{}) return;
     Rect frame; g_frame(view, nullptr, &frame);
     if (std::fabs(frame.left - g_draggedFrame.left) < 0.001f && std::fabs(frame.top - g_draggedFrame.top) < 0.001f &&
         std::fabs(frame.right - g_draggedFrame.right) < 0.001f && std::fabs(frame.bottom - g_draggedFrame.bottom) < 0.001f) return;
-    // Save user movement independently of the initial display-only edge clamp.
-    const Point origin{frame.left + map.offset.x / map.value, frame.top + map.offset.y / map.value};
+    Point origin{};
+    if (g_useUnifiedScale) {
+        // An edge anchor is a persistent presentation offset, not a displacement to
+        // bake into the saved native frame. Only normalise a *change* in that offset
+        // (for example, a clamp after dragging near another edge).
+        const Transform next = Place(frame, g_screenSize, map.value, true);
+        if (next.offset == map.offset) return;
+        origin = {frame.left + (map.offset.x - next.offset.x) / map.value,
+                  frame.top + (map.offset.y - next.offset.y) / map.value};
+        map = next;
+    } else {
+        if (map.offset == Point{}) return;
+        // Legacy independent scales use the old top-left window placement rule.
+        origin = {frame.left + map.offset.x / map.value, frame.top + map.offset.y / map.value};
+        map.offset = {};
+    }
     using Move = void(__thiscall*)(void*, const Point*);
     const auto move = reinterpret_cast<Move>((*static_cast<void***>(view))[0xC8 / 4]);
-    map.offset = {};
     window->second.transform = map;
     g_views.insert_or_assign(view, map);
     {
@@ -336,6 +350,7 @@ void PlacedWindow(void* window, float factor)
     Rect frame;
     Point screen;
     g_frame(root, nullptr, &frame); g_windowScreen(&screen);
+    // Cursor-positioned popups already have the right native placement.
     const Transform map = Place(frame, screen, factor, false);
     g_windows.insert_or_assign(root, Window{window, map});
     g_views.insert_or_assign(root, map);
@@ -613,10 +628,18 @@ Import g_imports[] = {
 
 void SetScale(float windows, float hud)
 {
+    g_useUnifiedScale = false;  // Native regression fixtures also exercise independent factors.
     auto factor = [](float percent) { return std::isfinite(percent) ? std::clamp(percent, 50.0f, 200.0f) / 100.0f : 1.0f; };
     windows = factor(windows); hud = factor(hud);
     if (windows == g_wantedWindow && hud == g_wantedHud) return;
     g_wantedWindow = windows; g_wantedHud = hud;
+}
+
+void SetUiScale(float percent)
+{
+    if (!std::isfinite(percent)) return;
+    g_unifiedUiPercent = std::clamp(percent, 50.0f, 200.0f);
+    g_useUnifiedScale = true;
 }
 
 bool TakeScaleRedraw()
@@ -753,14 +776,19 @@ void InstallScaling(HMODULE gui)
 bool BeginScaleFrame(void* controller)
 {
     if (!g_installed) return false;
+    Point screen;
+    g_screen(controller, &screen);
+    if (g_useUnifiedScale) {
+        const UiFactors scales = EffectiveUiScales(g_unifiedUiPercent, screen);
+        g_wantedWindow = scales.windows / 100.0f;
+        g_wantedHud = scales.hud / 100.0f;
+    }
     // Keep the preferences slider under the mouse until its drag ends.
     const uint32_t buttons = *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(controller) + 0x58);
     if (!(buttons & 1) && g_windowScale != g_wantedWindow) {
         g_windowScale = g_wantedWindow;
         g_redraw = true;
     }
-    Point screen;
-    g_screen(controller, &screen);
     const bool resized = screen.x != g_screenSize.x || screen.y != g_screenSize.y;
     g_screenSize = screen;
     if (g_hudScale != g_wantedHud || resized) {
@@ -845,7 +873,10 @@ bool BeginScaleFrame(void* controller)
             map = {factor, {(1 - factor) * cursor.x, (1 - factor) * cursor.y}};
         } else if (!full) {
             if (!resized && known && previous->second.transform.value == factor) map = previous->second.transform;
-            else map = Place(frame, screen, factor, false);
+            // Only floating windows need the new nearest-edge anchor. HUD bars
+            // must retain their original top-left-based placement at 75%.
+            // Independent SetScale fixtures keep their legacy placement rule.
+            else map = Place(frame, screen, factor, g_useUnifiedScale && !hud);
         }
         if (!known || !(previous->second.transform == map)) g_redraw = true;
         current.emplace(root, Window{owner, map});
