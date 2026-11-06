@@ -1,7 +1,7 @@
 # Interface separation and scaling
 
 The interface is captured at display resolution, independently of world rendering and refresh rate. Windows and
-HUD have independent scales, with matching input and fresh text rasterization. See the
+HUD share one visible UI-size control, with internally calibrated factors, matching input and fresh text rasterization. See the
 [font metrics](ui-font-metrics.md), [defect investigation](ui-scaling-investigation.md),
 [performance audit](ui-scaling-performance-audit.md) and [neural-rendering roadmap](neural-rendering-roadmap.md).
 
@@ -15,14 +15,18 @@ main-surface readback compose the same layers; the world target remains availabl
 GUI render targets remain separate, while blits to the main surface follow the active overlay. Opaque texture
 formats retain opaque alpha when copied. `RANDYVK_WORLD_SHOT=1` saves the world alone for comparison.
 
-`RVK_WinScale` and `RVK_HudScale` are independent percentages in General (50–200, default 100). Scaling happens
+`RVK_HudScale` is the sole visible UI-size percentage (50–200, default 100). The retained `RVK_WinScale` INI key
+is ignored, so existing launch scripts and configurations can still load. At a native 1920x1080 GUI size, 75% UI
+means 100% ordinary windows and 75% HUD, matching the tested PRK layout; at 3840x2160, 150% means 150% of both.
+The two internal factors exist because AO sizes floating windows differently at 1080p. Scaling happens
 in GUI.dll's native view coordinates, before drawing into the display-sized interface image. Rectangle transforms
 include the last pixel, so clipping and input use the same bounds as drawing. Native layout keeps its original
 workspace; the controller's physical screen and mouse coordinates stay unchanged. HUD changes take effect at the
 next GUI frame. Window changes wait while the primary mouse button is held, keeping the Preferences slider still,
 then apply at the first GUI frame after release. Applied changes force a fresh cached image.
-Clamping affects only display placement, so returning to 100% restores the unchanged model. Full-screen HUD
-containers keep their native dimensions; their widget groups scale around the nearest screen edge or centre.
+Clamping and nearest-edge anchoring affect only display placement; scale changes leave the native saved layout
+untouched. Both ordinary windows and HUD widget groups scale about the nearest screen edge or centre. Full-screen HUD
+containers keep their native dimensions.
 Their clipping and input bounds include the enlarged children. No scale-driven move/resize calls or separate
 preferences file are used. Native frame queries always remain canonical. Only the controller's cursor and tooltip
 hit-test call sites request displayed frames, including outside rendering. Border dragging and frame updates use
