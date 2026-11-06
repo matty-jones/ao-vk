@@ -229,6 +229,10 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
     SetUiScale(75); BeginScaleFrame(controller.bytes);
     check(ScaleForView(child.bytes) == 1.0f && ScaleForView(hudChild.bytes) == 0.75f,
           "unified 75% at 1080p preserves native window size and shrinks HUD");
+    Point barInput{3, 4}, barDisplay{};
+    to(hudChild.bytes, &barDisplay, &barInput, 1);
+    check(equal(barDisplay, {384.75f, 48.0f}),
+          "native 1080p character/target HUD bars retain unanchored scaled positions");
     put(controller, 0x80, Point{3840, 2160});
     SetUiScale(150); BeginScaleFrame(controller.bytes);
     check(ScaleForView(child.bytes) == 1.5f && ScaleForView(hudChild.bytes) == 1.5f,
