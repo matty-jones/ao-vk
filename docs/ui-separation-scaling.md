@@ -25,8 +25,9 @@ workspace; the controller's physical screen and mouse coordinates stay unchanged
 next GUI frame. Window changes wait while the primary mouse button is held, keeping the Preferences slider still,
 then apply at the first GUI frame after release. Applied changes force a fresh cached image.
 Clamping and nearest-edge anchoring affect only display placement; scale changes leave the native saved layout
-untouched. Both ordinary windows and HUD widget groups scale about the nearest screen edge or centre. Full-screen HUD
-containers keep their native dimensions.
+untouched. Ordinary floating windows use nearest-edge/centre anchoring, while character and target HUD bar windows
+retain the game's existing unanchored placement. Full-screen HUD containers keep their native dimensions and
+continue anchoring their widget groups to the nearest edge or centre.
 Their clipping and input bounds include the enlarged children. No scale-driven move/resize calls or separate
 preferences file are used. Native frame queries always remain canonical. Only the controller's cursor and tooltip
 hit-test call sites request displayed frames, including outside rendering. Border dragging and frame updates use
