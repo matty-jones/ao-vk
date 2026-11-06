@@ -252,9 +252,11 @@ ao-vk spends that idle graphics card on its effects, and takes work off the game
 - The Vulkan work runs on a thread of its own: the game's thread only hands the draws over.
 - Characters are animated (skinned) on the graphics card instead of the CPU.
 - Static meshes stay on the graphics card and are drawn by reference instead of being sent again every frame.
-- Windows and HUD have independent sizes: `RVK_WinScale` and `RVK_HudScale` (General, 50–200%, default 100%).
-  Text is rendered at the requested size; labels and floating text, the cursor, and the developer console/readout
-  keep their sizes. Unsupported GUI builds are logged and keep their original scale.
+- A single **UI size** slider (`RVK_HudScale`, General, 50–200%, default 100%) scales windows and HUD together.
+  At native 1080p, 75% retains native 100% window size and sets HUD to 75%; at 4K, 150% scales both to 150%.
+  The old `RVK_WinScale` INI entry is accepted but ignored. Window and HUD placement is edge-anchored, with the
+  game's native preferences preserved. Text is rendered at the requested size; labels and floating text, the cursor,
+  and the developer console/readout keep their sizes. Unsupported GUI builds retain their original scale.
   See [UI scaling and compatibility](docs/ui-separation-scaling.md).
 - The interface can be redrawn fewer times a second than the 3D (`RVK_UiRate`, 60 recommended).
 
