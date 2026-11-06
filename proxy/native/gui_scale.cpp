@@ -112,15 +112,27 @@ void __fastcall BorderUpHook(void* view, void* edx, const Point* point, int butt
     auto window = g_windows.find(view);
     if (!g_active || window == g_windows.end()) return;
     Transform map = window->second.transform;
-    if (map.offset == Point{}) return;
     Rect frame; g_frame(view, nullptr, &frame);
     if (std::fabs(frame.left - g_draggedFrame.left) < 0.001f && std::fabs(frame.top - g_draggedFrame.top) < 0.001f &&
         std::fabs(frame.right - g_draggedFrame.right) < 0.001f && std::fabs(frame.bottom - g_draggedFrame.bottom) < 0.001f) return;
-    // Save user movement independently of the initial display-only edge clamp.
-    const Point origin{frame.left + map.offset.x / map.value, frame.top + map.offset.y / map.value};
+    Point origin{};
+    if (g_useUnifiedScale) {
+        // An edge anchor is a persistent presentation offset, not a displacement to
+        // bake into the saved native frame. Only normalise a *change* in that offset
+        // (for example, a clamp after dragging near another edge).
+        const Transform next = Place(frame, g_screenSize, map.value, true);
+        if (next.offset == map.offset) return;
+        origin = {frame.left + (map.offset.x - next.offset.x) / map.value,
+                  frame.top + (map.offset.y - next.offset.y) / map.value};
+        map = next;
+    } else {
+        if (map.offset == Point{}) return;
+        // Legacy independent scales use the old top-left window placement rule.
+        origin = {frame.left + map.offset.x / map.value, frame.top + map.offset.y / map.value};
+        map.offset = {};
+    }
     using Move = void(__thiscall*)(void*, const Point*);
     const auto move = reinterpret_cast<Move>((*static_cast<void***>(view))[0xC8 / 4]);
-    map.offset = {};
     window->second.transform = map;
     g_views.insert_or_assign(view, map);
     {
