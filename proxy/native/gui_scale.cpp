@@ -350,7 +350,8 @@ void PlacedWindow(void* window, float factor)
     Rect frame;
     Point screen;
     g_frame(root, nullptr, &frame); g_windowScreen(&screen);
-    const Transform map = Place(frame, screen, factor, true);
+    // Cursor-positioned popups already have the right native placement.
+    const Transform map = Place(frame, screen, factor, false);
     g_windows.insert_or_assign(root, Window{window, map});
     g_views.insert_or_assign(root, map);
     g_redraw = true;
@@ -872,7 +873,10 @@ bool BeginScaleFrame(void* controller)
             map = {factor, {(1 - factor) * cursor.x, (1 - factor) * cursor.y}};
         } else if (!full) {
             if (!resized && known && previous->second.transform.value == factor) map = previous->second.transform;
-            else map = Place(frame, screen, factor, true);
+            // Only floating windows need the new nearest-edge anchor. HUD bars
+            // must retain their original top-left-based placement at 75%.
+            // Independent SetScale fixtures keep their legacy placement rule.
+            else map = Place(frame, screen, factor, g_useUnifiedScale && !hud);
         }
         if (!known || !(previous->second.transform == map)) g_redraw = true;
         current.emplace(root, Window{owner, map});
