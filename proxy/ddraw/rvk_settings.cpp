@@ -51,8 +51,8 @@ Setting g_settings[] = {
     {"RVK_LiteShader", "The interface drawn with a lean shader of its own (the same picture, far less GPU time)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_PrepassEq",  "Depth pre-pass: what it covers shaded only where it is seen", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
     {"RVK_PrepassMore", "Depth pre-pass: a second stretch after the water's copy of the scene", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
-    {"RVK_WinScale", "Window size (%) - release to apply", "General", Int, 50, 200, 5, 100, nullptr, 0},
-    {"RVK_HudScale", "HUD size (%)", "General", Int, 50, 200, 5, 100, nullptr, 0},
+    {"RVK_WinScale", "Legacy window size (ignored; UI size controls both)", "General", Int, 50, 200, 5, 100, nullptr, 0},
+    {"RVK_HudScale", "UI size (%) - release to apply", "General", Int, 50, 200, 5, 100, nullptr, 0},
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
     {"RVK_ZoneFade", "Zone changes: the last view stays up and fades into the new zone once it has loaded (off: the blank wait)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_ZoneHoldMax", "Zone changes: the longest the new zone stays hidden once it draws (seconds)", "General", Float, 0.5f, 5, 0.1f, 1.5f, nullptr, 0, "RVK_ZoneFade"},
@@ -464,7 +464,7 @@ const Vanilla kVanilla[] = {
 // changes, and most of the experimental features' tuning - each keeps its value, its game value and its part in the
 // presets. A setting whose feature switch is listed here is left out with it.
 const char* const kHidden[] = {
-    "RVK_HeapCheck", "RVK_TexKeepCpu",
+    "RVK_HeapCheck", "RVK_TexKeepCpu", "RVK_WinScale",  // compatibility key; only UI size appears in-game
     "RVK_Prepass", "RVK_LiteShader", "RVK_PrepassEq", "RVK_PrepassMore", "RVK_LightOver", "RVK_OwnLight", "RVK_LeafLightOn", "RVK_PlantDetOn", "RVK_FolLodOn",
     "RVK_GrassTex", "RVK_ShadowMem", "RVK_FxGlowOn", "RVK_NightOn", "RVK_MoonOn", "RVK_GameSun", "RVK_HillShade",
     "RVK_DarkFloor", "RVK_GroundOne", "RVK_ZoneHoldMax", "RVK_PortalDist", "RVK_StreetNow",
@@ -985,7 +985,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
         for (const Setting& other : g_settings)
             if (&other != &s) Apply(other, d);
     }
-    else if (is("RVK_WinScale") || is("RVK_HudScale")) rnative::gui::SetScale(V("RVK_WinScale"), V("RVK_HudScale"));
+    else if (is("RVK_WinScale") || is("RVK_HudScale")) rnative::gui::SetUiScale(V("RVK_HudScale"));
     else if (is("RVK_UiRate")) SetInterfaceRate(V(n));
     else if (is("RVK_LiveMeshes")) SetLiveMeshes(V(n) != 0.0f);
     else if (is("RVK_PixelLight")) d->SetPixelLighting(V(n) != 0.0f);
