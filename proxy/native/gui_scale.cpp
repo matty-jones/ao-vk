@@ -41,6 +41,8 @@ struct Clip { Rect logical, screen; Point origin; };
 std::unordered_map<void*, Clip> g_clips;
 float g_windowScale = 1.0f, g_hudScale = 1.0f;
 float g_wantedWindow = 1.0f, g_wantedHud = 1.0f;
+float g_unifiedUiPercent = 100.0f;
+bool g_useUnifiedScale;
 bool g_installed, g_redraw;
 bool g_active;
 int g_coordinates;
@@ -336,7 +338,7 @@ void PlacedWindow(void* window, float factor)
     Rect frame;
     Point screen;
     g_frame(root, nullptr, &frame); g_windowScreen(&screen);
-    const Transform map = Place(frame, screen, factor, false);
+    const Transform map = Place(frame, screen, factor, true);
     g_windows.insert_or_assign(root, Window{window, map});
     g_views.insert_or_assign(root, map);
     g_redraw = true;
@@ -613,10 +615,18 @@ Import g_imports[] = {
 
 void SetScale(float windows, float hud)
 {
+    g_useUnifiedScale = false;  // Native regression fixtures also exercise independent factors.
     auto factor = [](float percent) { return std::isfinite(percent) ? std::clamp(percent, 50.0f, 200.0f) / 100.0f : 1.0f; };
     windows = factor(windows); hud = factor(hud);
     if (windows == g_wantedWindow && hud == g_wantedHud) return;
     g_wantedWindow = windows; g_wantedHud = hud;
+}
+
+void SetUiScale(float percent)
+{
+    if (!std::isfinite(percent)) return;
+    g_unifiedUiPercent = std::clamp(percent, 50.0f, 200.0f);
+    g_useUnifiedScale = true;
 }
 
 bool TakeScaleRedraw()
@@ -753,14 +763,19 @@ void InstallScaling(HMODULE gui)
 bool BeginScaleFrame(void* controller)
 {
     if (!g_installed) return false;
+    Point screen;
+    g_screen(controller, &screen);
+    if (g_useUnifiedScale) {
+        const UiFactors scales = EffectiveUiScales(g_unifiedUiPercent, screen);
+        g_wantedWindow = scales.windows / 100.0f;
+        g_wantedHud = scales.hud / 100.0f;
+    }
     // Keep the preferences slider under the mouse until its drag ends.
     const uint32_t buttons = *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(controller) + 0x58);
     if (!(buttons & 1) && g_windowScale != g_wantedWindow) {
         g_windowScale = g_wantedWindow;
         g_redraw = true;
     }
-    Point screen;
-    g_screen(controller, &screen);
     const bool resized = screen.x != g_screenSize.x || screen.y != g_screenSize.y;
     g_screenSize = screen;
     if (g_hudScale != g_wantedHud || resized) {
@@ -845,7 +860,7 @@ bool BeginScaleFrame(void* controller)
             map = {factor, {(1 - factor) * cursor.x, (1 - factor) * cursor.y}};
         } else if (!full) {
             if (!resized && known && previous->second.transform.value == factor) map = previous->second.transform;
-            else map = Place(frame, screen, factor, false);
+            else map = Place(frame, screen, factor, true);
         }
         if (!known || !(previous->second.transform == map)) g_redraw = true;
         current.emplace(root, Window{owner, map});
