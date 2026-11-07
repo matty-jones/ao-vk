@@ -24,6 +24,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Character-creation controls keep their native screen positions at saved UI scales, keeping breed confirmation
+  and the later appearance, profession and naming steps on-screen.
 - The PF map's player arrow follows the scaled map instead of drifting away or disappearing. City/building
   map backgrounds and markers also share the map's scale.
 - The logout countdown stays centered when HUD size changes, with timer drawing and mouse regions aligned.
