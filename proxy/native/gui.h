@@ -10,6 +10,7 @@ void Install();
 // The single player-facing UI percentage. Native 1080p uses a calibrated
 // window/HUD pair; 4K uses the same percentage for both.
 void SetUiScale(float percent);
+void SetCursorScale(float percent);
 // Independent factors retained for native regression fixtures.
 void SetScale(float windows, float hud);
 bool TakeScaleRedraw();

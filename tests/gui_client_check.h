@@ -112,6 +112,7 @@ inline LONG WINAPI GuiCheckException(EXCEPTION_POINTERS* exception)
 #include "gui_popup_check.h"
 #include "gui_chat_check.h"
 #include "gui_timer_check.h"
+#include "gui_cursor_check.h"
 
 inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmark = false)
 {
@@ -206,6 +207,7 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
         rnative::SetIniPath(ini);
         const std::vector<uint8_t> code(bytes, bytes + pe->OptionalHeader.SizeOfImage);
         InstallScaling(module);
+        InstallCursorScaling(module);
         check(!FontScalingReady(), "bypass leaves font hooks uninstalled");
         check(std::memcmp(code.data(), bytes, code.size()) == 0, "bypass leaves GUI code, call sites and imports untouched");
         SetScale(150, 150);
@@ -449,6 +451,7 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
     failures += CheckGuiSidebar(module);
     failures += CheckGuiPopups(module);
     failures += CheckGuiTimers(module, controller.bytes);
+    failures += CheckGuiCursor(module, controller.bytes);
     BeginScaleFrame(controller.bytes);
     std::printf("GUI.dll: checking native border input\n");
     // Run native border input through dispatch's inverse, isolating only cursor capture and frame application.

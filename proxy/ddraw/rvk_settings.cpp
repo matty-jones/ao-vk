@@ -53,6 +53,7 @@ Setting g_settings[] = {
     {"RVK_PrepassMore", "Depth pre-pass: a second stretch after the water's copy of the scene", "General", Bool, 0, 1, 1, 1, nullptr, 0, "RVK_Prepass"},
     {"RVK_WinScale", "Legacy window size (ignored; UI size controls both)", "General", Int, 50, 200, 5, 100, nullptr, 0},
     {"RVK_HudScale", "UI size (%) - release to apply", "General", Int, 50, 200, 5, 100, nullptr, 0},
+    {"RVK_CursorScale", "Cursor size (%)", "General", Int, 50, 300, 5, 100, nullptr, 0},
     {"RVK_UiRate", "Interface refresh rate (0 = every frame)", "General", Choice, 0, 120, 1, 60, nullptr, 0, nullptr, "0 30 60 90 120"},
     {"RVK_ZoneFade", "Zone changes: the last view stays up and fades into the new zone once it has loaded (off: the blank wait)", "General", Bool, 0, 1, 1, 1, nullptr, 0},
     {"RVK_ZoneHoldMax", "Zone changes: the longest the new zone stays hidden once it draws (seconds)", "General", Float, 0.5f, 5, 0.1f, 1.5f, nullptr, 0, "RVK_ZoneFade"},
@@ -534,6 +535,7 @@ const Cost kCosts[] = {
     {"RVK_Enhance", "GPU: all of the below (off: the cheapest)"},
     {"RVK_WinScale", "no cost"},
     {"RVK_HudScale", "no cost"},
+    {"RVK_CursorScale", "negligible"},
     {"RVK_FpsCap", "saves CPU and GPU below the uncapped frame rate"},
     {"RVK_UiRate", "saves GPU and CPU: 30 or 60 cheaper than every frame"},
     {"RVK_ZoneFade", "no cost"},
@@ -986,6 +988,7 @@ void ApplyOne(const Setting& s, rvk::ThreadedDevice* d)
             if (&other != &s) Apply(other, d);
     }
     else if (is("RVK_WinScale") || is("RVK_HudScale")) rnative::gui::SetUiScale(V("RVK_HudScale"));
+    else if (is("RVK_CursorScale")) rnative::gui::SetCursorScale(V(n));
     else if (is("RVK_UiRate")) SetInterfaceRate(V(n));
     else if (is("RVK_LiveMeshes")) SetLiveMeshes(V(n) != 0.0f);
     else if (is("RVK_PixelLight")) d->SetPixelLighting(V(n) != 0.0f);

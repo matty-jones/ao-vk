@@ -17,7 +17,8 @@ transform. Native frames remain the layout workspace.
 | Popups and context menus | Window size, physical cursor anchors, logical placement/clamping and displayed-frame click checks |
 | Login, character selection/management, character creation and progress/loading windows | Native screen coordinates and native size |
 | Hover tooltips and dragged item images | Their existing source-window mapping and cursor-anchor adapters |
-| World labels/floating text, mouse pointer, renderer console and performance readout | Original sizes, outside window/HUD scaling |
+| Mouse pointer, including resize/text/target shapes and their detail icons | Independent Cursor size, scaling around the physical click point |
+| World labels/floating text, renderer console and performance readout | Original sizes, outside UI and cursor scaling |
 
 The timer adapter is limited to sprite windows created by the timer constructor. It stores the game's logical
 position and scale separately, reapplies HUD size when it changes, and refreshes the native mouse regions.
@@ -51,12 +52,20 @@ and a legacy text-window constructor (one). Login/loading retains native screen 
 native scale changes, explicit repositioning, hotspot refresh and destruction are covered together. The logout
 caller centers a timer from the physical display size and logical bar size; scaling that position from the
 screen origin displaced it. The timer adapter now anchors the complete logical bar rectangle before applying
-HUD size. Ordinary non-timer sprite windows remain outside this adapter, including cursor-related rendering.
+HUD size. Ordinary non-timer sprite windows remain outside this adapter. The cursor has a separate adapter:
+the original `MousePointer_t` selects and positions its sprites, then cursor-only sprite submissions scale their
+offsets about the physical pointer and apply absolute sprite sizes. Hotspot tables, controller/InputConfig mouse
+coordinates, world picking and UI hit testing are unchanged. This runs in the cursor's per-frame path, independently
+of UI refresh rate and its late-overlay compositing, including frame generation.
 The legacy text-window constructor is not exported, and no direct caller or static pointer reference was found
 in GUI.dll. No other client DLL or executable imports the legacy sprite-window methods.
 
 These checks use 75/100/125/150/176/200% factors, independent Window/HUD settings and return trips to 100%.
 They exercise the client implementation rather than substituting a synthetic quad for the player arrow.
+Cursor checks run the native placement function and sprite-size implementation for all 15 shapes, detail icons
+and their backgrounds at screen corners and the centre, across 75–300% and return trips to 100%. They verify
+physical click coordinates, hotspot alignment within half a pixel of integer sprite placement, hidden cursors and
+unchanged positioning of other sprites; only graphics resources and final sprite-position submission are substituted.
 The audit accounts for the supported binary's shared drawing paths; it does not claim an authenticated
 gameplay visit to every control or every third-party skin.
 

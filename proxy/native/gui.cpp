@@ -17,6 +17,7 @@
 namespace rnative::gui {
 
 void InstallScaling(HMODULE gui);
+void InstallCursorScaling(HMODULE gui);
 bool BeginScaleFrame(void* controller);
 
 namespace {
@@ -102,7 +103,10 @@ void Install()
         return;
     g_render = reinterpret_cast<RenderFn>(
         HookAt(render, 10, kRel, 1, reinterpret_cast<void*>(&RenderHook), "WindowController_c::Render"));
-    if (g_render) InstallScaling(gui);
+    if (g_render) {
+        InstallScaling(gui);
+        InstallCursorScaling(gui);
+    }
     Log("interface: GUI.dll %s", g_render ? "hooked (RVK_UiRate can redraw it less often)" : "not hooked");
 }
 

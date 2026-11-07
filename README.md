@@ -256,9 +256,11 @@ ao-vk spends that idle graphics card on its effects, and takes work off the game
   At native 1080p, 75% retains native 100% window size and sets HUD to 75%; at 4K, 150% scales both to 150%.
   The old `RVK_WinScale` INI entry is accepted but ignored. Window and HUD placement is edge-anchored, with the
   game's native preferences preserved. Floating HUD bars retain their original placement. Text is rendered at the
-  requested size; labels and floating text, the cursor,
-  and the developer console/readout keep their sizes. Unsupported GUI builds retain their original scale.
+  requested size; labels, floating text and the developer console/readout keep their sizes.
+  Unsupported GUI builds retain their original scale.
   See [UI scaling and compatibility](docs/ui-separation-scaling.md).
+- **Cursor size** (`RVK_CursorScale`, General, 50–300%, default 100%) is independent of UI size. Set it to
+  150% or 200% for a larger pointer; its physical click point stays fixed for every shape and detail icon.
 - The interface can be redrawn fewer times a second than the 3D (`RVK_UiRate`, 60 recommended).
 
 And it can draw the 3D world at less than the screen's size and bring it back up, or put frames of its own between

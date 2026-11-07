@@ -6,13 +6,15 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ## Unreleased
 
 ### New
+- `RVK_CursorScale` (General, 50–300%, default 100%) enlarges the cursor independently of UI size. Cursor shapes
+  and their detail icons grow around the physical click point, preserving click and hover alignment.
 - `RVK_FpsCap` in `randy-vk.ini` limits game frames before scene processing using a sleeping timer. The default
   is 0 (unlimited); stalls, pauses and focus changes reset pacing. Generated frames are additional to the cap.
 - One UI size slider (`RVK_HudScale`, General, 50–200%, default 100%) scales windows and the HUD together.
   At 1080p, 75% keeps windows at their native size and shrinks the HUD to 75%; at 4K the same percentage applies
   to both. Floating windows sit against the nearest screen edge, and character and target bars stay where the game
   placed them. Text is rendered at the requested size, and changes refresh cached UI immediately. World labels,
-  floating text, the cursor, and the developer console stay their original size. A saved `RVK_WinScale` is still
+  floating text and the developer console stay their original size. A saved `RVK_WinScale` is still
   accepted and ignored.
 
 ### Diagnostics

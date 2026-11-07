@@ -17,11 +17,11 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 - *Cost*: what the window says the setting costs a frame (`kCosts`): GPU time at 1920 x 1080 (2560 x 1440 at
   75% render scale) on an RTX 4070 Ti, low under 0.3 ms, medium 0.3 to 1 ms, high over 1 ms.
 
-361 settings, 181 of them in the settings window.
+362 settings, 182 of them in the settings window.
 
 ## Sections
 
-- [General](#general) (20)
+- [General](#general) (21)
 - [Lighting](#lighting) (21)
 - [Materials](#materials) (15)
 - [Debug](#debug) (8)
@@ -51,6 +51,7 @@ by hand; run the script after changing a setting (`--check` tells whether this f
 | `RVK_PrepassMore` | Depth pre-pass: a second stretch after the water's copy of the scene | on / off | on |  | ini only; switch `RVK_Prepass`; knob |
 | `RVK_WinScale` | Legacy window size (ignored; UI size controls both) | 50 .. 200 | 100 | no cost | ini only |
 | `RVK_HudScale` | UI size (%) - release to apply | 50 .. 200 | 100 | no cost | window |
+| `RVK_CursorScale` | Cursor size (%) | 50 .. 300 | 100 | negligible | window |
 | `RVK_UiRate` | Interface refresh rate (0 = every frame) | 0 (every frame) / 30 / 60 / 90 / 120 | 60 | saves GPU and CPU: 30 or 60 cheaper than every frame | window |
 | `RVK_ZoneFade` | Zone changes: the last view stays up and fades into the new zone once it has loaded (off: the blank wait) | on / off | on | no cost | window; game value off; knob |
 | `RVK_ZoneHoldMax` | Zone changes: the longest the new zone stays hidden once it draws (seconds) | 0.5 .. 5 | 1.5 | no cost | ini only; switch `RVK_ZoneFade`; knob |

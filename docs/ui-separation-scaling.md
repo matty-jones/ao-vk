@@ -53,7 +53,8 @@ anisotropy so filtering cannot reach neighbouring allocations. World and cursor 
 
 HUD classification covers the character bars, compass, shortcut bars, control centre and notifications through
 their native window types and names. Other GUI windows use the window factor. World labels and floating text,
-cursor, and developer console/performance readout do not use either scale.
+cursor, and developer console/performance readout do not use either scale. `RVK_CursorScale` separately scales the
+software pointer and its detail sprites about the physical click point; mouse coordinates and hit testing stay unchanged.
 
 The scaling hook group recognises GUI.dll timestamp `0x5CD32BEA`, image size `0x2B0000`, and checks exported
 addresses and entry instructions before patching. Unknown builds remain at 100% and log the reason. No client
