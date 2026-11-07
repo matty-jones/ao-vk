@@ -8,9 +8,12 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
 ### New
 - `RVK_FpsCap` in `randy-vk.ini` limits game frames before scene processing using a sleeping timer. The default
   is 0 (unlimited); stalls, pauses and focus changes reset pacing. Generated frames are additional to the cap.
-- Experimental `RVK_WinScale` and `RVK_HudScale` (General, 100% by default) resize windows and HUD independently, with matching
-  layout, clipping and mouse input. World labels and floating text, the cursor, and the developer console/readout
-  retain their sizes. Text is rendered at the requested size, and changes refresh cached UI immediately.
+- One UI size slider (`RVK_HudScale`, General, 50–200%, default 100%) scales windows and the HUD together.
+  At 1080p, 75% keeps windows at their native size and shrinks the HUD to 75%; at 4K the same percentage applies
+  to both. Floating windows sit against the nearest screen edge, and character and target bars stay where the game
+  placed them. Text is rendered at the requested size, and changes refresh cached UI immediately. World labels,
+  floating text, the cursor, and the developer console stay their original size. A saved `RVK_WinScale` is still
+  accepted and ignored.
 
 ### Diagnostics
 - `dump` also saves a bounded `rvk-frame-*-ui.tar` archive of enlarged text caches and their layout, without
@@ -24,6 +27,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Leaving a shop could turn the whole world black outdoors, by day or night, with only the sky, the interface and a
+  little bloom left; it stayed black until Ctrl+Shift+E or another zone change.
 - Character-creation controls keep their native screen positions at saved UI scales, keeping breed confirmation
   and the later appearance, profession and naming steps on-screen.
 - The PF map's player arrow follows the scaled map instead of drifting away or disappearing. City/building
