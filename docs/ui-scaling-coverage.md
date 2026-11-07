@@ -13,7 +13,7 @@ clipping and inverse mouse mapping inherit the same transform. Native frames rem
 | Mail indicator, help/tip buttons and raid bar | HUD size; these previously inherited Window size |
 | Attack, nanoprogram and other temporary timer bars, including logout/camping | HUD size through their common `TimerBarBase_c` constructor and legacy sprite-window methods; screen-centered bars retain their center |
 | Popups and context menus | Window size, physical cursor anchors, logical placement/clamping and displayed-frame click checks |
-| Login, character selection/management and progress/loading windows | Native screen coordinates and native size |
+| Login, character selection/management, character creation and progress/loading windows | Native screen coordinates and native size |
 | Hover tooltips and dragged item images | Their existing source-window mapping and cursor-anchor adapters |
 | World labels/floating text, mouse pointer, renderer console and performance readout | Original sizes, outside window/HUD scaling |
 
@@ -24,6 +24,10 @@ screen-centered position about the top-left corner.
 Destroying the sprite window removes its record. Other legacy sprite windows keep their original behaviour.
 Timer captions remain on the older bitmap text path; browser content also retains its separate rasterizer.
 The display-resolution font replacement covers native `TextRenderer_c` controls.
+
+Character creation uses `SceneBase_t`'s plain `Window` named `Background` at the physical display size, shared by
+breed, appearance, profession and naming. It retains native coordinates alongside the dedicated login and
+character-selection window classes; ordinary plain windows still follow Window size.
 
 ## Custom drawing and transient placement audit
 

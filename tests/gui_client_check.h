@@ -288,6 +288,29 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
         to(child.bytes, &output, &original, 1);
         check(equal(output, nativeLogin), "pregame windows retain native screen coordinates at saved 150%");
     }
+    // All character-creation scenes use SceneBase_t's plain full-screen Background window.
+    put(owner, 0, static_cast<const void*>(bytes + 0x1C8644));
+    std::memcpy(name.buffer, "Background", 11); name.size = 10;
+    for (Point size : {Point{1280, 720}, Point{1920, 1080}, Point{3840, 2160}}) {
+        put(controller, 0x80, size);
+        put(rootData, 0x20, Rect{0, 0, size.x - 1, size.y - 1});
+        put(childData, 0x20, Rect{size.x - 180, size.y - 90, size.x - 20, size.y - 20});
+        for (float scale : {75.0f, 100.0f, 150.0f, 200.0f}) {
+            SetScale(scale, 175); BeginScaleFrame(controller.bytes);
+            Point button{75, 35}, displayed, clicked;
+            to(child.bytes, &displayed, &button, 1);
+            from(child.bytes, &clicked, &displayed, 1);
+            check(equal(displayed, {size.x - 105, size.y - 55}), "creation confirmation stays at its native screen position");
+            check(equal(clicked, button), "creation confirmation accepts clicks at its displayed position");
+            check(ScaleForView(child.bytes) == 1, "breed, appearance, profession and name controls retain native size");
+        }
+    }
+    std::memcpy(name.buffer, "test", 5); name.size = 4;
+    SetScale(150, 175); BeginScaleFrame(controller.bytes);
+    check(ScaleForView(child.bytes) == 1.5f, "ordinary plain windows still use window scaling");
+    put(controller, 0x80, Point{3840, 2160});
+    put(rootData, 0x20, Rect{0, 0, 199, 99});
+    put(childData, 0x20, Rect{120, 60, 199, 99});
     for (size_t table : {size_t(0x1B4664), size_t(0x1B45DC), size_t(0x1BF0D4), size_t(0x1A963C),
                          size_t(0x1C258C), size_t(0x1B5784), size_t(0x1B1BA4), size_t(0x1C21EC)}) {
         put(owner, 0, static_cast<const void*>(bytes + table));
@@ -558,8 +581,8 @@ inline int CheckGuiClient(const char* client, bool bypass = false, bool benchmar
         pointer(imageOwnerData, 0x80, image); pointer(imageData, 0x10, top); pointer(hudData, 8, image);
         pointer(controller, 0x194, drag); pointer(drag, 0x54, imageOwner);
         put(drag, 0x58, Point{-8, -5});
-        void* table[64]{}; table[0xC8 / 4] = reinterpret_cast<void*>(&GuiCheckMovePosition);
-        put(image, 0, static_cast<void*>(table));
+        void* table[65]{}; table[1 + 0xC8 / 4] = reinterpret_cast<void*>(&GuiCheckMovePosition);
+        put(image, 0, static_cast<void*>(table + 1));
         using DragMove = void(__thiscall*)(void*, const Point*);
         auto dragMove = reinterpret_cast<DragMove>(symbol("?SlotMouseMoved@DragObject_c@@AAEXABVPoint@@@Z"));
         for (bool fromHud : {false, true}) {

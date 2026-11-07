@@ -270,6 +270,14 @@ const char* TypeOf(void* window)
 bool NativeScreen(void* window)
 {
     const char* type = TypeOf(window);
+    if (!std::strcmp(type, ".?AVWindow@@")) {
+        // SceneBase_t shares this full-screen window across all character-creation steps.
+        vc10::String name{};
+        g_name(window, &name);
+        const bool background = !std::strcmp(name.c_str(), "Background");
+        if (name.capacity > 15) vc10::Free(name.pointer);
+        return background;
+    }
     return !std::strcmp(type, ".?AVLoginWindow_c@@") || !std::strcmp(type, ".?AVLoginBrowserWindow_c@@") ||
            !std::strcmp(type, ".?AVCharSelectWindow_c@@") || !std::strcmp(type, ".?AVLimboWindow_c@@") ||
            !std::strcmp(type, ".?AVCharDeleteWindow_c@@") || !std::strcmp(type, ".?AVCharActivateWindow_c@@") ||
