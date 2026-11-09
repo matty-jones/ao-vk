@@ -92,12 +92,29 @@ moving, changing scale, and ordinary layout callbacks do not perform this normal
 Previously displaced saved positions cannot recover their earlier location automatically. Arrange affected
 windows once after updating; subsequent reloads should retain the new placement.
 
+Across restarts at different resolutions, raw native frames are not a portable layout: the game's configuration
+loader fits them to the new physical screen before scaling. Floating windows now save normalized displayed
+bounds, the reference viewport, applied scale and anchor in their existing per-window preference message.
+Loading at another resolution reconstructs the native frame for those proportions and the current UI factor.
+A scale change on the same display retains normal edge/centre scaling. Screen fitting uses displayed bounds,
+so a native rectangle outside the screen is left alone when its scaled image fits. Automatic fitting or native
+minimum sizes cannot overwrite the reference; explicit border moves, resizes and mouse-relative placement can.
+Pinned panels and full-screen HUD containers retain their shared layout paths.
+
+For existing preferences, first launch at the resolution with the desired layout and exit normally once to save
+the reference. The 4K/150% and 1080p/75% profiles need no script changes. Native minimum window sizes can limit
+how small a window becomes, but returning to the larger display restores its reference bounds.
+
 ## Checks and limits
 
 The actual GUI.dll checks cover the HUD/window class policies with unequal factors, native login-progress centering,
 sidebar search, popup selection, title-bar movement, and reconstruction of a moved window after discarding transient
 mapping state. Timer checks use the native constructor and sprite/hotspot methods, substituting only the engine
 resources; their drawing scale, position, mouse bounds, lifecycle and scale round trips are checked independently.
+Resolution checks run the native window configuration loader and saver with a preference-message fixture and
+substitute final frame submission. They cover 20 restart cycles in both directions between 4K/150% and
+1080p/75%, left/centre/right windows, a HUD bar, native screen fitting, minimum-size constraints, explicit edits,
+invalid metadata, pinned/container exclusions and same-display scale changes.
 
 The native allocator check first creates a one-bit-alpha pool, reproduces format reuse for an RGBA request, and
 verifies that an independent allocation retains RGBA. Native text checks verify independent cache allocation,

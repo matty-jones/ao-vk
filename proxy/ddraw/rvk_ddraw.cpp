@@ -139,6 +139,7 @@ bool RvkState::EnsureDevice(uint32_t width, uint32_t height)
     GetEnvironmentVariableA("RANDYVK_DUMP_VERTS", dumpVerts, sizeof(dumpVerts));
     device->SetDumpVertexCount(uint32_t(std::atoi(dumpVerts)));
     rvk_settings::ApplyAll(device);             // randy-vk.ini
+    rnative::gui::Install();                    // before gameplay windows load their saved geometry
     gpuName = device->Info().gpu;
     RvkLog("rvk device %ux%u on %s (window %p, %s, %s lighting)", width, height, gpuName.c_str(), (void*)window,
            device->Threaded() ? "worker thread" : "calling thread", device->PixelLighting() ? "per-pixel" : "per-vertex");

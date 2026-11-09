@@ -29,7 +29,7 @@ struct Scale {
 
 // One user-facing UI percentage; the 1080p client already sizes floating windows
 // appropriately at 100% when the HUD needs 75%. Preserve that observed 4:3
-// relationship, without changing native window frames or saved preferences.
+// relationship when applying the user's UI percentage.
 struct UiFactors { float windows; float hud; };
 inline UiFactors EffectiveUiScales(float percent, Point screen)
 {
@@ -59,7 +59,7 @@ struct Transform {
     }
 };
 
-inline Transform Place(Rect frame, Point screen, float factor, bool anchored)
+inline Transform Place(Rect frame, Point screen, float factor, bool anchored, const Point* fixedAnchor = nullptr)
 {
     if (factor == 1.0f) return {};
     Transform result{factor};
@@ -67,8 +67,8 @@ inline Transform Place(Rect frame, Point screen, float factor, bool anchored)
         auto anchor = [](float centre, float extent) {
             return centre < extent * 0.25f ? 0.0f : centre > extent * 0.75f ? extent : extent * 0.5f;
         };
-        result.offset = {(1 - factor) * anchor((frame.left + frame.right + 1) * 0.5f, screen.x),
-                         (1 - factor) * anchor((frame.top + frame.bottom + 1) * 0.5f, screen.y)};
+        result.offset = {(1 - factor) * (fixedAnchor ? fixedAnchor->x * screen.x : anchor((frame.left + frame.right + 1) * 0.5f, screen.x)),
+                         (1 - factor) * (fixedAnchor ? fixedAnchor->y * screen.y : anchor((frame.top + frame.bottom + 1) * 0.5f, screen.y))};
     }
     result.ToScreen(frame);
     result.offset.x += std::clamp(frame.left, 0.0f, std::max(0.0f, screen.x - (frame.right - frame.left + 1))) - frame.left;

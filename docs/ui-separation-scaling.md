@@ -28,8 +28,11 @@ Clamping and nearest-edge anchoring affect only display placement; scale changes
 untouched. Ordinary floating windows use nearest-edge/centre anchoring, while character and target HUD bar windows
 retain the game's existing unanchored placement. Full-screen HUD containers keep their native dimensions and
 continue anchoring their widget groups to the nearest edge or centre.
-Their clipping and input bounds include the enlarged children. No scale-driven move/resize calls or separate
-preferences file are used. Native frame queries always remain canonical. Only the controller's cursor and tooltip
+Their clipping and input bounds include the enlarged children. When loading a different display resolution,
+floating windows restore proportional displayed bounds from the existing per-window preferences. Their native
+frames are reconstructed for the current UI factor; screen fitting does not overwrite that reference. Explicit
+moves and resizes replace it. No separate preferences file is used. Native frame queries remain canonical.
+Only the controller's cursor and tooltip
 hit-test call sites request displayed frames, including outside rendering. Border dragging and frame updates use
 canonical screen coordinates after input dispatch has inverted the display transform. Tab-driven resizing therefore
 retains the window position. Mouse-relative window placement resets any old display-clamp offset. Dragged item

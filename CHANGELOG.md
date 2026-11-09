@@ -29,6 +29,8 @@ What changed in each ao-vk release, newest first. Downloads and install notes: t
   font hooks after a restart, for an independent performance comparison. See `docs/ui-scaling-performance-audit.md`.
 
 ### Fixed
+- Floating windows retain their relative positions and sizes when restarting between 4K at 150% UI and 1080p
+  at 75%. Automatic screen fitting no longer overwrites the layout; deliberate moves and resizes still save.
 - Leaving a shop could turn the whole world black outdoors, by day or night, with only the sky, the interface and a
   little bloom left; it stayed black until Ctrl+Shift+E or another zone change.
 - Character-creation controls keep their native screen positions at saved UI scales, keeping breed confirmation

@@ -22,6 +22,8 @@ using FrameFn = Rect*(__fastcall*)(void*, void*, Rect*);
 ViewFn g_top, g_child, g_sibling, g_parent, g_looper, g_windowClient;
 ViewFn g_dragObject, g_dragSource;
 NameFn g_name;
+using PinnedFn = bool(__thiscall*)(void*);
+PinnedFn g_pinned;
 SizeFn g_screen;
 Point g_screenSize{};
 FrameFn g_frame, g_bounds, g_borders;
@@ -30,6 +32,16 @@ WindowFrameFn g_windowFrame;
 SizeFn g_windowMouse;
 using ScreenFn = Point*(__cdecl*)(Point*);
 ScreenFn g_windowScreen;
+void* const* g_controller;
+uint8_t* g_gui;
+struct Layout { Rect relative; Point screen; float scale; Point anchor; };
+std::unordered_map<void*, Layout> g_layouts;
+using ConfigFn = void(__fastcall*)(void*, void*, void*);
+ConfigFn g_loadConfig, g_saveConfig;
+using InsideFn = void(__fastcall*)(void*, void*, bool, bool, bool);
+InsideFn g_inside;
+using DestroyWindowFn = void(__fastcall*)(void*, void*);
+DestroyWindowFn g_destroyWindow;
 
 struct Window {
     void* owner;
@@ -89,7 +101,7 @@ struct Coordinates {
 
 void __fastcall BorderDownHook(void* view, void* edx, const Point* point, int button, int clicks)
 {
-    if (!g_active) { g_borderDown(view, edx, point, button, clicks); return; }
+    if (!g_active && !g_layouts.count(g_looper(view))) { g_borderDown(view, edx, point, button, clicks); return; }
     Coordinates scope;
     g_frame(view, nullptr, &g_draggedFrame);
     g_borderDown(view, edx, point, button, clicks);
@@ -109,12 +121,13 @@ void __fastcall BorderUpHook(void* view, void* edx, const Point* point, int butt
     g_borderUp(view, edx, point, button, message);
     if (g_draggedBorder != view) return;
     g_draggedBorder = nullptr;
-    auto window = g_windows.find(view);
-    if (!g_active || window == g_windows.end()) return;
-    Transform map = window->second.transform;
     Rect frame; g_frame(view, nullptr, &frame);
     if (std::fabs(frame.left - g_draggedFrame.left) < 0.001f && std::fabs(frame.top - g_draggedFrame.top) < 0.001f &&
         std::fabs(frame.right - g_draggedFrame.right) < 0.001f && std::fabs(frame.bottom - g_draggedFrame.bottom) < 0.001f) return;
+    g_layouts.erase(g_looper(view));
+    auto window = g_windows.find(view);
+    if (!g_active || window == g_windows.end()) return;
+    Transform map = window->second.transform;
     Point origin{};
     if (g_useUnifiedScale) {
         // An edge anchor is a persistent presentation offset, not a displacement to
@@ -315,6 +328,164 @@ bool Hud(void* window)
            name == "notification_window" || name.compare(0, 3, "cc_") == 0 || name.compare(0, 2, "CC") == 0;
 }
 
+void* WindowBorder(void* window)
+{
+    void* data = *reinterpret_cast<void**>(static_cast<uint8_t*>(window) + 0x70);
+    return *reinterpret_cast<void**>(static_cast<uint8_t*>(data) + 0x80);
+}
+
+bool OwnLayout(void* window)
+{
+    if (!g_useUnifiedScale || !*g_controller || NativeScreen(window) ||
+        !std::strcmp(TypeOf(window), ".?AVControlCenterWindow_c@@")) return false;
+    Point screen; g_screen(*g_controller, &screen);
+    if (!(screen.x > 0 && screen.y > 0)) return false;
+    void* border = WindowBorder(window);
+    if (g_pinned(border) || g_parent(border) != g_top(*g_controller)) return false;
+    Rect frame; g_frame(border, nullptr, &frame);
+    return !(Hud(window) && frame.right - frame.left + 1 >= screen.x - 1 && frame.bottom - frame.top + 1 >= screen.y - 1);
+}
+
+Point PhysicalScreen() { Point screen; g_screen(*g_controller, &screen); return screen; }
+float LayoutScale(void* window, Point screen)
+{
+    const UiFactors factors = EffectiveUiScales(g_unifiedUiPercent, screen);
+    return (Hud(window) ? factors.hud : factors.windows) / 100;
+}
+
+Transform LayoutTransform(const Layout& layout, Point screen, float factor)
+{
+    return {factor, {(1 - factor) * layout.anchor.x * screen.x, (1 - factor) * layout.anchor.y * screen.y}};
+}
+
+Point LayoutAnchor(Rect relative, bool hud)
+{
+    auto anchor = [](float centre) { return centre < 0.25f ? 0.0f : centre > 0.75f ? 1.0f : 0.5f; };
+    return hud ? Point{} : Point{anchor((relative.left + relative.right) * 0.5f), anchor((relative.top + relative.bottom) * 0.5f)};
+}
+
+Transform WindowPlacement(void* window, Rect frame, Point screen, float factor)
+{
+    const auto layout = g_layouts.find(window);
+    if (g_useUnifiedScale && layout != g_layouts.end()) return Place(frame, screen, factor, true, &layout->second.anchor);
+    return Place(frame, screen, factor, g_useUnifiedScale && !Hud(window));
+}
+
+template <class F> F MessageImport(uint32_t rva) { return reinterpret_cast<F>(*reinterpret_cast<void**>(g_gui + rva)); }
+using FindRectFn = int(__fastcall*)(void*, void*, const char*, Rect*, int);
+using FindPointFn = int(__fastcall*)(void*, void*, const char*, Point*, int);
+using FindFloatFn = int(__fastcall*)(void*, void*, const char*, float*, int);
+using AddRectFn = int(__fastcall*)(void*, void*, const char*, const Rect*);
+using AddPointFn = int(__fastcall*)(void*, void*, const char*, const Point*);
+using AddFloatFn = int(__fastcall*)(void*, void*, const char*, float);
+
+void __fastcall SaveConfigHook(void* window, void* edx, void* message)
+{
+    g_saveConfig(window, edx, message);
+    if (!OwnLayout(window)) return;
+    const Point screen = PhysicalScreen();
+    void* border = WindowBorder(window);
+    const auto current = g_windows.find(border);
+    const float factor = current != g_windows.end() && current->second.owner == window ? current->second.transform.value :
+                         screen == g_screenSize ? (Hud(window) ? g_hudScale : g_windowScale) : LayoutScale(window, screen);
+    Layout layout;
+    const auto saved = g_layouts.find(window);
+    // Automatic layout and fitting must not replace the reference. Border edits discard it.
+    if (saved != g_layouts.end() && saved->second.screen == screen && saved->second.scale == factor) layout = saved->second;
+    else {
+        Rect frame; g_frame(border, nullptr, &frame);
+        Transform map = saved != g_layouts.end() ? LayoutTransform(saved->second, screen, factor) :
+                        current != g_windows.end() && current->second.owner == window ? current->second.transform :
+                        WindowPlacement(window, frame, screen, factor);
+        map.ToScreen(frame);
+        layout = {{frame.left / screen.x, frame.top / screen.y, (frame.right + 1) / screen.x, (frame.bottom + 1) / screen.y}, screen, factor};
+        layout.anchor = saved != g_layouts.end() ? saved->second.anchor : LayoutAnchor(layout.relative, Hud(window));
+    }
+    MessageImport<AddRectFn>(0x1A800C)(message, nullptr, "RVK_Layout", &layout.relative);
+    MessageImport<AddPointFn>(0x1A810C)(message, nullptr, "RVK_LayoutScreen", &screen);
+    MessageImport<AddPointFn>(0x1A810C)(message, nullptr, "RVK_LayoutAnchor", &layout.anchor);
+    MessageImport<AddFloatFn>(0x1A8360)(message, nullptr, "RVK_LayoutScale", factor);
+}
+
+void __fastcall LoadConfigHook(void* window, void* edx, void* message)
+{
+    g_layouts.erase(window);
+    g_loadConfig(window, edx, message);
+    if (!OwnLayout(window)) return;
+    Layout layout{};
+    if (MessageImport<FindRectFn>(0x1A8004)(message, nullptr, "RVK_Layout", &layout.relative, 0) ||
+        MessageImport<FindPointFn>(0x1A8104)(message, nullptr, "RVK_LayoutScreen", &layout.screen, 0) ||
+        MessageImport<FindPointFn>(0x1A8104)(message, nullptr, "RVK_LayoutAnchor", &layout.anchor, 0) ||
+        MessageImport<FindFloatFn>(0x1A8364)(message, nullptr, "RVK_LayoutScale", &layout.scale, 0)) return;
+    const Rect r = layout.relative;
+    auto anchorValid = [](float v) { return v == 0 || v == 0.5f || v == 1; };
+    if (!(std::isfinite(r.left) && std::isfinite(r.top) && std::isfinite(r.right) && std::isfinite(r.bottom) &&
+          r.right > r.left && r.bottom > r.top && layout.screen.x > 0 && layout.screen.y > 0 &&
+          std::isfinite(layout.screen.x) && std::isfinite(layout.screen.y) && layout.scale >= 0.5f && layout.scale <= 2 &&
+          anchorValid(layout.anchor.x) && anchorValid(layout.anchor.y))) return;
+    const Point screen = PhysicalScreen();
+    const float factor = LayoutScale(window, screen);
+    // A UI-size change on the same display is intentional; changing displays preserves proportions.
+    if (layout.screen == screen && std::fabs(layout.scale - factor) > 0.0001f) {
+        const float ratio = factor / layout.scale;
+        layout.relative = {layout.anchor.x + (r.left - layout.anchor.x) * ratio,
+                           layout.anchor.y + (r.top - layout.anchor.y) * ratio,
+                           layout.anchor.x + (r.right - layout.anchor.x) * ratio,
+                           layout.anchor.y + (r.bottom - layout.anchor.y) * ratio};
+    }
+    layout.screen = screen; layout.scale = factor;
+    g_layouts[window] = layout;
+    Rect frame{layout.relative.left * screen.x, layout.relative.top * screen.y,
+               layout.relative.right * screen.x - 1, layout.relative.bottom * screen.y - 1};
+    LayoutTransform(layout, screen, factor).FromScreen(frame);
+    void* border = WindowBorder(window);
+    using SetFrame = void(__thiscall*)(void*, const Rect*);
+    Coordinates scope;
+    reinterpret_cast<SetFrame>((*static_cast<void***>(border))[0xF0 / 4])(border, &frame);
+    Rect applied; g_frame(border, nullptr, &applied);
+    // Native minimum sizes may enlarge the frame; keep its reference anchor fixed.
+    const Point origin{frame.left + layout.anchor.x * ((frame.right - frame.left) - (applied.right - applied.left)),
+                       frame.top + layout.anchor.y * ((frame.bottom - frame.top) - (applied.bottom - applied.top))};
+    if (origin != Point{applied.left, applied.top}) {
+        using Move = void(__thiscall*)(void*, const Point*);
+        reinterpret_cast<Move>((*static_cast<void***>(border))[0xC8 / 4])(border, &origin);
+    }
+    g_windows.erase(border); g_views.erase(border);
+    g_redraw = true;
+}
+
+void __fastcall InsideHook(void* window, void* edx, bool shrink, bool horizontal, bool vertical)
+{
+    if (!OwnLayout(window)) { g_inside(window, edx, shrink, horizontal, vertical); return; }
+    void* border = WindowBorder(window);
+    Rect native; g_frame(border, nullptr, &native);
+    const Point screen = PhysicalScreen();
+    const auto current = g_windows.find(border);
+    const float factor = current != g_windows.end() && current->second.owner == window ? current->second.transform.value :
+                         LayoutScale(window, screen);
+    const Transform map = WindowPlacement(window, native, screen, factor);
+    Rect frame = native; map.ToScreen(frame);
+    const Rect before = frame;
+    auto fit = [shrink](float& first, float& last, float extent) {
+        const float width = last - first + 1;
+        first = std::clamp(first, 0.0f, std::max(0.0f, extent - width));
+        last = first + (shrink ? std::min(width, extent) : width) - 1;
+    };
+    if (horizontal) fit(frame.left, frame.right, screen.x);
+    if (vertical) fit(frame.top, frame.bottom, screen.y);
+    if (std::memcmp(&before, &frame, sizeof(frame)) == 0) return;
+    map.FromScreen(frame);
+    using SetFrame = void(__thiscall*)(void*, const Rect*);
+    Coordinates scope;
+    reinterpret_cast<SetFrame>((*static_cast<void***>(border))[0xF0 / 4])(border, &frame);
+}
+
+void __fastcall WindowDestroyHook(void* window, void* edx)
+{
+    g_layouts.erase(window);
+    g_destroyWindow(window, edx);
+}
+
 Rect* __fastcall ScreenFrameHook(void* view, void* edx, Rect* out)
 {
     g_frame(view, edx, out);
@@ -367,6 +538,7 @@ void PlacedWindow(void* window, float factor)
 
 void __fastcall PlacementHook(void* window, void* edx, uint32_t centered)
 {
+    g_layouts.erase(window);
     if (!g_active || NativeScreen(window)) { g_placement(window, edx, centered); return; }
     const float saved = g_placementScale;
     g_placementScale = g_installed ? (Hud(window) ? g_hudScale : g_windowScale) : 1.0f;
@@ -594,6 +766,14 @@ Hook g_hooks[] = {
       reinterpret_cast<void*>(&VerticesHook), reinterpret_cast<void**>(&g_vertices)},
     {"?MoveToMouse@Window@@QAEX_N@Z", 0x154E16, "", 10,
       reinterpret_cast<void*>(&PlacementHook), reinterpret_cast<void**>(&g_placement)},
+    {"?SaveWndConfig@Window@@QAEXPAVMessage@@@Z", 0x1548A7, "", 10,
+      reinterpret_cast<void*>(&SaveConfigHook), reinterpret_cast<void**>(&g_saveConfig)},
+    {"?LoadWndConfig@Window@@QAEXABVMessage@@@Z", 0x154D6E, "", 10,
+      reinterpret_cast<void*>(&LoadConfigHook), reinterpret_cast<void**>(&g_loadConfig)},
+    {"?MoveInsideScreen@Window@@QAEX_N00@Z", 0x154ABC, "", 10,
+      reinterpret_cast<void*>(&InsideHook), reinterpret_cast<void**>(&g_inside)},
+    {"??1Window@@UAE@XZ", 0x156600, "", 10,
+      reinterpret_cast<void*>(&WindowDestroyHook), reinterpret_cast<void**>(&g_destroyWindow)},
     {"?ConvertToScreen@View@@QBE?AVPoint@@ABV2@_N@Z", 0x14BFC7, "", 10,
       reinterpret_cast<void*>(&ToPointValue), reinterpret_cast<void**>(&g_toPointValue)},
     {"?ConvertToScreen@View@@QBEXPAVPoint@@_N@Z", 0x14C123, "", 10,
@@ -670,6 +850,9 @@ void InstallScaling(HMODULE gui)
         return;
     }
     auto address = [&](const char* name) { return GetProcAddress(gui, name); };
+    g_gui = reinterpret_cast<uint8_t*>(gui);
+    g_controller = reinterpret_cast<void* const*>(address("?s_pcInstance@WindowController_c@@0PAV1@A"));
+    g_pinned = reinterpret_cast<PinnedFn>(address("?GetPinButtonState@WndBorder@@QBE_NXZ"));
     g_top = reinterpret_cast<ViewFn>(address("?GetToplevelView@WindowController_c@@QBEPAVView@@XZ"));
     g_parent = reinterpret_cast<ViewFn>(address("?GetParent@View@@QBEPAV1@XZ"));
     g_child = reinterpret_cast<ViewFn>(address("?GetTopChild@View@@QBEPAV1@XZ"));
@@ -687,7 +870,7 @@ void InstallScaling(HMODULE gui)
     g_looper = utils ? reinterpret_cast<ViewFn>(GetProcAddress(utils, "?GetLooper@Handler@@QBEPAVLooper@@XZ")) : nullptr;
     g_name = utils ? reinterpret_cast<NameFn>(GetProcAddress(utils, "?GetName@Looper@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ")) : nullptr;
     if (!g_top || !g_parent || !g_child || !g_sibling || !g_windowClient || !g_dragObject || !g_dragSource || !g_frame ||
-        !g_bounds || !g_borders || !g_windowFrame || !g_screen || !g_looper || !g_name || !g_spriteMove) {
+        !g_bounds || !g_borders || !g_windowFrame || !g_screen || !g_looper || !g_name || !g_spriteMove || !g_controller || !g_pinned) {
         Log("interface scaling: required GUI exports unavailable, left at 100%%");
         return;
     }
@@ -884,7 +1067,7 @@ bool BeginScaleFrame(void* controller)
             // Only floating windows need the new nearest-edge anchor. HUD bars
             // must retain their original top-left-based placement at 75%.
             // Independent SetScale fixtures keep their legacy placement rule.
-            else map = Place(frame, screen, factor, g_useUnifiedScale && !hud);
+            else map = WindowPlacement(owner, frame, screen, factor);
         }
         if (!known || !(previous->second.transform == map)) g_redraw = true;
         current.emplace(root, Window{owner, map});
